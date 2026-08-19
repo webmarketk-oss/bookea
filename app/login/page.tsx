@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
-import Link from "next/link";
 import { BookeaLogo } from "@/components/bookea-logo";
+import { LoginForm } from "./login-form";
 
 export const metadata: Metadata = {
   title: "Connexion - Bookea",
@@ -16,50 +16,13 @@ export default function LoginPage() {
           Connexion Bookea
         </h1>
         <p className="mt-3 text-base font-medium leading-7 text-slate-500">
-          Choisissez votre espace. La connexion sécurisée sera ensuite reliée
-          aux comptes clients, centres et administrateurs.
+          Connectez-vous à votre espace centre pour accéder au CRM, à
+          l&apos;agenda, aux clientes et à la facturation.
         </p>
 
-        <div className="mt-7 grid gap-3">
-          <Link
-            href="/client#client"
-            className="flex items-center justify-between rounded-2xl border border-blue-100 bg-blue-50 px-5 py-4 text-left transition hover:border-blue-300 hover:bg-blue-100"
-          >
-            <span>
-              <span className="block text-lg font-black text-slate-950">
-                Espace cliente
-              </span>
-              <span className="mt-1 block text-sm font-semibold text-slate-500">
-                Mes rendez-vous, carte fidélité et réservations.
-              </span>
-            </span>
-            <span className="rounded-full bg-blue-600 px-4 py-2 text-sm font-black text-white">
-              Ouvrir
-            </span>
-          </Link>
-
-          <Link
-            href="/dashboard"
-            className="flex items-center justify-between rounded-2xl border border-slate-200 bg-slate-950 px-5 py-4 text-left text-white transition hover:bg-slate-800"
-          >
-            <span>
-              <span className="block text-lg font-black">Espace centre</span>
-              <span className="mt-1 block text-sm font-semibold text-slate-300">
-                CRM, agenda, clients, facturation et réglages.
-              </span>
-            </span>
-            <span className="rounded-full bg-white px-4 py-2 text-sm font-black text-slate-950">
-              Ouvrir
-            </span>
-          </Link>
+        <div className="mt-7">
+          <LoginForm />
         </div>
-
-        <Link
-          href="/client"
-          className="mt-6 inline-flex text-sm font-bold text-slate-500 transition hover:text-blue-600"
-        >
-          Retour à l’interface publique
-        </Link>
       </div>
     </main>
   );
