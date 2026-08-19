@@ -68,13 +68,13 @@ export default function DashboardPage() {
 
   return (
     <main className="min-h-screen bg-[#f5f6fa]">
-      <div className="mx-auto max-w-[1800px] space-y-6 p-8">
+      <div className="mx-auto max-w-[1800px] space-y-5 p-4 sm:p-6 lg:space-y-6 lg:p-8">
         <header className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
           <div>
             <p className="text-sm font-black uppercase text-[#6415e8]">
               Bookea Dashboard
             </p>
-            <h1 className="mt-1 text-4xl font-black text-[#11152e]">
+            <h1 className="mt-1 text-3xl font-black text-[#11152e] sm:text-4xl">
               Tableau de bord
             </h1>
             <p className="mt-2 max-w-2xl text-slate-500">
@@ -83,7 +83,7 @@ export default function DashboardPage() {
             </p>
           </div>
 
-          <div className="flex flex-wrap gap-2">
+          <div className="grid gap-2 sm:flex sm:flex-wrap">
             <Link
               href="/dashboard/crm-leads"
               className="inline-flex h-11 items-center justify-center rounded-xl border border-[#dfe5f2] bg-white px-4 text-sm font-bold text-[#11152e] transition-colors hover:bg-[#e9eeff]"
@@ -99,7 +99,7 @@ export default function DashboardPage() {
           </div>
         </header>
 
-        <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+        <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
           <DashboardStat
             label="Leads aujourd'hui"
             value={todayLeads.length}
@@ -223,7 +223,7 @@ export default function DashboardPage() {
                 {todayAppointments.map((appointment) => (
                   <div
                     key={appointment.id}
-                    className="grid grid-cols-[88px_minmax(0,1fr)_120px] items-center gap-4 py-4"
+                    className="grid grid-cols-[64px_minmax(0,1fr)] items-center gap-3 py-4 sm:grid-cols-[88px_minmax(0,1fr)_120px] sm:gap-4"
                   >
                     <span className="font-black text-[#247af2]">
                       {appointment.start}
@@ -238,7 +238,7 @@ export default function DashboardPage() {
                     </div>
                     <span
                       className={cn(
-                        "rounded-full border px-3 py-1 text-center text-xs font-black",
+                        "col-span-2 w-fit rounded-full border px-3 py-1 text-center text-xs font-black sm:col-span-1 sm:w-auto",
                         appointmentStatusClass(appointment.status)
                       )}
                     >
@@ -313,7 +313,7 @@ function DashboardStat({
   return (
     <Link href={href} className="group block">
       <Card className="py-0 transition-all group-hover:-translate-y-0.5 group-hover:border-[#247af2]/35 group-hover:shadow-md">
-      <CardContent className="flex min-h-36 items-center justify-between gap-4 p-5">
+      <CardContent className="flex min-h-32 items-center justify-between gap-4 p-4 sm:min-h-36 sm:p-5">
         <div>
           <p className="text-sm font-semibold text-slate-500">{label}</p>
           <p className={`mt-2 text-3xl font-black ${color}`}>{value}</p>
