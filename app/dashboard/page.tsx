@@ -67,14 +67,14 @@ export default function DashboardPage() {
   );
 
   return (
-    <main className="min-h-screen bg-slate-100">
+    <main className="min-h-screen bg-[#f5f6fa]">
       <div className="mx-auto max-w-[1800px] space-y-6 p-8">
         <header className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
           <div>
-            <p className="text-sm font-semibold text-violet-600">
+            <p className="text-sm font-black uppercase text-[#6415e8]">
               Bookea Dashboard
             </p>
-            <h1 className="mt-1 text-4xl font-black tracking-tight text-slate-950">
+            <h1 className="mt-1 text-4xl font-black text-[#11152e]">
               Tableau de bord
             </h1>
             <p className="mt-2 max-w-2xl text-slate-500">
@@ -86,13 +86,13 @@ export default function DashboardPage() {
           <div className="flex flex-wrap gap-2">
             <Link
               href="/dashboard/crm-leads"
-              className="inline-flex h-11 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 text-sm font-bold text-slate-800 transition-colors hover:bg-slate-50"
+              className="inline-flex h-11 items-center justify-center rounded-xl border border-[#dfe5f2] bg-white px-4 text-sm font-bold text-[#11152e] transition-colors hover:bg-[#e9eeff]"
             >
               Voir les leads
             </Link>
             <Link
               href="/dashboard/agenda"
-              className="inline-flex h-11 items-center justify-center rounded-xl bg-slate-950 px-4 text-sm font-bold text-white transition-colors hover:bg-slate-800"
+              className="bookea-gradient inline-flex h-11 items-center justify-center rounded-xl px-4 text-sm font-bold text-white shadow-lg shadow-blue-600/20 transition hover:brightness-105"
             >
               Ouvrir le planning
             </Link>
@@ -143,18 +143,18 @@ export default function DashboardPage() {
         </section>
 
         <section className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_460px]">
-          <Card className="border-slate-200 py-0 shadow-sm">
+          <Card className="py-0">
             <CardContent className="p-6">
               <div className="mb-5 flex items-center gap-3">
-                <div className="rounded-2xl bg-violet-50 p-3 text-violet-700">
+                <div className="rounded-2xl bg-[#e9eeff] p-3 text-[#6415e8]">
                   <Sparkles className="h-5 w-5" />
                 </div>
                 <div>
-                  <h2 className="text-xl font-black text-slate-950">
+                  <h2 className="text-xl font-black text-[#11152e]">
                     Optimisations Seya
                   </h2>
                   <p className="text-sm font-medium text-slate-500">
-                    Recommandations prioritaires pour aujourd'hui.
+                    Recommandations prioritaires pour aujourd&apos;hui.
                   </p>
                 </div>
               </div>
@@ -163,7 +163,7 @@ export default function DashboardPage() {
                 {recommendations.map((recommendation) => (
                   <div
                     key={recommendation}
-                    className="rounded-xl border border-violet-100 bg-violet-50 p-4 text-sm font-semibold leading-6 text-violet-900"
+                    className="rounded-xl border border-[#dfe5f2] bg-[#e9eeff] p-4 text-sm font-semibold leading-6 text-[#11152e]"
                   >
                     {recommendation}
                   </div>
@@ -172,14 +172,14 @@ export default function DashboardPage() {
             </CardContent>
           </Card>
 
-          <Card className="border-slate-200 py-0 shadow-sm">
+          <Card className="py-0">
             <CardContent className="p-6">
               <div className="mb-5 flex items-center gap-3">
-                <div className="rounded-2xl bg-blue-50 p-3 text-blue-700">
+                <div className="rounded-2xl bg-[#e9eeff] p-3 text-[#247af2]">
                   <ClipboardCheck className="h-5 w-5" />
                 </div>
                 <div>
-                  <h2 className="text-xl font-black text-slate-950">
+                  <h2 className="text-xl font-black text-[#11152e]">
                     Tâches journalières
                   </h2>
                   <p className="text-sm font-medium text-slate-500">
@@ -193,7 +193,7 @@ export default function DashboardPage() {
                   <Link
                     key={task.label}
                     href={task.href}
-                    className="flex items-center justify-between gap-4 rounded-xl border border-slate-100 bg-white p-4 transition-colors hover:bg-blue-50"
+                    className="flex items-center justify-between gap-4 rounded-xl border border-[#dfe5f2] bg-white p-4 transition-colors hover:bg-[#e9eeff]"
                   >
                     <span className="font-semibold text-slate-800">
                       {task.label}
@@ -214,9 +214,9 @@ export default function DashboardPage() {
         </section>
 
         <section className="grid gap-6 xl:grid-cols-2">
-          <Card className="border-slate-200 py-0 shadow-sm">
+          <Card className="py-0">
             <CardContent className="p-6">
-              <h2 className="text-xl font-black text-slate-950">
+              <h2 className="text-xl font-black text-[#11152e]">
                 Rendez-vous du jour
               </h2>
               <div className="mt-4 divide-y divide-slate-100">
@@ -225,11 +225,11 @@ export default function DashboardPage() {
                     key={appointment.id}
                     className="grid grid-cols-[88px_minmax(0,1fr)_120px] items-center gap-4 py-4"
                   >
-                    <span className="font-black text-blue-600">
+                    <span className="font-black text-[#247af2]">
                       {appointment.start}
                     </span>
                     <div className="min-w-0">
-                      <p className="truncate font-black text-slate-950">
+                      <p className="truncate font-black text-[#11152e]">
                         {appointment.personName}
                       </p>
                       <p className="truncate text-sm font-semibold text-slate-500">
@@ -250,14 +250,14 @@ export default function DashboardPage() {
             </CardContent>
           </Card>
 
-          <Card className="border-slate-200 py-0 shadow-sm">
+          <Card className="py-0">
             <CardContent className="p-6">
               <div className="mb-5 flex items-center gap-3">
                 <div className="rounded-2xl bg-orange-50 p-3 text-orange-600">
                   <PhoneCall className="h-5 w-5" />
                 </div>
                 <div>
-                  <h2 className="text-xl font-black text-slate-950">
+                  <h2 className="text-xl font-black text-[#11152e]">
                     Contacts à traiter
                   </h2>
                   <p className="text-sm font-medium text-slate-500">
@@ -271,10 +271,10 @@ export default function DashboardPage() {
                   <Link
                     key={lead.id}
                     href="/dashboard/crm-leads"
-                    className="flex items-center justify-between gap-4 rounded-xl border border-slate-100 bg-white p-4 transition-colors hover:bg-orange-50"
+                    className="flex items-center justify-between gap-4 rounded-xl border border-[#dfe5f2] bg-white p-4 transition-colors hover:bg-[#fff7ed]"
                   >
                     <div className="min-w-0">
-                      <p className="truncate font-black text-slate-950">
+                      <p className="truncate font-black text-[#11152e]">
                         {lead.firstName} {lead.lastName}
                       </p>
                       <p className="truncate text-sm font-semibold text-slate-500">
@@ -312,7 +312,7 @@ function DashboardStat({
 }) {
   return (
     <Link href={href} className="group block">
-      <Card className="border-slate-200 py-0 shadow-sm transition-all group-hover:-translate-y-0.5 group-hover:border-blue-200 group-hover:shadow-md">
+      <Card className="py-0 transition-all group-hover:-translate-y-0.5 group-hover:border-[#247af2]/35 group-hover:shadow-md">
       <CardContent className="flex min-h-36 items-center justify-between gap-4 p-5">
         <div>
           <p className="text-sm font-semibold text-slate-500">{label}</p>
@@ -321,7 +321,7 @@ function DashboardStat({
             {subtitle}
           </p>
         </div>
-        <div className="rounded-2xl bg-slate-50 p-3 [&_svg]:h-6 [&_svg]:w-6">
+        <div className="rounded-2xl bg-[#e9eeff] p-3 [&_svg]:h-6 [&_svg]:w-6">
           <span className={color}>{icon}</span>
         </div>
       </CardContent>

@@ -37,7 +37,7 @@ export default function Sidebar() {
 
   return (
     <aside
-      className={`h-screen shrink-0 border-r bg-white p-4 transition-all duration-200 ${
+      className={`h-screen shrink-0 border-r border-white/10 bg-[#11152e] p-4 text-white transition-all duration-200 ${
         collapsed ? "w-20" : "w-72"
       }`}
     >
@@ -51,7 +51,7 @@ export default function Sidebar() {
         <button
           type="button"
           onClick={() => setCollapsed((value) => !value)}
-          className="flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 text-slate-500 transition-colors hover:bg-slate-50 hover:text-slate-900"
+          className="flex h-10 w-10 items-center justify-center rounded-xl border border-white/10 text-white/70 transition-colors hover:bg-white/10 hover:text-white"
           aria-label={collapsed ? "Ouvrir le menu" : "Réduire le menu"}
         >
           {collapsed ? (
@@ -97,7 +97,7 @@ export default function Sidebar() {
             icon={Bot}
             active={pathname.startsWith("/dashboard/seya-crm")}
           />
-          <div className="px-3 pt-3 pb-1 text-xs font-black uppercase tracking-wide text-slate-400">
+          <div className="px-3 pt-3 pb-1 text-xs font-black uppercase text-white/40">
             Messagerie Bookea
           </div>
           <NavItem
@@ -106,7 +106,7 @@ export default function Sidebar() {
             icon={MessageCircle}
             active={pathname.startsWith("/dashboard/messagerie")}
           />
-          <div className="px-3 pt-3 pb-1 text-xs font-black uppercase tracking-wide text-slate-400">
+          <div className="px-3 pt-3 pb-1 text-xs font-black uppercase text-white/40">
             Marketing
           </div>
           <NavItem
@@ -121,7 +121,7 @@ export default function Sidebar() {
             icon={MessageCircle}
             active={pathname.startsWith("/dashboard/sms")}
           />
-          <div className="px-3 pt-3 pb-1 text-xs font-black uppercase tracking-wide text-slate-400">
+          <div className="px-3 pt-3 pb-1 text-xs font-black uppercase text-white/40">
             Facturation
           </div>
           <NavItem

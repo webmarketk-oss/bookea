@@ -9,10 +9,10 @@ export const metadata: Metadata = {
 
 export default function LoginPage() {
   return (
-    <main className="flex min-h-screen items-center justify-center bg-slate-100 p-4 sm:p-8">
-      <div className="w-full max-w-xl rounded-3xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
+    <main className="bookea-surface flex min-h-screen items-center justify-center p-4 sm:p-8">
+      <div className="w-full max-w-xl rounded-3xl border border-[#dfe5f2] bg-white p-6 shadow-2xl shadow-[#11152e]/8 sm:p-8">
         <BookeaLogo href="/client" showSlogan />
-        <h1 className="mt-8 text-4xl font-black tracking-tight text-slate-950">
+        <h1 className="mt-8 text-4xl font-black text-[#11152e]">
           Connexion Bookea
         </h1>
         <p className="mt-3 text-base font-medium leading-7 text-slate-500">
