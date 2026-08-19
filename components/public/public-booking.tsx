@@ -8,7 +8,6 @@ import {
   CalendarCheck,
   CheckCircle2,
   ChevronRight,
-  Clock,
   Flame,
   Gift,
   Heart,
@@ -857,9 +856,9 @@ export function PublicBooking() {
   };
 
   return (
-    <main className="min-h-screen bg-[#f4f7fb] pb-28 text-slate-950 lg:pb-0">
+    <main className="min-h-screen overflow-x-hidden bg-[#f4f7fb] pb-28 text-slate-950 lg:pb-0">
       <header className="sticky top-0 z-30 border-b border-slate-200/80 bg-white/95 backdrop-blur">
-        <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3 sm:px-6 lg:px-8">
+        <div className="mx-auto flex w-full max-w-6xl items-center justify-between gap-3 px-4 py-3 sm:px-6 lg:px-8">
           <BookeaLogo href="/" size="sm" showSlogan={false} />
           <nav className="hidden max-w-[680px] items-center gap-2 overflow-x-auto text-sm font-semibold text-slate-600 md:flex">
             {publicCenterCategories.map((category) => (
@@ -882,21 +881,21 @@ export function PublicBooking() {
           </nav>
           <Link
             href="/login"
-            className="rounded-full bg-slate-950 px-4 py-2.5 text-sm font-bold text-white shadow-sm transition hover:bg-slate-800"
+            className="shrink-0 rounded-full bg-slate-950 px-4 py-2.5 text-sm font-bold text-white shadow-sm transition hover:bg-slate-800"
           >
             Connexion
           </Link>
         </div>
       </header>
 
-      <section id="recherche" className="mx-auto max-w-6xl px-4 py-5 sm:px-6 lg:px-8 lg:py-10">
-        <div className="grid gap-4 lg:grid-cols-[1.05fr_0.95fr] lg:items-stretch">
-          <div className="rounded-[28px] border border-blue-100 bg-white p-5 shadow-sm sm:p-7 lg:p-9">
-            <div className="inline-flex items-center gap-2 rounded-full border border-violet-200 bg-violet-50 px-3 py-2 text-xs font-bold text-violet-700 sm:text-sm">
-              <Sparkles className="h-4 w-4" />
-              Bookea Client avec Seya
+      <section id="recherche" className="mx-auto w-full max-w-6xl px-3 py-4 sm:px-6 lg:px-8 lg:py-10">
+        <div className="grid min-w-0 gap-4 lg:grid-cols-[1.05fr_0.95fr] lg:items-stretch">
+          <div className="min-w-0 rounded-[22px] border border-blue-100 bg-white p-4 shadow-sm sm:rounded-[28px] sm:p-7 lg:p-9">
+            <div className="inline-flex max-w-full items-center gap-2 rounded-full border border-violet-200 bg-violet-50 px-3 py-2 text-xs font-bold text-violet-700 sm:text-sm">
+              <Sparkles className="h-4 w-4 shrink-0" />
+              <span className="truncate">Bookea Client avec Seya</span>
             </div>
-            <h1 className="mt-5 max-w-3xl text-4xl font-black leading-[1.03] tracking-tight text-slate-950 sm:text-5xl lg:text-7xl">
+            <h1 className="mt-5 max-w-3xl text-[2rem] font-black leading-[1.08] text-slate-950 sm:text-5xl lg:text-7xl">
               Trouvez un soin, réservez, brillez.
             </h1>
             <p className="mt-4 max-w-2xl text-base font-medium leading-7 text-slate-600 sm:text-lg">
@@ -904,20 +903,20 @@ export function PublicBooking() {
               rendez-vous en quelques secondes.
             </p>
 
-            <div className="sticky top-[65px] z-20 mt-6 rounded-3xl border border-slate-200 bg-white p-3 shadow-lg shadow-slate-200/70 lg:static lg:bg-slate-50 lg:shadow-inner">
+            <div className="mt-6 rounded-2xl border border-slate-200 bg-white p-2 shadow-lg shadow-slate-200/70 sm:rounded-3xl sm:p-3 lg:bg-slate-50 lg:shadow-inner">
               <div className="grid gap-3 lg:grid-cols-[1fr_0.8fr_auto]">
-                <label className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3.5">
+                <label className="flex min-w-0 items-center gap-3 rounded-2xl border border-slate-200 bg-white px-3 py-3 sm:px-4 sm:py-3.5">
                   <Search className="h-5 w-5 shrink-0 text-slate-400" />
                   <input
                     ref={searchInputRef}
-                    className="w-full bg-transparent text-base font-semibold outline-none placeholder:text-slate-400"
+                    className="min-w-0 w-full bg-transparent text-base font-semibold outline-none placeholder:text-slate-400"
                     value={serviceQuery}
                     onChange={(event) => setServiceQuery(event.target.value)}
                     aria-label="Prestation recherchee"
                     placeholder="Soin, exemple Hydrafacial"
                   />
                 </label>
-                <label className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3.5">
+                <label className="flex min-w-0 items-center gap-3 rounded-2xl border border-slate-200 bg-white px-3 py-3 sm:px-4 sm:py-3.5">
                   <MapPin className="h-5 w-5 shrink-0 text-slate-400" />
                   <input
                     className="w-full bg-transparent text-base font-semibold outline-none placeholder:text-slate-400"
@@ -930,7 +929,7 @@ export function PublicBooking() {
                 <button
                   type="button"
                   onClick={launchPublicSearch}
-                  className="inline-flex items-center justify-center gap-2 rounded-2xl bg-blue-600 px-5 py-3.5 text-base font-black text-white shadow-sm transition hover:bg-blue-700"
+                  className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-blue-600 px-5 py-3.5 text-base font-black text-white shadow-sm transition hover:bg-blue-700 lg:w-auto"
                 >
                   Rechercher
                   <ArrowRight className="h-5 w-5" />
@@ -938,7 +937,7 @@ export function PublicBooking() {
               </div>
             </div>
 
-            <div className="mt-4 flex snap-x gap-2 overflow-x-auto pb-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            <div className="-mx-1 mt-4 flex max-w-full snap-x gap-2 overflow-x-auto px-1 pb-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
               {["Tous", ...publicCenterCategories].map((item) => (
                 <button
                   key={item}
@@ -954,7 +953,7 @@ export function PublicBooking() {
               ))}
             </div>
 
-            <div className="mt-3 flex snap-x gap-2 overflow-x-auto pb-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            <div className="-mx-1 mt-3 flex max-w-full snap-x gap-2 overflow-x-auto px-1 pb-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
               {["Remplissage gel demain", "Laser jambes", "Cryolipolyse proche"].map(
                 (item) => (
                   <button
@@ -972,7 +971,7 @@ export function PublicBooking() {
           <button
             type="button"
             onClick={focusSeyaSearch}
-            className="rounded-[28px] border border-violet-100 bg-violet-50 p-5 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-violet-200 hover:shadow-md sm:p-7 lg:p-8"
+            className="min-w-0 rounded-[22px] border border-violet-100 bg-violet-50 p-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-violet-200 hover:shadow-md sm:rounded-[28px] sm:p-7 lg:p-8"
             aria-label="Demander à Seya de chercher un créneau"
           >
             <div className="flex items-center gap-3">
@@ -990,18 +989,18 @@ export function PublicBooking() {
             </div>
 
             <div className="mt-5 space-y-3">
-              <div className="rounded-3xl bg-white p-4 text-base font-bold leading-7 text-slate-800 shadow-sm">
-                "Je cherche un institut pres de chez moi pour un Hydrafacial
-                samedi apres-midi."
+              <div className="rounded-2xl bg-white p-4 text-base font-bold leading-7 text-slate-800 shadow-sm sm:rounded-3xl">
+                &quot;Je cherche un institut pres de chez moi pour un Hydrafacial
+                samedi apres-midi.&quot;
               </div>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid gap-3 sm:grid-cols-2">
                 {[
                   ["Prestation", serviceQuery || "A preciser"],
                   ["Ville", locationQuery || "Autour de moi"],
                   ["Moment", "Samedi apres-midi"],
                   ["Resultat", `${visibleCenters.length} centres`],
                 ].map(([label, value]) => (
-                  <div key={label} className="rounded-2xl bg-white/80 p-4">
+                  <div key={label} className="min-w-0 rounded-2xl bg-white/80 p-4">
                     <p className="text-[11px] font-black uppercase text-slate-400">
                       {label}
                     </p>
@@ -1016,15 +1015,15 @@ export function PublicBooking() {
         </div>
       </section>
 
-      <section className="mx-auto max-w-6xl px-4 pb-8 sm:px-6 lg:px-8">
-        <div className="grid gap-4 lg:grid-cols-[1.15fr_0.85fr]">
-          <div className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
+      <section className="mx-auto w-full max-w-6xl px-3 pb-8 sm:px-6 lg:px-8">
+        <div className="grid min-w-0 gap-4 lg:grid-cols-[1.15fr_0.85fr]">
+          <div className="min-w-0 rounded-[22px] border border-slate-200 bg-white p-4 shadow-sm sm:rounded-[28px] sm:p-6">
             <div className="flex items-center justify-between gap-3">
               <div>
                 <p className="text-xs font-black uppercase text-blue-600">
                   Par catégorie
                 </p>
-                <h2 className="text-2xl font-black tracking-tight text-slate-950">
+                <h2 className="text-2xl font-black text-slate-950">
                   Les plus réservés
                 </h2>
               </div>
@@ -1037,7 +1036,7 @@ export function PublicBooking() {
                   key={`${item.category}-${item.service}`}
                   type="button"
                   onClick={() => launchOfferSearch(item.service, item.category)}
-                  className="rounded-3xl border border-slate-200 bg-slate-50 p-4 text-left transition hover:-translate-y-0.5 hover:border-blue-200 hover:bg-blue-50"
+                  className="min-w-0 rounded-2xl border border-slate-200 bg-slate-50 p-4 text-left transition hover:-translate-y-0.5 hover:border-blue-200 hover:bg-blue-50 sm:rounded-3xl"
                 >
                   <span className="rounded-full bg-white px-3 py-1 text-xs font-black text-blue-700">
                     {item.category}
@@ -1045,7 +1044,7 @@ export function PublicBooking() {
                   <h3 className="mt-3 text-lg font-black text-slate-950">
                     {item.service}
                   </h3>
-                  <div className="mt-3 flex items-end justify-between gap-3">
+                  <div className="mt-3 flex flex-wrap items-end justify-between gap-3">
                     <p className="text-2xl font-black text-blue-600">
                       dès {item.price}
                     </p>
@@ -1058,8 +1057,8 @@ export function PublicBooking() {
             </div>
           </div>
 
-          <div className="grid gap-4">
-            <div className="rounded-[28px] border border-violet-100 bg-violet-50 p-5 shadow-sm">
+          <div className="grid min-w-0 gap-4">
+            <div className="rounded-[22px] border border-violet-100 bg-violet-50 p-4 shadow-sm sm:rounded-[28px] sm:p-5">
               <div className="flex items-center justify-between gap-3">
                 <div>
                   <p className="text-xs font-black uppercase text-violet-700">
@@ -1077,7 +1076,7 @@ export function PublicBooking() {
                     key={offer.title}
                     type="button"
                     onClick={() => launchOfferSearch(offer.title, offer.category)}
-                    className="flex w-full items-center justify-between gap-3 rounded-3xl bg-white p-4 text-left shadow-sm transition hover:-translate-y-0.5"
+                    className="flex w-full min-w-0 items-center justify-between gap-3 rounded-2xl bg-white p-4 text-left shadow-sm transition hover:-translate-y-0.5 sm:rounded-3xl"
                   >
                     <div>
                       <p className="font-black text-slate-950">{offer.title}</p>
@@ -1085,7 +1084,7 @@ export function PublicBooking() {
                         {offer.center}
                       </p>
                     </div>
-                    <div className="text-right">
+                    <div className="shrink-0 text-right">
                       <p className="text-xl font-black text-violet-700">
                         {offer.price}
                       </p>
@@ -1098,7 +1097,7 @@ export function PublicBooking() {
               </div>
             </div>
 
-            <div className="rounded-[28px] border border-orange-100 bg-orange-50 p-5 shadow-sm">
+            <div className="rounded-[22px] border border-orange-100 bg-orange-50 p-4 shadow-sm sm:rounded-[28px] sm:p-5">
               <div className="flex items-center justify-between gap-3">
                 <div>
                   <p className="text-xs font-black uppercase text-orange-700">
@@ -1116,7 +1115,7 @@ export function PublicBooking() {
                     key={offer.title}
                     type="button"
                     onClick={() => launchOfferSearch(offer.title, offer.category)}
-                    className="flex w-full items-center justify-between gap-3 rounded-2xl bg-white px-4 py-3 text-left font-black shadow-sm transition hover:bg-orange-100"
+                    className="flex w-full min-w-0 flex-col items-start justify-between gap-2 rounded-2xl bg-white px-4 py-3 text-left font-black shadow-sm transition hover:bg-orange-100 sm:flex-row sm:items-center"
                   >
                     <span className="text-slate-950">{offer.title}</span>
                     <span className="rounded-full bg-orange-100 px-3 py-1 text-xs text-orange-700">
@@ -1130,27 +1129,27 @@ export function PublicBooking() {
         </div>
       </section>
 
-      <section className="mx-auto max-w-6xl space-y-4 px-4 pb-8 sm:px-6 lg:px-8">
-        <div className="rounded-[30px] border border-orange-100 bg-gradient-to-br from-orange-50 via-white to-violet-50 p-5 shadow-sm sm:p-6">
+      <section className="mx-auto w-full max-w-6xl space-y-4 px-3 pb-8 sm:px-6 lg:px-8">
+        <div className="min-w-0 rounded-[22px] border border-orange-100 bg-gradient-to-br from-orange-50 via-white to-violet-50 p-4 shadow-sm sm:rounded-[30px] sm:p-6">
           <div className="flex items-end justify-between gap-4">
-            <div>
+            <div className="min-w-0">
               <p className="text-xs font-black uppercase text-orange-600">
                 Offres à ne pas manquer
               </p>
-              <h2 className="text-2xl font-black tracking-tight text-slate-950 sm:text-3xl">
+              <h2 className="text-2xl font-black text-slate-950 sm:text-3xl">
                 Les bons plans du moment
               </h2>
             </div>
             <Flame className="hidden h-8 w-8 text-orange-500 sm:block" />
           </div>
 
-          <div className="mt-5 flex snap-x gap-3 overflow-x-auto pb-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          <div className="-mx-1 mt-5 flex max-w-full snap-x gap-3 overflow-x-auto px-1 pb-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             {publicCurrentOffers.slice(0, 4).map((offer, index) => (
               <button
                 key={`${offer.title}-${offer.center}`}
                 type="button"
                 onClick={() => launchOfferSearch(offer.title, offer.category)}
-                className={`min-w-[270px] snap-start rounded-[26px] p-5 text-left text-white shadow-sm transition hover:-translate-y-0.5 sm:min-w-[320px] ${
+                className={`min-w-[245px] max-w-[calc(100vw-3rem)] snap-start rounded-[22px] p-4 text-left text-white shadow-sm transition hover:-translate-y-0.5 sm:min-w-[320px] sm:rounded-[26px] sm:p-5 ${
                   index % 2 === 0
                     ? "bg-gradient-to-br from-orange-500 to-pink-500"
                     : "bg-gradient-to-br from-blue-600 to-violet-600"
@@ -1159,11 +1158,11 @@ export function PublicBooking() {
                 <span className="rounded-full bg-white/20 px-3 py-1 text-xs font-black">
                   Offre limitée
                 </span>
-                <h3 className="mt-5 text-2xl font-black">{offer.title}</h3>
+                <h3 className="mt-5 text-xl font-black sm:text-2xl">{offer.title}</h3>
                 <p className="mt-2 text-sm font-bold text-white/80">
                   {offer.center}
                 </p>
-                <div className="mt-6 flex items-end justify-between gap-4">
+                <div className="mt-6 flex flex-wrap items-end justify-between gap-4">
                   <div>
                     <p className="text-3xl font-black">{offer.price}</p>
                     <p className="text-sm font-bold text-white/70 line-through">
@@ -1171,7 +1170,7 @@ export function PublicBooking() {
                     </p>
                   </div>
                   <span className="rounded-full bg-white px-4 py-2 text-sm font-black text-slate-950">
-                    Voir l'offre
+                    Voir l&apos;offre
                   </span>
                 </div>
               </button>
@@ -1180,7 +1179,7 @@ export function PublicBooking() {
         </div>
 
         <div className="grid gap-4 lg:grid-cols-[0.95fr_1.05fr]">
-          <div className="rounded-[28px] border border-orange-100 bg-white p-5 shadow-sm">
+          <div className="min-w-0 rounded-[22px] border border-orange-100 bg-white p-4 shadow-sm sm:rounded-[28px] sm:p-5">
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-xs font-black uppercase text-orange-600">
@@ -1198,15 +1197,15 @@ export function PublicBooking() {
                   key={`soon-${offer.title}`}
                   type="button"
                   onClick={() => launchOfferSearch(offer.title, offer.category)}
-                  className="flex w-full items-center justify-between gap-3 rounded-3xl border border-orange-100 bg-orange-50 px-4 py-3 text-left transition hover:border-orange-200"
+                  className="flex w-full min-w-0 items-center justify-between gap-3 rounded-2xl border border-orange-100 bg-orange-50 px-4 py-3 text-left transition hover:border-orange-200 sm:rounded-3xl"
                 >
-                  <div>
+                  <div className="min-w-0">
                     <p className="font-black text-slate-950">{offer.title}</p>
                     <p className="mt-1 text-sm font-bold text-orange-700">
                       {offer.until}
                     </p>
                   </div>
-                  <span className="rounded-full bg-white px-3 py-1 text-sm font-black text-orange-700">
+                  <span className="shrink-0 rounded-full bg-white px-3 py-1 text-sm font-black text-orange-700">
                     {offer.discount}
                   </span>
                 </button>
@@ -1218,22 +1217,22 @@ export function PublicBooking() {
             id="seya-assistant"
             type="button"
             onClick={focusSeyaSearch}
-            className="rounded-[28px] border border-violet-200 bg-violet-600 p-5 text-left text-white shadow-sm transition hover:-translate-y-0.5"
+            className="min-w-0 rounded-[22px] border border-violet-200 bg-violet-600 p-4 text-left text-white shadow-sm transition hover:-translate-y-0.5 sm:rounded-[28px] sm:p-5"
           >
             <div className="flex items-start gap-4">
               <div className="grid h-12 w-12 place-items-center rounded-2xl bg-white/15">
                 <Bot className="h-7 w-7" />
               </div>
-              <div>
+              <div className="min-w-0">
                 <p className="text-xs font-black uppercase text-violet-100">
                   Demandez à Seya
                 </p>
-                <h2 className="mt-1 text-3xl font-black">
+                <h2 className="mt-1 text-2xl font-black sm:text-3xl">
                   Bonjour, je peux vous aider.
                 </h2>
               </div>
             </div>
-            <div className="mt-5 rounded-3xl bg-white p-4 text-slate-950 shadow-sm">
+            <div className="mt-5 rounded-2xl bg-white p-4 text-slate-950 shadow-sm sm:rounded-3xl">
               <p className="text-sm font-black uppercase text-slate-400">
                 Que recherchez-vous ?
               </p>
@@ -1244,8 +1243,8 @@ export function PublicBooking() {
           </button>
         </div>
 
-        <div className="grid gap-4 lg:grid-cols-3">
-          <div className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="grid min-w-0 gap-4 lg:grid-cols-3">
+          <div className="min-w-0 rounded-[22px] border border-slate-200 bg-white p-4 shadow-sm sm:rounded-[28px] sm:p-5">
             <p className="text-xs font-black uppercase text-blue-600">
               Très réservés
             </p>
@@ -1258,9 +1257,9 @@ export function PublicBooking() {
                   key={center.name}
                   type="button"
                   onClick={() => openPopularCenter(center)}
-                  className="flex w-full items-center justify-between gap-3 rounded-3xl bg-slate-50 p-4 text-left transition hover:bg-blue-50"
+                  className="flex w-full min-w-0 items-center justify-between gap-3 rounded-2xl bg-slate-50 p-4 text-left transition hover:bg-blue-50 sm:rounded-3xl"
                 >
-                  <div>
+                  <div className="min-w-0">
                     <p className="font-black text-slate-950">
                       {index + 1}. {center.name}
                     </p>
@@ -1268,7 +1267,7 @@ export function PublicBooking() {
                       {center.city} · {center.rating}/5
                     </p>
                   </div>
-                  <span className="rounded-full bg-blue-600 px-3 py-1 text-xs font-black text-white">
+                  <span className="shrink-0 rounded-full bg-blue-600 px-3 py-1 text-xs font-black text-white">
                     {center.bookings} fois
                   </span>
                 </button>
@@ -1276,7 +1275,7 @@ export function PublicBooking() {
             </div>
           </div>
 
-          <div className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="min-w-0 rounded-[22px] border border-slate-200 bg-white p-4 shadow-sm sm:rounded-[28px] sm:p-5">
             <p className="text-xs font-black uppercase text-violet-600">
               Tendances du moment
             </p>
@@ -1291,9 +1290,9 @@ export function PublicBooking() {
                   onClick={() => launchOfferSearch(title, category)}
                   className="rounded-3xl border border-slate-200 p-4 text-left transition hover:border-violet-200 hover:bg-violet-50"
                 >
-                  <div className="flex items-center justify-between gap-3">
-                    <p className="font-black text-slate-950">{title}</p>
-                    <span className="rounded-full bg-violet-50 px-3 py-1 text-xs font-black text-violet-700">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <p className="min-w-0 font-black text-slate-950">{title}</p>
+                    <span className="shrink-0 rounded-full bg-violet-50 px-3 py-1 text-xs font-black text-violet-700">
                       {badge}
                     </span>
                   </div>
@@ -1305,7 +1304,7 @@ export function PublicBooking() {
             </div>
           </div>
 
-          <div className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="min-w-0 rounded-[22px] border border-slate-200 bg-white p-4 shadow-sm sm:rounded-[28px] sm:p-5">
             <p className="text-xs font-black uppercase text-emerald-600">
               Près de vous
             </p>
@@ -1324,15 +1323,15 @@ export function PublicBooking() {
                       .getElementById("centres")
                       ?.scrollIntoView({ behavior: "smooth" });
                   }}
-                  className="flex w-full items-center justify-between rounded-3xl bg-emerald-50 p-4 text-left"
+                  className="flex w-full min-w-0 items-center justify-between gap-3 rounded-2xl bg-emerald-50 p-4 text-left sm:rounded-3xl"
                 >
-                  <div>
+                  <div className="min-w-0">
                     <p className="font-black text-slate-950">{service}</p>
                     <p className="mt-1 text-sm font-bold text-slate-500">
                       {city} · {distance}
                     </p>
                   </div>
-                  <span className="text-2xl font-black text-emerald-600">
+                  <span className="shrink-0 text-2xl font-black text-emerald-600">
                     {deal}
                   </span>
                 </button>
@@ -1341,8 +1340,8 @@ export function PublicBooking() {
           </div>
         </div>
 
-        <div className="grid gap-4 lg:grid-cols-[1.05fr_0.95fr]">
-          <div className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="grid min-w-0 gap-4 lg:grid-cols-[1.05fr_0.95fr]">
+          <div className="min-w-0 rounded-[22px] border border-slate-200 bg-white p-4 shadow-sm sm:rounded-[28px] sm:p-5">
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="rounded-3xl bg-blue-50 p-5">
                 <Heart className="h-7 w-7 text-blue-600" />
@@ -1375,7 +1374,7 @@ export function PublicBooking() {
               </div>
             </div>
 
-            <div className="mt-4 rounded-3xl bg-slate-950 p-5 text-white">
+            <div className="mt-4 rounded-2xl bg-slate-950 p-4 text-white sm:rounded-3xl sm:p-5">
               <div className="flex items-center justify-between gap-4">
                 <div>
                   <p className="text-xs font-black uppercase text-cyan-200">
@@ -1396,7 +1395,7 @@ export function PublicBooking() {
                       setLocationQuery(city);
                       scrollToCenters();
                     }}
-                    className="rounded-2xl bg-white/10 px-3 py-3 text-sm font-black"
+                    className="min-w-0 rounded-2xl bg-white/10 px-2 py-3 text-xs font-black sm:px-3 sm:text-sm"
                   >
                     {city}
                   </button>
@@ -1405,10 +1404,10 @@ export function PublicBooking() {
             </div>
           </div>
 
-          <div className="grid gap-4">
-            <div className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="grid min-w-0 gap-4">
+            <div className="min-w-0 rounded-[22px] border border-slate-200 bg-white p-4 shadow-sm sm:rounded-[28px] sm:p-5">
               <p className="text-xs font-black uppercase text-blue-600">
-                Disponibilités aujourd'hui
+                Disponibilités aujourd&apos;hui
               </p>
               <div className="mt-4 space-y-3">
                 {todayAvailabilities.map(([time, service, center]) => (
@@ -1416,12 +1415,12 @@ export function PublicBooking() {
                     key={`${time}-${service}`}
                     type="button"
                     onClick={() => openAvailability(time, service, center)}
-                    className="grid w-full grid-cols-[72px_1fr_auto] items-center gap-3 rounded-3xl border border-slate-200 p-4 text-left"
+                    className="grid w-full min-w-0 grid-cols-[64px_minmax(0,1fr)] items-center gap-3 rounded-2xl border border-slate-200 p-3 text-left sm:grid-cols-[72px_1fr_auto] sm:rounded-3xl sm:p-4"
                   >
                     <span className="text-xl font-black text-blue-600">
                       {time}
                     </span>
-                    <span>
+                    <span className="min-w-0">
                       <span className="block font-black text-slate-950">
                         {service}
                       </span>
@@ -1429,7 +1428,7 @@ export function PublicBooking() {
                         {center}
                       </span>
                     </span>
-                    <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-black text-blue-700">
+                    <span className="col-span-2 w-fit rounded-full bg-blue-50 px-3 py-1 text-xs font-black text-blue-700 sm:col-span-1">
                       Réserver
                     </span>
                   </button>
@@ -1501,13 +1500,13 @@ export function PublicBooking() {
         </div>
       </section>
 
-      <section id="centres" className="mx-auto max-w-6xl px-4 pb-8 sm:px-6 lg:px-8">
+      <section id="centres" className="mx-auto w-full max-w-6xl px-3 pb-8 sm:px-6 lg:px-8">
         <div className="mb-4 flex items-end justify-between gap-4">
-          <div>
+          <div className="min-w-0">
             <p className="text-xs font-black uppercase text-blue-600">
               Disponibilites
             </p>
-            <h2 className="text-2xl font-black tracking-tight text-slate-950 sm:text-3xl">
+            <h2 className="text-2xl font-black text-slate-950 sm:text-3xl">
               Centres recommandes
             </h2>
           </div>
@@ -1584,11 +1583,11 @@ export function PublicBooking() {
           </div>
         ) : null}
 
-        <div className="grid gap-4 lg:grid-cols-3">
+        <div className="grid min-w-0 gap-4 lg:grid-cols-3">
           {visibleCenters.map((center) => (
             <article
               key={center.name}
-              className={`overflow-hidden rounded-[26px] border bg-white shadow-sm transition ${
+              className={`min-w-0 overflow-hidden rounded-[22px] border bg-white shadow-sm transition sm:rounded-[26px] ${
                 selectedCenter.name === center.name
                   ? "border-blue-300 ring-4 ring-blue-100"
                   : "border-slate-200"
@@ -1613,13 +1612,13 @@ export function PublicBooking() {
                   }
                 />
               )}
-              <div className="p-5">
+              <div className="p-4 sm:p-5">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
                     <h3 className="truncate text-2xl font-black text-slate-950">
                       {center.name}
                     </h3>
-                    <p className="mt-1 flex items-center gap-2 font-semibold text-slate-500">
+                    <p className="mt-1 flex min-w-0 items-center gap-2 font-semibold text-slate-500">
                       <MapPin className="h-4 w-4 shrink-0" />
                       {center.city} · {center.distance}
                     </p>
@@ -1640,10 +1639,10 @@ export function PublicBooking() {
                   </span>
                 </div>
 
-                <div className="mt-4 rounded-3xl border border-emerald-100 bg-emerald-50 px-4 py-3">
+                <div className="mt-4 rounded-2xl border border-emerald-100 bg-emerald-50 px-3 py-3 sm:rounded-3xl sm:px-4">
                   <div className="flex items-center gap-3">
                     <span className="h-3 w-3 rounded-full bg-emerald-500 shadow-[0_0_0_6px_rgba(16,185,129,0.14)]" />
-                    <div>
+                    <div className="min-w-0">
                       <p className="text-[11px] font-black uppercase tracking-[0.12em] text-emerald-700">
                         Prochaine disponibilité
                       </p>
@@ -1677,9 +1676,9 @@ export function PublicBooking() {
                 ) : null}
 
                 {center.services?.length ? (
-                  <div className="mt-4 rounded-[28px] border border-slate-100 bg-white p-4 shadow-sm">
-                    <div className="flex items-end justify-between gap-3">
-                      <div>
+                  <div className="mt-4 min-w-0 rounded-[22px] border border-slate-100 bg-white p-3 shadow-sm sm:rounded-[28px] sm:p-4">
+                    <div className="flex flex-wrap items-end justify-between gap-3">
+                      <div className="min-w-0">
                         <p className="text-xs font-black uppercase text-blue-600">
                           Prestations
                         </p>
@@ -1744,7 +1743,7 @@ export function PublicBooking() {
                       ))}
                     </div>
 
-                    <div className="mt-4 grid grid-cols-2 gap-2">
+                    <div className="mt-4 grid gap-2 sm:grid-cols-2">
                       <button
                         type="button"
                         onClick={() => {
@@ -1816,7 +1815,7 @@ export function PublicBooking() {
                 ) : null}
 
                 {center.address || center.phone || center.email ? (
-                  <div className="mt-4 rounded-3xl border border-slate-100 bg-white px-4 py-3 shadow-sm">
+                  <div className="mt-4 rounded-2xl border border-slate-100 bg-white px-3 py-3 shadow-sm sm:rounded-3xl sm:px-4">
                     <div className="flex items-start gap-3">
                       <div className="grid h-9 w-9 shrink-0 place-items-center rounded-2xl bg-blue-50 text-blue-600">
                         <Navigation className="h-4 w-4" />
@@ -1938,13 +1937,13 @@ export function PublicBooking() {
         </div>
       </section>
 
-      <section id="reservation" className="mx-auto grid max-w-6xl gap-4 px-4 pb-10 sm:px-6 lg:grid-cols-[0.9fr_1.1fr] lg:px-8">
-        <div className="rounded-[26px] border border-slate-200 bg-white p-5 shadow-sm">
+      <section id="reservation" className="mx-auto grid w-full max-w-6xl gap-4 px-3 pb-10 sm:px-6 lg:grid-cols-[0.9fr_1.1fr] lg:px-8">
+        <div className="min-w-0 rounded-[22px] border border-slate-200 bg-white p-4 shadow-sm sm:rounded-[26px] sm:p-5">
           <div className="flex items-center gap-3">
             <div className="grid h-11 w-11 place-items-center rounded-2xl bg-emerald-50 text-emerald-600">
               <CalendarCheck className="h-6 w-6" />
             </div>
-            <div>
+            <div className="min-w-0">
               <p className="text-xs font-black uppercase text-emerald-600">
                 Reservation
               </p>
@@ -1954,7 +1953,7 @@ export function PublicBooking() {
             </div>
           </div>
 
-          <div className="mt-5 rounded-3xl bg-slate-50 p-5">
+          <div className="mt-5 rounded-2xl bg-slate-50 p-4 sm:rounded-3xl sm:p-5">
             {[
               ["Centre", selectedCenter.name],
               ["Soin", selectedCenter.service],
@@ -1962,10 +1961,10 @@ export function PublicBooking() {
             ].map(([label, value]) => (
               <div
                 key={label}
-                className="flex items-center justify-between gap-4 border-b border-slate-200 py-3 first:pt-0"
+                className="flex min-w-0 items-center justify-between gap-4 border-b border-slate-200 py-3 first:pt-0"
               >
                 <span className="font-bold text-slate-500">{label}</span>
-                <span className="text-right font-black">{value}</span>
+                <span className="min-w-0 text-right font-black">{value}</span>
               </div>
             ))}
           </div>
@@ -2128,20 +2127,20 @@ export function PublicBooking() {
           ) : null}
         </div>
 
-        <div id="client" className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
+        <div id="client" className="min-w-0 rounded-[22px] border border-slate-200 bg-white p-4 shadow-sm sm:rounded-[28px] sm:p-6">
           <div className="flex flex-wrap items-start justify-between gap-4">
-            <div className="flex items-center gap-3">
+            <div className="flex min-w-0 items-center gap-3">
               <div className="grid h-12 w-12 place-items-center rounded-2xl bg-blue-50 text-blue-600">
                 <UserRound className="h-6 w-6" />
               </div>
-              <div>
+              <div className="min-w-0">
                 <p className="text-xs font-black uppercase text-blue-600">
                   Espace cliente connecté
                 </p>
                 <h2 className="text-2xl font-black text-slate-950 sm:text-3xl">
                   Mon compte Bookea
                 </h2>
-                <p className="mt-1 text-sm font-bold text-slate-500">
+                <p className="mt-1 truncate text-sm font-bold text-slate-500">
                   {customerForm.firstName} {customerForm.lastName} · {customerForm.email}
                 </p>
               </div>
@@ -2152,7 +2151,7 @@ export function PublicBooking() {
           </div>
 
           <div className="mt-6 grid gap-4 lg:grid-cols-[1.05fr_0.95fr]">
-            <section className="rounded-[26px] border border-slate-200 bg-slate-50 p-4">
+            <section className="min-w-0 rounded-[22px] border border-slate-200 bg-slate-50 p-4 sm:rounded-[26px]">
               <div className="flex items-center justify-between gap-3">
                 <div>
                   <p className="text-xs font-black uppercase text-slate-400">
@@ -2216,7 +2215,7 @@ export function PublicBooking() {
 
             <section
               id="client-messagerie"
-              className="rounded-[26px] border border-slate-200 bg-white p-4 shadow-sm"
+              className="min-w-0 rounded-[22px] border border-slate-200 bg-white p-4 shadow-sm sm:rounded-[26px]"
             >
               <div className="flex items-center justify-between gap-3">
                 <div>
@@ -2252,17 +2251,17 @@ export function PublicBooking() {
                 ))}
               </div>
 
-              <div className="mt-3 flex gap-2">
+              <div className="mt-3 flex flex-col gap-2 sm:flex-row">
                 <input
                   value={clientMessageDraft}
                   onChange={(event) => setClientMessageDraft(event.target.value)}
                   placeholder="Écrire au centre..."
-                  className="min-h-12 flex-1 rounded-2xl border border-slate-200 px-4 font-bold outline-none focus:border-blue-500"
+                  className="min-h-12 min-w-0 flex-1 rounded-2xl border border-slate-200 px-4 font-bold outline-none focus:border-blue-500"
                 />
                 <button
                   type="button"
                   onClick={sendClientMessage}
-                  className="rounded-2xl bg-slate-950 px-5 font-black text-white transition hover:bg-slate-800"
+                  className="rounded-2xl bg-slate-950 px-5 py-3 font-black text-white transition hover:bg-slate-800 sm:py-0"
                 >
                   Envoyer
                 </button>
@@ -2407,7 +2406,7 @@ export function PublicBooking() {
                 Une seule plateforme pour la cliente et pour le centre.
               </h2>
               <p className="mt-4 font-medium leading-7 text-slate-300">
-                La cliente reserve depuis l'interface publique. Le centre recoit
+                La cliente reserve depuis l&apos;interface publique. Le centre recoit
                 le rendez-vous dans son agenda Pro, avec les donnees separees de
                 chaque etablissement.
               </p>
