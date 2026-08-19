@@ -1,0 +1,37 @@
+<svg width="760" height="260" viewBox="0 0 760 260" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="markGradient" x1="46" y1="198" x2="188" y2="42" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#6D28D9"/>
+      <stop offset="0.48" stop-color="#4F46E5"/>
+      <stop offset="1" stop-color="#22C7E8"/>
+    </linearGradient>
+    <linearGradient id="ribbonGradient" x1="48" y1="178" x2="166" y2="104" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#55C7F3"/>
+      <stop offset="0.5" stop-color="#3988F2"/>
+      <stop offset="1" stop-color="#7C3AED"/>
+    </linearGradient>
+    <linearGradient id="wordGradient" x1="252" y1="70" x2="590" y2="74" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#6D28D9"/>
+      <stop offset="0.5" stop-color="#4F46E5"/>
+      <stop offset="1" stop-color="#22C7E8"/>
+    </linearGradient>
+    <radialGradient id="markGlow" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(78 48) rotate(55) scale(124)">
+      <stop stop-color="white" stop-opacity="0.45"/>
+      <stop offset="1" stop-color="white" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="shadow" x="0" y="0" width="250" height="250" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="18" stdDeviation="20" flood-color="#4F46E5" flood-opacity="0.22"/>
+    </filter>
+  </defs>
+  <g filter="url(#shadow)">
+    <path d="M48 208V42h80c45 0 74 26 74 64 0 20-10 37-27 47 22 11 35 29 35 50 0 5-3 5-10 5H48Z" fill="url(#markGradient)"/>
+    <path d="M48 208V42h80c45 0 74 26 74 64 0 20-10 37-27 47 22 11 35 29 35 50 0 5-3 5-10 5H48Z" fill="url(#markGlow)"/>
+    <path d="M96 80h35c18 0 30 11 30 27s-12 27-30 27H96V80Z" fill="white" opacity="0.96"/>
+    <path d="M96 144h43c19 0 32 12 32 30s-13 31-34 31H96V144Z" fill="white" opacity="0.96"/>
+    <path d="M48 201L164 130c13-8 29 0 33 15L85 208H48Z" fill="url(#ribbonGradient)"/>
+  </g>
+  <text x="252" y="111" font-family="Inter, Arial, sans-serif" font-size="82" font-weight="900" letter-spacing="-4" fill="url(#wordGradient)">Bookea</text>
+  <text x="256" y="166" font-family="Inter, Arial, sans-serif" font-size="31" font-weight="600" fill="#0F1B3D">Le planning qui remplit</text>
+  <text x="256" y="207" font-family="Inter, Arial, sans-serif" font-size="31" font-weight="600" fill="#0F1B3D">votre <tspan fill="#7C3AED" font-weight="800">agenda</tspan></text>
+  <text x="520" y="207" font-family="Inter, Arial, sans-serif" font-size="34" font-weight="700" fill="#6366F1">✦</text>
+</svg>

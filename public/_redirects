@@ -1,0 +1,8 @@
+/client /client/index.html 200
+/dashboard /dashboard/index.html 200
+/dashboard/agenda /dashboard/agenda/index.html 200
+/dashboard/crm-clients /dashboard/crm-clients/index.html 200
+/dashboard/crm-leads /dashboard/crm-leads/index.html 200
+/dashboard/crm-leads/pipeline /dashboard/crm-leads/pipeline/index.html 200
+/dashboard/crm-leads/tasks /dashboard/crm-leads/tasks/index.html 200
+/login /login/index.html 200

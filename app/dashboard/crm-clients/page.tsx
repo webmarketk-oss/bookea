@@ -1,0 +1,1905 @@
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
+import {
+  CalendarDays,
+  CheckCircle2,
+  CreditCard,
+  Euro,
+  Eye,
+  FileText,
+  MessageCircle,
+  MoreVertical,
+  Phone,
+  Plus,
+  Search,
+  Sparkles,
+  UserRound,
+  X,
+} from "lucide-react";
+
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { appointments, cabins, practitioners } from "@/lib/agenda-data";
+import {
+  getSourceNames,
+  publicCenterCategories,
+  readCenterSettings,
+} from "@/lib/center-settings";
+import { leads } from "@/lib/mock-data";
+
+type ClientStatus = "Actif" | "Cure en cours" | "À relancer" | "Inactif";
+
+type ClientNote = {
+  id: string;
+  author: string;
+  date: string;
+  text: string;
+  visibility?: "private" | "shared";
+};
+
+type ClientCare = {
+  id: string;
+  label: string;
+  date: string;
+  amount: number;
+  paid: number;
+  status: "Payé" | "Acompte" | "À encaisser";
+};
+
+type ClientDocument = {
+  id: string;
+  label: string;
+  date: string;
+  status: "À signer" | "Signé" | "À envoyer" | "Validé";
+  type: "Consentement" | "Devis" | "Facture" | "Fiche cure";
+};
+
+type Client = {
+  id: string;
+  firstName: string;
+  lastName: string;
+  phone: string;
+  email: string;
+  birthDate: string;
+  gender: string;
+  address: string;
+  postalCode: string;
+  city: string;
+  mainCare: string;
+  category: string;
+  source: string;
+  campaign: string;
+  status: ClientStatus;
+  commercial: string;
+  nextAppointment: string;
+  lastVisit: string;
+  totalSpent: number;
+  balanceDue: number;
+  notes: ClientNote[];
+  cares: ClientCare[];
+  documents: ClientDocument[];
+};
+
+const statusStyles: Record<ClientStatus, string> = {
+  Actif: "bg-emerald-50 text-emerald-700 border-emerald-100",
+  "Cure en cours": "bg-blue-50 text-blue-700 border-blue-100",
+  "À relancer": "bg-amber-50 text-amber-700 border-amber-100",
+  Inactif: "bg-slate-100 text-slate-600 border-slate-200",
+};
+
+const defaultProvenanceOptions = [
+  "Organique",
+  "Facebook",
+  "Instagram",
+  "Google",
+  "Google Ads",
+  "Site web",
+  "WhatsApp",
+  "Recommandation",
+  "Parrainage",
+  "Autre",
+];
+
+const seedClients: Client[] = [
+  {
+    id: "client-marie",
+    firstName: "Marie",
+    lastName: "Dubois",
+    phone: "06 12 34 56 78",
+    email: "marie@email.com",
+    birthDate: "14/03/1991",
+    gender: "Femme",
+    address: "12 rue Victor Hugo",
+    postalCode: "75015",
+    city: "Paris",
+    mainCare: "Épilation Laser",
+    category: "Institut beauté",
+    source: "Facebook",
+    campaign: "Laser juillet",
+    status: "Cure en cours",
+    commercial: "Samantha",
+    nextAppointment: "29/07/2026 10:30",
+    lastVisit: "25/07/2026",
+    totalSpent: 420,
+    balanceDue: 180,
+    notes: [
+      {
+        id: "note-marie-1",
+        author: "Samantha",
+        date: "Aujourd'hui 09:20",
+        text: "Préférence WhatsApp. À prévenir la veille du RDV.",
+      },
+    ],
+    cares: [
+      {
+        id: "care-marie-1",
+        label: "Cure laser aisselles",
+        date: "25/07/2026",
+        amount: 600,
+        paid: 420,
+        status: "Acompte",
+      },
+    ],
+    documents: [
+      {
+        id: "doc-marie-consentement",
+        label: "Consentement laser",
+        date: "25/07/2026",
+        status: "Signé",
+        type: "Consentement",
+      },
+      {
+        id: "doc-marie-devis",
+        label: "Devis cure laser",
+        date: "25/07/2026",
+        status: "Validé",
+        type: "Devis",
+      },
+    ],
+  },
+  {
+    id: "client-claire",
+    firstName: "Claire",
+    lastName: "Moreau",
+    phone: "06 95 86 13 69",
+    email: "claire@email.com",
+    birthDate: "22/09/1988",
+    gender: "Femme",
+    address: "8 avenue de la Gare",
+    postalCode: "69003",
+    city: "Lyon",
+    mainCare: "Cryolipolyse",
+    category: "Minceur",
+    source: "Google",
+    campaign: "Cryo été",
+    status: "Actif",
+    commercial: "Camille",
+    nextAppointment: "31/07/2026 14:00",
+    lastVisit: "18/07/2026",
+    totalSpent: 980,
+    balanceDue: 0,
+    notes: [
+      {
+        id: "note-claire-1",
+        author: "Seya",
+        date: "Suggestion",
+        text: "Cliente fidèle. Proposer un bilan silhouette dans 3 semaines.",
+      },
+    ],
+    cares: [
+      {
+        id: "care-claire-1",
+        label: "Cure cryolipolyse",
+        date: "18/07/2026",
+        amount: 980,
+        paid: 980,
+        status: "Payé",
+      },
+    ],
+    documents: [
+      {
+        id: "doc-claire-facture",
+        label: "Facture cure cryolipolyse",
+        date: "18/07/2026",
+        status: "Validé",
+        type: "Facture",
+      },
+      {
+        id: "doc-claire-fiche",
+        label: "Fiche suivi silhouette",
+        date: "18/07/2026",
+        status: "Signé",
+        type: "Fiche cure",
+      },
+    ],
+  },
+  {
+    id: "client-laura",
+    firstName: "Laura",
+    lastName: "Petit",
+    phone: "06 73 33 81 66",
+    email: "laura@email.com",
+    birthDate: "05/12/1994",
+    gender: "Femme",
+    address: "4 impasse des Lilas",
+    postalCode: "13008",
+    city: "Marseille",
+    mainCare: "Hydrafacial",
+    category: "Soin du visage",
+    source: "Instagram",
+    campaign: "Hydrafacial",
+    status: "À relancer",
+    commercial: "Thomas",
+    nextAppointment: "Aucun RDV",
+    lastVisit: "08/07/2026",
+    totalSpent: 310,
+    balanceDue: 0,
+    notes: [
+      {
+        id: "note-laura-1",
+        author: "Thomas",
+        date: "24/07/2026",
+        text: "Relancer pour programmer la séance entretien.",
+      },
+    ],
+    cares: [
+      {
+        id: "care-laura-1",
+        label: "Hydrafacial découverte",
+        date: "08/07/2026",
+        amount: 310,
+        paid: 310,
+        status: "Payé",
+      },
+    ],
+    documents: [
+      {
+        id: "doc-laura-fiche",
+        label: "Fiche Hydrafacial",
+        date: "08/07/2026",
+        status: "À envoyer",
+        type: "Fiche cure",
+      },
+    ],
+  },
+  ...leads
+    .filter((lead) =>
+      ["Client", "Client converti", "Vendu"].includes(lead.status)
+    )
+    .map((lead) => ({
+      id: `client-${lead.id}`,
+      firstName: lead.firstName,
+      lastName: lead.lastName,
+      phone: lead.phone,
+      email: lead.email,
+      birthDate: "À compléter",
+      gender: "À compléter",
+      address: "À compléter",
+      postalCode: "",
+      city: "",
+      mainCare: lead.treatment,
+      category: getClientCategoryFromCare(lead.treatment),
+      source: lead.source,
+      campaign: lead.campaign,
+      status: "Actif" as ClientStatus,
+      commercial: lead.commercial,
+      nextAppointment: lead.nextAction,
+      lastVisit: lead.createdDate,
+      totalSpent: lead.dealAmount,
+      balanceDue: 0,
+      notes: lead.activityLog.map((activity) => ({
+        id: activity.id,
+        author: activity.author,
+        date: activity.date,
+        text: activity.text,
+      })),
+      cares: [
+        {
+          id: `care-${lead.id}`,
+          label: lead.treatment,
+          date: lead.createdDate,
+          amount: lead.dealAmount,
+          paid: lead.dealAmount,
+          status: "Payé" as const,
+        },
+      ],
+      documents: [
+        {
+          id: `doc-${lead.id}-fiche`,
+          label: `Fiche ${lead.treatment}`,
+          date: lead.createdDate,
+          status: "À envoyer" as const,
+          type: "Fiche cure" as const,
+        },
+      ],
+    })),
+];
+
+const emptyClientForm: Omit<Client, "id" | "notes" | "cares" | "documents"> = {
+  firstName: "",
+  lastName: "",
+  phone: "",
+  email: "",
+  birthDate: "",
+  gender: "",
+  address: "",
+  postalCode: "",
+  city: "",
+  mainCare: "",
+  category: "",
+  source: "",
+  campaign: "",
+  status: "Actif",
+  commercial: "Samantha",
+  nextAppointment: "Aucun RDV",
+  lastVisit: new Date().toISOString().slice(0, 10),
+  totalSpent: 0,
+  balanceDue: 0,
+};
+
+const emptyDocumentForm: Omit<ClientDocument, "id"> = {
+  label: "",
+  date: todayFrenchDate(),
+  status: "À envoyer",
+  type: "Consentement",
+};
+
+export default function CRMClientsPage() {
+  const [clientList, setClientList] = useState(seedClients);
+  const [selectedClientId, setSelectedClientId] = useState(seedClients[0]?.id);
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState<"Tous" | ClientStatus>(
+    "Tous"
+  );
+  const [provenanceOptions, setProvenanceOptions] = useState(
+    defaultProvenanceOptions,
+  );
+  const [noteDraft, setNoteDraft] = useState("");
+  const [noteVisibility, setNoteVisibility] = useState<"private" | "shared">(
+    "private"
+  );
+  const [isClientFormOpen, setIsClientFormOpen] = useState(false);
+  const [isFullClientOpen, setIsFullClientOpen] = useState(false);
+  const [clientForm, setClientForm] = useState(emptyClientForm);
+
+  useEffect(() => {
+    function syncSourceSettings() {
+      const settingSources = getSourceNames(readCenterSettings());
+      setProvenanceOptions(
+        Array.from(new Set([...settingSources, ...defaultProvenanceOptions])),
+      );
+    }
+
+    syncSourceSettings();
+    window.addEventListener("bookea-center-settings-updated", syncSourceSettings);
+    window.addEventListener("storage", syncSourceSettings);
+
+    return () => {
+      window.removeEventListener(
+        "bookea-center-settings-updated",
+        syncSourceSettings,
+      );
+      window.removeEventListener("storage", syncSourceSettings);
+    };
+  }, []);
+
+  const filteredClients = useMemo(() => {
+    const query = normalize(search);
+
+    return clientList.filter((client) => {
+      const matchesSearch =
+        query.length === 0 ||
+        normalize(`${client.firstName} ${client.lastName}`).includes(query) ||
+        normalize(client.phone).includes(query) ||
+        normalize(client.email).includes(query) ||
+        normalize(client.mainCare).includes(query) ||
+        normalize(client.category).includes(query);
+      const matchesStatus =
+        statusFilter === "Tous" || client.status === statusFilter;
+
+      return matchesSearch && matchesStatus;
+    });
+  }, [clientList, search, statusFilter]);
+
+  const selectedClient =
+    clientList.find((client) => client.id === selectedClientId) ??
+    filteredClients[0] ??
+    clientList[0];
+  const stats = getClientStats(clientList);
+
+  function addNote() {
+    const text = noteDraft.trim();
+
+    if (!text || !selectedClient) {
+      return;
+    }
+
+    setClientList((currentClients) =>
+      currentClients.map((client) =>
+        client.id === selectedClient.id
+          ? {
+              ...client,
+              notes: [
+                {
+                  id: crypto.randomUUID(),
+                  author: "Samantha",
+                  date: formatActivityDate(),
+                  text,
+                  visibility: noteVisibility,
+                },
+                ...client.notes,
+              ],
+            }
+          : client
+      )
+    );
+    setNoteDraft("");
+  }
+
+  function openRdvForClient(client: Client) {
+    const params = new URLSearchParams({
+      newRdv: "1",
+      name: `${client.firstName} ${client.lastName}`,
+      phone: client.phone,
+      treatment: client.mainCare,
+      source: "Client",
+    });
+
+    window.open(`/dashboard/agenda?${params.toString()}`, "_blank", "noopener,noreferrer");
+  }
+
+  function openNewClientForm() {
+    setClientForm(emptyClientForm);
+    setIsClientFormOpen(true);
+  }
+
+  function addClient(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    const client: Client = {
+      ...clientForm,
+      id: crypto.randomUUID(),
+      notes: [],
+      cares: [],
+      documents: [],
+    };
+
+    setClientList((currentClients) => [client, ...currentClients]);
+    setSelectedClientId(client.id);
+    setIsClientFormOpen(false);
+  }
+
+  function saveFullClient(updatedClient: Client) {
+    setClientList((currentClients) =>
+      currentClients.map((client) =>
+        client.id === updatedClient.id ? updatedClient : client
+      )
+    );
+    setSelectedClientId(updatedClient.id);
+    setIsFullClientOpen(false);
+  }
+
+  function addClientDocument(
+    clientId: string,
+    document: Omit<ClientDocument, "id">
+  ) {
+    const newDocument: ClientDocument = {
+      ...document,
+      id: crypto.randomUUID(),
+    };
+
+    setClientList((currentClients) =>
+      currentClients.map((client) =>
+        client.id === clientId
+          ? {
+              ...client,
+              documents: [newDocument, ...client.documents],
+            }
+          : client
+      )
+    );
+  }
+
+  return (
+    <main className="min-h-screen bg-slate-100">
+      <div className="mx-auto max-w-[1800px] space-y-6 p-8">
+        <header className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+          <div>
+            <p className="text-sm font-semibold text-violet-600">Bookea CRM</p>
+            <h1 className="mt-1 text-4xl font-black tracking-tight text-slate-950">
+              Clients
+            </h1>
+            <p className="mt-2 text-slate-500">
+              Suivez les clientes, les cures, les paiements et les prochains
+              rendez-vous.
+            </p>
+          </div>
+
+          <Button type="button" className="h-11 bg-slate-950" onClick={openNewClientForm}>
+            <Plus className="mr-2 h-4 w-4" />
+            Nouveau client
+          </Button>
+        </header>
+
+        <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          <ClientStatCard
+            label="Clients du mois"
+            value={stats.monthClients}
+            icon={<UserRound />}
+            color="text-blue-600"
+          />
+          <ClientStatCard
+            label="Cures en cours"
+            value={stats.inCare}
+            icon={<CheckCircle2 />}
+            color="text-emerald-600"
+          />
+          <ClientStatCard
+            label="CA clients"
+            value={formatCurrency(stats.monthRevenue)}
+            icon={<Euro />}
+            color="text-violet-600"
+          />
+          <ClientStatCard
+            label="En attente de validation"
+            value={formatCurrency(stats.pendingValidation)}
+            icon={<CreditCard />}
+            color="text-amber-600"
+          />
+        </section>
+
+        <Card className="border-slate-200 py-0 shadow-sm">
+          <CardContent className="flex flex-col gap-3 p-4 xl:flex-row xl:items-center">
+            <div className="relative min-w-0 flex-1">
+              <Search className="absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+              <Input
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder="Rechercher une cliente, téléphone, email, soin..."
+                className="h-11 pl-11"
+              />
+            </div>
+
+            <select
+              value={statusFilter}
+              onChange={(event) =>
+                setStatusFilter(event.target.value as "Tous" | ClientStatus)
+              }
+              className="h-11 rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-800 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+            >
+              <option>Tous</option>
+              <option>Actif</option>
+              <option>Cure en cours</option>
+              <option>À relancer</option>
+              <option>Inactif</option>
+            </select>
+          </CardContent>
+        </Card>
+
+        <section className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_420px]">
+          <Card className="overflow-hidden border-slate-200 py-0 shadow-sm">
+            <CardContent className="p-0">
+              <div className="grid grid-cols-[1.35fr_1fr_0.9fr_1fr_0.9fr_120px] border-b border-slate-100 bg-white px-5 py-3 text-xs font-black uppercase text-slate-500">
+                <span>Cliente</span>
+                <span>Soin principal</span>
+                <span>Provenance</span>
+                <span>Prochain RDV</span>
+                <span>Commercial</span>
+                <span className="text-right">CA</span>
+              </div>
+
+              <div className="divide-y divide-slate-100">
+                {filteredClients.map((client) => {
+                  const selected = selectedClient?.id === client.id;
+
+                  return (
+                    <button
+                      key={client.id}
+                      type="button"
+                      onClick={() => setSelectedClientId(client.id)}
+                      className={`grid w-full grid-cols-[1.35fr_1fr_0.9fr_1fr_0.9fr_120px] items-center gap-4 px-5 py-4 text-left transition-colors hover:bg-blue-50/70 ${
+                        selected ? "bg-blue-50 ring-1 ring-inset ring-blue-200" : "bg-white"
+                      }`}
+                    >
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-3">
+                          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-slate-900 text-sm font-black text-white">
+                            {client.firstName[0]}
+                            {client.lastName[0]}
+                          </span>
+                          <div className="min-w-0">
+                            <p className="truncate font-black text-slate-950">
+                              {client.firstName} {client.lastName}
+                            </p>
+                            <p className="truncate text-sm font-medium text-slate-500">
+                              {client.phone} · {client.email}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                      <span className="truncate font-semibold text-slate-700">
+                        {client.mainCare}
+                      </span>
+                      <span className="w-fit max-w-full truncate rounded-full border border-blue-100 bg-blue-50 px-3 py-1 text-sm font-black text-blue-700">
+                        {client.source || "À compléter"}
+                      </span>
+                      <span className="truncate text-sm font-semibold text-slate-500">
+                        {client.nextAppointment}
+                      </span>
+                      <span className="truncate text-sm font-semibold text-slate-600">
+                        {client.commercial}
+                      </span>
+                      <span className="text-right font-black text-emerald-600">
+                        {formatCurrency(client.totalSpent)}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </CardContent>
+          </Card>
+
+          {selectedClient && (
+            <ClientPanel
+              client={selectedClient}
+              noteDraft={noteDraft}
+              noteVisibility={noteVisibility}
+              onNoteDraftChange={setNoteDraft}
+              onNoteVisibilityChange={setNoteVisibility}
+              onAddNote={addNote}
+              onAddDocument={(document) =>
+                addClientDocument(selectedClient.id, document)
+              }
+              onOpenFull={() => setIsFullClientOpen(true)}
+              onOpenRdv={() => openRdvForClient(selectedClient)}
+            />
+          )}
+        </section>
+      </div>
+
+      {isClientFormOpen && (
+        <ClientFormModal
+          form={clientForm}
+          title="Nouveau client"
+          onChange={setClientForm}
+          onClose={() => setIsClientFormOpen(false)}
+          onSubmit={addClient}
+          sourceOptions={provenanceOptions}
+        />
+      )}
+
+      {selectedClient && isFullClientOpen && (
+        <FullClientModal
+          client={selectedClient}
+          onClose={() => setIsFullClientOpen(false)}
+          onSave={saveFullClient}
+          sourceOptions={provenanceOptions}
+        />
+      )}
+    </main>
+  );
+}
+
+function ClientPanel({
+  client,
+  noteDraft,
+  noteVisibility,
+  onAddNote,
+  onAddDocument,
+  onNoteDraftChange,
+  onNoteVisibilityChange,
+  onOpenFull,
+  onOpenRdv,
+}: {
+  client: Client;
+  noteDraft: string;
+  noteVisibility: "private" | "shared";
+  onAddDocument: (document: Omit<ClientDocument, "id">) => void;
+  onAddNote: () => void;
+  onNoteDraftChange: (value: string) => void;
+  onNoteVisibilityChange: (value: "private" | "shared") => void;
+  onOpenFull: () => void;
+  onOpenRdv: () => void;
+}) {
+  const [activePanel, setActivePanel] = useState<
+    "cures" | "appointments" | "documents"
+  >("cures");
+  const [isMoreOpen, setIsMoreOpen] = useState(false);
+  const appointmentHistory = getClientAppointmentHistory(client);
+
+  return (
+    <Card className="h-fit border-slate-200 py-0 shadow-sm">
+      <CardContent className="space-y-5 p-5">
+        <header className="flex items-start justify-between gap-3">
+          <div>
+            <div className="flex flex-wrap items-center gap-2">
+              <h2 className="text-2xl font-black text-slate-950">
+                {client.firstName} {client.lastName}
+              </h2>
+              <Badge className={statusStyles[client.status]}>
+                {client.status}
+              </Badge>
+            </div>
+            <p className="mt-1 text-sm font-medium text-slate-400">
+              Cliente depuis {client.lastVisit}
+            </p>
+          </div>
+          <div className="relative">
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              aria-label="Plus"
+              onClick={() => setIsMoreOpen((value) => !value)}
+            >
+              <MoreVertical className="h-4 w-4" />
+            </Button>
+            {isMoreOpen && (
+              <div className="absolute right-0 z-20 mt-2 w-52 overflow-hidden rounded-xl border border-slate-200 bg-white p-1 shadow-xl">
+                <MoreMenuButton
+                  label="Ouvrir fiche complète"
+                  onClick={() => {
+                    onOpenFull();
+                    setIsMoreOpen(false);
+                  }}
+                />
+                <MoreMenuButton
+                  label="Historique RDV"
+                  onClick={() => {
+                    setActivePanel("appointments");
+                    setIsMoreOpen(false);
+                  }}
+                />
+                <MoreMenuButton
+                  label="Documents"
+                  onClick={() => {
+                    setActivePanel("documents");
+                    setIsMoreOpen(false);
+                  }}
+                />
+                <MoreMenuButton
+                  label="Cures & paiements"
+                  onClick={() => {
+                    setActivePanel("cures");
+                    setIsMoreOpen(false);
+                  }}
+                />
+              </div>
+            )}
+          </div>
+        </header>
+
+        <section className="rounded-xl border border-slate-100 bg-slate-50 p-4">
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <h3 className="text-sm font-black uppercase text-slate-500">
+              Fiche cliente
+            </h3>
+            <Button size="sm" variant="outline" onClick={onOpenFull}>
+              Ouvrir fiche complète
+            </Button>
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-2">
+            <ClientIdentity label="Prénom" value={client.firstName} />
+            <ClientIdentity label="Nom" value={client.lastName} />
+            <ClientIdentity label="Téléphone" value={client.phone} />
+            <ClientIdentity label="Email" value={client.email} />
+            <ClientIdentity
+              label="Date de naissance"
+              value={client.birthDate}
+            />
+            <ClientIdentity label="Genre" value={client.gender} />
+            <ClientIdentity
+              label="Adresse"
+              value={formatClientAddress(client)}
+            />
+            <ClientIdentity label="Commerciale" value={client.commercial} />
+          </div>
+        </section>
+
+        <div className="grid grid-cols-2 gap-2">
+          <ClientAction
+            label="Appeler"
+            icon={<Phone />}
+            className="border-blue-100 bg-blue-50 text-blue-700"
+            onClick={() => window.open(`tel:${client.phone}`)}
+          />
+          <ClientAction
+            label="WhatsApp"
+            icon={<MessageCircle />}
+            className="border-emerald-100 bg-emerald-50 text-emerald-700"
+            onClick={() => window.open(getWhatsappUrl(client.phone), "_blank")}
+          />
+          <ClientAction
+            label="RDV"
+            icon={<CalendarDays />}
+            className="border-violet-100 bg-violet-50 text-violet-700"
+            active={activePanel === "appointments"}
+            onClick={() => setActivePanel("appointments")}
+          />
+          <ClientAction
+            label="Document"
+            icon={<FileText />}
+            className="border-amber-100 bg-amber-50 text-amber-700"
+            active={activePanel === "documents"}
+            onClick={() => setActivePanel("documents")}
+          />
+        </div>
+
+        <div className="rounded-xl border border-violet-100 bg-violet-50 p-4">
+          <div className="mb-2 flex items-center gap-2 font-black text-violet-900">
+            <Sparkles className="h-4 w-4" />
+            Seya recommande
+          </div>
+          <p className="text-sm leading-6 text-violet-800">
+            Vérifier le solde, confirmer le prochain rendez-vous et proposer un
+            soin complémentaire lié à {client.mainCare}.
+          </p>
+        </div>
+
+        <div className="grid grid-cols-2 gap-3">
+          <MiniInfo label="Total dépensé" value={formatCurrency(client.totalSpent)} />
+          <MiniInfo label="Reste dû" value={formatCurrency(client.balanceDue)} />
+          <MiniInfo label="Catégorie" value={client.category || "À compléter"} />
+          <MiniInfo label="Provenance" value={client.source} />
+          <MiniInfo label="Campagne" value={client.campaign} />
+        </div>
+
+        <div className="flex gap-2 rounded-xl bg-slate-50 p-1">
+          <ClientPanelTab
+            active={activePanel === "cures"}
+            onClick={() => setActivePanel("cures")}
+          >
+            Cures
+          </ClientPanelTab>
+          <ClientPanelTab
+            active={activePanel === "appointments"}
+            onClick={() => setActivePanel("appointments")}
+          >
+            Historique RDV
+          </ClientPanelTab>
+          <ClientPanelTab
+            active={activePanel === "documents"}
+            onClick={() => setActivePanel("documents")}
+          >
+            Documents
+          </ClientPanelTab>
+        </div>
+
+        {activePanel === "cures" && <ClientCares cares={client.cares} />}
+        {activePanel === "appointments" && (
+          <ClientAppointments
+            appointments={appointmentHistory}
+            onOpenRdv={onOpenRdv}
+          />
+        )}
+        {activePanel === "documents" && (
+          <ClientDocuments
+            documents={client.documents}
+            onAddDocument={onAddDocument}
+          />
+        )}
+
+        <section>
+          <h3 className="mb-3 text-sm font-black uppercase text-slate-500">
+            Notes cliente
+          </h3>
+          <div className="rounded-xl border border-slate-200 bg-white p-3">
+            <div className="mb-3 grid grid-cols-2 gap-2">
+              {(
+                [
+                  {
+                    value: "private",
+                    label: "Note privée",
+                    detail: "Visible équipe",
+                  },
+                  {
+                    value: "shared",
+                    label: "Note partagée",
+                    detail: "Visible cliente",
+                  },
+                ] as const
+              ).map((option) => {
+                const isActive = noteVisibility === option.value;
+
+                return (
+                  <button
+                    key={option.value}
+                    type="button"
+                    onClick={() => onNoteVisibilityChange(option.value)}
+                    className={`rounded-xl border px-3 py-2 text-left transition ${
+                      isActive
+                        ? "border-blue-200 bg-blue-50 text-blue-700"
+                        : "border-slate-200 bg-slate-50 text-slate-500 hover:border-slate-300"
+                    }`}
+                  >
+                    <span className="block text-sm font-black">
+                      {option.label}
+                    </span>
+                    <span className="block text-xs font-bold">
+                      {option.detail}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+            <textarea
+              value={noteDraft}
+              onChange={(event) => onNoteDraftChange(event.target.value)}
+              placeholder="Ajouter une note client..."
+              className="min-h-20 w-full resize-none bg-transparent text-sm outline-none placeholder:text-slate-400"
+            />
+            <div className="mt-3 flex justify-end">
+              <Button
+                size="sm"
+                onClick={onAddNote}
+                disabled={noteDraft.trim().length === 0}
+              >
+                Ajouter la note
+              </Button>
+            </div>
+          </div>
+
+          <div className="mt-3 space-y-2">
+            {client.notes.map((note) => {
+              const isShared = note.visibility === "shared";
+
+              return (
+                <div
+                  key={note.id}
+                  className={`rounded-xl border p-3 ${
+                    isShared
+                      ? "border-blue-100 bg-blue-50"
+                      : "border-slate-100 bg-slate-50"
+                  }`}
+                >
+                  <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-sm font-bold text-slate-900">
+                        {note.author}
+                      </span>
+                      <span
+                        className={`rounded-full px-2 py-1 text-[11px] font-black ${
+                          isShared
+                            ? "bg-blue-100 text-blue-700"
+                            : "bg-slate-200 text-slate-500"
+                        }`}
+                      >
+                        {isShared ? "Partagée cliente" : "Privée équipe"}
+                      </span>
+                    </div>
+                    <span className="text-xs font-semibold text-slate-400">
+                      {note.date}
+                    </span>
+                  </div>
+                  <p className="text-sm leading-6 text-slate-600">
+                    {note.text}
+                  </p>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      </CardContent>
+    </Card>
+  );
+}
+
+function ClientStatCard({
+  color,
+  icon,
+  label,
+  value,
+}: {
+  color: string;
+  icon: React.ReactNode;
+  label: string;
+  value: number | string;
+}) {
+  return (
+    <Card className="border-slate-200 py-0 shadow-sm">
+      <CardContent className="flex items-center justify-between gap-4 p-5">
+        <div>
+          <p className="text-sm font-semibold text-slate-500">{label}</p>
+          <p className={`mt-2 text-3xl font-black ${color}`}>{value}</p>
+        </div>
+        <div className="rounded-2xl bg-slate-50 p-3 [&_svg]:h-6 [&_svg]:w-6">
+          <span className={color}>{icon}</span>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function ClientFormModal({
+  form,
+  onChange,
+  onClose,
+  onSubmit,
+  sourceOptions,
+  title,
+}: {
+  form: Omit<Client, "id" | "notes" | "cares" | "documents">;
+  onChange: (
+    value: Omit<Client, "id" | "notes" | "cares" | "documents">
+  ) => void;
+  onClose: () => void;
+  onSubmit: (event: React.FormEvent<HTMLFormElement>) => void;
+  sourceOptions: string[];
+  title: string;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-6 backdrop-blur-sm">
+      <form
+        onSubmit={onSubmit}
+        className="max-h-[92vh] w-full max-w-4xl overflow-y-auto rounded-2xl bg-white p-6 shadow-2xl"
+      >
+        <div className="mb-6 flex items-start justify-between gap-4">
+          <div>
+            <h2 className="text-2xl font-black text-slate-950">{title}</h2>
+            <p className="mt-1 text-sm font-semibold text-slate-500">
+              Renseignez les informations utiles pour la fiche cliente.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-lg p-2 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700"
+            aria-label="Fermer"
+          >
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
+        <ClientFormFields
+          form={form}
+          onChange={onChange}
+          sourceOptions={sourceOptions}
+        />
+
+        <div className="mt-6 flex justify-end gap-3">
+          <Button type="button" variant="outline" onClick={onClose}>
+            Annuler
+          </Button>
+          <Button type="submit" className="bg-slate-950">
+            Enregistrer
+          </Button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+function FullClientModal({
+  client,
+  onClose,
+  onSave,
+  sourceOptions,
+}: {
+  client: Client;
+  onClose: () => void;
+  onSave: (client: Client) => void;
+  sourceOptions: string[];
+}) {
+  const [form, setForm] = useState(client);
+
+  function addDocument(document: Omit<ClientDocument, "id">) {
+    setForm((currentForm) => ({
+      ...currentForm,
+      documents: [
+        {
+          ...document,
+          id: crypto.randomUUID(),
+        },
+        ...currentForm.documents,
+      ],
+    }));
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-6 backdrop-blur-sm">
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          onSave(form);
+        }}
+        className="max-h-[92vh] w-full max-w-5xl overflow-y-auto rounded-2xl bg-white p-6 shadow-2xl"
+      >
+        <div className="mb-6 flex items-start justify-between gap-4">
+          <div>
+            <p className="text-sm font-black uppercase text-violet-600">
+              Fiche complète
+            </p>
+            <h2 className="mt-1 text-2xl font-black text-slate-950">
+              {form.firstName} {form.lastName}
+            </h2>
+            <p className="mt-1 text-sm font-semibold text-slate-500">
+              Identité, coordonnées, historique, documents et suivi financier.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-lg p-2 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700"
+            aria-label="Fermer"
+          >
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
+        <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_340px]">
+          <div className="space-y-5">
+            <section className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+              <h3 className="mb-4 text-sm font-black uppercase text-slate-500">
+                Informations personnelles
+              </h3>
+              <ClientFormFields
+                form={form}
+                onChange={setForm}
+                sourceOptions={sourceOptions}
+              />
+            </section>
+
+            <section className="rounded-2xl border border-slate-200 bg-white p-4">
+              <ClientCares cares={form.cares} />
+            </section>
+          </div>
+
+          <aside className="space-y-5">
+            <section className="rounded-2xl border border-violet-100 bg-violet-50 p-4">
+              <div className="mb-2 flex items-center gap-2 font-black text-violet-900">
+                <Sparkles className="h-4 w-4" />
+                Seya recommande
+              </div>
+              <p className="text-sm leading-6 text-violet-800">
+                Vérifier les informations manquantes, contrôler le solde et
+                programmer la prochaine action.
+              </p>
+            </section>
+
+            <div className="grid grid-cols-2 gap-3">
+              <MiniInfo
+                label="Total dépensé"
+                value={formatCurrency(form.totalSpent)}
+              />
+              <MiniInfo
+                label="Reste dû"
+                value={formatCurrency(form.balanceDue)}
+              />
+              <MiniInfo
+                label="Catégorie"
+                value={form.category || "À compléter"}
+              />
+              <MiniInfo label="Provenance" value={form.source || "À compléter"} />
+              <MiniInfo
+                label="Campagne"
+                value={form.campaign || "À compléter"}
+              />
+            </div>
+
+            <section className="rounded-2xl border border-slate-200 bg-white p-4">
+              <ClientAppointments
+                appointments={getClientAppointmentHistory(form)}
+                onOpenRdv={() => {}}
+              />
+            </section>
+
+            <section className="rounded-2xl border border-slate-200 bg-white p-4">
+              <ClientDocuments
+                documents={form.documents}
+                onAddDocument={addDocument}
+              />
+            </section>
+          </aside>
+        </div>
+
+        <div className="mt-6 flex justify-end gap-3">
+          <Button type="button" variant="outline" onClick={onClose}>
+            Fermer
+          </Button>
+          <Button type="submit" className="bg-slate-950">
+            Enregistrer la fiche
+          </Button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+function ClientFormFields<T extends Omit<Client, "id" | "notes" | "cares" | "documents">>({
+  form,
+  onChange,
+  sourceOptions,
+}: {
+  form: T;
+  onChange: (value: T) => void;
+  sourceOptions: string[];
+}) {
+  return (
+    <div className="grid gap-4 md:grid-cols-2">
+      <ClientInput
+        label="Prénom"
+        required
+        value={form.firstName}
+        onChange={(value) => onChange({ ...form, firstName: value })}
+      />
+      <ClientInput
+        label="Nom"
+        required
+        value={form.lastName}
+        onChange={(value) => onChange({ ...form, lastName: value })}
+      />
+      <ClientInput
+        label="Téléphone"
+        value={form.phone}
+        onChange={(value) => onChange({ ...form, phone: value })}
+      />
+      <ClientInput
+        label="Email"
+        type="email"
+        value={form.email}
+        onChange={(value) => onChange({ ...form, email: value })}
+      />
+      <ClientInput
+        label="Date de naissance / anniversaire"
+        value={form.birthDate}
+        onChange={(value) => onChange({ ...form, birthDate: value })}
+        placeholder="JJ/MM/AAAA"
+      />
+      <label className="space-y-1.5">
+        <span className="text-sm font-semibold text-slate-700">Genre</span>
+        <select
+          value={form.gender}
+          onChange={(event) => onChange({ ...form, gender: event.target.value })}
+          className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+        >
+          <option value="">À compléter</option>
+          <option>Femme</option>
+          <option>Homme</option>
+          <option>Non renseigné</option>
+        </select>
+      </label>
+      <ClientInput
+        label="Adresse"
+        value={form.address}
+        onChange={(value) => onChange({ ...form, address: value })}
+      />
+      <div className="grid grid-cols-[120px_1fr] gap-3">
+        <ClientInput
+          label="Code postal"
+          value={form.postalCode}
+          onChange={(value) => onChange({ ...form, postalCode: value })}
+        />
+        <ClientInput
+          label="Ville"
+          value={form.city}
+          onChange={(value) => onChange({ ...form, city: value })}
+        />
+      </div>
+      <ClientInput
+        label="Soin principal"
+        value={form.mainCare}
+        onChange={(value) => onChange({ ...form, mainCare: value })}
+      />
+      <label className="space-y-1.5">
+        <span className="text-sm font-semibold text-slate-700">Catégorie</span>
+        <select
+          value={form.category}
+          onChange={(event) => onChange({ ...form, category: event.target.value })}
+          className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+        >
+          <option value="">À compléter</option>
+          {publicCenterCategories.map((category) => (
+            <option key={category}>{category}</option>
+          ))}
+        </select>
+      </label>
+      <ClientInput
+        label="Commerciale"
+        value={form.commercial}
+        onChange={(value) => onChange({ ...form, commercial: value })}
+      />
+      <label className="space-y-1.5">
+        <span className="text-sm font-semibold text-slate-700">Provenance</span>
+        <select
+          value={form.source}
+          onChange={(event) => onChange({ ...form, source: event.target.value })}
+          className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+        >
+          <option value="">À compléter</option>
+          {sourceOptions.map((option) => (
+            <option key={option}>{option}</option>
+          ))}
+        </select>
+      </label>
+      <ClientInput
+        label="Campagne"
+        value={form.campaign}
+        onChange={(value) => onChange({ ...form, campaign: value })}
+      />
+    </div>
+  );
+}
+
+function ClientInput({
+  label,
+  onChange,
+  placeholder,
+  required = false,
+  type = "text",
+  value,
+}: {
+  label: string;
+  onChange: (value: string) => void;
+  placeholder?: string;
+  required?: boolean;
+  type?: string;
+  value: string;
+}) {
+  return (
+    <label className="space-y-1.5">
+      <span className="text-sm font-semibold text-slate-700">{label}</span>
+      <Input
+        required={required}
+        type={type}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder={placeholder}
+        className="h-10"
+      />
+    </label>
+  );
+}
+
+function MoreMenuButton({
+  label,
+  onClick,
+}: {
+  label: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="w-full rounded-lg px-3 py-2 text-left text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-50 hover:text-slate-950"
+    >
+      {label}
+    </button>
+  );
+}
+
+function ClientIdentity({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="min-w-0 rounded-lg bg-white px-3 py-2">
+      <p className="text-[11px] font-black uppercase text-slate-400">
+        {label}
+      </p>
+      <p className="mt-1 truncate text-sm font-black text-slate-900">
+        {value}
+      </p>
+    </div>
+  );
+}
+
+function ClientAction({
+  active = false,
+  className,
+  icon,
+  label,
+  onClick,
+}: {
+  active?: boolean;
+  className: string;
+  icon: React.ReactNode;
+  label: string;
+  onClick?: () => void;
+}) {
+  return (
+    <Button
+      variant="outline"
+      onClick={onClick}
+      className={`h-14 flex-col gap-1 text-xs font-bold [&_svg]:h-4 [&_svg]:w-4 ${
+        active ? "ring-2 ring-slate-300" : ""
+      } ${className}`}
+    >
+      {icon}
+      {label}
+    </Button>
+  );
+}
+
+function ClientPanelTab({
+  active,
+  children,
+  onClick,
+}: {
+  active: boolean;
+  children: React.ReactNode;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`flex-1 rounded-lg px-3 py-2 text-xs font-black transition-colors ${
+        active
+          ? "bg-white text-slate-950 shadow-sm"
+          : "text-slate-500 hover:text-slate-900"
+      }`}
+    >
+      {children}
+    </button>
+  );
+}
+
+function ClientCares({ cares }: { cares: ClientCare[] }) {
+  return (
+    <section>
+      <h3 className="mb-3 text-sm font-black uppercase text-slate-500">
+        Cures & paiements
+      </h3>
+      <div className="space-y-2">
+        {cares.map((care) => (
+          <div
+            key={care.id}
+            className="rounded-xl border border-slate-100 bg-white p-3"
+          >
+            <div className="flex justify-between gap-3">
+              <div>
+                <p className="font-bold text-slate-900">{care.label}</p>
+                <p className="text-xs font-semibold text-slate-400">
+                  {care.date}
+                </p>
+              </div>
+              <Badge className="border-slate-100 bg-slate-50 text-slate-600">
+                {care.status}
+              </Badge>
+            </div>
+            <div className="mt-3 h-2 rounded-full bg-slate-100">
+              <div
+                className="h-2 rounded-full bg-gradient-to-r from-violet-500 to-cyan-400"
+                style={{
+                  width: `${Math.min(
+                    100,
+                    Math.round((care.paid / Math.max(care.amount, 1)) * 100)
+                  )}%`,
+                }}
+              />
+            </div>
+            <p className="mt-2 text-xs font-semibold text-slate-500">
+              {formatCurrency(care.paid)} / {formatCurrency(care.amount)}
+            </p>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function ClientAppointments({
+  appointments,
+  onOpenRdv,
+}: {
+  appointments: ReturnType<typeof getClientAppointmentHistory>;
+  onOpenRdv: () => void;
+}) {
+  return (
+    <section>
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <h3 className="text-sm font-black uppercase text-slate-500">
+          Historique des RDV
+        </h3>
+        <Button size="sm" onClick={onOpenRdv}>
+          Nouveau RDV
+        </Button>
+      </div>
+
+      <div className="space-y-2">
+        {appointments.map((appointment) => (
+          <div
+            key={appointment.id}
+            className="rounded-xl border border-slate-100 bg-white p-3"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="font-bold text-slate-900">
+                  {formatDisplayDate(appointment.date)} · {appointment.start}
+                </p>
+                <p className="mt-1 text-sm font-semibold text-slate-600">
+                  {appointment.treatment} · {appointment.duration} min
+                </p>
+                <p className="mt-1 text-xs font-semibold text-slate-400">
+                  {appointment.practitioner} · {appointment.cabin}
+                </p>
+              </div>
+              <Badge className="border-violet-100 bg-violet-50 text-violet-700">
+                {appointment.status}
+              </Badge>
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function ClientDocuments({
+  documents,
+  onAddDocument,
+}: {
+  documents: ClientDocument[];
+  onAddDocument: (document: Omit<ClientDocument, "id">) => void;
+}) {
+  const [isDocumentFormOpen, setIsDocumentFormOpen] = useState(false);
+  const [documentForm, setDocumentForm] =
+    useState<Omit<ClientDocument, "id">>(emptyDocumentForm);
+
+  function openDocumentForm() {
+    setDocumentForm(emptyDocumentForm);
+    setIsDocumentFormOpen(true);
+  }
+
+  function submitDocument(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    onAddDocument({
+      ...documentForm,
+      label: documentForm.label.trim(),
+    });
+    setIsDocumentFormOpen(false);
+  }
+
+  return (
+    <section>
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <h3 className="text-sm font-black uppercase text-slate-500">
+          Documents client
+        </h3>
+        <Button size="sm" variant="outline" onClick={openDocumentForm}>
+          Ajouter
+        </Button>
+      </div>
+
+      <div className="space-y-2">
+        {documents.map((document) => (
+          <div
+            key={document.id}
+            className="flex items-center justify-between gap-3 rounded-xl border border-slate-100 bg-white p-3"
+          >
+            <div className="min-w-0">
+              <p className="truncate font-bold text-slate-900">
+                {document.label}
+              </p>
+              <p className="mt-1 text-xs font-semibold text-slate-400">
+                {document.type} · {document.date}
+              </p>
+            </div>
+            <div className="flex shrink-0 items-center gap-2">
+              <Badge className="border-amber-100 bg-amber-50 text-amber-700">
+                {document.status}
+              </Badge>
+              <Button
+                size="icon-sm"
+                variant="ghost"
+                aria-label={`Ouvrir ${document.label}`}
+              >
+                <Eye className="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {isDocumentFormOpen && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/40 p-6 backdrop-blur-sm">
+          <form
+            onSubmit={submitDocument}
+            className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl"
+          >
+            <div className="mb-5 flex items-start justify-between gap-4">
+              <div>
+                <h3 className="text-xl font-black text-slate-950">
+                  Ajouter un document
+                </h3>
+                <p className="mt-1 text-sm font-semibold text-slate-500">
+                  Le document sera ajouté à cette fiche cliente.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsDocumentFormOpen(false)}
+                className="rounded-lg p-2 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700"
+                aria-label="Fermer"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="grid gap-4">
+              <ClientInput
+                label="Nom du document"
+                required
+                value={documentForm.label}
+                onChange={(value) =>
+                  setDocumentForm((form) => ({ ...form, label: value }))
+                }
+                placeholder="Ex : Consentement laser"
+              />
+
+              <label className="space-y-1.5">
+                <span className="text-sm font-semibold text-slate-700">
+                  Type
+                </span>
+                <select
+                  value={documentForm.type}
+                  onChange={(event) =>
+                    setDocumentForm((form) => ({
+                      ...form,
+                      type: event.target.value as ClientDocument["type"],
+                    }))
+                  }
+                  className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                >
+                  <option>Consentement</option>
+                  <option>Devis</option>
+                  <option>Facture</option>
+                  <option>Fiche cure</option>
+                </select>
+              </label>
+
+              <label className="space-y-1.5">
+                <span className="text-sm font-semibold text-slate-700">
+                  Statut
+                </span>
+                <select
+                  value={documentForm.status}
+                  onChange={(event) =>
+                    setDocumentForm((form) => ({
+                      ...form,
+                      status: event.target.value as ClientDocument["status"],
+                    }))
+                  }
+                  className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                >
+                  <option>À envoyer</option>
+                  <option>À signer</option>
+                  <option>Signé</option>
+                  <option>Validé</option>
+                </select>
+              </label>
+
+              <ClientInput
+                label="Date"
+                value={documentForm.date}
+                onChange={(value) =>
+                  setDocumentForm((form) => ({ ...form, date: value }))
+                }
+                placeholder="JJ/MM/AAAA"
+              />
+            </div>
+
+            <div className="mt-6 flex justify-end gap-3">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setIsDocumentFormOpen(false)}
+              >
+                Annuler
+              </Button>
+              <Button type="submit" className="bg-slate-950">
+                Ajouter
+              </Button>
+            </div>
+          </form>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function MiniInfo({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-xl bg-slate-50 p-3">
+      <p className="text-xs font-black uppercase text-slate-400">{label}</p>
+      <p className="mt-1 truncate text-sm font-bold text-slate-800">{value}</p>
+    </div>
+  );
+}
+
+function formatClientAddress(client: Client) {
+  const cityLine = [client.postalCode, client.city].filter(Boolean).join(" ");
+  const address = [client.address, cityLine]
+    .filter((part) => part && part !== "À compléter")
+    .join(", ");
+
+  return address || "À compléter";
+}
+
+function getClientStats(clients: Client[]) {
+  const monthClients = clients.filter((client) =>
+    client.cares.some((care) => isCurrentMonth(parseFrenchDate(care.date)))
+  );
+
+  return {
+    monthClients: monthClients.length,
+    inCare: clients.filter((client) => client.status === "Cure en cours").length,
+    monthRevenue: monthClients.reduce(
+      (total, client) =>
+        total +
+        client.cares
+          .filter((care) => isCurrentMonth(parseFrenchDate(care.date)))
+          .reduce((careTotal, care) => careTotal + care.paid, 0),
+      0
+    ),
+    pendingValidation: monthClients.reduce(
+      (total, client) => total + client.balanceDue,
+      0
+    ),
+  };
+}
+
+function normalize(value: string) {
+  return value
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s/g, "");
+}
+
+function getClientCategoryFromCare(care: string) {
+  const normalizedCare = normalize(care);
+
+  if (normalizedCare.includes("cryo") || normalizedCare.includes("minceur")) {
+    return "Minceur";
+  }
+
+  if (
+    normalizedCare.includes("hydra") ||
+    normalizedCare.includes("visage") ||
+    normalizedCare.includes("facial")
+  ) {
+    return "Soin du visage";
+  }
+
+  if (normalizedCare.includes("ongle") || normalizedCare.includes("gel")) {
+    return "Beauté des ongles";
+  }
+
+  if (
+    normalizedCare.includes("regard") ||
+    normalizedCare.includes("cil") ||
+    normalizedCare.includes("sourcil")
+  ) {
+    return "Beauté du regard";
+  }
+
+  if (normalizedCare.includes("laser") || normalizedCare.includes("epilation")) {
+    return "Institut beauté";
+  }
+
+  return publicCenterCategories[0] ?? "Institut beauté";
+}
+
+function formatCurrency(value: number) {
+  return value.toLocaleString("fr-FR", {
+    currency: "EUR",
+    style: "currency",
+  });
+}
+
+function formatActivityDate() {
+  return `Aujourd'hui ${new Date().toLocaleTimeString("fr-FR", {
+    hour: "2-digit",
+    minute: "2-digit",
+  })}`;
+}
+
+function todayFrenchDate() {
+  return new Date().toLocaleDateString("fr-FR", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  });
+}
+
+function getClientAppointmentHistory(client: Client) {
+  const clientName = normalize(`${client.firstName} ${client.lastName}`);
+  const clientPhone = normalize(client.phone);
+  const matchingAppointments = appointments
+    .filter(
+      (appointment) =>
+        normalize(appointment.personName) === clientName ||
+        normalize(appointment.phone) === clientPhone
+    )
+    .map((appointment) => ({
+      id: appointment.id,
+      date: appointment.date,
+      start: appointment.start,
+      duration: appointment.duration,
+      treatment: appointment.treatment,
+      status: appointment.status,
+      practitioner:
+        practitioners.find(
+          (practitioner) => practitioner.id === appointment.practitionerId
+        )?.name ?? "Praticienne",
+      cabin:
+        cabins.find((cabin) => cabin.id === appointment.cabinId)?.name ??
+        "Cabine",
+    }));
+
+  const nextAppointment = parseNextAppointment(client.nextAppointment);
+  const fallbackAppointments =
+    nextAppointment && matchingAppointments.length === 0
+      ? [
+          {
+            id: `${client.id}-next-appointment`,
+            date: nextAppointment.date,
+            start: nextAppointment.start,
+            duration: 60,
+            treatment: client.mainCare,
+            status: "À confirmer" as const,
+            practitioner: client.commercial,
+            cabin: "À définir",
+          },
+        ]
+      : [];
+
+  return [...matchingAppointments, ...fallbackAppointments].sort((a, b) =>
+    `${b.date} ${b.start}`.localeCompare(`${a.date} ${a.start}`)
+  );
+}
+
+function parseNextAppointment(value: string) {
+  const match = value.match(/^(\d{2})\/(\d{2})\/(\d{4})\s+(\d{2}:\d{2})$/);
+
+  if (!match) {
+    return null;
+  }
+
+  const [, day, month, year, start] = match;
+
+  return {
+    date: `${year}-${month}-${day}`,
+    start,
+  };
+}
+
+function formatDisplayDate(date: string) {
+  const [year, month, day] = date.split("-");
+
+  if (!year || !month || !day) {
+    return date;
+  }
+
+  return `${day}/${month}/${year}`;
+}
+
+function getWhatsappUrl(phone: string) {
+  const digits = phone.replace(/\D/g, "");
+  const normalizedPhone = digits.startsWith("0")
+    ? `33${digits.slice(1)}`
+    : digits;
+
+  return `https://wa.me/${normalizedPhone}`;
+}
+
+function parseFrenchDate(date: string) {
+  if (/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    return date;
+  }
+
+  const [day, month, year] = date.split("/");
+
+  if (!day || !month || !year) {
+    return "";
+  }
+
+  return `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
+}
+
+function isCurrentMonth(date: string) {
+  return date.slice(0, 7) === new Date().toISOString().slice(0, 7);
+}

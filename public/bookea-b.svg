@@ -1,0 +1,23 @@
+<svg width="128" height="128" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bookeaBGradient" x1="18" y1="112" x2="108" y2="14" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#6D28D9"/>
+      <stop offset="0.48" stop-color="#4F46E5"/>
+      <stop offset="1" stop-color="#22C7E8"/>
+    </linearGradient>
+    <linearGradient id="bookeaRibbonGradient" x1="18" y1="104" x2="94" y2="58" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#55C7F3"/>
+      <stop offset="0.5" stop-color="#3988F2"/>
+      <stop offset="1" stop-color="#7C3AED"/>
+    </linearGradient>
+    <radialGradient id="bookeaBGlow" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(34 20) rotate(55) scale(76)">
+      <stop stop-color="white" stop-opacity="0.45"/>
+      <stop offset="1" stop-color="white" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <path d="M31 116V12h45c24 0 40 14 40 36 0 12-6 22-16 28 13 6 21 17 21 33 0 4-3 7-7 7H31Z" fill="url(#bookeaBGradient)"/>
+  <path d="M31 116V12h45c24 0 40 14 40 36 0 12-6 22-16 28 13 6 21 17 21 33 0 4-3 7-7 7H31Z" fill="url(#bookeaBGlow)"/>
+  <path d="M55 34h19c10 0 17 6 17 16s-7 16-17 16H55V34Z" fill="white" opacity="0.96"/>
+  <path d="M55 78h24c11 0 19 7 19 17s-8 18-20 18H55V78Z" fill="white" opacity="0.96"/>
+  <path d="M31 109L94 70c8-5 19 0 22 10l-59 36H31Z" fill="url(#bookeaRibbonGradient)"/>
+</svg>
