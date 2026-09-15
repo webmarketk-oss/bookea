@@ -1,4 +1,4 @@
-import Sidebar from "@/components/layout/sidebar";
+import { DashboardShell } from "@/components/layout/dashboard-shell";
 import { MobileDashboardNav } from "@/components/layout/mobile-dashboard-nav";
 
 export default function DashboardLayout({
@@ -9,13 +9,9 @@ export default function DashboardLayout({
   return (
     <div className="min-h-screen bg-[#f5f6fa] lg:flex">
       <MobileDashboardNav />
-      <div className="hidden lg:block">
-        <Sidebar />
-      </div>
-
-      <main className="min-w-0 flex-1 p-0 lg:p-6">
+      <DashboardShell>
         {children}
-      </main>
+      </DashboardShell>
     </div>
   );
 }

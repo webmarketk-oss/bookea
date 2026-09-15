@@ -3,7 +3,6 @@
 import {
   AlertTriangle,
   Bot,
-  Calendar,
   CheckCircle2,
   MessageCircle,
   Send,
@@ -165,7 +164,7 @@ export default function SeyaCrmPage() {
     if (!selectedDepositLink) return;
     const message = `${selectedDepositLink.message} ${selectedDepositLink.url}`.trim();
     const phone = task.phone.replace(/\s+/g, "");
-    window.location.href = `sms:${phone}?&body=${encodeURIComponent(message)}`;
+    window.location.assign(`sms:${phone}?&body=${encodeURIComponent(message)}`);
     sendTask(task.id);
   }
 
@@ -178,13 +177,16 @@ export default function SeyaCrmPage() {
   }
 
   return (
-    <main className="min-h-screen bg-[#eef3f9] px-6 py-6 text-slate-950">
+    <main
+      className="min-h-screen bg-[#eef3f9] px-6 py-6 text-slate-950"
+      data-sidebar-collapse-area="true"
+    >
       <section className="mb-6 flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
         <div>
           <p className="text-sm font-black text-violet-600">Bookea Agent IA</p>
           <h1 className="mt-1 text-3xl font-black tracking-tight">Seya CRM</h1>
           <p className="mt-2 max-w-3xl text-base font-medium text-slate-500">
-            L'agent qui prépare les relances, vérifie les doublons, surveille les
+            L&apos;agent qui prépare les relances, vérifie les doublons, surveille les
             acomptes et aide les équipes à traiter les leads.
           </p>
         </div>
@@ -194,7 +196,7 @@ export default function SeyaCrmPage() {
           className="inline-flex items-center justify-center gap-2 rounded-2xl bg-slate-950 px-4 py-3 text-sm font-black text-white shadow-sm"
         >
           <Wand2 className="h-6 w-6" />
-          Lancer l'analyse
+          Lancer l&apos;analyse
         </button>
       </section>
 
@@ -259,7 +261,7 @@ export default function SeyaCrmPage() {
                   <div className="mt-4 grid gap-3 rounded-2xl border border-blue-100 bg-blue-50 p-4 md:grid-cols-[1fr_auto]">
                     <label className="block">
                       <span className="mb-2 block text-sm font-black uppercase text-blue-700">
-                        Lien d'acompte à envoyer
+                        Lien d&apos;acompte à envoyer
                       </span>
                       <select
                         value={selectedDepositLinkId}
@@ -349,7 +351,7 @@ function StatCard({
       <div className="flex items-start justify-between gap-4">
         <div>
           <p className="text-sm font-black text-slate-500">{title}</p>
-          <p className={`mt-3 text-3xl font-black `}>{value}</p>
+          <p className={`mt-3 text-3xl font-black ${color}`}>{value}</p>
         </div>
         <div className="grid h-12 w-12 place-items-center rounded-2xl bg-slate-50 text-blue-600">
           {icon}

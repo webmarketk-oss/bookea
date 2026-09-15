@@ -504,7 +504,7 @@ export default function CRMClientsPage() {
   }
 
   return (
-    <main className="min-h-screen bg-slate-100">
+    <main className="min-h-screen bg-slate-100" data-sidebar-collapse-area="true">
       <div className="mx-auto max-w-[1800px] space-y-6 p-8">
         <header className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
           <div>

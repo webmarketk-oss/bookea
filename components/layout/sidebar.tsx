@@ -15,14 +15,20 @@ import {
   Settings,
   UserRound,
 } from "lucide-react";
-import { useState } from "react";
 import { usePathname } from "next/navigation";
 import { BookeaLogo } from "@/components/bookea-logo";
 import NavItem from "./nav-item";
 import NavGroup from "./nav-group";
 
-export default function Sidebar() {
-  const [collapsed, setCollapsed] = useState(false);
+type SidebarProps = {
+  collapsed: boolean;
+  onCollapsedChange: (collapsed: boolean) => void;
+};
+
+export default function Sidebar({
+  collapsed,
+  onCollapsedChange,
+}: SidebarProps) {
   const pathname = usePathname();
   const crmOpen =
     pathname.startsWith("/dashboard/crm-leads") ||
@@ -50,7 +56,7 @@ export default function Sidebar() {
 
         <button
           type="button"
-          onClick={() => setCollapsed((value) => !value)}
+          onClick={() => onCollapsedChange(!collapsed)}
           className="flex h-10 w-10 items-center justify-center rounded-xl border border-white/10 text-white/70 transition-colors hover:bg-white/10 hover:text-white"
           aria-label={collapsed ? "Ouvrir le menu" : "Réduire le menu"}
         >

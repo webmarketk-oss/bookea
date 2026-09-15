@@ -531,7 +531,7 @@ export default function CRMLeadsPage() {
   }
 
   return (
-    <main className="min-h-screen bg-slate-100">
+    <main className="min-h-screen bg-slate-100" data-sidebar-collapse-area="true">
       <div className="mx-auto max-w-[1800px] space-y-8 p-8">
         <CRMHeader onNewLead={openNewLeadModal} />
 

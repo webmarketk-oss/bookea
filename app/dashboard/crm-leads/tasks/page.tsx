@@ -14,7 +14,7 @@ export default function LeadTasksPage() {
     }));
 
   return (
-    <main className="min-h-screen bg-slate-100 p-8">
+    <main className="min-h-screen bg-slate-100 p-8" data-sidebar-collapse-area="true">
       <div className="mx-auto max-w-5xl space-y-6">
         <header>
           <p className="text-sm font-semibold text-violet-600">Bookea CRM</p>
