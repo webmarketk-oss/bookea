@@ -14,6 +14,15 @@ import { Input } from "@/components/ui/input";
 import { leadStatuses } from "@/lib/lead-statuses";
 import { leads } from "@/lib/mock-data";
 import {
+  addCrmLeadActivity,
+  createCrmLead,
+  deleteCrmLeadActivity,
+  loadCrmLeads,
+  updateCrmLeadAmount,
+  updateCrmLeadReminder,
+  updateCrmLeadStatus,
+} from "@/lib/crm-supabase";
+import {
   APPOINTMENT_STATUS_UPDATED_EVENT,
   applyAppointmentStatusOverrides,
   readAppointmentStatusOverrides,
@@ -71,6 +80,9 @@ const statusGroups: Partial<Record<LeadStatus, LeadStatus[]>> = {
 export default function CRMLeadsPage() {
   const [leadList, setLeadList] = useState(leads);
   const [selectedLeadId, setSelectedLeadId] = useState(leads[0].id);
+  const [isLoadingCrm, setIsLoadingCrm] = useState(true);
+  const [crmError, setCrmError] = useState<string | null>(null);
+  const [crmNotice, setCrmNotice] = useState<string | null>(null);
   const [isLeadDetailsOpen, setIsLeadDetailsOpen] = useState(false);
   const [isNewLeadOpen, setIsNewLeadOpen] = useState(false);
   const [newLeadForm, setNewLeadForm] = useState(emptyLeadForm);
@@ -93,6 +105,39 @@ export default function CRMLeadsPage() {
     [leadList]
   );
 
+  async function refreshCrmLeads() {
+    setCrmError(null);
+
+    try {
+      const { leads: loadedLeads } = await loadCrmLeads();
+
+      const nextLeads =
+        loadedLeads.length > 0
+          ? applyAppointmentStatusOverrides(
+              mergePublicBookingsIntoLeads(loadedLeads, readPublicBookings()),
+              readAppointmentStatusOverrides()
+            )
+          : [];
+
+      setLeadList(nextLeads);
+      setSelectedLeadId((currentId) => {
+        if (nextLeads.some((lead) => lead.id === currentId)) {
+          return currentId;
+        }
+
+        return nextLeads[0]?.id ?? "";
+      });
+    } catch (error) {
+      setCrmError(
+        error instanceof Error
+          ? error.message
+          : "Impossible de charger les prospects CRM."
+      );
+    } finally {
+      setIsLoadingCrm(false);
+    }
+  }
+
   function scrollToLeadList() {
     window.setTimeout(() => {
       document
@@ -100,6 +145,11 @@ export default function CRMLeadsPage() {
         ?.scrollIntoView({ behavior: "smooth", block: "start" });
     }, 80);
   }
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    refreshCrmLeads();
+  }, []);
 
   useEffect(() => {
     function syncPublicBookings() {
@@ -125,7 +175,6 @@ export default function CRMLeadsPage() {
       );
     }
 
-    syncPublicBookings();
     window.addEventListener(PUBLIC_BOOKINGS_UPDATED_EVENT, syncPublicBookings);
     window.addEventListener(
       APPOINTMENT_STATUS_UPDATED_EVENT,
@@ -152,6 +201,7 @@ export default function CRMLeadsPage() {
     const quick = searchParams.get("quick");
 
     if (status && isLeadStatusFilter(status)) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setActiveTab("prospects");
       setQuickDateFilter("Tous");
       setFilters((currentFilters) => ({
@@ -220,7 +270,9 @@ export default function CRMLeadsPage() {
     );
   });
 
-  function handleStatusChange(leadId: string, status: LeadStatus) {
+  async function handleStatusChange(leadId: string, status: LeadStatus) {
+    const leadBeforeUpdate = leadList.find((lead) => lead.id === leadId);
+
     setLeadList((currentLeads) =>
       currentLeads.map((lead) => {
         if (lead.id !== leadId || lead.status === status) {
@@ -244,9 +296,25 @@ export default function CRMLeadsPage() {
         };
       })
     );
+
+    if (!leadBeforeUpdate) {
+      return;
+    }
+
+    try {
+      await updateCrmLeadStatus(leadBeforeUpdate, status);
+      setCrmNotice("Statut enregistré dans Supabase.");
+    } catch (error) {
+      setCrmError(
+        error instanceof Error
+          ? error.message
+          : "Le statut n'a pas pu être enregistré."
+      );
+      await refreshCrmLeads();
+    }
   }
 
-  function handleAddActivity(leadId: string, text: string) {
+  async function handleAddActivity(leadId: string, text: string) {
     setLeadList((currentLeads) =>
       currentLeads.map((lead) =>
         lead.id === leadId
@@ -267,6 +335,19 @@ export default function CRMLeadsPage() {
           : lead
       )
     );
+
+    try {
+      await addCrmLeadActivity(leadId, text);
+      setCrmNotice("Commentaire enregistré dans Supabase.");
+      await refreshCrmLeads();
+    } catch (error) {
+      setCrmError(
+        error instanceof Error
+          ? error.message
+          : "Le commentaire n'a pas pu être enregistré."
+      );
+      await refreshCrmLeads();
+    }
   }
 
   function handleQuickComment(leadId: string, text: string) {
@@ -279,7 +360,7 @@ export default function CRMLeadsPage() {
     handleAddActivity(leadId, comment);
   }
 
-  function handleDeleteActivity(leadId: string, activityId: string) {
+  async function handleDeleteActivity(leadId: string, activityId: string) {
     setLeadList((currentLeads) =>
       currentLeads.map((lead) =>
         lead.id === leadId
@@ -293,9 +374,21 @@ export default function CRMLeadsPage() {
           : lead
       )
     );
+
+    try {
+      await deleteCrmLeadActivity(activityId);
+      setCrmNotice("Activité supprimée.");
+    } catch (error) {
+      setCrmError(
+        error instanceof Error
+          ? error.message
+          : "L'activité n'a pas pu être supprimée."
+      );
+      await refreshCrmLeads();
+    }
   }
 
-  function handleDealAmountChange(leadId: string, amount: number) {
+  async function handleDealAmountChange(leadId: string, amount: number) {
     setLeadList((currentLeads) =>
       currentLeads.map((lead) =>
         lead.id === leadId
@@ -303,9 +396,21 @@ export default function CRMLeadsPage() {
           : lead
       )
     );
+
+    try {
+      await updateCrmLeadAmount(leadId, amount);
+      setCrmNotice("Montant enregistré.");
+    } catch (error) {
+      setCrmError(
+        error instanceof Error
+          ? error.message
+          : "Le montant n'a pas pu être enregistré."
+      );
+      await refreshCrmLeads();
+    }
   }
 
-  function handleReminderDateChange(leadId: string, reminderDate: string) {
+  async function handleReminderDateChange(leadId: string, reminderDate: string) {
     setLeadList((currentLeads) =>
       currentLeads.map((lead) =>
         lead.id === leadId
@@ -317,6 +422,18 @@ export default function CRMLeadsPage() {
           : lead
       )
     );
+
+    try {
+      await updateCrmLeadReminder(leadId, reminderDate);
+      setCrmNotice("Rappel enregistré.");
+    } catch (error) {
+      setCrmError(
+        error instanceof Error
+          ? error.message
+          : "La date de rappel n'a pas pu être enregistrée."
+      );
+      await refreshCrmLeads();
+    }
   }
 
   function handleCommercialChange(leadId: string, commercial: string) {
@@ -341,10 +458,10 @@ export default function CRMLeadsPage() {
     setIsNewLeadOpen(true);
   }
 
-  function handleNewLeadSubmit(event: React.FormEvent<HTMLFormElement>) {
+  async function handleNewLeadSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
-    const lead: Lead = {
+    const optimisticLead: Lead = {
       id: crypto.randomUUID(),
       firstName: newLeadForm.firstName.trim(),
       lastName: newLeadForm.lastName.trim(),
@@ -375,15 +492,82 @@ export default function CRMLeadsPage() {
       ],
     };
 
-    setLeadList((currentLeads) => [lead, ...currentLeads]);
-    setSelectedLeadId(lead.id);
+    setLeadList((currentLeads) => [optimisticLead, ...currentLeads]);
+    setSelectedLeadId(optimisticLead.id);
     setIsNewLeadOpen(false);
+
+    try {
+      const createdLead = await createCrmLead({
+        firstName: newLeadForm.firstName,
+        lastName: newLeadForm.lastName,
+        phone: newLeadForm.phone,
+        email: newLeadForm.email,
+        treatment: newLeadForm.treatment,
+        source: newLeadForm.source,
+        campaign: newLeadForm.campaign,
+        commercial: newLeadForm.commercial,
+        status: newLeadForm.status,
+        dealAmount: newLeadForm.dealAmount,
+        nextAction: newLeadForm.nextAction,
+        reminderDate: newLeadForm.reminderDate || undefined,
+      });
+
+      setLeadList((currentLeads) => [
+        createdLead,
+        ...currentLeads.filter((lead) => lead.id !== optimisticLead.id),
+      ]);
+      setSelectedLeadId(createdLead.id);
+      setCrmNotice("Prospect créé dans Supabase.");
+    } catch (error) {
+      setCrmError(
+        error instanceof Error
+          ? error.message
+          : "Le prospect n'a pas pu être créé dans Supabase."
+      );
+      setLeadList((currentLeads) =>
+        currentLeads.filter((lead) => lead.id !== optimisticLead.id)
+      );
+    }
   }
 
   return (
     <main className="min-h-screen bg-slate-100">
       <div className="mx-auto max-w-[1800px] space-y-8 p-8">
         <CRMHeader onNewLead={openNewLeadModal} />
+
+        <section className="rounded-2xl border border-blue-100 bg-white p-4 shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className="text-sm font-black uppercase text-blue-700">
+                CRM connecté
+              </p>
+              <p className="mt-1 text-sm font-semibold text-slate-600">
+                Les prospects, statuts, rappels, montants et commentaires sont
+                maintenant synchronisés avec Supabase.
+              </p>
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={refreshCrmLeads}
+              disabled={isLoadingCrm}
+            >
+              {isLoadingCrm ? "Chargement..." : "Rafraîchir"}
+            </Button>
+          </div>
+
+          {crmError ? (
+            <p className="mt-3 rounded-xl border border-rose-100 bg-rose-50 px-4 py-3 text-sm font-bold text-rose-700">
+              {crmError}
+            </p>
+          ) : null}
+
+          {crmNotice ? (
+            <p className="mt-3 rounded-xl border border-emerald-100 bg-emerald-50 px-4 py-3 text-sm font-bold text-emerald-700">
+              {crmNotice}
+            </p>
+          ) : null}
+        </section>
 
         <div className="flex flex-wrap items-center gap-2 border-b border-slate-200">
           <CRMTabButton
@@ -430,6 +614,30 @@ export default function CRMLeadsPage() {
               onNewLead={openNewLeadModal}
             />
 
+            {isLoadingCrm ? (
+              <div className="rounded-2xl border border-slate-200 bg-white p-8 text-center shadow-sm">
+                <p className="text-lg font-black text-slate-950">
+                  Chargement du CRM...
+                </p>
+                <p className="mt-2 text-sm font-semibold text-slate-500">
+                  Bookea récupère les prospects du centre.
+                </p>
+              </div>
+            ) : leadList.length === 0 ? (
+              <div className="rounded-2xl border border-slate-200 bg-white p-8 text-center shadow-sm">
+                <p className="text-lg font-black text-slate-950">
+                  Aucun prospect pour le moment
+                </p>
+                <p className="mt-2 text-sm font-semibold text-slate-500">
+                  Créez le premier prospect pour tester le CRM en conditions
+                  réelles.
+                </p>
+                <Button type="button" className="mt-5" onClick={openNewLeadModal}>
+                  Ajouter un prospect
+                </Button>
+              </div>
+            ) : (
+              <>
             {duplicateLeadGroups.length > 0 && (
               <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-slate-900 shadow-sm">
                 <div className="flex flex-wrap items-center justify-between gap-3">
@@ -501,6 +709,8 @@ export default function CRMLeadsPage() {
               </aside>
               )}
             </div>
+              </>
+            )}
           </>
         ) : (
           <KPIDashboard leads={leadList} />
