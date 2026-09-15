@@ -70,6 +70,7 @@ export default function AdminCentresPage() {
   const [centers, setCenters] = useState<CenterCardData[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [attachingCenterId, setAttachingCenterId] = useState<string | null>(null);
   const [notice, setNotice] = useState<{
     type: "success" | "error" | "info";
     message: string;
@@ -207,6 +208,44 @@ export default function AdminCentresPage() {
       });
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function handleAttachOwner(centerId: string, email: string) {
+    setAttachingCenterId(centerId);
+    setNotice(null);
+
+    try {
+      const ownerEmail = email.trim().toLowerCase();
+
+      if (!ownerEmail) {
+        throw new Error("Ajoutez l'email du responsable.");
+      }
+
+      const owner = await findProfileByEmail(ownerEmail);
+
+      if (!owner) {
+        throw new Error(
+          "Aucun compte Bookea trouvé avec cet email. Le responsable doit d'abord créer son compte.",
+        );
+      }
+
+      await attachOwner(centerId, owner);
+      setNotice({
+        type: "success",
+        message: `Responsable rattaché : ${owner.email ?? ownerEmail}`,
+      });
+      await loadCenters();
+    } catch (error) {
+      setNotice({
+        type: "error",
+        message:
+          error instanceof Error
+            ? error.message
+            : "Impossible de rattacher ce responsable.",
+      });
+    } finally {
+      setAttachingCenterId(null);
     }
   }
 
@@ -412,7 +451,14 @@ export default function AdminCentresPage() {
                 </p>
               </div>
             ) : (
-              centers.map((center) => <CenterCard key={center.id} center={center} />)
+              centers.map((center) => (
+                <CenterCard
+                  key={center.id}
+                  center={center}
+                  attaching={attachingCenterId === center.id}
+                  onAttachOwner={(email) => handleAttachOwner(center.id, email)}
+                />
+              ))
             )}
           </div>
         </section>
@@ -421,7 +467,22 @@ export default function AdminCentresPage() {
   );
 }
 
-function CenterCard({ center }: { center: CenterCardData }) {
+function CenterCard({
+  center,
+  attaching,
+  onAttachOwner,
+}: {
+  center: CenterCardData;
+  attaching: boolean;
+  onAttachOwner: (email: string) => void;
+}) {
+  const [ownerEmail, setOwnerEmail] = useState("");
+
+  function submitOwner(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    onAttachOwner(ownerEmail);
+  }
+
   return (
     <article className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
       <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
@@ -480,6 +541,36 @@ function CenterCard({ center }: { center: CenterCardData }) {
               <p className="font-bold">Aucun responsable rattaché.</p>
             </div>
           )}
+
+          <form onSubmit={submitOwner} className="mt-4 space-y-2">
+            <label className="block text-sm font-black text-slate-500">
+              Rattacher un responsable
+            </label>
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <input
+                type="email"
+                value={ownerEmail}
+                onChange={(event) => setOwnerEmail(event.target.value)}
+                placeholder="responsable@centre.fr"
+                className="h-12 min-w-0 flex-1 rounded-xl border border-slate-200 bg-white px-3 font-bold text-slate-950 outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-100"
+              />
+              <button
+                type="submit"
+                disabled={attaching}
+                className="inline-flex h-12 items-center justify-center gap-2 rounded-xl bg-slate-950 px-4 font-black text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {attaching ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <UserRoundPlus className="h-4 w-4" />
+                )}
+                Rattacher
+              </button>
+            </div>
+            <p className="text-xs font-semibold text-slate-400">
+              Le compte doit déjà avoir été créé sur la page connexion.
+            </p>
+          </form>
         </div>
       </div>
     </article>
