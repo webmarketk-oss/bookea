@@ -18,13 +18,25 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    const clickedCollapseArea =
-      target === event.currentTarget ||
-      target.dataset.sidebarCollapseArea === "true";
+    const clickedInteractiveElement = target.closest(
+      [
+        "a",
+        "button",
+        "input",
+        "select",
+        "textarea",
+        "label",
+        "[role='button']",
+        "[role='tab']",
+        "[data-sidebar-keep-open='true']",
+      ].join(","),
+    );
 
-    if (clickedCollapseArea) {
-      setSidebarCollapsed(true);
+    if (clickedInteractiveElement) {
+      return;
     }
+
+    setSidebarCollapsed(true);
   }
 
   return (
