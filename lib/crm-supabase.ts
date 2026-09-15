@@ -50,6 +50,127 @@ type LeadRow = {
 
 type Relation<T> = T | T[] | null;
 
+export type CrmClientStatus = "Actif" | "Cure en cours" | "À relancer" | "Inactif";
+
+export type CrmClientNote = {
+  id: string;
+  author: string;
+  date: string;
+  text: string;
+  visibility?: "private" | "shared";
+};
+
+export type CrmClientCare = {
+  id: string;
+  label: string;
+  date: string;
+  amount: number;
+  paid: number;
+  status: "Payé" | "Acompte" | "À encaisser";
+};
+
+export type CrmClientDocument = {
+  id: string;
+  label: string;
+  date: string;
+  status: "À signer" | "Signé" | "À envoyer" | "Validé";
+  type: "Consentement" | "Devis" | "Facture" | "Fiche cure";
+};
+
+export type CrmClient = {
+  id: string;
+  firstName: string;
+  lastName: string;
+  phone: string;
+  email: string;
+  birthDate: string;
+  gender: string;
+  address: string;
+  postalCode: string;
+  city: string;
+  mainCare: string;
+  category: string;
+  source: string;
+  campaign: string;
+  status: CrmClientStatus;
+  commercial: string;
+  nextAppointment: string;
+  lastVisit: string;
+  totalSpent: number;
+  balanceDue: number;
+  notes: CrmClientNote[];
+  cares: CrmClientCare[];
+  documents: CrmClientDocument[];
+};
+
+type ClientRow = {
+  id: string;
+  center_id: string;
+  first_name: string | null;
+  last_name: string | null;
+  email: string | null;
+  phone: string | null;
+  birthdate: string | null;
+  gender: string | null;
+  address_line1: string | null;
+  postal_code: string | null;
+  city: string | null;
+  private_note: string | null;
+  shared_note: string | null;
+  status: string | null;
+  created_at: string;
+  updated_at: string;
+  lead_sources: Relation<{ name: string | null }>;
+  campaigns: Relation<{ name: string | null }>;
+  leads:
+    | Array<{
+        id: string;
+        status: string | null;
+        amount_cure_ttc: number | string | null;
+        created_at: string;
+        services: Relation<{ name: string | null }>;
+      }>
+    | null;
+  appointments:
+    | Array<{
+        id: string;
+        appointment_date: string;
+        starts_at: string;
+        duration_minutes: number;
+        status: string;
+        services: Relation<{ name: string | null }>;
+        practitioners: Relation<{ name: string | null }>;
+        rooms: Relation<{ name: string | null }>;
+      }>
+    | null;
+  invoices:
+    | Array<{
+        id: string;
+        type: string;
+        status: string;
+        total_ttc: number | string | null;
+        paid_amount: number | string | null;
+        balance_due: number | string | null;
+        issued_on: string;
+      }>
+    | null;
+  documents:
+    | Array<{
+        id: string;
+        folder_name: string | null;
+        name: string;
+        status: string;
+        file_type: string | null;
+        created_at: string;
+      }>
+    | null;
+};
+
+export type CrmClientInput = Omit<
+  CrmClient,
+  "id" | "notes" | "cares" | "documents"
+>;
+
 export type NewCrmLeadInput = {
   firstName: string;
   lastName: string;
@@ -253,6 +374,179 @@ export async function updateCrmLeadNextAction(leadId: string, nextAction: string
   });
 }
 
+export async function loadCrmClients() {
+  const supabase = createClient();
+  const context = await getCrmCenterContext(supabase);
+
+  const { data, error } = await supabase
+    .from("clients")
+    .select(
+      `
+        id,
+        center_id,
+        first_name,
+        last_name,
+        email,
+        phone,
+        birthdate,
+        gender,
+        address_line1,
+        postal_code,
+        city,
+        private_note,
+        shared_note,
+        status,
+        created_at,
+        updated_at,
+        lead_sources(name),
+        campaigns(name),
+        leads(id,status,amount_cure_ttc,created_at,services(name)),
+        appointments(
+          id,
+          appointment_date,
+          starts_at,
+          duration_minutes,
+          status,
+          services(name),
+          practitioners(name),
+          rooms(name)
+        ),
+        invoices(id,type,status,total_ttc,paid_amount,balance_due,issued_on),
+        documents(id,folder_name,name,status,file_type,created_at)
+      `,
+    )
+    .eq("center_id", context.centerId)
+    .is("merged_into_client_id", null)
+    .order("updated_at", { ascending: false });
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return {
+    center: context,
+    clients: ((data ?? []) as unknown as ClientRow[]).map(toCrmClient),
+  };
+}
+
+export async function createCrmClient(input: CrmClientInput) {
+  const supabase = createClient();
+  const context = await getCrmCenterContext(supabase);
+  const [sourceId, campaignId] = await Promise.all([
+    input.source ? ensureLeadSource(supabase, context.centerId, input.source) : null,
+    input.campaign ? ensureCampaign(supabase, context.centerId, input.campaign) : null,
+  ]);
+
+  const { data, error } = await supabase
+    .from("clients")
+    .insert(toClientFields(context.centerId, input, sourceId, campaignId))
+    .select(
+      `
+        id,
+        center_id,
+        first_name,
+        last_name,
+        email,
+        phone,
+        birthdate,
+        gender,
+        address_line1,
+        postal_code,
+        city,
+        private_note,
+        shared_note,
+        status,
+        created_at,
+        updated_at,
+        lead_sources(name),
+        campaigns(name),
+        leads(id,status,amount_cure_ttc,created_at,services(name)),
+        appointments(id,appointment_date,starts_at,duration_minutes,status,services(name),practitioners(name),rooms(name)),
+        invoices(id,type,status,total_ttc,paid_amount,balance_due,issued_on),
+        documents(id,folder_name,name,status,file_type,created_at)
+      `,
+    )
+    .single();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return toCrmClient(data as unknown as ClientRow);
+}
+
+export async function updateCrmClient(input: CrmClient) {
+  const supabase = createClient();
+  const centerId = await getClientCenterId(supabase, input.id);
+  const [sourceId, campaignId] = await Promise.all([
+    input.source ? ensureLeadSource(supabase, centerId, input.source) : null,
+    input.campaign ? ensureCampaign(supabase, centerId, input.campaign) : null,
+  ]);
+
+  const { error } = await supabase
+    .from("clients")
+    .update(toClientFields(centerId, input, sourceId, campaignId))
+    .eq("id", input.id);
+
+  if (error) {
+    throw new Error(error.message);
+  }
+}
+
+export async function addCrmClientNote(
+  client: CrmClient,
+  text: string,
+  visibility: "private" | "shared",
+) {
+  const supabase = createClient();
+  const currentNotes = client.notes
+    .filter((note) => note.visibility === visibility)
+    .map((note) => `${note.date} - ${note.text}`);
+  const nextValue = [`${formatActivityDateForStorage()} - ${text.trim()}`, ...currentNotes]
+    .filter(Boolean)
+    .join("\n");
+  const field = visibility === "shared" ? "shared_note" : "private_note";
+
+  const { error } = await supabase
+    .from("clients")
+    .update({
+      [field]: nextValue,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", client.id);
+
+  if (error) {
+    throw new Error(error.message);
+  }
+}
+
+export async function addCrmClientDocument(
+  clientId: string,
+  document: Omit<CrmClientDocument, "id">,
+) {
+  const supabase = createClient();
+  const centerId = await getClientCenterId(supabase, clientId);
+  const { data, error } = await supabase
+    .from("documents")
+    .insert({
+      center_id: centerId,
+      client_id: clientId,
+      folder_name: document.type,
+      name: document.label.trim(),
+      file_type: document.type,
+      status: toDocumentStatusValue(document.status),
+      updated_at: new Date().toISOString(),
+    })
+    .select("id,folder_name,name,status,file_type,created_at")
+    .single();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return toClientDocument(data);
+}
+
 async function getCrmCenterContext(supabase: SupabaseClient): Promise<CrmCenterContext> {
   const { data: member, error: memberError } = await supabase
     .from("center_members")
@@ -298,6 +592,20 @@ async function getLeadCenterId(supabase: SupabaseClient, leadId: string) {
     .from("leads")
     .select("center_id")
     .eq("id", leadId)
+    .single();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return data.center_id as string;
+}
+
+async function getClientCenterId(supabase: SupabaseClient, clientId: string) {
+  const { data, error } = await supabase
+    .from("clients")
+    .select("center_id")
+    .eq("id", clientId)
     .single();
 
   if (error) {
@@ -513,6 +821,291 @@ function toLead(row: LeadRow): Lead {
     reminderDate: row.recall_date ?? undefined,
     activityLog,
   };
+}
+
+function toCrmClient(row: ClientRow): CrmClient {
+  const source = relationObject(row.lead_sources)?.name ?? "À compléter";
+  const campaign = relationObject(row.campaigns)?.name ?? "À compléter";
+  const leads = row.leads ?? [];
+  const appointments = row.appointments ?? [];
+  const invoices = row.invoices ?? [];
+  const documents = row.documents ?? [];
+  const latestLead = leads
+    .slice()
+    .sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at))[0];
+  const nextAppointment = appointments
+    .filter((appointment) =>
+      ["confirmed", "to_confirm", "in_progress"].includes(appointment.status),
+    )
+    .sort((a, b) =>
+      `${a.appointment_date} ${a.starts_at}`.localeCompare(
+        `${b.appointment_date} ${b.starts_at}`,
+      ),
+    )[0];
+  const paidTotal = invoices.reduce(
+    (total, invoice) => total + Number(invoice.paid_amount ?? 0),
+    0,
+  );
+  const balanceDue = invoices.reduce(
+    (total, invoice) => total + Number(invoice.balance_due ?? 0),
+    0,
+  );
+  const leadAmount = leads.reduce(
+    (total, lead) => total + Number(lead.amount_cure_ttc ?? 0),
+    0,
+  );
+  const mainCare =
+    relationObject(nextAppointment?.services)?.name ??
+    relationObject(latestLead?.services)?.name ??
+    "À compléter";
+
+  return {
+    id: row.id,
+    firstName: row.first_name || "Cliente",
+    lastName: row.last_name || "",
+    phone: row.phone || "",
+    email: row.email || "",
+    birthDate: row.birthdate ? formatDisplayDateForCrm(row.birthdate) : "À compléter",
+    gender: row.gender || "À compléter",
+    address: row.address_line1 || "À compléter",
+    postalCode: row.postal_code || "",
+    city: row.city || "",
+    mainCare,
+    category: getClientCategoryFromCareName(mainCare),
+    source,
+    campaign,
+    status: normalizeClientStatus(row.status, latestLead?.status),
+    commercial: "Équipe",
+    nextAppointment: nextAppointment
+      ? `${formatDisplayDateForCrm(nextAppointment.appointment_date)} ${nextAppointment.starts_at.slice(0, 5)}`
+      : "Aucun RDV",
+    lastVisit: formatDisplayDateForCrm(row.updated_at.slice(0, 10)),
+    totalSpent: paidTotal || leadAmount,
+    balanceDue,
+    notes: [
+      ...toClientNotes(row.private_note, "private"),
+      ...toClientNotes(row.shared_note, "shared"),
+    ],
+    cares: toClientCares(leads, invoices),
+    documents: documents.map(toClientDocument),
+  };
+}
+
+function toClientFields(
+  centerId: string,
+  input: CrmClientInput,
+  sourceId: string | null,
+  campaignId: string | null,
+) {
+  return {
+    center_id: centerId,
+    first_name: input.firstName.trim(),
+    last_name: input.lastName.trim(),
+    email: input.email.trim() || null,
+    phone: input.phone.trim() || null,
+    birthdate: toIsoDate(input.birthDate),
+    gender: input.gender && input.gender !== "À compléter" ? input.gender : null,
+    address_line1:
+      input.address && input.address !== "À compléter" ? input.address.trim() : null,
+    postal_code: input.postalCode.trim() || null,
+    city: input.city.trim() || null,
+    source_id: sourceId,
+    campaign_id: campaignId,
+    status: toClientStatusValue(input.status),
+    updated_at: new Date().toISOString(),
+  };
+}
+
+function toClientNotes(
+  value: string | null,
+  visibility: "private" | "shared",
+): CrmClientNote[] {
+  if (!value) {
+    return [];
+  }
+
+  return value
+    .split("\n")
+    .map((line, index) => {
+      const [date, ...textParts] = line.split(" - ");
+
+      return {
+        id: `${visibility}-${index}`,
+        author: visibility === "shared" ? "Équipe" : "Samantha",
+        date: textParts.length > 0 ? date : "Note",
+        text: textParts.length > 0 ? textParts.join(" - ") : line,
+        visibility,
+      };
+    })
+    .filter((note) => note.text.trim().length > 0);
+}
+
+function toClientCares(
+  leads: NonNullable<ClientRow["leads"]>,
+  invoices: NonNullable<ClientRow["invoices"]>,
+): CrmClientCare[] {
+  const invoiceCares = invoices.map((invoice) => ({
+    id: invoice.id,
+    label: invoice.type === "devis" ? "Devis client" : "Facture client",
+    date: formatDisplayDateForCrm(invoice.issued_on),
+    amount: Number(invoice.total_ttc ?? 0),
+    paid: Number(invoice.paid_amount ?? 0),
+    status: normalizeCareStatus(invoice.status, Number(invoice.balance_due ?? 0)),
+  }));
+
+  if (invoiceCares.length > 0) {
+    return invoiceCares;
+  }
+
+  return leads.map((lead) => {
+    const amount = Number(lead.amount_cure_ttc ?? 0);
+
+    return {
+      id: lead.id,
+      label: relationObject(lead.services)?.name ?? "Soin à préciser",
+      date: formatDisplayDateForCrm(lead.created_at.slice(0, 10)),
+      amount,
+      paid: ["Vendu", "Client", "Client converti"].includes(lead.status ?? "")
+        ? amount
+        : 0,
+      status: ["Vendu", "Client", "Client converti"].includes(lead.status ?? "")
+        ? "Payé"
+        : "À encaisser",
+    };
+  });
+}
+
+function toClientDocument(row: {
+  id: string;
+  folder_name: string | null;
+  name: string;
+  status: string;
+  file_type: string | null;
+  created_at: string;
+}): CrmClientDocument {
+  return {
+    id: row.id,
+    label: row.name,
+    date: formatDisplayDateForCrm(row.created_at.slice(0, 10)),
+    status: normalizeDocumentStatus(row.status),
+    type: normalizeDocumentType(row.file_type ?? row.folder_name),
+  };
+}
+
+function normalizeClientStatus(
+  value?: string | null,
+  leadStatus?: string | null,
+): CrmClientStatus {
+  if (value === "in_care") return "Cure en cours";
+  if (value === "to_recall") return "À relancer";
+  if (value === "inactive") return "Inactif";
+  if (["Vendu", "Client", "Client converti"].includes(leadStatus ?? "")) {
+    return "Cure en cours";
+  }
+
+  return "Actif";
+}
+
+function toClientStatusValue(status: CrmClientStatus) {
+  if (status === "Cure en cours") return "in_care";
+  if (status === "À relancer") return "to_recall";
+  if (status === "Inactif") return "inactive";
+  return "active";
+}
+
+function normalizeCareStatus(
+  status: string,
+  balanceDue: number,
+): CrmClientCare["status"] {
+  if (status === "paid" || balanceDue <= 0) return "Payé";
+  if (status === "pending_payment") return "Acompte";
+  return "À encaisser";
+}
+
+function normalizeDocumentStatus(status: string): CrmClientDocument["status"] {
+  if (status === "signed") return "Signé";
+  if (status === "validated") return "Validé";
+  if (status === "sent") return "À signer";
+  return "À envoyer";
+}
+
+function toDocumentStatusValue(status: CrmClientDocument["status"]) {
+  if (status === "Signé") return "signed";
+  if (status === "Validé") return "validated";
+  if (status === "À signer") return "sent";
+  return "draft";
+}
+
+function normalizeDocumentType(value?: string | null): CrmClientDocument["type"] {
+  const normalized = (value ?? "").toLowerCase();
+
+  if (normalized.includes("devis")) return "Devis";
+  if (normalized.includes("facture")) return "Facture";
+  if (normalized.includes("fiche")) return "Fiche cure";
+  return "Consentement";
+}
+
+function getClientCategoryFromCareName(care: string) {
+  const normalizedCare = care
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+
+  if (normalizedCare.includes("cryo") || normalizedCare.includes("minceur")) {
+    return "Minceur";
+  }
+
+  if (
+    normalizedCare.includes("hydra") ||
+    normalizedCare.includes("visage") ||
+    normalizedCare.includes("facial")
+  ) {
+    return "Soin du visage";
+  }
+
+  if (normalizedCare.includes("ongle") || normalizedCare.includes("gel")) {
+    return "Beauté des ongles";
+  }
+
+  if (
+    normalizedCare.includes("regard") ||
+    normalizedCare.includes("cil") ||
+    normalizedCare.includes("sourcil")
+  ) {
+    return "Beauté du regard";
+  }
+
+  return "Institut beauté";
+}
+
+function toIsoDate(value: string) {
+  if (!value || value === "À compléter") return null;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
+
+  const [day, month, year] = value.split("/");
+
+  if (!day || !month || !year) return null;
+
+  return `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
+}
+
+function formatDisplayDateForCrm(value: string) {
+  if (!value) return "À compléter";
+
+  const [year, month, day] = value.split("-");
+
+  if (!year || !month || !day) {
+    return value;
+  }
+
+  return `${day}/${month}/${year}`;
+}
+
+function formatActivityDateForStorage() {
+  return `Aujourd'hui ${new Date().toLocaleTimeString("fr-FR", {
+    hour: "2-digit",
+    minute: "2-digit",
+  })}`;
 }
 
 function normalizeLeadStatus(value?: string | null): LeadStatus {

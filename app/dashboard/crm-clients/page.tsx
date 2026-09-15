@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import {
+  AlertTriangle,
   CalendarDays,
   CheckCircle2,
   CreditCard,
@@ -12,6 +13,7 @@ import {
   MoreVertical,
   Phone,
   Plus,
+  RefreshCcw,
   Search,
   Sparkles,
   UserRound,
@@ -28,60 +30,18 @@ import {
   publicCenterCategories,
   readCenterSettings,
 } from "@/lib/center-settings";
-import { leads } from "@/lib/mock-data";
-
-type ClientStatus = "Actif" | "Cure en cours" | "À relancer" | "Inactif";
-
-type ClientNote = {
-  id: string;
-  author: string;
-  date: string;
-  text: string;
-  visibility?: "private" | "shared";
-};
-
-type ClientCare = {
-  id: string;
-  label: string;
-  date: string;
-  amount: number;
-  paid: number;
-  status: "Payé" | "Acompte" | "À encaisser";
-};
-
-type ClientDocument = {
-  id: string;
-  label: string;
-  date: string;
-  status: "À signer" | "Signé" | "À envoyer" | "Validé";
-  type: "Consentement" | "Devis" | "Facture" | "Fiche cure";
-};
-
-type Client = {
-  id: string;
-  firstName: string;
-  lastName: string;
-  phone: string;
-  email: string;
-  birthDate: string;
-  gender: string;
-  address: string;
-  postalCode: string;
-  city: string;
-  mainCare: string;
-  category: string;
-  source: string;
-  campaign: string;
-  status: ClientStatus;
-  commercial: string;
-  nextAppointment: string;
-  lastVisit: string;
-  totalSpent: number;
-  balanceDue: number;
-  notes: ClientNote[];
-  cares: ClientCare[];
-  documents: ClientDocument[];
-};
+import {
+  addCrmClientDocument as persistCrmClientDocument,
+  addCrmClientNote,
+  createCrmClient,
+  loadCrmClients,
+  updateCrmClient,
+  type CrmClient as Client,
+  type CrmClientCare as ClientCare,
+  type CrmClientDocument as ClientDocument,
+  type CrmClientNote as ClientNote,
+  type CrmClientStatus as ClientStatus,
+} from "@/lib/crm-supabase";
 
 const statusStyles: Record<ClientStatus, string> = {
   Actif: "bg-emerald-50 text-emerald-700 border-emerald-100",
@@ -265,57 +225,6 @@ const seedClients: Client[] = [
       },
     ],
   },
-  ...leads
-    .filter((lead) =>
-      ["Client", "Client converti", "Vendu"].includes(lead.status)
-    )
-    .map((lead) => ({
-      id: `client-${lead.id}`,
-      firstName: lead.firstName,
-      lastName: lead.lastName,
-      phone: lead.phone,
-      email: lead.email,
-      birthDate: "À compléter",
-      gender: "À compléter",
-      address: "À compléter",
-      postalCode: "",
-      city: "",
-      mainCare: lead.treatment,
-      category: getClientCategoryFromCare(lead.treatment),
-      source: lead.source,
-      campaign: lead.campaign,
-      status: "Actif" as ClientStatus,
-      commercial: lead.commercial,
-      nextAppointment: lead.nextAction,
-      lastVisit: lead.createdDate,
-      totalSpent: lead.dealAmount,
-      balanceDue: 0,
-      notes: lead.activityLog.map((activity) => ({
-        id: activity.id,
-        author: activity.author,
-        date: activity.date,
-        text: activity.text,
-      })),
-      cares: [
-        {
-          id: `care-${lead.id}`,
-          label: lead.treatment,
-          date: lead.createdDate,
-          amount: lead.dealAmount,
-          paid: lead.dealAmount,
-          status: "Payé" as const,
-        },
-      ],
-      documents: [
-        {
-          id: `doc-${lead.id}-fiche`,
-          label: `Fiche ${lead.treatment}`,
-          date: lead.createdDate,
-          status: "À envoyer" as const,
-          type: "Fiche cure" as const,
-        },
-      ],
-    })),
 ];
 
 const emptyClientForm: Omit<Client, "id" | "notes" | "cares" | "documents"> = {
@@ -354,6 +263,8 @@ export default function CRMClientsPage() {
   const [statusFilter, setStatusFilter] = useState<"Tous" | ClientStatus>(
     "Tous"
   );
+  const [isLoadingClients, setIsLoadingClients] = useState(true);
+  const [clientError, setClientError] = useState("");
   const [provenanceOptions, setProvenanceOptions] = useState(
     defaultProvenanceOptions,
   );
@@ -364,6 +275,39 @@ export default function CRMClientsPage() {
   const [isClientFormOpen, setIsClientFormOpen] = useState(false);
   const [isFullClientOpen, setIsFullClientOpen] = useState(false);
   const [clientForm, setClientForm] = useState(emptyClientForm);
+
+  async function refreshClients() {
+    setIsLoadingClients(true);
+    setClientError("");
+
+    try {
+      const { clients } = await loadCrmClients();
+
+      setClientList(clients.length > 0 ? clients : seedClients);
+      setSelectedClientId((currentId) => {
+        if (currentId && clients.some((client) => client.id === currentId)) {
+          return currentId;
+        }
+
+        return clients[0]?.id ?? seedClients[0]?.id;
+      });
+    } catch (error) {
+      setClientError(
+        error instanceof Error
+          ? error.message
+          : "Impossible de charger les clients Supabase.",
+      );
+      setClientList(seedClients);
+      setSelectedClientId(seedClients[0]?.id);
+    } finally {
+      setIsLoadingClients(false);
+    }
+  }
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void refreshClients();
+  }, []);
 
   useEffect(() => {
     function syncSourceSettings() {
@@ -410,33 +354,43 @@ export default function CRMClientsPage() {
     clientList[0];
   const stats = getClientStats(clientList);
 
-  function addNote() {
+  async function addNote() {
     const text = noteDraft.trim();
 
     if (!text || !selectedClient) {
       return;
     }
 
+    const optimisticNote: ClientNote = {
+      id: crypto.randomUUID(),
+      author: noteVisibility === "shared" ? "Équipe" : "Samantha",
+      date: formatActivityDate(),
+      text,
+      visibility: noteVisibility,
+    };
+
     setClientList((currentClients) =>
       currentClients.map((client) =>
         client.id === selectedClient.id
           ? {
               ...client,
-              notes: [
-                {
-                  id: crypto.randomUUID(),
-                  author: "Samantha",
-                  date: formatActivityDate(),
-                  text,
-                  visibility: noteVisibility,
-                },
-                ...client.notes,
-              ],
+              notes: [optimisticNote, ...client.notes],
             }
           : client
       )
     );
     setNoteDraft("");
+
+    try {
+      await addCrmClientNote(selectedClient, text, noteVisibility);
+    } catch (error) {
+      setClientError(
+        error instanceof Error
+          ? error.message
+          : "La note n'a pas pu être sauvegardée.",
+      );
+      await refreshClients();
+    }
   }
 
   function openRdvForClient(client: Client) {
@@ -456,23 +410,36 @@ export default function CRMClientsPage() {
     setIsClientFormOpen(true);
   }
 
-  function addClient(event: React.FormEvent<HTMLFormElement>) {
+  async function addClient(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
-    const client: Client = {
-      ...clientForm,
-      id: crypto.randomUUID(),
-      notes: [],
-      cares: [],
-      documents: [],
-    };
+    try {
+      const client = await createCrmClient(clientForm);
 
-    setClientList((currentClients) => [client, ...currentClients]);
-    setSelectedClientId(client.id);
-    setIsClientFormOpen(false);
+      setClientList((currentClients) => [client, ...currentClients]);
+      setSelectedClientId(client.id);
+      setIsClientFormOpen(false);
+    } catch (error) {
+      setClientError(
+        error instanceof Error
+          ? error.message
+          : "Le client n'a pas pu être créé.",
+      );
+    }
   }
 
-  function saveFullClient(updatedClient: Client) {
+  async function saveFullClient(updatedClient: Client) {
+    try {
+      await updateCrmClient(updatedClient);
+    } catch (error) {
+      setClientError(
+        error instanceof Error
+          ? error.message
+          : "La fiche client n'a pas pu être sauvegardée.",
+      );
+      return;
+    }
+
     setClientList((currentClients) =>
       currentClients.map((client) =>
         client.id === updatedClient.id ? updatedClient : client
@@ -482,14 +449,22 @@ export default function CRMClientsPage() {
     setIsFullClientOpen(false);
   }
 
-  function addClientDocument(
+  async function addClientDocument(
     clientId: string,
     document: Omit<ClientDocument, "id">
   ) {
-    const newDocument: ClientDocument = {
-      ...document,
-      id: crypto.randomUUID(),
-    };
+    let newDocument: ClientDocument;
+
+    try {
+      newDocument = await persistCrmClientDocument(clientId, document);
+    } catch (error) {
+      setClientError(
+        error instanceof Error
+          ? error.message
+          : "Le document n'a pas pu être ajouté.",
+      );
+      return;
+    }
 
     setClientList((currentClients) =>
       currentClients.map((client) =>
@@ -518,11 +493,39 @@ export default function CRMClientsPage() {
             </p>
           </div>
 
-          <Button type="button" className="h-11 bg-slate-950" onClick={openNewClientForm}>
-            <Plus className="mr-2 h-4 w-4" />
-            Nouveau client
-          </Button>
+          <div className="flex flex-wrap gap-3">
+            <Button
+              type="button"
+              variant="outline"
+              className="h-11 bg-white"
+              onClick={() => void refreshClients()}
+              disabled={isLoadingClients}
+            >
+              <RefreshCcw className="mr-2 h-4 w-4" />
+              Actualiser
+            </Button>
+            <Button type="button" className="h-11 bg-slate-950" onClick={openNewClientForm}>
+              <Plus className="mr-2 h-4 w-4" />
+              Nouveau client
+            </Button>
+          </div>
         </header>
+
+        {clientError && (
+          <div className="flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm font-semibold text-amber-800">
+            <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
+            <div>
+              <p className="font-black">Connexion clients Supabase à vérifier</p>
+              <p className="mt-1">{clientError}</p>
+            </div>
+          </div>
+        )}
+
+        {isLoadingClients && (
+          <div className="rounded-2xl border border-blue-100 bg-blue-50 p-4 text-sm font-bold text-blue-700">
+            Chargement des clients depuis Supabase...
+          </div>
+        )}
 
         <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           <ClientStatCard
@@ -592,6 +595,17 @@ export default function CRMClientsPage() {
               </div>
 
               <div className="divide-y divide-slate-100">
+                {filteredClients.length === 0 && (
+                  <div className="bg-white px-5 py-12 text-center">
+                    <p className="text-lg font-black text-slate-900">
+                      Aucun client trouvé
+                    </p>
+                    <p className="mt-2 text-sm font-semibold text-slate-500">
+                      Modifiez la recherche ou créez une nouvelle fiche client.
+                    </p>
+                  </div>
+                )}
+
                 {filteredClients.map((client) => {
                   const selected = selectedClient?.id === client.id;
 
@@ -1747,40 +1761,6 @@ function normalize(value: string) {
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/\s/g, "");
-}
-
-function getClientCategoryFromCare(care: string) {
-  const normalizedCare = normalize(care);
-
-  if (normalizedCare.includes("cryo") || normalizedCare.includes("minceur")) {
-    return "Minceur";
-  }
-
-  if (
-    normalizedCare.includes("hydra") ||
-    normalizedCare.includes("visage") ||
-    normalizedCare.includes("facial")
-  ) {
-    return "Soin du visage";
-  }
-
-  if (normalizedCare.includes("ongle") || normalizedCare.includes("gel")) {
-    return "Beauté des ongles";
-  }
-
-  if (
-    normalizedCare.includes("regard") ||
-    normalizedCare.includes("cil") ||
-    normalizedCare.includes("sourcil")
-  ) {
-    return "Beauté du regard";
-  }
-
-  if (normalizedCare.includes("laser") || normalizedCare.includes("epilation")) {
-    return "Institut beauté";
-  }
-
-  return publicCenterCategories[0] ?? "Institut beauté";
 }
 
 function formatCurrency(value: number) {
