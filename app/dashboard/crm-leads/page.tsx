@@ -303,7 +303,11 @@ export default function CRMLeadsPage() {
 
     try {
       await updateCrmLeadStatus(leadBeforeUpdate, status);
-      setCrmNotice("Statut enregistré dans Supabase.");
+      setCrmNotice(
+        ["Vendu", "Client", "Client converti"].includes(status)
+          ? "Statut enregistré et fiche client synchronisée."
+          : "Statut enregistré dans Supabase."
+      );
     } catch (error) {
       setCrmError(
         error instanceof Error

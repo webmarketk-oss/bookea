@@ -10,6 +10,8 @@ type CrmCenterContext = {
 
 type LeadSource = Lead["source"];
 
+const clientLeadStatuses: LeadStatus[] = ["Vendu", "Client", "Client converti"];
+
 type LeadRow = {
   id: string;
   center_id: string;
@@ -313,18 +315,24 @@ export async function updateCrmLeadStatus(
   status: LeadStatus,
 ) {
   const supabase = createClient();
+  const centerId = await getLeadCenterId(supabase, lead.id);
+
   await updateLeadFields(supabase, lead.id, {
     status,
     updated_at: new Date().toISOString(),
     last_activity_at: new Date().toISOString(),
   });
 
-  await insertLeadEvent(supabase, await getLeadCenterId(supabase, lead.id), lead.id, {
+  await insertLeadEvent(supabase, centerId, lead.id, {
     event_type: "status",
     from_value: lead.status,
     to_value: status,
     note: `Statut changé : ${lead.status} → ${status}.`,
   });
+
+  if (clientLeadStatuses.includes(status)) {
+    await ensureClientForConvertedLead(supabase, centerId, lead.id, lead);
+  }
 }
 
 export async function addCrmLeadActivity(leadId: string, text: string) {
@@ -621,6 +629,140 @@ async function updateLeadFields(
   fields: Record<string, unknown>,
 ) {
   const { error } = await supabase.from("leads").update(fields).eq("id", leadId);
+
+  if (error) {
+    throw new Error(error.message);
+  }
+}
+
+async function ensureClientForConvertedLead(
+  supabase: SupabaseClient,
+  centerId: string,
+  leadId: string,
+  lead: Lead,
+) {
+  const { data: currentLead, error: leadError } = await supabase
+    .from("leads")
+    .select("client_id,source_id,campaign_id,service_id")
+    .eq("id", leadId)
+    .single();
+
+  if (leadError) {
+    throw new Error(leadError.message);
+  }
+
+  const matchedClientId =
+    (currentLead.client_id as string | null) ??
+    (await findExistingClientId(supabase, centerId, lead));
+
+  if (matchedClientId) {
+    await updateConvertedClient(supabase, matchedClientId, lead, {
+      sourceId: currentLead.source_id as string | null,
+      campaignId: currentLead.campaign_id as string | null,
+    });
+
+    if (!currentLead.client_id) {
+      await updateLeadFields(supabase, leadId, {
+        client_id: matchedClientId,
+        updated_at: new Date().toISOString(),
+      });
+    }
+
+    return matchedClientId;
+  }
+
+  const { data: createdClient, error: clientError } = await supabase
+    .from("clients")
+    .insert({
+      center_id: centerId,
+      first_name: lead.firstName.trim() || "Cliente",
+      last_name: lead.lastName.trim() || "Bookea",
+      email: lead.email.trim() || null,
+      phone: lead.phone.trim() || null,
+      source_id: currentLead.source_id,
+      campaign_id: currentLead.campaign_id,
+      status: "in_care",
+      private_note: `Converti depuis le prospect le ${formatActivityDateForStorage()}.`,
+      updated_at: new Date().toISOString(),
+    })
+    .select("id")
+    .single();
+
+  if (clientError) {
+    throw new Error(clientError.message);
+  }
+
+  await updateLeadFields(supabase, leadId, {
+    client_id: createdClient.id,
+    updated_at: new Date().toISOString(),
+  });
+
+  return createdClient.id as string;
+}
+
+async function findExistingClientId(
+  supabase: SupabaseClient,
+  centerId: string,
+  lead: Lead,
+) {
+  const email = lead.email.trim();
+
+  if (email) {
+    const { data, error } = await supabase
+      .from("clients")
+      .select("id")
+      .eq("center_id", centerId)
+      .ilike("email", email)
+      .maybeSingle();
+
+    if (error) {
+      throw new Error(error.message);
+    }
+
+    if (data?.id) {
+      return data.id as string;
+    }
+  }
+
+  const phone = lead.phone.trim();
+
+  if (!phone) {
+    return null;
+  }
+
+  const { data, error } = await supabase
+    .from("clients")
+    .select("id")
+    .eq("center_id", centerId)
+    .eq("phone", phone)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return (data?.id as string | undefined) ?? null;
+}
+
+async function updateConvertedClient(
+  supabase: SupabaseClient,
+  clientId: string,
+  lead: Lead,
+  links: { sourceId: string | null; campaignId: string | null },
+) {
+  const { error } = await supabase
+    .from("clients")
+    .update({
+      first_name: lead.firstName.trim() || "Cliente",
+      last_name: lead.lastName.trim() || "Bookea",
+      email: lead.email.trim() || null,
+      phone: lead.phone.trim() || null,
+      source_id: links.sourceId,
+      campaign_id: links.campaignId,
+      status: "in_care",
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", clientId);
 
   if (error) {
     throw new Error(error.message);
