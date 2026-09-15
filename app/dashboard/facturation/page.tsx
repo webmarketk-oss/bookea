@@ -334,7 +334,7 @@ export default function BillingPage() {
       setBillingError(
         error instanceof Error
           ? error.message
-          : "Impossible de charger les factures Supabase.",
+          : "Impossible de charger les factures.",
       );
       setInvoices(initialInvoices);
       setSelectedInvoiceId(initialInvoices[0]?.id ?? "");
@@ -613,7 +613,7 @@ export default function BillingPage() {
       setInvoices((current) => [savedInvoice as Invoice, ...current]);
       setSelectedInvoiceId(savedInvoice.id);
       setPreviewInvoiceId(savedInvoice.id);
-      setBillingNotice("Document enregistré dans Supabase.");
+      setBillingNotice("Document enregistré.");
     } catch (error) {
       setBillingError(
         error instanceof Error
@@ -1192,7 +1192,7 @@ export default function BillingPage() {
 
         {isLoadingBilling && (
           <div className="rounded-2xl border border-blue-100 bg-blue-50 p-4 text-sm font-bold text-blue-700">
-            Chargement des factures depuis Supabase...
+            Chargement des factures...
           </div>
         )}
 

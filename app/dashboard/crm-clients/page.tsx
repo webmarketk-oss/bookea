@@ -295,7 +295,7 @@ export default function CRMClientsPage() {
       setClientError(
         error instanceof Error
           ? error.message
-          : "Impossible de charger les clients Supabase.",
+          : "Impossible de charger les clients.",
       );
       setClientList(seedClients);
       setSelectedClientId(seedClients[0]?.id);
@@ -515,7 +515,7 @@ export default function CRMClientsPage() {
           <div className="flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm font-semibold text-amber-800">
             <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
             <div>
-              <p className="font-black">Connexion clients Supabase à vérifier</p>
+              <p className="font-black">Connexion aux données clients à vérifier</p>
               <p className="mt-1">{clientError}</p>
             </div>
           </div>
@@ -523,7 +523,7 @@ export default function CRMClientsPage() {
 
         {isLoadingClients && (
           <div className="rounded-2xl border border-blue-100 bg-blue-50 p-4 text-sm font-bold text-blue-700">
-            Chargement des clients depuis Supabase...
+            Chargement des clients...
           </div>
         )}
 

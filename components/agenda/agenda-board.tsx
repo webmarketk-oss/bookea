@@ -297,7 +297,7 @@ export default function AgendaBoard() {
       setAgendaError(
         error instanceof Error
           ? error.message
-          : "Impossible de charger l'agenda Supabase.",
+          : "Impossible de charger l'agenda.",
       );
       setAppointmentList(appointments);
     } finally {
@@ -577,7 +577,7 @@ export default function AgendaBoard() {
         savedAppointment,
       ]);
       setSelectedDate(savedAppointment.date);
-      setAgendaNotice("RDV enregistré dans Supabase.");
+      setAgendaNotice("RDV enregistré.");
       setIsModalOpen(false);
     } catch (error) {
       setAgendaError(
@@ -959,7 +959,7 @@ export default function AgendaBoard() {
 
         {isLoadingAgenda && (
           <div className="rounded-2xl border border-blue-100 bg-blue-50 p-4 text-sm font-bold text-blue-700">
-            Chargement de l&apos;agenda depuis Supabase...
+            Chargement de l&apos;agenda...
           </div>
         )}
 

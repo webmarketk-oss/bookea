@@ -79,7 +79,7 @@ export function LoginForm({ initialError }: LoginFormProps) {
     setFeedback({
       type: "success",
       message:
-        "Compte créé ! Vérifiez votre email pour confirmer votre inscription, puis connectez-vous. Si c'est un compte admin, il sera activé par le script Supabase.",
+        "Compte créé ! Vérifiez votre email pour confirmer votre inscription, puis connectez-vous. Si c'est un compte admin, il sera activé par l'équipe Bookea.",
     });
     setMode("login");
     setPassword("");

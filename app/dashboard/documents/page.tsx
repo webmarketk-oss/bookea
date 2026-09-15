@@ -284,7 +284,7 @@ export default function DocumentsPage() {
       return;
     }
     alert(
-      "Ce document est un exemple. Quand Supabase Storage sera branché, le fichier réel s'ouvrira ici.",
+      "Ce document est un exemple. Quand l'espace fichiers sera branché, le fichier réel s'ouvrira ici.",
     );
   }
 

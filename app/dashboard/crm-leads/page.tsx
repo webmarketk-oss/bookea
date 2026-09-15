@@ -306,7 +306,7 @@ export default function CRMLeadsPage() {
       setCrmNotice(
         ["Vendu", "Client", "Client converti"].includes(status)
           ? "Statut enregistré et fiche client synchronisée."
-          : "Statut enregistré dans Supabase."
+          : "Statut enregistré."
       );
     } catch (error) {
       setCrmError(
@@ -342,7 +342,7 @@ export default function CRMLeadsPage() {
 
     try {
       await addCrmLeadActivity(leadId, text);
-      setCrmNotice("Commentaire enregistré dans Supabase.");
+      setCrmNotice("Commentaire enregistré.");
       await refreshCrmLeads();
     } catch (error) {
       setCrmError(
@@ -521,12 +521,12 @@ export default function CRMLeadsPage() {
         ...currentLeads.filter((lead) => lead.id !== optimisticLead.id),
       ]);
       setSelectedLeadId(createdLead.id);
-      setCrmNotice("Prospect créé dans Supabase.");
+      setCrmNotice("Prospect créé.");
     } catch (error) {
       setCrmError(
         error instanceof Error
           ? error.message
-          : "Le prospect n'a pas pu être créé dans Supabase."
+          : "Le prospect n'a pas pu être créé."
       );
       setLeadList((currentLeads) =>
         currentLeads.filter((lead) => lead.id !== optimisticLead.id)
@@ -547,7 +547,7 @@ export default function CRMLeadsPage() {
               </p>
               <p className="mt-1 text-sm font-semibold text-slate-600">
                 Les prospects, statuts, rappels, montants et commentaires sont
-                maintenant synchronisés avec Supabase.
+                maintenant synchronisés avec la base Bookea.
               </p>
             </div>
             <Button
