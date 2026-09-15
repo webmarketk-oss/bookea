@@ -13,6 +13,7 @@ import {
   PanelLeftOpen,
   ReceiptText,
   Settings,
+  ShieldCheck,
   UserRound,
 } from "lucide-react";
 import { usePathname } from "next/navigation";
@@ -166,6 +167,14 @@ export default function Sidebar({
           label="Paramètres du centre"
           icon={Settings}
           active={pathname.startsWith("/dashboard/parametres-centre")}
+          collapsed={collapsed}
+        />
+
+        <NavItem
+          href="/dashboard/admin-centres"
+          label="Admin centres"
+          icon={ShieldCheck}
+          active={pathname.startsWith("/dashboard/admin-centres")}
           collapsed={collapsed}
         />
       </nav>
