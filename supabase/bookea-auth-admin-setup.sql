@@ -18,7 +18,7 @@ begin
     user_email,
     coalesce(user_name, split_part(user_email::text, '@', 1)),
     case
-      when lower(user_email::text) in ('webmarket.k@gmail.com') then 'bookea_admin'::public.bookea_role
+      when lower(user_email::text) in ('webmarket.k@gmail.com', 'cynthia@webkagency.net') then 'bookea_admin'::public.bookea_role
       else 'client'::public.bookea_role
     end
   )
@@ -26,12 +26,12 @@ begin
     email = excluded.email,
     full_name = coalesce(excluded.full_name, public.profiles.full_name),
     role = case
-      when lower(excluded.email::text) in ('webmarket.k@gmail.com') then 'bookea_admin'::public.bookea_role
+      when lower(excluded.email::text) in ('webmarket.k@gmail.com', 'cynthia@webkagency.net') then 'bookea_admin'::public.bookea_role
       else public.profiles.role
     end,
     updated_at = now();
 
-  if lower(user_email::text) in ('webmarket.k@gmail.com') then
+  if lower(user_email::text) in ('webmarket.k@gmail.com', 'cynthia@webkagency.net') then
     insert into public.bookea_admins (profile_id, label)
     values (new.id, coalesce(user_name, 'Bookea Admin'))
     on conflict (profile_id) do update set
@@ -118,6 +118,7 @@ using (public.is_bookea_admin())
 with check (public.is_bookea_admin());
 
 select public.bootstrap_bookea_admin('webmarket.k@gmail.com', 'Admin Bookea');
+select public.bootstrap_bookea_admin('cynthia@webkagency.net', 'Cynthia');
 
--- Quand vous avez l'email de la collaboratrice, ajoutez puis exécutez :
--- select public.bootstrap_bookea_admin('email-collaboratrice@example.com', 'Collaboratrice Bookea');
+-- Ajoutez d'autres admins avec :
+-- select public.bootstrap_bookea_admin('email@example.com', 'Nom admin');
