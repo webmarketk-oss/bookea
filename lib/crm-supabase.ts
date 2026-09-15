@@ -245,6 +245,14 @@ export async function updateCrmLeadReminder(leadId: string, reminderDate: string
   });
 }
 
+export async function updateCrmLeadNextAction(leadId: string, nextAction: string) {
+  await updateLeadFields(createClient(), leadId, {
+    next_action: nextAction.trim() || "À contacter",
+    updated_at: new Date().toISOString(),
+    last_activity_at: new Date().toISOString(),
+  });
+}
+
 async function getCrmCenterContext(supabase: SupabaseClient): Promise<CrmCenterContext> {
   const { data: member, error: memberError } = await supabase
     .from("center_members")
