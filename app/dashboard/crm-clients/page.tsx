@@ -63,170 +63,6 @@ const defaultProvenanceOptions = [
   "Autre",
 ];
 
-const seedClients: Client[] = [
-  {
-    id: "client-marie",
-    firstName: "Marie",
-    lastName: "Dubois",
-    phone: "06 12 34 56 78",
-    email: "marie@email.com",
-    birthDate: "14/03/1991",
-    gender: "Femme",
-    address: "12 rue Victor Hugo",
-    postalCode: "75015",
-    city: "Paris",
-    mainCare: "Épilation Laser",
-    category: "Institut beauté",
-    source: "Facebook",
-    campaign: "Laser juillet",
-    status: "Cure en cours",
-    commercial: "Samantha",
-    nextAppointment: "29/07/2026 10:30",
-    lastVisit: "25/07/2026",
-    totalSpent: 420,
-    balanceDue: 180,
-    notes: [
-      {
-        id: "note-marie-1",
-        author: "Samantha",
-        date: "Aujourd'hui 09:20",
-        text: "Préférence WhatsApp. À prévenir la veille du RDV.",
-      },
-    ],
-    cares: [
-      {
-        id: "care-marie-1",
-        label: "Cure laser aisselles",
-        date: "25/07/2026",
-        amount: 600,
-        paid: 420,
-        status: "Acompte",
-      },
-    ],
-    documents: [
-      {
-        id: "doc-marie-consentement",
-        label: "Consentement laser",
-        date: "25/07/2026",
-        status: "Signé",
-        type: "Consentement",
-      },
-      {
-        id: "doc-marie-devis",
-        label: "Devis cure laser",
-        date: "25/07/2026",
-        status: "Validé",
-        type: "Devis",
-      },
-    ],
-  },
-  {
-    id: "client-claire",
-    firstName: "Claire",
-    lastName: "Moreau",
-    phone: "06 95 86 13 69",
-    email: "claire@email.com",
-    birthDate: "22/09/1988",
-    gender: "Femme",
-    address: "8 avenue de la Gare",
-    postalCode: "69003",
-    city: "Lyon",
-    mainCare: "Cryolipolyse",
-    category: "Minceur",
-    source: "Google",
-    campaign: "Cryo été",
-    status: "Actif",
-    commercial: "Camille",
-    nextAppointment: "31/07/2026 14:00",
-    lastVisit: "18/07/2026",
-    totalSpent: 980,
-    balanceDue: 0,
-    notes: [
-      {
-        id: "note-claire-1",
-        author: "Seya",
-        date: "Suggestion",
-        text: "Cliente fidèle. Proposer un bilan silhouette dans 3 semaines.",
-      },
-    ],
-    cares: [
-      {
-        id: "care-claire-1",
-        label: "Cure cryolipolyse",
-        date: "18/07/2026",
-        amount: 980,
-        paid: 980,
-        status: "Payé",
-      },
-    ],
-    documents: [
-      {
-        id: "doc-claire-facture",
-        label: "Facture cure cryolipolyse",
-        date: "18/07/2026",
-        status: "Validé",
-        type: "Facture",
-      },
-      {
-        id: "doc-claire-fiche",
-        label: "Fiche suivi silhouette",
-        date: "18/07/2026",
-        status: "Signé",
-        type: "Fiche cure",
-      },
-    ],
-  },
-  {
-    id: "client-laura",
-    firstName: "Laura",
-    lastName: "Petit",
-    phone: "06 73 33 81 66",
-    email: "laura@email.com",
-    birthDate: "05/12/1994",
-    gender: "Femme",
-    address: "4 impasse des Lilas",
-    postalCode: "13008",
-    city: "Marseille",
-    mainCare: "Hydrafacial",
-    category: "Soin du visage",
-    source: "Instagram",
-    campaign: "Hydrafacial",
-    status: "À relancer",
-    commercial: "Thomas",
-    nextAppointment: "Aucun RDV",
-    lastVisit: "08/07/2026",
-    totalSpent: 310,
-    balanceDue: 0,
-    notes: [
-      {
-        id: "note-laura-1",
-        author: "Thomas",
-        date: "24/07/2026",
-        text: "Relancer pour programmer la séance entretien.",
-      },
-    ],
-    cares: [
-      {
-        id: "care-laura-1",
-        label: "Hydrafacial découverte",
-        date: "08/07/2026",
-        amount: 310,
-        paid: 310,
-        status: "Payé",
-      },
-    ],
-    documents: [
-      {
-        id: "doc-laura-fiche",
-        label: "Fiche Hydrafacial",
-        date: "08/07/2026",
-        status: "À envoyer",
-        type: "Fiche cure",
-      },
-    ],
-  },
-];
-
 const emptyClientForm: Omit<Client, "id" | "notes" | "cares" | "documents"> = {
   firstName: "",
   lastName: "",
@@ -257,8 +93,8 @@ const emptyDocumentForm: Omit<ClientDocument, "id"> = {
 };
 
 export default function CRMClientsPage() {
-  const [clientList, setClientList] = useState(seedClients);
-  const [selectedClientId, setSelectedClientId] = useState(seedClients[0]?.id);
+  const [clientList, setClientList] = useState<Client[]>([]);
+  const [selectedClientId, setSelectedClientId] = useState<string | undefined>();
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<"Tous" | ClientStatus>(
     "Tous"
@@ -283,13 +119,13 @@ export default function CRMClientsPage() {
     try {
       const { clients } = await loadCrmClients();
 
-      setClientList(clients.length > 0 ? clients : seedClients);
+      setClientList(clients);
       setSelectedClientId((currentId) => {
         if (currentId && clients.some((client) => client.id === currentId)) {
           return currentId;
         }
 
-        return clients[0]?.id ?? seedClients[0]?.id;
+        return clients[0]?.id;
       });
     } catch (error) {
       setClientError(
@@ -297,8 +133,8 @@ export default function CRMClientsPage() {
           ? error.message
           : "Impossible de charger les clients.",
       );
-      setClientList(seedClients);
-      setSelectedClientId(seedClients[0]?.id);
+      setClientList([]);
+      setSelectedClientId(undefined);
     } finally {
       setIsLoadingClients(false);
     }
