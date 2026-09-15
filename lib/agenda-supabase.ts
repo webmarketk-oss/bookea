@@ -1,4 +1,5 @@
 import { cabins, practitioners } from "@/lib/agenda-data";
+import { getActiveCenterContext } from "@/lib/center-access";
 import { createClient } from "@/lib/supabase";
 import type { Appointment, AppointmentStatus } from "@/types/agenda";
 
@@ -139,37 +140,9 @@ export async function deleteCrmAppointment(appointmentId: string) {
 }
 
 async function getAgendaCenterId(supabase: SupabaseClient) {
-  const { data: member, error: memberError } = await supabase
-    .from("center_members")
-    .select("center_id")
-    .eq("is_active", true)
-    .limit(1)
-    .maybeSingle();
+  const context = await getActiveCenterContext(supabase);
 
-  if (memberError) {
-    throw new Error(memberError.message);
-  }
-
-  if (member?.center_id) {
-    return member.center_id as string;
-  }
-
-  const slug = process.env.NEXT_PUBLIC_DEFAULT_CENTER_SLUG ?? "jfg-clinique-clermont";
-  const { data: center, error: centerError } = await supabase
-    .from("centers")
-    .select("id")
-    .eq("slug", slug)
-    .maybeSingle();
-
-  if (centerError) {
-    throw new Error(centerError.message);
-  }
-
-  if (!center?.id) {
-    throw new Error("Aucun centre agenda accessible pour ce compte.");
-  }
-
-  return center.id as string;
+  return context.centerId;
 }
 
 async function ensureAppointmentLinks(

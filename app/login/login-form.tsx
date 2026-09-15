@@ -16,6 +16,7 @@ export function LoginForm({ initialError }: LoginFormProps) {
   const supabase = createClient();
 
   const [mode, setMode] = useState<AuthMode>("login");
+  const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
@@ -55,6 +56,9 @@ export function LoginForm({ initialError }: LoginFormProps) {
       email,
       password,
       options: {
+        data: {
+          full_name: fullName.trim(),
+        },
         emailRedirectTo: `${window.location.origin}/auth/callback?next=/dashboard`,
       },
     });
@@ -75,7 +79,7 @@ export function LoginForm({ initialError }: LoginFormProps) {
     setFeedback({
       type: "success",
       message:
-        "Compte créé ! Vérifiez votre email pour confirmer votre inscription, puis connectez-vous.",
+        "Compte créé ! Vérifiez votre email pour confirmer votre inscription, puis connectez-vous. Si c'est un compte admin, il sera activé par le script Supabase.",
     });
     setMode("login");
     setPassword("");
@@ -148,6 +152,29 @@ export function LoginForm({ initialError }: LoginFormProps) {
       )}
 
       <form onSubmit={handleEmailAuth} className="space-y-5">
+        {mode === "signup" && (
+          <div>
+            <label
+              htmlFor="full-name"
+              className="mb-2 block text-sm font-medium text-slate-700"
+            >
+              Nom complet
+            </label>
+            <input
+              id="full-name"
+              name="full-name"
+              type="text"
+              autoComplete="name"
+              required
+              value={fullName}
+              onChange={(e) => setFullName(e.target.value)}
+              placeholder="Samantha Kahlac"
+              disabled={loading}
+              className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-slate-900 shadow-sm outline-none transition-colors placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 disabled:opacity-60"
+            />
+          </div>
+        )}
+
         <div>
           <label
             htmlFor="email"

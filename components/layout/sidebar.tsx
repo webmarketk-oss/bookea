@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { usePathname } from "next/navigation";
 import { BookeaLogo } from "@/components/bookea-logo";
+import { CenterSwitcher } from "./center-switcher";
 import NavItem from "./nav-item";
 import NavGroup from "./nav-group";
 
@@ -67,6 +68,8 @@ export default function Sidebar({
           )}
         </button>
       </div>
+
+      <CenterSwitcher collapsed={collapsed} />
 
       <nav className="space-y-2">
         <NavItem
