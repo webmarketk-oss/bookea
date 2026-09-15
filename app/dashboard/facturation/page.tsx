@@ -28,6 +28,14 @@ import {
   mergeCenterSettings,
   readCenterSettings,
 } from "@/lib/center-settings";
+import {
+  createBillingInvoice,
+  deleteBillingInvoice,
+  loadBillingInvoices,
+  registerBillingPayment,
+  updateBillingInvoice,
+  type BillingInvoice,
+} from "@/lib/billing-supabase";
 
 type InvoiceType = "Devis" | "Acompte" | "Facture finale" | "Avoir";
 type InvoiceStatus = "Payée" | "En attente de paiement" | "Envoyée" | "Annulée";
@@ -265,6 +273,9 @@ export default function BillingPage() {
   const [invoices, setInvoices] = useState(initialInvoices);
   const [selectedInvoiceId, setSelectedInvoiceId] = useState(invoices[0].id);
   const [previewInvoiceId, setPreviewInvoiceId] = useState<string | null>(null);
+  const [isLoadingBilling, setIsLoadingBilling] = useState(true);
+  const [billingError, setBillingError] = useState("");
+  const [billingNotice, setBillingNotice] = useState("");
   const [pendingFinalInvoice, setPendingFinalInvoice] = useState<Invoice | null>(
     null,
   );
@@ -305,11 +316,44 @@ export default function BillingPage() {
   });
   const [settingsLoaded, setSettingsLoaded] = useState(false);
 
+  async function refreshInvoices() {
+    setBillingError("");
+
+    try {
+      const loadedInvoices = await loadBillingInvoices();
+      const nextInvoices =
+        loadedInvoices.length > 0 ? (loadedInvoices as Invoice[]) : initialInvoices;
+
+      setInvoices(nextInvoices);
+      setSelectedInvoiceId((currentId) =>
+        nextInvoices.some((invoice) => invoice.id === currentId)
+          ? currentId
+          : nextInvoices[0]?.id ?? "",
+      );
+    } catch (error) {
+      setBillingError(
+        error instanceof Error
+          ? error.message
+          : "Impossible de charger les factures Supabase.",
+      );
+      setInvoices(initialInvoices);
+      setSelectedInvoiceId(initialInvoices[0]?.id ?? "");
+    } finally {
+      setIsLoadingBilling(false);
+    }
+  }
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void refreshInvoices();
+  }, []);
+
   useEffect(() => {
     const settings = readCenterSettings();
     const centerServices = settings?.services ?? defaultCenterServices;
     const centerProducts = settings?.products ?? defaultCenterProducts;
 
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setBillingServices(
       centerServices.map((service, index) => ({
         id: String(service.id),
@@ -448,7 +492,7 @@ export default function BillingPage() {
     return { paid, pending, deposits: deposits.length, credits: credits.length };
   }, [invoices]);
 
-  function createInvoice(type: InvoiceType = draft.type) {
+  async function createInvoice(type: InvoiceType = draft.type) {
     const prefix = type === "Avoir" ? "AVR" : type === "Devis" ? "DEV" : "FAC";
     const nextNumber = `${prefix}-2026-${String(invoices.length + 8).padStart(4, "0")}`;
     const lines = draft.lines
@@ -488,26 +532,43 @@ export default function BillingPage() {
           : "En attente de paiement";
 
     if (type === "Devis" && editingQuoteId) {
+      const updatedInvoice = invoices.find((invoice) => invoice.id === editingQuoteId);
+
+      if (!updatedInvoice) {
+        return;
+      }
+
+      const nextInvoice: Invoice = {
+        ...updatedInvoice,
+        client: draft.client,
+        email: draft.email,
+        care:
+          lines.length === 1
+            ? lines[0].label
+            : `${lines.length} prestations`,
+        total,
+        paid,
+        lines,
+        discountType: draft.discountType,
+        discountValue: draft.discountValue,
+        paymentMethod: draft.paymentMethod,
+        status,
+      };
+
+      try {
+        await updateBillingInvoice(nextInvoice as BillingInvoice);
+      } catch (error) {
+        setBillingError(
+          error instanceof Error
+            ? error.message
+            : "Le devis n'a pas pu être mis à jour.",
+        );
+        return;
+      }
+
       setInvoices((current) =>
         current.map((invoice) =>
-          invoice.id === editingQuoteId
-            ? {
-                ...invoice,
-                client: draft.client,
-                email: draft.email,
-                care:
-                  lines.length === 1
-                    ? lines[0].label
-                    : `${lines.length} prestations`,
-                total,
-                paid,
-                lines,
-                discountType: draft.discountType,
-                discountValue: draft.discountValue,
-                paymentMethod: draft.paymentMethod,
-                status,
-              }
-            : invoice,
+          invoice.id === editingQuoteId ? nextInvoice : invoice,
         ),
       );
       setSelectedInvoiceId(editingQuoteId);
@@ -546,25 +607,52 @@ export default function BillingPage() {
       return;
     }
 
-    setInvoices((current) => [invoice, ...current]);
-    setSelectedInvoiceId(invoice.id);
-    setPreviewInvoiceId(invoice.id);
+    try {
+      const savedInvoice = await createBillingInvoice(invoice as BillingInvoice);
+
+      setInvoices((current) => [savedInvoice as Invoice, ...current]);
+      setSelectedInvoiceId(savedInvoice.id);
+      setPreviewInvoiceId(savedInvoice.id);
+      setBillingNotice("Document enregistré dans Supabase.");
+    } catch (error) {
+      setBillingError(
+        error instanceof Error
+          ? error.message
+          : "Le document n'a pas pu être enregistré.",
+      );
+      return;
+    }
+
     setIsInvoiceDetailOpen(true);
     setEditingQuoteId(null);
     setPaymentAmount(0);
   }
 
-  function validatePendingFinalInvoice() {
+  async function validatePendingFinalInvoice() {
     if (!pendingFinalInvoice) {
       return;
     }
 
-    setInvoices((current) => [pendingFinalInvoice, ...current]);
-    setSelectedInvoiceId(pendingFinalInvoice.id);
-    setPreviewInvoiceId(pendingFinalInvoice.id);
+    let savedInvoice: BillingInvoice;
+
+    try {
+      savedInvoice = await createBillingInvoice(pendingFinalInvoice as BillingInvoice);
+    } catch (error) {
+      setBillingError(
+        error instanceof Error
+          ? error.message
+          : "La facture finale n'a pas pu être enregistrée.",
+      );
+      return;
+    }
+
+    setInvoices((current) => [savedInvoice as Invoice, ...current]);
+    setSelectedInvoiceId(savedInvoice.id);
+    setPreviewInvoiceId(savedInvoice.id);
     setIsInvoiceDetailOpen(true);
     setPendingFinalInvoice(null);
     setPaymentAmount(0);
+    setBillingNotice("Facture finale enregistrée.");
   }
 
   function cancelPendingFinalInvoice() {
@@ -584,12 +672,14 @@ export default function BillingPage() {
     setPreviewInvoiceId(null);
   }
 
-  function deleteQuote(invoiceId: string) {
+  async function deleteQuote(invoiceId: string) {
     if (!window.confirm("Êtes-vous sûr de vouloir supprimer ce devis ?")) {
       return;
     }
 
     const nextInvoice = invoices.find((invoice) => invoice.id !== invoiceId);
+    const previousInvoices = invoices;
+
     setInvoices((current) =>
       current.filter((invoice) => invoice.id !== invoiceId),
     );
@@ -598,9 +688,21 @@ export default function BillingPage() {
     }
     setPreviewInvoiceId(null);
     setEditingQuoteId((current) => (current === invoiceId ? null : current));
+
+    try {
+      await deleteBillingInvoice(invoiceId);
+      setBillingNotice("Devis supprimé.");
+    } catch (error) {
+      setInvoices(previousInvoices);
+      setBillingError(
+        error instanceof Error
+          ? error.message
+          : "Le devis n'a pas pu être supprimé.",
+      );
+    }
   }
 
-  function convertQuoteToFinalInvoice(invoice: Invoice) {
+  async function convertQuoteToFinalInvoice(invoice: Invoice) {
     if (invoice.type !== "Devis") {
       return;
     }
@@ -614,9 +716,22 @@ export default function BillingPage() {
       status: "En attente de paiement",
     };
 
-    setInvoices((current) => [finalInvoice, ...current]);
-    setSelectedInvoiceId(finalInvoice.id);
-    setPreviewInvoiceId(finalInvoice.id);
+    try {
+      const savedInvoice = await createBillingInvoice(finalInvoice as BillingInvoice);
+
+      setInvoices((current) => [savedInvoice as Invoice, ...current]);
+      setSelectedInvoiceId(savedInvoice.id);
+      setPreviewInvoiceId(savedInvoice.id);
+      setBillingNotice("Devis transformé en facture finale.");
+    } catch (error) {
+      setBillingError(
+        error instanceof Error
+          ? error.message
+          : "Le devis n'a pas pu être transformé en facture.",
+      );
+      return;
+    }
+
     setIsInvoiceDetailOpen(true);
     setEditingQuoteId(null);
     setPaymentAmount(0);
@@ -865,7 +980,30 @@ export default function BillingPage() {
     }
   }
 
-  function markAsPaid(invoiceId: string) {
+  async function markAsPaid(invoiceId: string) {
+    const invoiceToPay = invoices.find((invoice) => invoice.id === invoiceId);
+
+    if (!invoiceToPay || invoiceToPay.type === "Devis") {
+      return;
+    }
+
+    const amount = Math.max(invoiceToPay.total - invoiceToPay.paid, 0);
+
+    try {
+      await registerBillingPayment(
+        invoiceToPay as BillingInvoice,
+        amount,
+        invoiceToPay.paymentMethod,
+      );
+    } catch (error) {
+      setBillingError(
+        error instanceof Error
+          ? error.message
+          : "Le paiement n'a pas pu être enregistré.",
+      );
+      return;
+    }
+
     setInvoices((current) =>
       current.map((invoice) =>
         invoice.id === invoiceId && invoice.type !== "Devis"
@@ -873,32 +1011,48 @@ export default function BillingPage() {
           : invoice,
       ),
     );
+    setBillingNotice("Paiement enregistré.");
   }
 
-  function registerPayment(invoiceId: string) {
+  async function registerPayment(invoiceId: string) {
     const amount = Math.max(Number(paymentAmount) || 0, 0);
     if (amount <= 0) {
       return;
     }
 
+    const invoiceToPay = invoices.find((invoice) => invoice.id === invoiceId);
+
+    if (!invoiceToPay || invoiceToPay.type === "Devis") {
+      return;
+    }
+
+    let paidInvoice: BillingInvoice;
+
+    try {
+      paidInvoice = await registerBillingPayment(
+        invoiceToPay as BillingInvoice,
+        amount,
+        invoiceToPay.paymentMethod,
+      );
+    } catch (error) {
+      setBillingError(
+        error instanceof Error
+          ? error.message
+          : "Le règlement n'a pas pu être enregistré.",
+      );
+      return;
+    }
+
     setInvoices((current) =>
-      current.map((invoice) => {
-        if (invoice.id !== invoiceId || invoice.type === "Devis") {
-          return invoice;
-        }
-        const nextPaid = Math.min(invoice.total, invoice.paid + amount);
-        return {
-          ...invoice,
-          paid: nextPaid,
-          status:
-            nextPaid >= invoice.total ? "Payée" : "En attente de paiement",
-        };
-      }),
+      current.map((invoice) =>
+        invoice.id === invoiceId ? (paidInvoice as Invoice) : invoice,
+      ),
     );
     setPaymentAmount(0);
+    setBillingNotice("Règlement enregistré.");
   }
 
-  function registerInvoicePayment(
+  async function registerInvoicePayment(
     invoiceId: string,
     amount: number,
     paymentMethod: Invoice["paymentMethod"],
@@ -906,6 +1060,25 @@ export default function BillingPage() {
     const payment = Math.max(Number(amount) || 0, 0);
     if (payment <= 0) {
       return;
+    }
+
+    const persistedInvoice = invoices.find((invoice) => invoice.id === invoiceId);
+
+    if (persistedInvoice) {
+      try {
+        await registerBillingPayment(
+          persistedInvoice as BillingInvoice,
+          payment,
+          paymentMethod,
+        );
+      } catch (error) {
+        setBillingError(
+          error instanceof Error
+            ? error.message
+            : "Le règlement n'a pas pu être enregistré.",
+        );
+        return;
+      }
     }
 
     const applyPayment = (invoice: Invoice): Invoice => {
@@ -927,6 +1100,7 @@ export default function BillingPage() {
         invoice.id === invoiceId ? applyPayment(invoice) : invoice,
       ),
     );
+    setBillingNotice("Règlement enregistré.");
   }
 
   function downloadInvoice(invoice: Invoice) {
@@ -962,12 +1136,21 @@ export default function BillingPage() {
               Facturation
             </h1>
             <p className="mt-3 max-w-3xl text-xl font-medium text-slate-500">
-              Factures d'acompte, factures finales, avoirs et suivi des
+              Factures d&apos;acompte, factures finales, avoirs et suivi des
               encaissements du centre.
             </p>
           </div>
 
           <div className="flex flex-wrap gap-3">
+            <button
+              type="button"
+              onClick={() => void refreshInvoices()}
+              className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-5 py-3 font-black text-slate-700 shadow-sm"
+              disabled={isLoadingBilling}
+            >
+              <RotateCcw className="h-5 w-5" />
+              Actualiser
+            </button>
             <button
               type="button"
               onClick={() => openInvoiceCreation("Devis")}
@@ -994,6 +1177,24 @@ export default function BillingPage() {
             </button>
           </div>
         </header>
+
+        {billingError && (
+          <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm font-semibold text-amber-800">
+            {billingError}
+          </div>
+        )}
+
+        {billingNotice && !billingError && (
+          <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm font-semibold text-emerald-800">
+            {billingNotice}
+          </div>
+        )}
+
+        {isLoadingBilling && (
+          <div className="rounded-2xl border border-blue-100 bg-blue-50 p-4 text-sm font-bold text-blue-700">
+            Chargement des factures depuis Supabase...
+          </div>
+        )}
 
         <div className="flex flex-wrap gap-3 border-b border-slate-200 pb-1">
           <button
@@ -2130,6 +2331,7 @@ function InvoicePreview({
     useState<Invoice["paymentMethod"]>(invoice.paymentMethod);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setPreviewPaymentAmount(Math.max(invoice.total - invoice.paid, 0));
     setPreviewPaymentMethod(invoice.paymentMethod);
   }, [invoice.id, invoice.paid, invoice.paymentMethod, invoice.total]);
