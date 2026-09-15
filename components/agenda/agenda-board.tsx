@@ -7,6 +7,12 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { appointments, cabins, practitioners } from "@/lib/agenda-data";
 import { agendaContacts } from "@/lib/agenda-data";
+import {
+  createCrmAppointment,
+  deleteCrmAppointment,
+  loadCrmAppointments,
+  updateCrmAppointment,
+} from "@/lib/agenda-supabase";
 import { saveAppointmentStatusOverride } from "@/lib/appointment-crm-sync";
 import {
   mergePublicBookingsIntoAppointments,
@@ -32,6 +38,7 @@ import {
   Grip,
   Minus,
   Plus,
+  RefreshCcw,
   Sparkles,
   Trash2,
   Users,
@@ -236,6 +243,9 @@ export default function AgendaBoard() {
   const rdvPrefill = getRdvPrefill(searchParams);
   const [appointmentList, setAppointmentList] = useState(appointments);
   const [cabinList, setCabinList] = useState(cabins);
+  const [isLoadingAgenda, setIsLoadingAgenda] = useState(true);
+  const [agendaError, setAgendaError] = useState("");
+  const [agendaNotice, setAgendaNotice] = useState("");
   const [activeTab, setActiveTab] = useState<AgendaTab>("agenda");
   const [agendaView, setAgendaView] = useState<AgendaView>("day");
   const [teamSchedules, setTeamSchedules] = useState(defaultTeamSchedules);
@@ -268,6 +278,32 @@ export default function AgendaBoard() {
   const [contactSearch, setContactSearch] = useState(
     rdvPrefill?.personName ?? ""
   );
+
+  async function refreshAgenda() {
+    setAgendaError("");
+
+    try {
+      const loadedAppointments = await loadCrmAppointments();
+
+      setAppointmentList(
+        loadedAppointments.length > 0
+          ? mergePublicBookingsIntoAppointments(
+              loadedAppointments,
+              readPublicBookings(),
+            )
+          : appointments,
+      );
+    } catch (error) {
+      setAgendaError(
+        error instanceof Error
+          ? error.message
+          : "Impossible de charger l'agenda Supabase.",
+      );
+      setAppointmentList(appointments);
+    } finally {
+      setIsLoadingAgenda(false);
+    }
+  }
   const selectedDayHours =
     centerDayHours.find((day) => day.weekday === getWeekdayFromIso(selectedDate)) ??
     defaultCenterDayHours[0];
@@ -297,7 +333,8 @@ export default function AgendaBoard() {
       );
     }
 
-    syncPublicBookings();
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void refreshAgenda();
     window.addEventListener(PUBLIC_BOOKINGS_UPDATED_EVENT, syncPublicBookings);
     window.addEventListener("storage", syncPublicBookings);
 
@@ -511,8 +548,9 @@ export default function AgendaBoard() {
     setIsModalOpen(true);
   }
 
-  function addAppointment(event: React.FormEvent<HTMLFormElement>) {
+  async function addAppointment(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    setAgendaError("");
 
     const appointment: Appointment = {
       id: crypto.randomUUID(),
@@ -531,16 +569,30 @@ export default function AgendaBoard() {
       notes: appointmentForm.notes.trim() || undefined,
     };
 
-    setAppointmentList((currentAppointments) => [
-      ...currentAppointments,
-      appointment,
-    ]);
-    setSelectedDate(appointment.date);
-    setIsModalOpen(false);
+    try {
+      const savedAppointment = await createCrmAppointment(appointment);
+
+      setAppointmentList((currentAppointments) => [
+        ...currentAppointments,
+        savedAppointment,
+      ]);
+      setSelectedDate(savedAppointment.date);
+      setAgendaNotice("RDV enregistré dans Supabase.");
+      setIsModalOpen(false);
+    } catch (error) {
+      setAgendaError(
+        error instanceof Error
+          ? error.message
+          : "Le RDV n'a pas pu être enregistré.",
+      );
+    }
   }
 
   function moveAppointment(appointmentId: string, cabinId: string, start: string) {
     const cabinTreatment = getCabinTreatment(cabinList, cabinId);
+    const appointmentBeforeMove = appointmentList.find(
+      (appointment) => appointment.id === appointmentId,
+    );
 
     setAppointmentList((currentAppointments) =>
       currentAppointments.map((appointment) =>
@@ -558,6 +610,30 @@ export default function AgendaBoard() {
           : appointment
       )
     );
+
+    if (!appointmentBeforeMove) {
+      return;
+    }
+
+    const updatedAppointment: Appointment = {
+      ...appointmentBeforeMove,
+      cabinId,
+      date: selectedDate,
+      start,
+      treatment:
+        appointmentBeforeMove.kind && appointmentBeforeMove.kind !== "Rendez-vous"
+          ? appointmentBeforeMove.treatment
+          : cabinTreatment,
+    };
+
+    updateCrmAppointment(updatedAppointment).catch((error) => {
+      setAgendaError(
+        error instanceof Error
+          ? error.message
+          : "Le déplacement du RDV n'a pas pu être sauvegardé.",
+      );
+      void refreshAgenda();
+    });
   }
 
   function startMoveAppointment(appointmentId: string) {
@@ -567,7 +643,7 @@ export default function AgendaBoard() {
     );
   }
 
-  function deleteAppointment(appointmentId: string) {
+  async function deleteAppointment(appointmentId: string) {
     const confirmed = window.confirm(
       "Êtes-vous sûr de vouloir supprimer le RDV ?"
     );
@@ -576,6 +652,7 @@ export default function AgendaBoard() {
       return;
     }
 
+    const previousAppointments = appointmentList;
     setAppointmentList((currentAppointments) =>
       currentAppointments.filter((appointment) => appointment.id !== appointmentId)
     );
@@ -583,9 +660,22 @@ export default function AgendaBoard() {
     if (selectedAppointmentId === appointmentId) {
       setSelectedAppointmentId(null);
     }
+
+    try {
+      await deleteCrmAppointment(appointmentId);
+      setAgendaNotice("RDV supprimé.");
+    } catch (error) {
+      setAppointmentList(previousAppointments);
+      setAgendaError(
+        error instanceof Error
+          ? error.message
+          : "Le RDV n'a pas pu être supprimé.",
+      );
+    }
   }
 
-  function updateAppointment(updatedAppointment: Appointment) {
+  async function updateAppointment(updatedAppointment: Appointment) {
+    const previousAppointments = appointmentList;
     setAppointmentList((currentAppointments) =>
       currentAppointments.map((appointment) =>
         appointment.id === updatedAppointment.id ? updatedAppointment : appointment
@@ -593,6 +683,18 @@ export default function AgendaBoard() {
     );
     saveAppointmentStatusOverride(updatedAppointment);
     setSelectedDate(updatedAppointment.date);
+
+    try {
+      await updateCrmAppointment(updatedAppointment);
+      setAgendaNotice("RDV mis à jour.");
+    } catch (error) {
+      setAppointmentList(previousAppointments);
+      setAgendaError(
+        error instanceof Error
+          ? error.message
+          : "Le RDV n'a pas pu être mis à jour.",
+      );
+    }
   }
 
   function updateAppointmentStatus(
@@ -600,6 +702,7 @@ export default function AgendaBoard() {
     status: AppointmentStatus
   ) {
     const updatedAppointment = { ...appointment, status };
+    const previousAppointments = appointmentList;
 
     setAppointmentList((currentAppointments) =>
       currentAppointments.map((currentAppointment) =>
@@ -609,6 +712,15 @@ export default function AgendaBoard() {
       )
     );
     saveAppointmentStatusOverride(updatedAppointment);
+
+    updateCrmAppointment(updatedAppointment).catch((error) => {
+      setAppointmentList(previousAppointments);
+      setAgendaError(
+        error instanceof Error
+          ? error.message
+          : "Le statut du RDV n'a pas pu être sauvegardé.",
+      );
+    });
   }
 
   const contactMatches =
@@ -755,7 +867,7 @@ export default function AgendaBoard() {
             </p>
           </div>
 
-            <div className="flex flex-wrap items-center gap-3">
+          <div className="flex flex-wrap items-center gap-3">
             <div className="flex h-11 items-center rounded-xl border border-slate-200 bg-white p-1">
               <button
                 type="button"
@@ -816,12 +928,40 @@ export default function AgendaBoard() {
               ))}
             </select>
 
+            <Button
+              variant="outline"
+              className="h-11 bg-white"
+              onClick={() => void refreshAgenda()}
+              disabled={isLoadingAgenda}
+            >
+              <RefreshCcw className="mr-2 h-4 w-4" />
+              Actualiser
+            </Button>
+
             <Button className="h-11 bg-slate-950" onClick={openAppointmentModal}>
               <Plus className="mr-2 h-4 w-4" />
               Nouveau RDV
             </Button>
           </div>
         </header>
+
+        {agendaError && (
+          <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm font-semibold text-amber-800">
+            {agendaError}
+          </div>
+        )}
+
+        {agendaNotice && !agendaError && (
+          <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm font-semibold text-emerald-800">
+            {agendaNotice}
+          </div>
+        )}
+
+        {isLoadingAgenda && (
+          <div className="rounded-2xl border border-blue-100 bg-blue-50 p-4 text-sm font-bold text-blue-700">
+            Chargement de l&apos;agenda depuis Supabase...
+          </div>
+        )}
 
         <div className="flex flex-wrap items-center gap-2 border-b border-slate-200">
           <AgendaTabButton
@@ -2825,7 +2965,7 @@ function AppointmentDetailsModal({
               Modifier le rendez-vous
             </h2>
             <p className="mt-1 text-sm font-semibold text-slate-500">
-              Changez la date, l'heure, la cabine, la durée, le statut ou le
+              Changez la date, l&apos;heure, la cabine, la durée, le statut ou le
               commentaire.
             </p>
           </div>
@@ -3055,15 +3195,6 @@ function AppointmentDetailsModal({
           <Button type="submit">Enregistrer</Button>
         </div>
       </form>
-    </div>
-  );
-}
-
-function InfoBox({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-xl bg-slate-50 p-3">
-      <p className="text-xs font-black uppercase text-slate-400">{label}</p>
-      <p className="mt-1 font-semibold text-slate-800">{value}</p>
     </div>
   );
 }
