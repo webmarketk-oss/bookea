@@ -77,7 +77,7 @@ function extractLeadgenChanges(body) {
 async function importMetaLead(supabase, change) {
   const lead = await fetchMetaLead(change.leadgenId);
   const mapped = mapMetaLead(lead, change);
-  const centerId = await resolveCenterId(supabase, change.formId);
+  const centerId = await resolveCenterId(supabase, change);
   const [sourceId, campaignId, serviceId] = await Promise.all([
     ensureLeadSource(supabase, centerId, "Facebook"),
     ensureCampaign(supabase, centerId, mapped.campaign),
@@ -167,13 +167,13 @@ function mapMetaLead(lead, change) {
   };
 }
 
-async function resolveCenterId(supabase, formId) {
-  if (formId) {
+async function resolveCenterId(supabase, change) {
+  if (change.formId) {
     try {
       const { data, error } = await supabase
         .from("facebook_lead_forms")
         .select("center_id")
-        .eq("form_id", formId)
+        .eq("form_id", change.formId)
         .eq("is_active", true)
         .maybeSingle();
 
@@ -182,6 +182,24 @@ async function resolveCenterId(supabase, formId) {
       }
     } catch {
       // The mapping table is optional for the first setup. Fallback below keeps Meta import usable.
+    }
+  }
+
+  if (change.pageId) {
+    try {
+      const { data, error } = await supabase
+        .from("facebook_lead_forms")
+        .select("center_id")
+        .eq("page_id", change.pageId)
+        .eq("is_active", true)
+        .limit(1)
+        .maybeSingle();
+
+      if (!error && data?.center_id) {
+        return data.center_id;
+      }
+    } catch {
+      // Same optional mapping fallback as above.
     }
   }
 
