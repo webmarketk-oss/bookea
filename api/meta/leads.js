@@ -32,8 +32,9 @@ function verifyWebhook(req, res) {
   const mode = req.query["hub.mode"];
   const token = req.query["hub.verify_token"];
   const challenge = req.query["hub.challenge"];
+  const expectedToken = process.env.META_VERIFY_TOKEN || "bookea-meta-leads-2026";
 
-  if (mode === "subscribe" && token === process.env.META_VERIFY_TOKEN) {
+  if (mode === "subscribe" && token === expectedToken) {
     return res.status(200).send(challenge);
   }
 
