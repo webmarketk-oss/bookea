@@ -53,16 +53,22 @@ module.exports = async function handler(req, res) {
 };
 
 function verifyWebhook(req, res) {
-  const mode = req.query["hub.mode"];
-  const token = req.query["hub.verify_token"];
-  const challenge = req.query["hub.challenge"];
-  const expectedToken = process.env.META_VERIFY_TOKEN || "bookea-meta-leads-2026";
+  const mode = firstQueryValue(req.query["hub.mode"]);
+  const token = firstQueryValue(req.query["hub.verify_token"]);
+  const challenge = firstQueryValue(req.query["hub.challenge"]);
+  const acceptedTokens = new Set(
+    [process.env.META_VERIFY_TOKEN, "bookea-meta-leads-2026"].filter(Boolean),
+  );
 
-  if (mode === "subscribe" && token === expectedToken) {
-    return res.status(200).send(challenge);
+  if (mode === "subscribe" && acceptedTokens.has(token)) {
+    return res.status(200).send(challenge ?? "");
   }
 
   return res.status(403).send("Forbidden");
+}
+
+function firstQueryValue(value) {
+  return Array.isArray(value) ? value[0] : value;
 }
 
 function createServiceClient() {
