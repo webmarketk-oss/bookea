@@ -4,6 +4,7 @@ import {
   AlertTriangle,
   Building2,
   CheckCircle2,
+  ExternalLink,
   Loader2,
   Mail,
   MapPin,
@@ -477,6 +478,11 @@ function CenterCard({
   onAttachOwner: (email: string) => void;
 }) {
   const [ownerEmail, setOwnerEmail] = useState("");
+  const [facebookPageId, setFacebookPageId] = useState("");
+  const facebookConnectUrl =
+    center.slug && facebookPageId.trim()
+      ? `/api/meta/connect?center_slug=${encodeURIComponent(center.slug)}&page_id=${encodeURIComponent(facebookPageId.trim())}`
+      : "";
 
   function submitOwner(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -571,6 +577,38 @@ function CenterCard({
               Le compte doit déjà avoir été créé sur la page connexion.
             </p>
           </form>
+
+          <div className="mt-5 border-t border-slate-200 pt-4">
+            <label className="block text-sm font-black text-slate-500">
+              Connecter les leads Facebook
+            </label>
+            <div className="mt-2 flex flex-col gap-2 sm:flex-row">
+              <input
+                type="text"
+                value={facebookPageId}
+                onChange={(event) => setFacebookPageId(event.target.value.replace(/\D/g, ""))}
+                placeholder="ID de page Meta"
+                inputMode="numeric"
+                className="h-12 min-w-0 flex-1 rounded-xl border border-slate-200 bg-white px-3 font-bold text-slate-950 outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-100"
+              />
+              <a
+                href={facebookConnectUrl || undefined}
+                aria-disabled={!facebookConnectUrl}
+                className={`inline-flex h-12 items-center justify-center gap-2 rounded-xl px-4 font-black text-white transition ${
+                  facebookConnectUrl
+                    ? "bg-blue-600 hover:bg-blue-700"
+                    : "pointer-events-none bg-slate-300"
+                }`}
+              >
+                <ExternalLink className="h-4 w-4" />
+                Connecter
+              </a>
+            </div>
+            <p className="mt-2 text-xs font-semibold text-slate-400">
+              Exemple GAP : collez l&apos;ID de la Page, puis connectez-vous avec
+              le compte Meta admin de cette page.
+            </p>
+          </div>
         </div>
       </div>
     </article>

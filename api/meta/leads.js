@@ -105,7 +105,8 @@ function extractLeadgenChanges(body) {
 }
 
 async function importMetaLead(supabase, change) {
-  const lead = await fetchMetaLead(change.leadgenId);
+  const token = await resolveMetaPageAccessToken(supabase, change.pageId);
+  const lead = await fetchMetaLead(change.leadgenId, token);
   const mapped = mapMetaLead(lead, change);
   const centerId = await resolveCenterId(supabase, change);
   const [sourceId, campaignId, serviceId] = await Promise.all([
@@ -149,17 +150,38 @@ async function importMetaLead(supabase, change) {
   });
 }
 
-async function fetchMetaLead(leadgenId) {
-  const token = process.env.META_PAGE_ACCESS_TOKEN;
+async function resolveMetaPageAccessToken(supabase, pageId) {
+  if (pageId) {
+    try {
+      const { data, error } = await supabase
+        .from("facebook_page_connections")
+        .select("page_access_token")
+        .eq("page_id", pageId)
+        .eq("is_active", true)
+        .maybeSingle();
 
-  if (!token) {
-    throw new Error("Missing META_PAGE_ACCESS_TOKEN");
+      if (!error && data?.page_access_token) {
+        return data.page_access_token;
+      }
+    } catch {
+      // The OAuth connection table is optional during setup. Fallback below keeps older installs working.
+    }
+  }
+
+  return process.env.META_PAGE_ACCESS_TOKEN;
+}
+
+async function fetchMetaLead(leadgenId, token) {
+  const accessToken = token;
+
+  if (!accessToken) {
+    throw new Error("Missing Meta page access token");
   }
 
   const fields = "created_time,ad_id,ad_name,adset_id,adset_name,campaign_id,campaign_name,form_id,field_data";
   const url = new URL(`https://graph.facebook.com/${GRAPH_VERSION}/${leadgenId}`);
   url.searchParams.set("fields", fields);
-  url.searchParams.set("access_token", token);
+  url.searchParams.set("access_token", accessToken);
 
   const response = await fetch(url);
   const data = await response.json();

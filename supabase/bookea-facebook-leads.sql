@@ -20,7 +20,22 @@ create index if not exists idx_facebook_lead_forms_page
   on public.facebook_lead_forms(page_id)
   where page_id is not null;
 
+create table if not exists public.facebook_page_connections (
+  id uuid primary key default gen_random_uuid(),
+  center_id uuid not null references public.centers(id) on delete cascade,
+  page_id text not null unique,
+  page_name text not null,
+  page_access_token text not null,
+  is_active boolean not null default true,
+  connected_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists idx_facebook_page_connections_center
+  on public.facebook_page_connections(center_id);
+
 alter table public.facebook_lead_forms enable row level security;
+alter table public.facebook_page_connections enable row level security;
 
 drop policy if exists "Facebook lead forms are readable by center members"
   on public.facebook_lead_forms;
@@ -36,6 +51,28 @@ drop policy if exists "Facebook lead forms are manageable by admins"
 
 create policy "Facebook lead forms are manageable by admins"
   on public.facebook_lead_forms
+  for all
+  to authenticated
+  using (public.is_bookea_admin())
+  with check (public.is_bookea_admin());
+
+drop policy if exists "Facebook page connections are readable by center members"
+  on public.facebook_page_connections;
+
+drop policy if exists "Facebook page connections are readable by admins"
+  on public.facebook_page_connections;
+
+create policy "Facebook page connections are readable by admins"
+  on public.facebook_page_connections
+  for select
+  to authenticated
+  using (public.is_bookea_admin());
+
+drop policy if exists "Facebook page connections are manageable by admins"
+  on public.facebook_page_connections;
+
+create policy "Facebook page connections are manageable by admins"
+  on public.facebook_page_connections
   for all
   to authenticated
   using (public.is_bookea_admin())
