@@ -16,12 +16,27 @@ module.exports = async function handler(req, res) {
   try {
     const supabase = createServiceClient();
     const changes = extractLeadgenChanges(req.body);
+    const errors = [];
+    let imported = 0;
 
     for (const change of changes) {
-      await importMetaLead(supabase, change);
+      try {
+        await importMetaLead(supabase, change);
+        imported += 1;
+      } catch (error) {
+        errors.push({
+          leadgenId: change.leadgenId,
+          message: error instanceof Error ? error.message : "Import failed",
+        });
+        console.error("[meta/leads] import failed", error);
+      }
     }
 
-    return res.status(200).json({ received: true, imported: changes.length });
+    return res.status(200).json({
+      received: true,
+      imported,
+      failed: errors.length,
+    });
   } catch (error) {
     console.error("[meta/leads]", error);
     return res.status(500).json({ error: "Unable to import Meta lead" });
