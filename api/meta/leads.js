@@ -14,8 +14,17 @@ module.exports = async function handler(req, res) {
   }
 
   try {
-    const supabase = createServiceClient();
     const changes = extractLeadgenChanges(req.body);
+
+    if (changes.length === 0) {
+      return res.status(200).json({
+        received: true,
+        imported: 0,
+        failed: 0,
+      });
+    }
+
+    const supabase = createServiceClient();
     const errors = [];
     let imported = 0;
 
