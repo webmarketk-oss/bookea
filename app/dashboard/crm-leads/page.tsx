@@ -43,7 +43,7 @@ const emptyLeadForm = {
   email: "",
   treatment: "",
   source: "Facebook" as Lead["source"],
-  campaign: "Laser juillet",
+  campaign: "",
   commercial: "Samantha",
   status: "Nouveau" as LeadStatus,
   dealAmount: 0,
@@ -848,17 +848,15 @@ export default function CRMLeadsPage() {
               </FormField>
 
               <FormField label="Campagne">
-                <Select
+                <Input
                   value={newLeadForm.campaign}
-                  onChange={(value) =>
-                    setNewLeadForm((form) => ({ ...form, campaign: value }))
+                  placeholder="Nom de la campagne"
+                  onChange={(event) =>
+                    setNewLeadForm((form) => ({
+                      ...form,
+                      campaign: event.target.value,
+                    }))
                   }
-                  options={[
-                    "Laser juillet",
-                    "Cryo été",
-                    "HIFU Lift",
-                    "Hydrafacial",
-                  ]}
                 />
               </FormField>
 
