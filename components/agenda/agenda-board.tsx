@@ -1298,7 +1298,7 @@ export default function AgendaBoard() {
 
         {agendaView === "day" ? (
         <section className="min-w-0">
-          <Card className="overflow-hidden border-slate-200 py-0 shadow-sm">
+          <Card className="relative z-0 overflow-hidden border-slate-200 py-0 shadow-sm">
             <CardContent className="relative min-w-0 p-0">
               <div className="absolute right-3 top-3 z-30 flex items-center gap-2 rounded-xl bg-white/95 p-1 shadow-sm ring-1 ring-slate-200">
                 <button
@@ -1336,8 +1336,7 @@ export default function AgendaBoard() {
               </div>
               <div
                 ref={boardScrollRef}
-                className="overflow-x-auto overscroll-x-contain"
-                style={{ WebkitOverflowScrolling: "touch" }}
+                className="isolate overflow-x-auto overscroll-x-contain"
               >
                 <div
                   className="min-w-full"
@@ -1666,21 +1665,19 @@ export default function AgendaBoard() {
         </div>
       )}
 
-      {isModalOpen &&
+        {isModalOpen &&
         portalTarget &&
         createPortal(
-        <div
-          className="fixed inset-0 z-[200] flex items-center justify-center bg-slate-950/40 p-6 backdrop-blur-sm"
-          onMouseDown={(event) => {
-            if (event.target === event.currentTarget) {
-              setIsModalOpen(false);
-            }
-          }}
-        >
+        <div className="fixed inset-0 z-[200]">
+          <div
+            className="absolute inset-0 z-0 bg-slate-950/40"
+            onMouseDown={() => setIsModalOpen(false)}
+          />
+          <div className="pointer-events-none relative z-10 flex h-full items-center justify-center overflow-y-auto p-6">
           <form
             onSubmit={addAppointment}
             onMouseDown={(event) => event.stopPropagation()}
-            className="relative z-[201] max-h-[92vh] w-full max-w-2xl overflow-y-auto rounded-2xl bg-white p-6 shadow-2xl"
+            className="pointer-events-auto relative max-h-[92vh] w-full max-w-2xl overflow-y-auto rounded-2xl bg-white p-6 shadow-2xl"
           >
             <div className="mb-6 flex items-start justify-between gap-4">
               <div>
@@ -2006,6 +2003,7 @@ export default function AgendaBoard() {
               <Button type="submit">Créer le RDV</Button>
             </div>
           </form>
+          </div>
         </div>,
         portalTarget,
       )}
@@ -3183,18 +3181,16 @@ function AppointmentDetailsModal({
   }
 
   return (
-    <div
-      className="fixed inset-0 z-[200] flex items-center justify-center bg-slate-950/40 p-6 backdrop-blur-sm"
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget) {
-          onClose();
-        }
-      }}
-    >
+    <div className="fixed inset-0 z-[200]">
+      <div
+        className="absolute inset-0 z-0 bg-slate-950/40"
+        onMouseDown={onClose}
+      />
+      <div className="pointer-events-none relative z-10 flex h-full items-center justify-center overflow-y-auto p-6">
       <form
         onSubmit={saveAppointment}
         onMouseDown={(event) => event.stopPropagation()}
-        className="relative z-[201] max-h-[92vh] w-full max-w-3xl overflow-y-auto rounded-2xl bg-white p-6 shadow-2xl"
+        className="pointer-events-auto relative max-h-[92vh] w-full max-w-3xl overflow-y-auto rounded-2xl bg-white p-6 shadow-2xl"
       >
         <div className="mb-5 flex items-start justify-between gap-4">
           <div>
@@ -3432,6 +3428,7 @@ function AppointmentDetailsModal({
           <Button type="submit">Enregistrer</Button>
         </div>
       </form>
+      </div>
     </div>
   );
 }
@@ -3452,10 +3449,10 @@ function Field({
   children: React.ReactNode;
 }) {
   return (
-    <label className="space-y-1.5">
+    <div className="space-y-1.5">
       <span className="text-sm font-semibold text-slate-700">{label}</span>
       {children}
-    </label>
+    </div>
   );
 }
 
