@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -300,6 +301,10 @@ export default function AgendaBoard() {
   const [contactSearch, setContactSearch] = useState(
     rdvPrefill?.personName ?? ""
   );
+  const [pickedContact, setPickedContact] = useState<CrmAgendaContact | null>(
+    null
+  );
+  const [portalTarget, setPortalTarget] = useState<HTMLElement | null>(null);
 
   async function refreshAgenda() {
     setAgendaError("");
@@ -344,6 +349,10 @@ export default function AgendaBoard() {
     );
   }, [centerEndTime, centerStartTime, isSelectedDayClosed]);
   const dailyInfo = dailyInfoByDate[selectedDate] ?? "";
+
+  useEffect(() => {
+    setPortalTarget(document.body);
+  }, []);
 
   useEffect(() => {
     function syncPublicBookings() {
@@ -577,6 +586,7 @@ export default function AgendaBoard() {
   function openAppointmentModal() {
     setAppointmentForm({ ...emptyAppointment, date: selectedDate });
     setContactSearch("");
+    setPickedContact(null);
     setSendSmsNow(false);
     setSendSms48h(false);
     setIsModalOpen(true);
@@ -817,13 +827,14 @@ export default function AgendaBoard() {
   }
 
   const contactMatches =
-    contactSearch.trim().length >= 2
+    !pickedContact && contactSearch.trim().length >= 2
       ? agendaContacts
           .filter((contact) => matchesAgendaContact(contact, contactSearch))
           .slice(0, 8)
       : [];
 
   function selectContact(contact: (typeof agendaContacts)[number]) {
+    setPickedContact(contact);
     setContactSearch(contact.name);
     setAppointmentForm((form) => ({
       ...form,
@@ -1460,6 +1471,7 @@ export default function AgendaBoard() {
                                   ),
                                 });
                                 setContactSearch("");
+                                setPickedContact(null);
                                 setIsModalOpen(true);
                               }}
                               className="flex h-full min-h-12 w-full items-center justify-center rounded-lg border border-dashed border-slate-200 text-[11px] font-semibold text-slate-300 transition-colors [touch-action:pan-x_pan-y] hover:border-blue-200 hover:bg-blue-50 hover:text-blue-600"
@@ -1654,15 +1666,21 @@ export default function AgendaBoard() {
         </div>
       )}
 
-      {isModalOpen && (
+      {isModalOpen &&
+        portalTarget &&
+        createPortal(
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-6 backdrop-blur-sm"
-          onClick={() => setIsModalOpen(false)}
+          className="fixed inset-0 z-[200] flex items-center justify-center bg-slate-950/40 p-6 backdrop-blur-sm"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) {
+              setIsModalOpen(false);
+            }
+          }}
         >
           <form
             onSubmit={addAppointment}
-            onClick={(event) => event.stopPropagation()}
-            className="max-h-[92vh] w-full max-w-2xl overflow-y-auto rounded-2xl bg-white p-6 shadow-2xl"
+            onMouseDown={(event) => event.stopPropagation()}
+            className="relative z-[201] max-h-[92vh] w-full max-w-2xl overflow-y-auto rounded-2xl bg-white p-6 shadow-2xl"
           >
             <div className="mb-6 flex items-start justify-between gap-4">
               <div>
@@ -1677,6 +1695,12 @@ export default function AgendaBoard() {
               <Bot className="h-6 w-6 text-violet-600" />
             </div>
 
+            {agendaError ? (
+              <p className="mb-4 rounded-xl border border-red-100 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">
+                {agendaError}
+              </p>
+            ) : null}
+
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="relative sm:col-span-2">
                 <Field label="Rechercher prospect ou client">
@@ -1685,6 +1709,7 @@ export default function AgendaBoard() {
                     value={contactSearch}
                     onChange={(event) => {
                       const value = event.target.value;
+                      setPickedContact(null);
                       setContactSearch(value);
                       setAppointmentForm((form) => ({
                         ...form,
@@ -1694,8 +1719,24 @@ export default function AgendaBoard() {
                   />
                 </Field>
 
+                {pickedContact ? (
+                  <div className="mt-3 flex items-center justify-between gap-4 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                    <div>
+                      <p className="font-bold text-slate-900">
+                        {pickedContact.name}
+                      </p>
+                      <p className="text-sm text-slate-500">
+                        {pickedContact.phone} · {pickedContact.email}
+                      </p>
+                    </div>
+                    <span className="rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-slate-600">
+                      {pickedContact.type}
+                    </span>
+                  </div>
+                ) : null}
+
                 {contactMatches.length > 0 && (
-                  <div className="absolute z-20 mt-2 w-full overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl">
+                  <div className="absolute z-30 mt-2 max-h-64 w-full overflow-y-auto rounded-xl border border-slate-200 bg-white shadow-xl">
                     {contactMatches.map((contact) => (
                       <button
                         key={contact.id}
@@ -1965,19 +2006,23 @@ export default function AgendaBoard() {
               <Button type="submit">Créer le RDV</Button>
             </div>
           </form>
-        </div>
+        </div>,
+        portalTarget,
       )}
 
-      {selectedAppointment && (
-        <AppointmentDetailsModal
-          appointment={selectedAppointment}
-          agendaSlots={agendaSlots}
-          cabinList={cabinList}
-          onClose={() => setSelectedAppointmentId(null)}
-          onDelete={() => deleteAppointment(selectedAppointment.id)}
-          onSave={updateAppointment}
-        />
-      )}
+      {selectedAppointment &&
+        portalTarget &&
+        createPortal(
+          <AppointmentDetailsModal
+            appointment={selectedAppointment}
+            agendaSlots={agendaSlots}
+            cabinList={cabinList}
+            onClose={() => setSelectedAppointmentId(null)}
+            onDelete={() => deleteAppointment(selectedAppointment.id)}
+            onSave={updateAppointment}
+          />,
+          portalTarget,
+        )}
     </main>
   );
 }
@@ -3139,13 +3184,17 @@ function AppointmentDetailsModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-6 backdrop-blur-sm"
-      onClick={onClose}
+      className="fixed inset-0 z-[200] flex items-center justify-center bg-slate-950/40 p-6 backdrop-blur-sm"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) {
+          onClose();
+        }
+      }}
     >
       <form
         onSubmit={saveAppointment}
-        onClick={(event) => event.stopPropagation()}
-        className="max-h-[92vh] w-full max-w-3xl overflow-y-auto rounded-2xl bg-white p-6 shadow-2xl"
+        onMouseDown={(event) => event.stopPropagation()}
+        className="relative z-[201] max-h-[92vh] w-full max-w-3xl overflow-y-auto rounded-2xl bg-white p-6 shadow-2xl"
       >
         <div className="mb-5 flex items-start justify-between gap-4">
           <div>
