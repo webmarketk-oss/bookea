@@ -28,7 +28,7 @@ type AppointmentRow = {
   }>;
   services: Relation<{ name: string | null }>;
   rooms: Relation<{ name: string | null }>;
-  practitioners: Relation<{ name: string | null }>;
+  practitioners: Relation<{ first_name: string | null; last_name: string | null }>;
 };
 
 type Relation<T> = T | T[] | null;
@@ -66,7 +66,7 @@ export async function loadCrmAppointments() {
         clients(first_name,last_name,phone,email),
         services(name),
         rooms(name),
-        practitioners(name)
+        practitioners(first_name,last_name)
       `,
     )
     .eq("center_id", centerId)
@@ -104,7 +104,7 @@ export async function createCrmAppointment(appointment: Appointment) {
         clients(first_name,last_name,phone,email),
         services(name),
         rooms(name),
-        practitioners(name)
+        practitioners(first_name,last_name)
       `,
     )
     .single();
@@ -453,19 +453,31 @@ async function ensurePractitioner(
 ) {
   const practitioner = practitioners.find((item) => item.id === practitionerId);
   const name = practitioner?.name ?? "Praticienne";
-  const { data: existing, error: existingError } = await supabase
+  const names = splitPersonName(name);
+  const { data: existingRows, error: existingError } = await supabase
     .from("practitioners")
-    .select("id")
-    .eq("center_id", centerId)
-    .eq("name", name)
-    .maybeSingle();
+    .select("id, first_name, last_name")
+    .eq("center_id", centerId);
 
   if (existingError) throw new Error(existingError.message);
+
+  const existing = (existingRows ?? []).find(
+    (row) =>
+      practitionerDisplayName(row) === name ||
+      (normalizeName(row.first_name) === normalizeName(names.first_name) &&
+        normalizeName(row.last_name) === normalizeName(names.last_name)),
+  );
+
   if (existing?.id) return existing.id as string;
 
   const { data, error } = await supabase
     .from("practitioners")
-    .insert({ center_id: centerId, name, role: practitioner?.role ?? null, is_active: true })
+    .insert({
+      center_id: centerId,
+      first_name: names.first_name,
+      last_name: names.last_name,
+      is_active: true,
+    })
     .select("id")
     .single();
 
@@ -510,7 +522,7 @@ function toAppointment(row: AppointmentRow): Appointment {
     phone: client?.phone ?? "",
     email: client?.email ?? undefined,
     treatment: service?.name ?? "Soin à préciser",
-    practitionerId: getPractitionerIdByName(practitioner?.name),
+    practitionerId: getPractitionerIdByName(practitionerDisplayName(practitioner)),
     cabinId: getCabinIdByName(room?.name),
     date: row.appointment_date,
     start: row.starts_at.slice(0, 5),
@@ -561,6 +573,25 @@ function getPractitionerIdByName(name?: string | null) {
     practitioners[0]?.id ??
     "samantha"
   );
+}
+
+function practitionerDisplayName(
+  row?: { first_name?: string | null; last_name?: string | null } | null,
+) {
+  return [row?.first_name, row?.last_name].filter(Boolean).join(" ") || null;
+}
+
+function splitPersonName(name: string) {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+
+  return {
+    first_name: parts[0] || "Praticienne",
+    last_name: parts.slice(1).join(" ") || null,
+  };
+}
+
+function normalizeName(value?: string | null) {
+  return (value ?? "").trim().toLowerCase();
 }
 
 function getCabinIdByName(name?: string | null) {

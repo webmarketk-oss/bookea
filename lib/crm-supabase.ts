@@ -143,7 +143,7 @@ type ClientRow = {
         duration_minutes: number;
         status: string;
         services: Relation<{ name: string | null }>;
-        practitioners: Relation<{ name: string | null }>;
+        practitioners: Relation<{ first_name: string | null; last_name: string | null }>;
         rooms: Relation<{ name: string | null }>;
       }>
     | null;
@@ -548,7 +548,7 @@ export async function loadCrmClients() {
           duration_minutes,
           status,
           services(name),
-          practitioners(name),
+          practitioners(first_name,last_name),
           rooms(name)
         ),
         invoices(id,type,status,total_ttc,paid_amount,balance_due,issued_on),
@@ -672,7 +672,7 @@ export async function createCrmClient(input: CrmClientInput) {
         lead_sources(name),
         campaigns(name),
         leads(id,status,amount_cure_ttc,created_at,services(name)),
-        appointments(id,appointment_date,starts_at,duration_minutes,status,services(name),practitioners(name),rooms(name)),
+        appointments(id,appointment_date,starts_at,duration_minutes,status,services(name),practitioners(first_name,last_name),rooms(name)),
         invoices(id,type,status,total_ttc,paid_amount,balance_due,issued_on),
         documents(id,folder_name,name,status,file_type,created_at)
       `,
