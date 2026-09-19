@@ -1,5 +1,6 @@
 import { cabins, practitioners } from "@/lib/agenda-data";
 import { getActiveCenterContext } from "@/lib/center-access";
+import { normalizeLeadStatus } from "@/lib/lead-statuses";
 import { createClient } from "@/lib/supabase";
 import type { Appointment, AppointmentStatus } from "@/types/agenda";
 
@@ -35,6 +36,7 @@ type Relation<T> = T | T[] | null;
 type AppointmentLinks = {
   centerId: string;
   clientId: string;
+  leadId: string | null;
   serviceId: string | null;
   roomId: string | null;
   practitionerId: string | null;
@@ -156,11 +158,78 @@ async function ensureAppointmentLinks(
     ensureRoom(supabase, centerId, appointment.cabinId),
     ensurePractitioner(supabase, centerId, appointment.practitionerId),
   ]);
+  const leadId = await linkAppointmentLead(
+    supabase,
+    centerId,
+    clientId,
+    appointment,
+  );
 
-  return { centerId, clientId, serviceId, roomId, practitionerId };
+  return { centerId, clientId, leadId, serviceId, roomId, practitionerId };
 }
 
 async function ensureAppointmentClient(
+  supabase: SupabaseClient,
+  centerId: string,
+  appointment: Appointment,
+) {
+  const existingId = await findAppointmentClientId(
+    supabase,
+    centerId,
+    appointment,
+  );
+
+  if (existingId) {
+    if (isBookableAppointment(appointment)) {
+      const [firstName, ...lastNameParts] = appointment.personName
+        .trim()
+        .split(/\s+/);
+      const { data, error } = await supabase
+        .from("clients")
+        .update({
+          first_name: firstName || "Cliente",
+          last_name: lastNameParts.join(" ") || "Bookea",
+          email: appointment.email?.trim() || null,
+          phone: appointment.phone.trim() || null,
+          status: "in_care",
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", existingId)
+        .select("id")
+        .maybeSingle();
+
+      if (error) throw new Error(error.message);
+      if (!data?.id) {
+        throw new Error("La fiche client n'a pas pu être mise à jour.");
+      }
+    }
+
+    return existingId;
+  }
+
+  const [firstName, ...lastNameParts] = appointment.personName.trim().split(/\s+/);
+  const { data, error } = await supabase
+    .from("clients")
+    .insert({
+      center_id: centerId,
+      first_name: firstName || "Cliente",
+      last_name: lastNameParts.join(" ") || "Bookea",
+      email: appointment.email?.trim() || null,
+      phone: appointment.phone.trim() || null,
+      status: isBookableAppointment(appointment) ? "in_care" : "to_recall",
+      private_note: isBookableAppointment(appointment)
+        ? `Converti depuis un rendez-vous agenda le ${new Date().toLocaleDateString("fr-FR")}.`
+        : null,
+    })
+    .select("id")
+    .single();
+
+  if (error) throw new Error(error.message);
+
+  return data.id as string;
+}
+
+async function findAppointmentClientId(
   supabase: SupabaseClient,
   centerId: string,
   appointment: Appointment,
@@ -172,44 +241,147 @@ async function ensureAppointmentClient(
       .from("clients")
       .select("id")
       .eq("center_id", centerId)
+      .is("merged_into_client_id", null)
       .ilike("email", email)
+      .limit(1)
       .maybeSingle();
 
     if (error) throw new Error(error.message);
     if (data?.id) return data.id as string;
   }
 
-  const phone = appointment.phone.trim();
+  const phoneKey = lastPhoneDigits(appointment.phone);
 
-  if (phone) {
-    const { data, error } = await supabase
-      .from("clients")
-      .select("id")
-      .eq("center_id", centerId)
-      .eq("phone", phone)
-      .maybeSingle();
-
-    if (error) throw new Error(error.message);
-    if (data?.id) return data.id as string;
+  if (!phoneKey) {
+    return null;
   }
 
-  const [firstName, ...lastNameParts] = appointment.personName.trim().split(/\s+/);
   const { data, error } = await supabase
     .from("clients")
-    .insert({
-      center_id: centerId,
-      first_name: firstName || "Cliente",
-      last_name: lastNameParts.join(" ") || "Bookea",
-      email: email || null,
-      phone: phone || null,
-      status: appointment.source === "Client" ? "active" : "to_recall",
-    })
-    .select("id")
-    .single();
+    .select("id,phone")
+    .eq("center_id", centerId)
+    .is("merged_into_client_id", null)
+    .order("created_at", { ascending: false })
+    .limit(400);
 
   if (error) throw new Error(error.message);
 
-  return data.id as string;
+  return (
+    (data ?? []).find(
+      (row) => lastPhoneDigits(String(row.phone || "")) === phoneKey,
+    )?.id ?? null
+  );
+}
+
+async function linkAppointmentLead(
+  supabase: SupabaseClient,
+  centerId: string,
+  clientId: string,
+  appointment: Appointment,
+) {
+  if (!isBookableAppointment(appointment)) {
+    return null;
+  }
+
+  const lead = await findAppointmentLead(supabase, centerId, clientId, appointment);
+
+  if (!lead) {
+    return null;
+  }
+
+  const currentStatus = normalizeLeadStatus(lead.status);
+  const nextStatus = shouldMarkLeadAsBooked(currentStatus)
+    ? "RDV pris"
+    : currentStatus;
+
+  const { error } = await supabase
+    .from("leads")
+    .update({
+      client_id: clientId,
+      status: nextStatus,
+      next_action: `RDV ${appointment.date} ${appointment.start}`,
+      updated_at: new Date().toISOString(),
+      last_activity_at: new Date().toISOString(),
+    })
+    .eq("id", lead.id);
+
+  if (error) throw new Error(error.message);
+
+  await supabase.from("lead_events").insert({
+    center_id: centerId,
+    lead_id: lead.id,
+    event_type: "status",
+    from_value: lead.status,
+    to_value: nextStatus,
+    note: `RDV posé dans l'agenda : ${lead.status} → ${nextStatus}.`,
+  });
+
+  return lead.id as string;
+}
+
+async function findAppointmentLead(
+  supabase: SupabaseClient,
+  centerId: string,
+  clientId: string,
+  appointment: Appointment,
+) {
+  const { data: byClient, error: byClientError } = await supabase
+    .from("leads")
+    .select("id,status")
+    .eq("center_id", centerId)
+    .eq("client_id", clientId)
+    .order("last_activity_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (byClientError) throw new Error(byClientError.message);
+  if (byClient?.id) return byClient;
+
+  const email = appointment.email?.trim();
+  const phoneKey = lastPhoneDigits(appointment.phone);
+
+  const { data: leads, error } = await supabase
+    .from("leads")
+    .select("id,status,client_id,clients(email,phone)")
+    .eq("center_id", centerId)
+    .order("last_activity_at", { ascending: false })
+    .limit(400);
+
+  if (error) throw new Error(error.message);
+
+  return (
+    (leads ?? []).find((row) => {
+      const client = Array.isArray(row.clients) ? row.clients[0] : row.clients;
+      const leadEmail = String(client?.email || "").trim().toLowerCase();
+      const leadPhone = lastPhoneDigits(String(client?.phone || ""));
+
+      return (
+        (email && leadEmail === email.toLowerCase()) ||
+        (phoneKey && leadPhone === phoneKey)
+      );
+    }) ?? null
+  );
+}
+
+function isBookableAppointment(appointment: Appointment) {
+  return !appointment.kind || appointment.kind === "Rendez-vous";
+}
+
+function shouldMarkLeadAsBooked(status: string) {
+  return ![
+    "RDV pris",
+    "RDV confirmé",
+    "Acompte envoyé",
+    "Acompte reçu",
+    "Acompte en attente",
+    "Devis",
+    "Vendu",
+    "Client converti",
+  ].includes(status);
+}
+
+function lastPhoneDigits(value: string) {
+  return value.replace(/[^\d]/g, "").slice(-9);
 }
 
 async function ensureAppointmentService(
@@ -309,6 +481,7 @@ function toAppointmentFields(
   return {
     center_id: links.centerId,
     client_id: links.clientId,
+    lead_id: links.leadId,
     service_id: links.serviceId,
     room_id: links.roomId,
     practitioner_id: links.practitionerId,

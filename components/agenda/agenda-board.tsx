@@ -6,13 +6,16 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { appointments, cabins, practitioners } from "@/lib/agenda-data";
-import { agendaContacts } from "@/lib/agenda-data";
 import {
   createCrmAppointment,
   deleteCrmAppointment,
   loadCrmAppointments,
   updateCrmAppointment,
 } from "@/lib/agenda-supabase";
+import {
+  loadCrmAgendaContacts,
+  type CrmAgendaContact,
+} from "@/lib/crm-supabase";
 import { saveAppointmentStatusOverride } from "@/lib/appointment-crm-sync";
 import {
   cancelAppointmentSmsJobs,
@@ -277,6 +280,7 @@ export default function AgendaBoard() {
   );
   const [isHoursModalOpen, setIsHoursModalOpen] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(Boolean(rdvPrefill));
+  const [agendaContacts, setAgendaContacts] = useState<CrmAgendaContact[]>([]);
   const [selectedAppointmentId, setSelectedAppointmentId] = useState<
     string | null
   >(null);
@@ -367,6 +371,9 @@ export default function AgendaBoard() {
       .then((result) => setSmsSettings(result.settings))
       .catch(() => null);
     void fetch("/api/sms/dispatch").catch(() => null);
+    void loadCrmAgendaContacts()
+      .then(setAgendaContacts)
+      .catch(() => setAgendaContacts([]));
   }, []);
 
   const visibleAppointments = useMemo(
@@ -570,6 +577,9 @@ export default function AgendaBoard() {
     setSendSmsNow(false);
     setSendSms48h(false);
     setIsModalOpen(true);
+    void loadCrmAgendaContacts()
+      .then(setAgendaContacts)
+      .catch(() => null);
   }
 
   async function addAppointment(event: React.FormEvent<HTMLFormElement>) {
@@ -647,6 +657,9 @@ export default function AgendaBoard() {
       setSendSmsNow(false);
       setSendSms48h(false);
       setIsModalOpen(false);
+      void loadCrmAgendaContacts()
+        .then(setAgendaContacts)
+        .catch(() => null);
     } catch (error) {
       setAgendaError(
         error instanceof Error
@@ -803,16 +816,8 @@ export default function AgendaBoard() {
   const contactMatches =
     contactSearch.trim().length >= 2
       ? agendaContacts
-          .filter((contact) => {
-            const query = normalize(contactSearch);
-
-            return (
-              normalize(contact.name).includes(query) ||
-              normalize(contact.phone).includes(query) ||
-              normalize(contact.email).includes(query)
-            );
-          })
-          .slice(0, 5)
+          .filter((contact) => matchesAgendaContact(contact, contactSearch))
+          .slice(0, 8)
       : [];
 
   function selectContact(contact: (typeof agendaContacts)[number]) {
@@ -1410,6 +1415,7 @@ export default function AgendaBoard() {
                                     cabin.id
                                   ),
                                 });
+                                setContactSearch("");
                                 setIsModalOpen(true);
                               }}
                               className="flex h-full min-h-12 w-full items-center justify-center rounded-lg border border-dashed border-slate-200 text-[11px] font-semibold text-slate-300 transition-colors hover:border-blue-200 hover:bg-blue-50 hover:text-blue-600"
@@ -2375,6 +2381,24 @@ function normalize(value: string) {
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/\s/g, "");
+}
+
+function matchesAgendaContact(contact: CrmAgendaContact, query: string) {
+  const normalizedQuery = normalize(query);
+  const queryDigits = query.replace(/[^\d]/g, "");
+  const name = normalize(contact.name);
+  const [firstName = "", ...lastNameParts] = contact.name.trim().split(/\s+/);
+  const lastName = lastNameParts.join(" ");
+
+  return (
+    name.includes(normalizedQuery) ||
+    normalize(firstName).startsWith(normalizedQuery) ||
+    normalize(lastName).startsWith(normalizedQuery) ||
+    normalize(contact.email).includes(normalizedQuery) ||
+    normalize(contact.phone).includes(normalizedQuery) ||
+    (queryDigits.length >= 2 &&
+      contact.phone.replace(/[^\d]/g, "").includes(queryDigits))
+  );
 }
 
 function addTeamAbsence(

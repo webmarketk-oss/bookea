@@ -571,6 +571,75 @@ export async function loadCrmClients() {
   };
 }
 
+export type CrmAgendaContact = {
+  id: string;
+  name: string;
+  phone: string;
+  email: string;
+  treatment: string;
+  type: "Prospect" | "Client";
+};
+
+export async function loadCrmAgendaContacts(): Promise<CrmAgendaContact[]> {
+  const supabase = createClient();
+  const context = await getCrmCenterContext(supabase);
+  const [{ leads }, clientsResult] = await Promise.all([
+    loadCrmLeads(),
+    supabase
+      .from("clients")
+      .select("id,first_name,last_name,phone,email,status")
+      .eq("center_id", context.centerId)
+      .is("merged_into_client_id", null),
+  ]);
+
+  if (clientsResult.error) {
+    throw new Error(clientsResult.error.message);
+  }
+
+  const contacts: CrmAgendaContact[] = [];
+  const seenPhones = new Set<string>();
+  const seenEmails = new Set<string>();
+
+  for (const lead of leads) {
+    const phoneKey = lastPhoneDigits(lead.phone);
+    const emailKey = lead.email.trim().toLowerCase();
+
+    contacts.push({
+      id: `lead:${lead.id}`,
+      name: `${lead.firstName} ${lead.lastName}`.trim(),
+      phone: lead.phone,
+      email: lead.email,
+      treatment: lead.treatment,
+      type: ["Vendu", "Client converti", "Client"].includes(lead.status)
+        ? "Client"
+        : "Prospect",
+    });
+
+    if (phoneKey) seenPhones.add(phoneKey);
+    if (emailKey) seenEmails.add(emailKey);
+  }
+
+  for (const client of clientsResult.data ?? []) {
+    const phoneKey = lastPhoneDigits(String(client.phone || ""));
+    const emailKey = String(client.email || "").trim().toLowerCase();
+
+    if ((phoneKey && seenPhones.has(phoneKey)) || (emailKey && seenEmails.has(emailKey))) {
+      continue;
+    }
+
+    contacts.push({
+      id: `client:${client.id}`,
+      name: `${client.first_name || ""} ${client.last_name || ""}`.trim(),
+      phone: client.phone || "",
+      email: client.email || "",
+      treatment: "",
+      type: client.status === "prospect" ? "Prospect" : "Client",
+    });
+  }
+
+  return contacts;
+}
+
 export async function createCrmClient(input: CrmClientInput) {
   const supabase = createClient();
   const context = await getCrmCenterContext(supabase);
