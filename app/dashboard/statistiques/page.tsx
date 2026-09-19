@@ -183,11 +183,35 @@ export default function StatisticsPage() {
           <MetricCard title="Leads CRM" value={leadCount} detail="Prospects ajoutés ou reçus" icon={<Users />} color="text-blue-600" />
           <MetricCard title="RDV via leads" value={rdvLeads} detail="Leads passés en RDV" icon={<CalendarClock />} color="text-violet-600" />
           <MetricCard title="Organique Bookea" value={organicBookings} detail="Réservations directes" icon={<MousePointerClick />} color="text-cyan-600" />
-          <MetricCard title="Conversion leads" value={`${conversionRate}%`} detail="Leads devenus clients" icon={<TrendingUp />} color="text-emerald-600" />
-          <MetricCard title="Présentiel" value={`${attendanceRate}%`} detail="RDV honorés" icon={<CheckCircle2 />} color="text-green-600" />
-          <MetricCard title="No-show / rouge" value={`${noShowRate}%`} detail="À réduire" icon={<XCircle />} color="text-red-600" />
+          <MetricCard
+            title="Conversion leads"
+            value={`${conversionRate}%`}
+            detail="Leads devenus clients"
+            icon={<TrendingUp />}
+            tone={rateTone(conversionRate)}
+          />
+          <MetricCard
+            title="Présentiel"
+            value={`${attendanceRate}%`}
+            detail="RDV honorés"
+            icon={<CheckCircle2 />}
+            tone={rateTone(attendanceRate)}
+          />
+          <MetricCard
+            title="No-show / rouge"
+            value={`${noShowRate}%`}
+            detail="À réduire"
+            icon={<XCircle />}
+            tone={rateTone(noShowRate, true)}
+          />
           <MetricCard title="CA leads" value={formatCurrency(revenue)} detail="Depuis CRM + factures" icon={<Euro />} color="text-emerald-600" />
-          <MetricCard title="Remplissage" value={`${fillRate}%`} detail="Planning jour" icon={<BarChart3 />} color="text-cyan-600" />
+          <MetricCard
+            title="Remplissage"
+            value={`${fillRate}%`}
+            detail="Planning jour"
+            icon={<BarChart3 />}
+            tone={rateTone(fillRate)}
+          />
           <MetricCard title="Activité Seya" value={128} detail="Actions IA suivies" icon={<Sparkles />} color="text-violet-600" />
         </section>
 
@@ -215,14 +239,16 @@ export default function StatisticsPage() {
                         <Badge tone={service.trend.startsWith("+") ? "green" : "red"}>
                           {service.trend}
                         </Badge>
-                        <Badge tone="blue">{honoredRate}% honoré</Badge>
-                        <Badge tone={missedRate > 15 ? "red" : "orange"}>
+                        <Badge tone={rateTone(honoredRate)}>
+                          {honoredRate}% honoré
+                        </Badge>
+                        <Badge tone={rateTone(missedRate, true)}>
                           {missedRate}% non honoré
                         </Badge>
                       </div>
                     </div>
                     <div className="mt-4 grid gap-2 md:grid-cols-[1fr_100px] md:items-center">
-                      <Progress value={honoredRate} color="bg-emerald-500" />
+                      <Progress value={honoredRate} color={toneBarClass[rateTone(honoredRate)]} />
                       <p className="text-right text-sm font-black text-slate-600">
                         {service.honored}/{service.reservations}
                       </p>
@@ -303,6 +329,7 @@ export default function StatisticsPage() {
                 sub: `${formatCurrency(row.revenue)} CA · ${row.sold} converti${row.sold > 1 ? "s" : ""} · ${row.conversion}% conversion`,
                 percent: row.percent,
                 progressLabel: `${row.percent}% des leads`,
+                valueTone: rateTone(row.conversion),
               }))}
             />
           </Panel>
@@ -319,6 +346,7 @@ export default function StatisticsPage() {
                 sub: `${formatCurrency(row.revenue)} CA · ${row.sold} converti${row.sold > 1 ? "s" : ""} · ${row.conversion}% conversion`,
                 percent: row.percent,
                 progressLabel: `${row.percent}% des leads`,
+                tone: rateTone(row.conversion),
               }))}
             />
           </Panel>
@@ -385,22 +413,28 @@ function MetricCard({
   detail,
   icon,
   color,
+  tone,
 }: {
   title: string;
   value: string | number;
   detail: string;
   icon: ReactNode;
-  color: string;
+  color?: string;
+  tone?: RateTone;
 }) {
+  const textColor = tone ? toneTextClass[tone] : color;
+  const cardClass = tone ? toneCardClass[tone] : "border-slate-200 bg-white";
+  const iconWrapClass = tone ? toneIconWrapClass[tone] : "bg-slate-50";
+
   return (
-    <div className="rounded-[26px] border border-slate-200 bg-white p-5 shadow-sm">
+    <div className={`rounded-[26px] border p-5 shadow-sm ${cardClass}`}>
       <div className="flex items-start justify-between gap-3">
         <p className="text-sm font-black text-slate-500">{title}</p>
-        <div className={`grid h-11 w-11 place-items-center rounded-2xl bg-slate-50 ${color}`}>
+        <div className={`grid h-11 w-11 place-items-center rounded-2xl ${iconWrapClass} ${textColor}`}>
           {icon}
         </div>
       </div>
-      <p className={`mt-5 text-4xl font-black ${color}`}>{value}</p>
+      <p className={`mt-5 text-4xl font-black ${textColor}`}>{value}</p>
       <p className="mt-2 text-sm font-bold text-slate-500">{detail}</p>
     </div>
   );
@@ -469,6 +503,7 @@ function RankList({
     sub: string;
     percent: number;
     progressLabel?: string;
+    tone?: RateTone;
   }[];
 }) {
   return (
@@ -478,11 +513,16 @@ function RankList({
           <div className="mb-2 flex items-start justify-between gap-3">
             <div>
               <p className="font-black text-slate-950">{row.label}</p>
-              <p className="text-sm font-semibold text-slate-500">{row.sub}</p>
+              <p className={`text-sm font-semibold ${row.tone ? toneTextClass[row.tone] : "text-slate-500"}`}>
+                {row.sub}
+              </p>
             </div>
             <p className="font-black text-slate-700">{row.value}</p>
           </div>
-          <Progress value={row.percent} color="bg-gradient-to-r from-violet-500 to-cyan-400" />
+          <Progress
+            value={row.percent}
+            color="bg-gradient-to-r from-violet-500 to-cyan-400"
+          />
           {row.progressLabel ? (
             <p className="mt-1 text-xs font-black uppercase tracking-wide text-slate-400">
               {row.progressLabel}
@@ -555,6 +595,44 @@ function ratio(value: number, total: number) {
   if (!total) return 0;
   return Math.round((value / total) * 100);
 }
+
+type RateTone = "green" | "orange" | "red";
+
+function rateTone(percent: number, inverted = false): RateTone {
+  if (inverted) {
+    if (percent > 50) return "red";
+    if (percent >= 35) return "orange";
+    return "green";
+  }
+
+  if (percent > 50) return "green";
+  if (percent >= 35) return "orange";
+  return "red";
+}
+
+const toneTextClass: Record<RateTone, string> = {
+  green: "text-emerald-600",
+  orange: "text-orange-500",
+  red: "text-red-600",
+};
+
+const toneBarClass: Record<RateTone, string> = {
+  green: "bg-emerald-500",
+  orange: "bg-orange-500",
+  red: "bg-red-500",
+};
+
+const toneCardClass: Record<RateTone, string> = {
+  green: "border-emerald-200 bg-emerald-50",
+  orange: "border-orange-200 bg-orange-50",
+  red: "border-red-200 bg-red-50",
+};
+
+const toneIconWrapClass: Record<RateTone, string> = {
+  green: "bg-emerald-100",
+  orange: "bg-orange-100",
+  red: "bg-red-100",
+};
 
 function formatCurrency(value: number) {
   return new Intl.NumberFormat("fr-FR", {
