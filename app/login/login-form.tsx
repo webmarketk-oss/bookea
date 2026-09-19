@@ -86,6 +86,41 @@ export function LoginForm({ initialError }: LoginFormProps) {
     setLoading(false);
   }
 
+  async function handleForgotPassword() {
+    if (!email.trim()) {
+      setFeedback({
+        type: "error",
+        message:
+          "Saisissez votre email pour recevoir le lien de réinitialisation.",
+      });
+      return;
+    }
+
+    setLoading(true);
+    setFeedback(null);
+
+    const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
+      redirectTo: `${window.location.origin}/auth/callback?next=/auth/reset-password`,
+    });
+
+    setLoading(false);
+
+    if (error) {
+      setFeedback({
+        type: "error",
+        message:
+          "Impossible d'envoyer l'email de réinitialisation. Vérifiez l'adresse et réessayez.",
+      });
+      return;
+    }
+
+    setFeedback({
+      type: "success",
+      message:
+        "Si un compte existe avec cet email, un lien de réinitialisation vient d'être envoyé. Pensez à vérifier les spams.",
+    });
+  }
+
   async function handleGoogleSignIn() {
     setLoading(true);
     setFeedback(null);
@@ -205,12 +240,14 @@ export function LoginForm({ initialError }: LoginFormProps) {
               Mot de passe
             </label>
             {mode === "login" && (
-              <a
-                href="#"
-                className="text-sm font-medium text-blue-600 hover:text-blue-700"
+              <button
+                type="button"
+                onClick={() => void handleForgotPassword()}
+                disabled={loading}
+                className="text-sm font-medium text-blue-600 hover:text-blue-700 disabled:opacity-60"
               >
                 Mot de passe oublié ?
-              </a>
+              </button>
             )}
           </div>
           <input
