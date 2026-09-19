@@ -53,23 +53,18 @@ module.exports = async function handler(req, res) {
       });
     }
 
-    const existingId = await findRecentDuplicate(supabase, center.id, mapped.phone);
-
-    if (existingId) {
-      return res.status(200).json({
-        ok: true,
-        duplicate: true,
-        id: existingId,
-        center: center.slug,
-        center_name: center.name,
-      });
-    }
-
-    const leadId = await importPostedLead(supabase, center.id, mapped);
+    const existingId = await findExistingLeadByPhone(
+      supabase,
+      center.id,
+      mapped.phone,
+    );
+    const leadId = await importPostedLead(supabase, center.id, mapped, {
+      possibleDuplicate: Boolean(existingId),
+    });
 
     return res.status(200).json({
       ok: true,
-      duplicate: false,
+      duplicate: Boolean(existingId),
       id: leadId,
       center: center.slug,
       center_name: center.name,
@@ -130,7 +125,7 @@ function mapIncomingLead(payload) {
   };
 }
 
-async function importPostedLead(supabase, centerId, mapped) {
+async function importPostedLead(supabase, centerId, mapped, options = {}) {
   const [sourceId, campaignId, serviceId] = await Promise.all([
     ensureLeadSource(supabase, centerId, "Facebook"),
     ensureCampaign(supabase, centerId, mapped.campaign),
@@ -176,7 +171,9 @@ async function importPostedLead(supabase, centerId, mapped) {
     center_id: centerId,
     lead_id: crmLead.id,
     event_type: "system",
-    note: buildLeadNote(mapped),
+    note: options.possibleDuplicate
+      ? `${buildLeadNote(mapped)} Possible doublon : un prospect avec le même téléphone existe déjà.`
+      : buildLeadNote(mapped),
   });
 
   return crmLead.id;
@@ -196,29 +193,29 @@ async function findCenter(supabase, slug) {
   return data;
 }
 
-async function findRecentDuplicate(supabase, centerId, phone) {
-  const normalizedPhone = String(phone || "").replace(/[^\d+]/g, "");
+async function findExistingLeadByPhone(supabase, centerId, phone) {
+  const last9 = String(phone || "").replace(/[^\d]/g, "").slice(-9);
 
-  if (!normalizedPhone) {
+  if (!last9) {
     return null;
   }
 
-  const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
   const { data, error } = await supabase
     .from("clients")
-    .select("id")
+    .select("id,phone")
     .eq("center_id", centerId)
-    .eq("phone", normalizedPhone)
-    .gte("created_at", since)
     .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
+    .limit(400);
 
   if (error) {
     throw new Error(error.message);
   }
 
-  if (!data?.id) {
+  const client = (data ?? []).find(
+    (row) => String(row.phone || "").replace(/[^\d]/g, "").slice(-9) === last9,
+  );
+
+  if (!client?.id) {
     return null;
   }
 
@@ -226,8 +223,7 @@ async function findRecentDuplicate(supabase, centerId, phone) {
     .from("leads")
     .select("id")
     .eq("center_id", centerId)
-    .eq("client_id", data.id)
-    .gte("created_at", since)
+    .eq("client_id", client.id)
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();

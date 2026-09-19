@@ -536,7 +536,7 @@ export default function CRMLeadsPage() {
 
   return (
     <main className="min-h-screen bg-slate-100" data-sidebar-collapse-area="true">
-      <div className="w-full space-y-8 px-4 py-6 lg:px-0 lg:py-2">
+      <div className="w-full space-y-6 px-2 py-4 lg:px-2 lg:py-3">
         <CRMHeader onNewLead={openNewLeadModal} />
 
         <section className="rounded-2xl border border-blue-100 bg-white p-4 shadow-sm">
@@ -683,7 +683,7 @@ export default function CRMLeadsPage() {
               id="crm-leads-results"
               className={
                 isLeadDetailsOpen
-                  ? "grid grid-cols-[minmax(0,1fr)_20rem] gap-4"
+                  ? "grid grid-cols-[minmax(0,1fr)_18rem] gap-3"
                   : ""
               }
             >

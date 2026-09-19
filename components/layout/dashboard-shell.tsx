@@ -53,7 +53,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
       </div>
 
       <main
-        className="min-w-0 flex-1 p-0 lg:p-6"
+        className="min-w-0 flex-1 p-0 lg:py-3 lg:pr-3 lg:pl-0"
         onClick={collapseSidebarFromContent}
       >
         {children}
