@@ -565,7 +565,9 @@ export async function loadCrmClients() {
 
   return {
     center: context,
-    clients: ((data ?? []) as unknown as ClientRow[]).map(toCrmClient),
+    clients: ((data ?? []) as unknown as ClientRow[])
+      .filter(isVisibleCrmClientRow)
+      .map(toCrmClient),
   };
 }
 
@@ -783,7 +785,12 @@ async function ensureClientForConvertedLead(
       source_id: currentLead.source_id,
       campaign_id: currentLead.campaign_id,
       status: "in_care",
-      private_note: `Converti depuis le prospect le ${formatActivityDateForStorage()}.`,
+      private_note: [
+        `Converti depuis le prospect le ${formatActivityDateForStorage()}.`,
+        lead.treatment ? `Soin : ${lead.treatment}.` : "",
+      ]
+        .filter(Boolean)
+        .join(" "),
       updated_at: new Date().toISOString(),
     })
     .select("id")
@@ -813,6 +820,7 @@ async function findExistingClientId(
       .from("clients")
       .select("id")
       .eq("center_id", centerId)
+      .is("merged_into_client_id", null)
       .ilike("email", email)
       .maybeSingle();
 
@@ -825,24 +833,29 @@ async function findExistingClientId(
     }
   }
 
-  const phone = lead.phone.trim();
+  const phoneKey = lastPhoneDigits(lead.phone);
 
-  if (!phone) {
+  if (!phoneKey) {
     return null;
   }
 
   const { data, error } = await supabase
     .from("clients")
-    .select("id")
+    .select("id,phone")
     .eq("center_id", centerId)
-    .eq("phone", phone)
-    .maybeSingle();
+    .is("merged_into_client_id", null)
+    .order("created_at", { ascending: false })
+    .limit(400);
 
   if (error) {
     throw new Error(error.message);
   }
 
-  return (data?.id as string | undefined) ?? null;
+  return (
+    (data ?? []).find(
+      (row) => lastPhoneDigits(String(row.phone || "")) === phoneKey,
+    )?.id ?? null
+  );
 }
 
 async function updateConvertedClient(
@@ -851,7 +864,7 @@ async function updateConvertedClient(
   lead: Lead,
   links: { sourceId: string | null; campaignId: string | null },
 ) {
-  const { error } = await supabase
+  const { data, error } = await supabase
     .from("clients")
     .update({
       first_name: lead.firstName.trim() || "Cliente",
@@ -863,10 +876,16 @@ async function updateConvertedClient(
       status: "in_care",
       updated_at: new Date().toISOString(),
     })
-    .eq("id", clientId);
+    .eq("id", clientId)
+    .select("id")
+    .maybeSingle();
 
   if (error) {
     throw new Error(error.message);
+  }
+
+  if (!data?.id) {
+    throw new Error("La fiche client n'a pas pu être mise à jour.");
   }
 }
 
@@ -1064,6 +1083,28 @@ function toLead(row: LeadRow): Lead {
     reminderDate: row.recall_date ?? undefined,
     activityLog,
   };
+}
+
+function isVisibleCrmClientRow(row: ClientRow) {
+  const status = (row.status || "").trim().toLowerCase();
+
+  if (status && status !== "prospect") {
+    return true;
+  }
+
+  const leads = row.leads ?? [];
+
+  if (leads.length === 0) {
+    return true;
+  }
+
+  return leads.some((lead) =>
+    ["Vendu", "Client converti", "Client"].includes(lead.status ?? ""),
+  );
+}
+
+function lastPhoneDigits(value: string) {
+  return value.replace(/[^\d]/g, "").slice(-9);
 }
 
 function toCrmClient(row: ClientRow): CrmClient {
