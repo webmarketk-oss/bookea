@@ -1609,9 +1609,13 @@ export default function AgendaBoard() {
       )}
 
       {isModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-6 backdrop-blur-sm">
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-6 backdrop-blur-sm"
+          onClick={() => setIsModalOpen(false)}
+        >
           <form
             onSubmit={addAppointment}
+            onClick={(event) => event.stopPropagation()}
             className="max-h-[92vh] w-full max-w-2xl overflow-y-auto rounded-2xl bg-white p-6 shadow-2xl"
           >
             <div className="mb-6 flex items-start justify-between gap-4">
@@ -3088,9 +3092,13 @@ function AppointmentDetailsModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-6 backdrop-blur-sm">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-6 backdrop-blur-sm"
+      onClick={onClose}
+    >
       <form
         onSubmit={saveAppointment}
+        onClick={(event) => event.stopPropagation()}
         className="max-h-[92vh] w-full max-w-3xl overflow-y-auto rounded-2xl bg-white p-6 shadow-2xl"
       >
         <div className="mb-5 flex items-start justify-between gap-4">
