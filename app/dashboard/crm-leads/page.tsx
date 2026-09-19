@@ -342,7 +342,7 @@ export default function CRMLeadsPage() {
 
     try {
       await addCrmLeadActivity(leadId, text);
-      setCrmNotice("Commentaire enregistré.");
+      setCrmNotice(text.startsWith("SMS envoyé") ? "SMS envoyé." : "Commentaire enregistré.");
       await refreshCrmLeads();
     } catch (error) {
       setCrmError(

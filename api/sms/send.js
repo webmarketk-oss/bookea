@@ -1,3 +1,10 @@
+const {
+  defaultSender,
+  normalizePhone,
+  personalize,
+  sendBrevoSms,
+} = require("./brevo");
+
 function firstValue(value) {
   return Array.isArray(value) ? value[0] : value;
 }
@@ -19,63 +26,6 @@ function parsePayload(body) {
   }
 
   return body;
-}
-
-function normalizePhone(value) {
-  const digits = String(value || "").replace(/[^\d]/g, "");
-
-  if (!digits) {
-    return "";
-  }
-
-  if (digits.startsWith("33") && digits.length >= 11) {
-    return digits;
-  }
-
-  if (digits.startsWith("0") && digits.length === 10) {
-    return `33${digits.slice(1)}`;
-  }
-
-  return digits;
-}
-
-function personalize(message, firstName) {
-  return String(message || "").replaceAll("{{prenom}}", firstName || "vous");
-}
-
-async function sendBrevoSms({ sender, recipient, content, type }) {
-  const apiKey = process.env.BREVO_API_KEY;
-
-  if (!apiKey) {
-    throw new Error("missing_brevo_api_key");
-  }
-
-  const response = await fetch("https://api.brevo.com/v3/transactionalSMS/sms", {
-    method: "POST",
-    headers: {
-      "api-key": apiKey,
-      "Content-Type": "application/json",
-      accept: "application/json",
-    },
-    body: JSON.stringify({
-      sender,
-      recipient,
-      content,
-      type: type === "marketing" ? "marketing" : "transactional",
-    }),
-  });
-
-  const result = await response.json().catch(() => ({}));
-
-  if (!response.ok) {
-    const message =
-      result?.message ||
-      result?.error?.message ||
-      `brevo_${response.status}`;
-    throw new Error(message);
-  }
-
-  return result;
 }
 
 module.exports = async function handler(req, res) {
@@ -103,11 +53,10 @@ module.exports = async function handler(req, res) {
 
   try {
     const payload = parsePayload(req.body);
-    const sender = String(process.env.BREVO_SMS_SENDER || "BOOKEA")
-      .replace(/[^a-zA-Z0-9]/g, "")
-      .slice(0, 11);
+    const sender = defaultSender();
     const message = String(firstValue(payload.message) || firstValue(payload.content) || "").trim();
     const type = String(firstValue(payload.type) || "transactional");
+    const centerName = String(firstValue(payload.centerName) || firstValue(payload.centre) || "");
     const recipientsInput = Array.isArray(payload.recipients)
       ? payload.recipients
       : firstValue(payload.to) || firstValue(payload.phone)
@@ -115,6 +64,11 @@ module.exports = async function handler(req, res) {
             {
               phone: firstValue(payload.to) || firstValue(payload.phone),
               firstName: firstValue(payload.firstName) || "vous",
+              lastName: firstValue(payload.lastName) || "",
+              date: firstValue(payload.date) || "",
+              time: firstValue(payload.time) || firstValue(payload.heure) || "",
+              treatment: firstValue(payload.treatment) || firstValue(payload.soin) || "",
+              centerName,
             },
           ]
         : [];
@@ -130,12 +84,25 @@ module.exports = async function handler(req, res) {
     const recipients = recipientsInput
       .map((item) => {
         if (typeof item === "string") {
-          return { phone: normalizePhone(item), firstName: "vous" };
+          return {
+            phone: normalizePhone(item),
+            firstName: "vous",
+            lastName: "",
+            date: "",
+            time: "",
+            treatment: "",
+            centerName,
+          };
         }
 
         return {
           phone: normalizePhone(item?.phone),
           firstName: String(item?.firstName || "vous").trim() || "vous",
+          lastName: String(item?.lastName || "").trim(),
+          date: String(item?.date || "").trim(),
+          time: String(item?.time || item?.heure || "").trim(),
+          treatment: String(item?.treatment || item?.soin || "").trim(),
+          centerName: String(item?.centerName || item?.centre || centerName).trim(),
         };
       })
       .filter((item) => item.phone);
@@ -155,7 +122,7 @@ module.exports = async function handler(req, res) {
         const sent = await sendBrevoSms({
           sender,
           recipient: recipient.phone,
-          content: personalize(message, recipient.firstName),
+          content: personalize(message, recipient),
           type,
         });
         results.push({

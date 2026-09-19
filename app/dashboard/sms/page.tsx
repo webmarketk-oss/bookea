@@ -16,6 +16,13 @@ import { useEffect, useMemo, useState } from "react";
 import { loadCrmAppointments } from "@/lib/agenda-supabase";
 import { getActiveCenterContext } from "@/lib/center-access";
 import { loadCrmClients, loadCrmLeads } from "@/lib/crm-supabase";
+import {
+  defaultSmsSettings,
+  loadCenterSmsSettings,
+  saveCenterSmsSettings,
+  type CenterSmsSettings,
+  type SmsTemplate,
+} from "@/lib/sms-settings";
 import type { Appointment } from "@/types/agenda";
 import type { Lead } from "@/types/lead";
 import type { CrmClient } from "@/lib/crm-supabase";
@@ -69,20 +76,31 @@ export default function SmsPage() {
   const [leads, setLeads] = useState<Lead[]>([]);
   const [clients, setClients] = useState<CrmClient[]>([]);
   const [appointments, setAppointments] = useState<Appointment[]>([]);
+  const [smsSettings, setSmsSettings] = useState<CenterSmsSettings>(defaultSmsSettings);
+  const [templateName, setTemplateName] = useState("");
+  const [templateBody, setTemplateBody] = useState("");
+  const [editingTemplateId, setEditingTemplateId] = useState<string | null>(null);
+  const [savingTemplates, setSavingTemplates] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
 
     async function load() {
       try {
-        const [center, leadData, clientData, appointmentData, status] =
+        const [center, leadData, clientData, appointmentData, status, sms] =
           await Promise.all([
             getActiveCenterContext(),
             loadCrmLeads().catch(() => ({ leads: [] as Lead[] })),
             loadCrmClients().catch(() => ({ clients: [] as CrmClient[] })),
             loadCrmAppointments().catch(() => [] as Appointment[]),
             fetch("/api/sms/send").then((response) => response.json()).catch(() => null),
+            loadCenterSmsSettings().catch(() => ({
+              centerName: "le centre",
+              settings: defaultSmsSettings,
+            })),
           ]);
+
+        void fetch("/api/sms/dispatch").catch(() => null);
 
         if (cancelled) {
           return;
@@ -92,6 +110,7 @@ export default function SmsPage() {
         setLeads(leadData.leads);
         setClients(clientData.clients);
         setAppointments(appointmentData);
+        setSmsSettings(sms.settings);
         if (typeof status?.remainingCredits === "number") {
           setCredits(Math.floor(status.remainingCredits));
         }
@@ -133,6 +152,96 @@ export default function SmsPage() {
     setConfirmation(
       `La recharge Bookea arrive ensuite. Pour l'instant, achetez les crédits SMS dans Brevo (${amount} SMS).`,
     );
+  }
+
+  async function persistSmsSettings(nextSettings: CenterSmsSettings) {
+    setSmsSettings(nextSettings);
+    setSavingTemplates(true);
+    setIsError(false);
+
+    try {
+      await saveCenterSmsSettings(nextSettings);
+      setConfirmation(`Modèles SMS enregistrés pour ${centerName}.`);
+    } catch (error) {
+      setIsError(true);
+      setConfirmation(
+        error instanceof Error
+          ? error.message
+          : "Impossible d'enregistrer les modèles SMS.",
+      );
+    } finally {
+      setSavingTemplates(false);
+    }
+  }
+
+  function startNewTemplate() {
+    setEditingTemplateId(null);
+    setTemplateName("");
+    setTemplateBody(
+      "Bonjour {{prenom}}, votre rendez-vous {{soin}} est confirmé le {{date}} à {{heure}} chez {{centre}}.",
+    );
+  }
+
+  function editTemplate(template: SmsTemplate) {
+    setEditingTemplateId(template.id);
+    setTemplateName(template.name);
+    setTemplateBody(template.body);
+  }
+
+  async function saveTemplate() {
+    const name = templateName.trim();
+    const body = templateBody.trim();
+
+    if (!name || !body) {
+      setIsError(true);
+      setConfirmation("Le modèle doit avoir un nom et un texte.");
+      return;
+    }
+
+    const nextTemplate: SmsTemplate = {
+      id: editingTemplateId || crypto.randomUUID(),
+      name,
+      body,
+    };
+    const templates = editingTemplateId
+      ? smsSettings.templates.map((template) =>
+          template.id === editingTemplateId ? nextTemplate : template,
+        )
+      : [...smsSettings.templates, nextTemplate];
+
+    setEditingTemplateId(nextTemplate.id);
+    await persistSmsSettings({ ...smsSettings, templates });
+  }
+
+  async function deleteTemplate(templateId: string) {
+    const templates = smsSettings.templates.filter((template) => template.id !== templateId);
+
+    if (templates.length === 0) {
+      setIsError(true);
+      setConfirmation("Garde au moins un modèle SMS.");
+      return;
+    }
+
+    if (editingTemplateId === templateId) {
+      startNewTemplate();
+    }
+
+    await persistSmsSettings({
+      ...smsSettings,
+      templates,
+      confirmationTemplateId:
+        smsSettings.confirmationTemplateId === templateId
+          ? templates[0].id
+          : smsSettings.confirmationTemplateId,
+      reminder48hTemplateId:
+        smsSettings.reminder48hTemplateId === templateId
+          ? templates[0].id
+          : smsSettings.reminder48hTemplateId,
+      leadWelcomeTemplateId:
+        smsSettings.leadWelcomeTemplateId === templateId
+          ? templates[0].id
+          : smsSettings.leadWelcomeTemplateId,
+    });
   }
 
   async function sendNow() {
@@ -262,6 +371,127 @@ export default function SmsPage() {
           {confirmation}
         </div>
       )}
+
+      <section className="mb-6 rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+          <div>
+            <h2 className="text-xl font-black">Modèles SMS de {centerName}</h2>
+            <p className="mt-1 max-w-2xl text-sm font-medium text-slate-500">
+              Crée tes textes, enregistre-les, puis choisis lequel part à la confirmation RDV, 48h avant, ou depuis le CRM. Variables : {"{{prenom}} {{nom}} {{date}} {{heure}} {{soin}} {{centre}}"}.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={startNewTemplate}
+            className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-black text-slate-700"
+          >
+            Nouveau modèle
+          </button>
+        </div>
+
+        <div className="mt-5 grid gap-4 xl:grid-cols-[0.9fr_1.1fr]">
+          <div className="grid gap-3">
+            {smsSettings.templates.map((template) => (
+              <article
+                key={template.id}
+                className={`rounded-2xl border p-4 ${
+                  editingTemplateId === template.id
+                    ? "border-blue-300 bg-blue-50"
+                    : "border-slate-200 bg-slate-50"
+                }`}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="font-black">{template.name}</p>
+                    <p className="mt-1 line-clamp-2 text-sm font-semibold text-slate-600">
+                      {template.body}
+                    </p>
+                  </div>
+                  <div className="flex shrink-0 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => editTemplate(template)}
+                      className="rounded-xl bg-white px-3 py-2 text-sm font-black text-slate-700"
+                    >
+                      Modifier
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void deleteTemplate(template.id)}
+                      className="rounded-xl bg-white px-3 py-2 text-sm font-black text-red-600"
+                    >
+                      Supprimer
+                    </button>
+                  </div>
+                </div>
+              </article>
+            ))}
+          </div>
+
+          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+            <Input
+              label="Nom du modèle"
+              value={templateName}
+              onChange={setTemplateName}
+              placeholder="Confirmation Gap, Rappel Clermont..."
+            />
+            <label className="mt-4 block space-y-2">
+              <span className="text-sm font-black uppercase text-slate-500">
+                Texte du modèle
+              </span>
+              <textarea
+                value={templateBody}
+                onChange={(event) => setTemplateBody(event.target.value)}
+                className="min-h-32 w-full rounded-2xl border border-slate-200 bg-white p-4 text-base font-bold leading-7 outline-none focus:border-blue-500"
+              />
+            </label>
+            <button
+              type="button"
+              disabled={savingTemplates}
+              onClick={() => void saveTemplate()}
+              className="mt-4 rounded-2xl bg-slate-950 px-5 py-3 font-black text-white disabled:opacity-60"
+            >
+              {savingTemplates ? "Enregistrement..." : "Enregistrer le modèle"}
+            </button>
+
+            <div className="mt-5 grid gap-4 md:grid-cols-3">
+              <TemplateSelect
+                label="Confirmation RDV"
+                value={smsSettings.confirmationTemplateId}
+                templates={smsSettings.templates}
+                onChange={(value) =>
+                  void persistSmsSettings({
+                    ...smsSettings,
+                    confirmationTemplateId: value,
+                  })
+                }
+              />
+              <TemplateSelect
+                label="Rappel 48h"
+                value={smsSettings.reminder48hTemplateId}
+                templates={smsSettings.templates}
+                onChange={(value) =>
+                  void persistSmsSettings({
+                    ...smsSettings,
+                    reminder48hTemplateId: value,
+                  })
+                }
+              />
+              <TemplateSelect
+                label="Accueil prospect"
+                value={smsSettings.leadWelcomeTemplateId}
+                templates={smsSettings.templates}
+                onChange={(value) =>
+                  void persistSmsSettings({
+                    ...smsSettings,
+                    leadWelcomeTemplateId: value,
+                  })
+                }
+              />
+            </div>
+          </div>
+        </div>
+      </section>
 
       <section className="mb-6 rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
         <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
@@ -544,6 +774,35 @@ function Input({
         onChange={(event) => onChange(event.target.value)}
         className="h-12 w-full rounded-2xl border border-slate-200 px-4 text-base font-bold outline-none focus:border-blue-500"
       />
+    </label>
+  );
+}
+
+function TemplateSelect({
+  label,
+  value,
+  templates,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  templates: SmsTemplate[];
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label className="space-y-2">
+      <span className="text-sm font-black uppercase text-slate-500">{label}</span>
+      <select
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className="h-12 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm font-bold outline-none focus:border-blue-500"
+      >
+        {templates.map((template) => (
+          <option key={template.id} value={template.id}>
+            {template.name}
+          </option>
+        ))}
+      </select>
     </label>
   );
 }

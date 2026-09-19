@@ -15,6 +15,18 @@ import {
 } from "@/lib/agenda-supabase";
 import { saveAppointmentStatusOverride } from "@/lib/appointment-crm-sync";
 import {
+  cancelAppointmentSmsJobs,
+  rescheduleAppointmentSmsJobs,
+  scheduleAppointmentReminderSms,
+  sendSavedTemplateSms,
+} from "@/lib/send-sms";
+import {
+  formatSmsDate,
+  loadCenterSmsSettings,
+  splitPersonName,
+  type CenterSmsSettings,
+} from "@/lib/sms-settings";
+import {
   mergePublicBookingsIntoAppointments,
   PUBLIC_BOOKINGS_UPDATED_EVENT,
   readPublicBookings,
@@ -275,6 +287,9 @@ export default function AgendaBoard() {
     ...emptyAppointment,
     ...rdvPrefill,
   }));
+  const [sendSmsNow, setSendSmsNow] = useState(false);
+  const [sendSms48h, setSendSms48h] = useState(false);
+  const [smsSettings, setSmsSettings] = useState<CenterSmsSettings | null>(null);
   const [contactSearch, setContactSearch] = useState(
     rdvPrefill?.personName ?? ""
   );
@@ -345,6 +360,13 @@ export default function AgendaBoard() {
       );
       window.removeEventListener("storage", syncPublicBookings);
     };
+  }, []);
+
+  useEffect(() => {
+    void loadCenterSmsSettings()
+      .then((result) => setSmsSettings(result.settings))
+      .catch(() => null);
+    void fetch("/api/sms/dispatch").catch(() => null);
   }, []);
 
   const visibleAppointments = useMemo(
@@ -545,6 +567,8 @@ export default function AgendaBoard() {
   function openAppointmentModal() {
     setAppointmentForm({ ...emptyAppointment, date: selectedDate });
     setContactSearch("");
+    setSendSmsNow(false);
+    setSendSms48h(false);
     setIsModalOpen(true);
   }
 
@@ -571,13 +595,57 @@ export default function AgendaBoard() {
 
     try {
       const savedAppointment = await createCrmAppointment(appointment);
+      const smsVars = {
+        phone: savedAppointment.phone,
+        ...splitPersonName(savedAppointment.personName),
+        date: formatSmsDate(savedAppointment.date),
+        time: savedAppointment.start,
+        treatment: savedAppointment.treatment,
+      };
+      const notices = ["RDV enregistré."];
+
+      if (
+        appointment.kind !== "Pause" &&
+        appointment.kind !== "Formation" &&
+        appointment.kind !== "Indisponible" &&
+        savedAppointment.phone
+      ) {
+        if (sendSmsNow) {
+          const confirmation = await sendSavedTemplateSms(
+            smsSettings?.confirmationTemplateId,
+            smsVars,
+          );
+          notices.push(
+            confirmation.ok
+              ? "SMS de confirmation envoyé."
+              : "Le SMS de confirmation n'a pas pu partir.",
+          );
+        }
+
+        if (sendSms48h) {
+          const reminder = await scheduleAppointmentReminderSms({
+            appointmentId: savedAppointment.id,
+            templateId: smsSettings?.reminder48hTemplateId,
+            vars: smsVars,
+          });
+          notices.push(
+            reminder.ok
+              ? reminder.scheduled
+                ? "SMS 48h programmé."
+                : "SMS 48h envoyé."
+              : "Le SMS 48h n'a pas pu être programmé.",
+          );
+        }
+      }
 
       setAppointmentList((currentAppointments) => [
         ...currentAppointments,
         savedAppointment,
       ]);
       setSelectedDate(savedAppointment.date);
-      setAgendaNotice("RDV enregistré.");
+      setAgendaNotice(notices.join(" "));
+      setSendSmsNow(false);
+      setSendSms48h(false);
       setIsModalOpen(false);
     } catch (error) {
       setAgendaError(
@@ -626,7 +694,9 @@ export default function AgendaBoard() {
           : cabinTreatment,
     };
 
-    updateCrmAppointment(updatedAppointment).catch((error) => {
+    updateCrmAppointment(updatedAppointment)
+      .then(() => rescheduleAppointmentSmsJobs(updatedAppointment.id))
+      .catch((error) => {
       setAgendaError(
         error instanceof Error
           ? error.message
@@ -662,8 +732,9 @@ export default function AgendaBoard() {
     }
 
     try {
+      await cancelAppointmentSmsJobs(appointmentId);
       await deleteCrmAppointment(appointmentId);
-      setAgendaNotice("RDV supprimé.");
+      setAgendaNotice("RDV supprimé. Les SMS 48h prévus pour ce rendez-vous sont annulés.");
     } catch (error) {
       setAppointmentList(previousAppointments);
       setAgendaError(
@@ -686,7 +757,13 @@ export default function AgendaBoard() {
 
     try {
       await updateCrmAppointment(updatedAppointment);
-      setAgendaNotice("RDV mis à jour.");
+      if (updatedAppointment.status === "Annulation") {
+        await cancelAppointmentSmsJobs(updatedAppointment.id);
+        setAgendaNotice("RDV mis à jour. Les SMS 48h prévus sont annulés.");
+      } else {
+        await rescheduleAppointmentSmsJobs(updatedAppointment.id);
+        setAgendaNotice("RDV mis à jour.");
+      }
     } catch (error) {
       setAppointmentList(previousAppointments);
       setAgendaError(
@@ -1786,6 +1863,39 @@ export default function AgendaBoard() {
                   />
                 </Field>
               </div>
+            </div>
+
+            <div className="mt-5 grid gap-3 rounded-2xl border border-blue-100 bg-blue-50 p-4">
+              <label className="flex items-start gap-3 text-sm font-bold text-slate-800">
+                <input
+                  type="checkbox"
+                  checked={sendSmsNow}
+                  disabled={!appointmentForm.phone.trim()}
+                  onChange={(event) => setSendSmsNow(event.target.checked)}
+                  className="mt-1 h-4 w-4"
+                />
+                <span>
+                  Envoyer un SMS de confirmation maintenant
+                  <span className="mt-1 block text-xs font-semibold text-slate-500">
+                    Utilise le modèle enregistré pour ce centre. Décoche pour ne rien envoyer.
+                  </span>
+                </span>
+              </label>
+              <label className="flex items-start gap-3 text-sm font-bold text-slate-800">
+                <input
+                  type="checkbox"
+                  checked={sendSms48h}
+                  disabled={!appointmentForm.phone.trim()}
+                  onChange={(event) => setSendSms48h(event.target.checked)}
+                  className="mt-1 h-4 w-4"
+                />
+                <span>
+                  Envoyer un SMS de confirmation 48h avant
+                  <span className="mt-1 block text-xs font-semibold text-slate-500">
+                    Programmé seulement si tu coches. Si le RDV est supprimé avant, le SMS ne part pas.
+                  </span>
+                </span>
+              </label>
             </div>
 
             <div className="mt-6 flex justify-end gap-3">

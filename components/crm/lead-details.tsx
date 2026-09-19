@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -10,6 +10,14 @@ import {
   readCenterSettings,
   type CenterDepositLinkSetting,
 } from "@/lib/center-settings";
+import {
+  defaultSmsSettings,
+  fillSmsTemplate,
+  getSmsTemplate,
+  loadCenterSmsSettings,
+  type CenterSmsSettings,
+} from "@/lib/sms-settings";
+import { sendBookeaSms } from "@/lib/send-sms";
 import { Lead } from "@/types/lead";
 import {
   Calendar,
@@ -48,6 +56,13 @@ export default function LeadDetails({
   const [selectedDepositLinkId, setSelectedDepositLinkId] = useState(
     String(defaultCenterDepositLinks[0]?.id ?? ""),
   );
+  const [smsSettings, setSmsSettings] = useState<CenterSmsSettings>(defaultSmsSettings);
+  const [smsCenterName, setSmsCenterName] = useState("");
+  const [smsMode, setSmsMode] = useState("template");
+  const [smsTemplateId, setSmsTemplateId] = useState(defaultSmsSettings.leadWelcomeTemplateId);
+  const [smsDraft, setSmsDraft] = useState("");
+  const [smsSending, setSmsSending] = useState(false);
+  const [smsNotice, setSmsNotice] = useState("");
   const commentTextareaRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
@@ -66,6 +81,13 @@ export default function LeadDetails({
 
     refreshDepositLinks();
     window.addEventListener("bookea-center-settings-updated", refreshDepositLinks);
+    void loadCenterSmsSettings()
+      .then((result) => {
+        setSmsSettings(result.settings);
+        setSmsCenterName(result.centerName);
+        setSmsTemplateId(result.settings.leadWelcomeTemplateId);
+      })
+      .catch(() => null);
     return () =>
       window.removeEventListener(
         "bookea-center-settings-updated",
@@ -77,6 +99,33 @@ export default function LeadDetails({
     depositLinks.find((link) => String(link.id) === selectedDepositLinkId) ??
     depositLinks[0] ??
     defaultCenterDepositLinks[0];
+
+  const smsPreview = useMemo(() => {
+    if (smsMode === "free") {
+      return smsDraft;
+    }
+
+    if (smsMode === "deposit" && selectedDepositLink) {
+      return `${selectedDepositLink.message} ${selectedDepositLink.url}`.trim();
+    }
+
+    return fillSmsTemplate(getSmsTemplate(smsSettings, smsTemplateId).body, {
+      firstName: lead.firstName,
+      lastName: lead.lastName,
+      treatment: lead.treatment,
+      centerName: smsCenterName,
+    });
+  }, [
+    lead.firstName,
+    lead.lastName,
+    lead.treatment,
+    selectedDepositLink,
+    smsCenterName,
+    smsDraft,
+    smsMode,
+    smsSettings,
+    smsTemplateId,
+  ]);
 
   function addComment() {
     const text = commentDraft.trim();
@@ -107,15 +156,45 @@ export default function LeadDetails({
     window.setTimeout(() => commentTextareaRef.current?.focus(), 0);
   }
 
-  function sendDepositSms() {
-    if (!selectedDepositLink) return;
-    const message = `${selectedDepositLink.message} ${selectedDepositLink.url}`.trim();
-    const phone = lead.phone.replace(/\s+/g, "");
-    window.location.href = `sms:${phone}?&body=${encodeURIComponent(message)}`;
-    onAddActivity(
-      lead.id,
-      `SMS acompte préparé : ${selectedDepositLink.name}.`,
-    );
+  async function sendLeadSms(messageOverride?: string) {
+    const message = (messageOverride ?? (smsMode === "free" ? smsDraft : smsPreview)).trim();
+
+    if (!lead.phone.trim()) {
+      setSmsNotice("Ce prospect n'a pas de téléphone.");
+      return;
+    }
+
+    if (!message) {
+      setSmsNotice("Écris un SMS ou choisis un modèle.");
+      return;
+    }
+
+    setSmsSending(true);
+    setSmsNotice("Envoi SMS en cours...");
+
+    try {
+      const result = await sendBookeaSms({
+        phone: lead.phone,
+        firstName: lead.firstName,
+        lastName: lead.lastName,
+        treatment: lead.treatment,
+        centerName: smsCenterName,
+        message,
+      });
+
+      if (!result.ok) {
+        throw new Error(result.error || "Envoi SMS refusé");
+      }
+
+      setSmsNotice("SMS envoyé.");
+      onAddActivity(lead.id, `SMS envoyé : ${message}`);
+    } catch (error) {
+      setSmsNotice(
+        error instanceof Error ? error.message : "Impossible d'envoyer le SMS.",
+      );
+    } finally {
+      setSmsSending(false);
+    }
   }
 
   return (
@@ -198,11 +277,51 @@ export default function LeadDetails({
         </div>
 
         <div className="rounded-2xl border border-blue-100 bg-blue-50 p-3">
-          <div className="grid gap-2 min-[1500px]:grid-cols-[1fr_auto]">
+          <div className="grid gap-2">
             <label className="block">
               <span className="mb-1 block text-[11px] font-black uppercase text-blue-700">
-                SMS acompte
+                Envoyer un SMS
               </span>
+              <select
+                value={
+                  smsMode === "template"
+                    ? `template:${smsTemplateId}`
+                    : smsMode === "deposit"
+                      ? `deposit:${selectedDepositLinkId}`
+                      : smsMode
+                }
+                onChange={(event) => {
+                  const value = event.target.value;
+                  if (value.startsWith("template:")) {
+                    setSmsMode("template");
+                    setSmsTemplateId(value.replace("template:", ""));
+                    return;
+                  }
+
+                  if (value.startsWith("deposit:")) {
+                    setSmsMode("deposit");
+                    setSelectedDepositLinkId(value.replace("deposit:", ""));
+                    return;
+                  }
+
+                  setSmsMode(value);
+                }}
+                className="h-10 w-full rounded-xl border border-blue-200 bg-white px-3 text-xs font-black text-slate-800 outline-none"
+              >
+                {smsSettings.templates.map((template) => (
+                  <option key={template.id} value={`template:${template.id}`}>
+                    Modèle : {template.name}
+                  </option>
+                ))}
+                {depositLinks.map((link) => (
+                  <option key={link.id} value={`deposit:${link.id}`}>
+                    Acompte : {link.name}
+                  </option>
+                ))}
+                <option value="free">Texte libre</option>
+              </select>
+            </label>
+            {smsMode === "deposit" && (
               <select
                 value={selectedDepositLinkId}
                 onChange={(event) => setSelectedDepositLinkId(event.target.value)}
@@ -214,18 +333,29 @@ export default function LeadDetails({
                   </option>
                 ))}
               </select>
-            </label>
+            )}
+            <textarea
+              value={smsMode === "free" ? smsDraft : smsPreview}
+              onChange={(event) => {
+                setSmsMode("free");
+                setSmsDraft(event.target.value);
+              }}
+              rows={4}
+              className="w-full rounded-xl border border-blue-200 bg-white px-3 py-2 text-xs font-semibold leading-5 text-slate-800 outline-none"
+              placeholder="Écris le SMS ou choisis un modèle."
+            />
             <Button
               type="button"
-              onClick={sendDepositSms}
-              className="self-end rounded-xl bg-blue-600 px-4 text-xs font-black text-white hover:bg-blue-700"
+              disabled={smsSending}
+              onClick={() => void sendLeadSms()}
+              className="rounded-xl bg-blue-600 px-4 text-xs font-black text-white hover:bg-blue-700"
             >
-              Envoyer SMS
+              {smsSending ? "Envoi..." : "Envoyer SMS"}
             </Button>
+            {smsNotice ? (
+              <p className="text-xs font-black text-blue-800">{smsNotice}</p>
+            ) : null}
           </div>
-          <p className="mt-2 line-clamp-2 text-xs font-semibold leading-5 text-blue-700">
-            {selectedDepositLink?.message} {selectedDepositLink?.url}
-          </p>
         </div>
 
         <div className="space-y-4">
