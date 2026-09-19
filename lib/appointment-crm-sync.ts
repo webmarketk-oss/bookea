@@ -97,12 +97,12 @@ function mapAppointmentStatusToLeadStatus(
 ): LeadStatus | null {
   const statusMap: Partial<Record<AppointmentStatus, LeadStatus>> = {
     Confirmé: "RDV confirmé",
-    "À confirmer": "RDV programmé",
+    "À confirmer": "RDV pris",
     "En cours": "RDV confirmé",
-    Terminé: "Client",
+    Terminé: "Client converti",
     "No show": "No show",
-    Présent: "Client",
-    Annulation: "À rappeler",
+    Présent: "Client converti",
+    Annulation: "À relancer",
     "Pas venu pas prévenu": "No show",
     Devis: "Devis",
     Vendu: "Vendu",

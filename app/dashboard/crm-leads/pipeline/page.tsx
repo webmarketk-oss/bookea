@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { AlertTriangle, ArrowRight, RefreshCcw, Users } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { leadStatusClasses, leadStatuses } from "@/lib/lead-statuses";
+import { leadStatusClassName, leadStatusSelectOptions } from "@/lib/lead-statuses";
 import { loadCrmLeads, updateCrmLeadStatus } from "@/lib/crm-supabase";
 import { cn } from "@/lib/utils";
 import type { Lead, LeadStatus } from "@/types/lead";
@@ -25,21 +25,22 @@ const stages: PipelineStage[] = [
     title: "À relancer",
     description: "Appels, SMS, WhatsApp",
     statuses: [
-      "À rappeler",
+      "À relancer",
       "Apl en abs",
-      "Souhaite être rappelé(e) plus tard",
+      "Reviendra vers nous",
+      "En réflexion",
       "Message WhatsApp envoyé",
       "SMS envoyé",
-      "Message vocal laissé",
+      "Message vocal envoyé",
       "Mail envoyé",
       "Mail/SMS Injoignable",
-      "Msg vocal + Mail",
+      "Message vocal",
     ],
   },
   {
     title: "RDV",
     description: "Rendez-vous pris ou confirmé",
-    statuses: ["RDV pris", "RDV fixé", "RDV confirmé", "RDV programmé"],
+    statuses: ["RDV pris", "RDV confirmé"],
   },
   {
     title: "Vente",
@@ -48,19 +49,18 @@ const stages: PipelineStage[] = [
       "Devis",
       "Acompte envoyé",
       "Acompte reçu",
-      "Acompte validé",
       "Acompte en attente",
       "Vendu",
       "Client converti",
-      "Client",
     ],
   },
   {
     title: "Perdus",
     description: "Non exploitables ou clôturés",
     statuses: [
-      "Perdu",
+      "Pas intéressé",
       "Prospect perdu",
+      "Intraitable",
       "Numéro invalide",
       "Doublon",
       "Hors zone",
@@ -208,7 +208,7 @@ export default function PipelinePage() {
                       <span
                         className={cn(
                           "rounded-full px-3 py-1 text-xs font-black ring-1",
-                          leadStatusClasses[lead.status],
+                          leadStatusClassName(lead.status),
                         )}
                       >
                         {lead.status}
@@ -236,7 +236,7 @@ export default function PipelinePage() {
                         }
                         className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-black text-slate-700 outline-none focus:border-blue-500"
                       >
-                        {leadStatuses.map((status) => (
+                        {leadStatusSelectOptions(lead.status).map((status) => (
                           <option key={status} value={status}>
                             {status}
                           </option>

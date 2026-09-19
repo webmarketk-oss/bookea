@@ -10,8 +10,8 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   inactiveLeadStatuses,
-  leadStatusClasses,
-  leadStatuses,
+  leadStatusClassName,
+  leadStatusSelectOptions,
 } from "@/lib/lead-statuses";
 import { cn } from "@/lib/utils";
 import { Lead, LeadStatus } from "@/types/lead";
@@ -188,10 +188,10 @@ export default function ProspectsTable({
                   className={cn(
                     "h-7 rounded-full border-0 px-3 text-xs font-semibold outline-none ring-1 transition-colors",
                     "focus:ring-2 focus:ring-blue-400",
-                    leadStatusClasses[lead.status]
+                    leadStatusClassName(lead.status)
                   )}
                 >
-                  {leadStatuses.map((status) => (
+                  {leadStatusSelectOptions(lead.status).map((status) => (
                     <option key={status} value={status}>
                       {status}
                     </option>

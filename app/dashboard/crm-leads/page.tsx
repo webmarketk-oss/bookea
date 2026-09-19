@@ -56,23 +56,13 @@ type CRMTab = "prospects" | "kpi";
 type QuickDateFilter = "Tous" | "Hier" | "7 derniers jours";
 
 const statusGroups: Partial<Record<LeadStatus, LeadStatus[]>> = {
-  "À rappeler": [
-    "À rappeler",
-    "Souhaite être rappelé(e) plus tard",
-    "Apl en abs",
-  ],
-  "RDV programmé": [
-    "RDV programmé",
-    "RDV pris",
-    "RDV fixé",
-    "RDV confirmé",
-    "Acompte reçu",
-    "Acompte validé",
-  ],
-  Client: ["Client", "Client converti", "Vendu"],
+  "À relancer": ["À relancer", "Apl en abs"],
+  "RDV pris": ["RDV pris", "RDV confirmé", "Acompte reçu"],
+  "Client converti": ["Client converti", "Vendu"],
   "Prospect perdu": [
-    "Perdu",
+    "Pas intéressé",
     "Prospect perdu",
+    "Intraitable",
     "Numéro invalide",
     "Doublon",
     "Hors zone",
@@ -308,7 +298,7 @@ export default function CRMLeadsPage() {
     try {
       await updateCrmLeadStatus(leadBeforeUpdate, status);
       setCrmNotice(
-        ["Vendu", "Client", "Client converti"].includes(status)
+        ["Vendu", "Client converti"].includes(status)
           ? "Statut enregistré et fiche client synchronisée."
           : "Statut enregistré."
       );

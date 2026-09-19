@@ -37,25 +37,27 @@ const periodLabels: Record<KPIPeriod, string> = {
   custom: "Personnalisé",
 };
 
-const soldStatuses = ["Vendu", "Client", "Client converti"];
+const soldStatuses = ["Vendu", "Client converti", "Client"];
 const rdvStatuses = [
-  "RDV programmé",
   "RDV pris",
-  "RDV fixé",
   "RDV confirmé",
+  "RDV programmé",
+  "RDV fixé",
   "Acompte reçu",
   "Acompte validé",
 ];
 const presentStatuses = [
   "Vendu",
-  "Client",
   "Client converti",
+  "Client",
   "Acompte reçu",
   "Acompte validé",
 ];
 const redStatuses = [
-  "Perdu",
+  "Pas intéressé",
   "Prospect perdu",
+  "Intraitable",
+  "Perdu",
   "Numéro invalide",
   "Doublon",
   "Hors zone",
@@ -86,7 +88,7 @@ export default function KPIDashboard({ leads }: KPIDashboardProps) {
   const waitingDepositCount = countByStatus(periodLeads, ["Acompte en attente"]);
   const lostCount = countByStatus(periodLeads, redStatuses);
   const remainingCount = periodLeads.filter((lead) =>
-    ["Nouveau", "À rappeler", "Acompte envoyé", "Acompte en attente"].includes(
+    ["Nouveau", "À relancer", "À rappeler", "Acompte envoyé", "Acompte en attente"].includes(
       lead.status
     )
   ).length;

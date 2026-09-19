@@ -1,5 +1,6 @@
 import { getActiveCenterContext } from "@/lib/center-access";
 import { createClient } from "@/lib/supabase";
+import { normalizeLeadStatus } from "@/lib/lead-statuses";
 import type { Lead, LeadActivity, LeadStatus } from "@/types/lead";
 
 type SupabaseClient = ReturnType<typeof createClient>;
@@ -11,7 +12,7 @@ type CrmCenterContext = {
 
 type LeadSource = Lead["source"];
 
-const clientLeadStatuses: LeadStatus[] = ["Vendu", "Client", "Client converti"];
+const clientLeadStatuses: LeadStatus[] = ["Vendu", "Client converti"];
 
 type LeadRow = {
   id: string;
@@ -1350,10 +1351,6 @@ function formatActivityDateForStorage() {
   })}`;
 }
 
-function normalizeLeadStatus(value?: string | null): LeadStatus {
-  const fallback: LeadStatus = "Nouveau";
-  return (value || fallback) as LeadStatus;
-}
 
 function normalizeSource(value?: string | null): LeadSource {
   const source = (value || "").toLowerCase();

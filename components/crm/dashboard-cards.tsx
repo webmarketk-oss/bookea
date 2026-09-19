@@ -55,47 +55,48 @@ export default function DashboardCards({
       status: "Nouveau" as const,
     },
     {
-      title: "À rappeler",
+      title: "À relancer",
       value: leads.filter((lead) =>
         isLeadDueToday(lead) &&
-        ["À rappeler", "Souhaite être rappelé(e) plus tard", "Apl en abs"].includes(
+        ["À relancer", "Apl en abs"].includes(
           lead.status
         )
       ).length,
       subtitle: "Relances du jour",
       icon: Phone,
       color: "text-orange-500",
-      status: "À rappeler" as const,
+      status: "À relancer" as const,
     },
     {
       title: "RDV programmés",
       value: leads.filter((lead) =>
         isLeadDueToday(lead) &&
-        ["RDV programmé", "RDV pris", "RDV fixé", "RDV confirmé", "Acompte reçu", "Acompte validé"].includes(
+        ["RDV pris", "RDV confirmé", "Acompte reçu"].includes(
           lead.status
         )
       ).length,
       subtitle: "Rendez-vous du jour",
       icon: CalendarDays,
       color: "text-violet-600",
-      status: "RDV programmé" as const,
+      status: "RDV pris" as const,
     },
     {
       title: "Clients",
       value: todayCreatedLeads.filter((lead) =>
-        ["Client", "Client converti", "Vendu"].includes(lead.status)
+        ["Client converti", "Vendu"].includes(lead.status)
       ).length,
       subtitle: "Convertis aujourd'hui",
       icon: CircleCheck,
       color: "text-green-600",
-      status: "Client" as const,
+      status: "Client converti" as const,
     },
     {
       title: "Perdus",
       value: todayCreatedLeads.filter((lead) =>
         [
-          "Perdu",
+          "Pas intéressé",
           "Prospect perdu",
+          "Intraitable",
           "Numéro invalide",
           "Doublon",
           "Hors zone",

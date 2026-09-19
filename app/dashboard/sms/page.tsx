@@ -42,6 +42,7 @@ type SmsRecipient = {
 
 const recallStatuses = new Set([
   "Nouveau",
+  "À relancer",
   "À rappeler",
   "Souhaite être rappelé(e) plus tard",
   "Apl en abs",
