@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -62,6 +62,8 @@ import {
 
 const timeOptions = createTimeSlots(7, 19, 15);
 const SLOT_ROW_HEIGHT_REM = 5;
+const TIME_COLUMN_PX = 92;
+const CABIN_COLUMN_MIN_PX = 260;
 
 const cabinPalette = [
   {
@@ -287,6 +289,7 @@ export default function AgendaBoard() {
   const [movingAppointmentId, setMovingAppointmentId] = useState<string | null>(
     null
   );
+  const boardScrollRef = useRef<HTMLDivElement>(null);
   const [appointmentForm, setAppointmentForm] = useState(() => ({
     ...emptyAppointment,
     ...rdvPrefill,
@@ -932,9 +935,23 @@ export default function AgendaBoard() {
     setSeyaCommand("");
   }
 
+  function slideCabinBoard(direction: -1 | 1) {
+    const board = boardScrollRef.current;
+
+    if (!board) return;
+
+    board.scrollBy({
+      left: direction * CABIN_COLUMN_MIN_PX,
+      behavior: "smooth",
+    });
+  }
+
+  const cabinBoardMinWidth = TIME_COLUMN_PX + cabinList.length * CABIN_COLUMN_MIN_PX;
+  const cabinBoardColumns = `${TIME_COLUMN_PX}px repeat(${cabinList.length}, minmax(${CABIN_COLUMN_MIN_PX}px, 1fr))`;
+
   return (
-    <main className="min-h-screen bg-slate-100">
-      <div className="mx-auto max-w-[1800px] space-y-6 p-8">
+    <main className="min-h-screen min-w-0 bg-slate-100">
+      <div className="mx-auto min-w-0 max-w-[1800px] space-y-6 p-8">
         <header className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
           <div>
             <p className="text-sm font-semibold text-violet-600">
@@ -1269,10 +1286,26 @@ export default function AgendaBoard() {
         </Card>
 
         {agendaView === "day" ? (
-        <section>
+        <section className="min-w-0">
           <Card className="overflow-hidden border-slate-200 py-0 shadow-sm">
-            <CardContent className="relative p-0">
-              <div className="absolute right-3 top-3 z-20 flex items-center gap-2 rounded-xl bg-white/95 p-1 shadow-sm ring-1 ring-slate-200">
+            <CardContent className="relative min-w-0 p-0">
+              <div className="absolute right-3 top-3 z-30 flex items-center gap-2 rounded-xl bg-white/95 p-1 shadow-sm ring-1 ring-slate-200">
+                <button
+                  type="button"
+                  onClick={() => slideCabinBoard(-1)}
+                  className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-500 transition-colors hover:bg-slate-50 hover:text-slate-950"
+                  aria-label="Voir les cabines à gauche"
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => slideCabinBoard(1)}
+                  className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-500 transition-colors hover:bg-slate-50 hover:text-slate-950"
+                  aria-label="Voir les cabines à droite"
+                >
+                  <ChevronRight className="h-4 w-4" />
+                </button>
                 <button
                   type="button"
                   onClick={removeCabin}
@@ -1291,12 +1324,23 @@ export default function AgendaBoard() {
                 </button>
               </div>
               <div
+                ref={boardScrollRef}
+                className="overflow-x-auto overscroll-x-contain"
+                style={{ WebkitOverflowScrolling: "touch" }}
+              >
+                <div
+                  className="min-w-full"
+                  style={{ minWidth: cabinBoardMinWidth }}
+                >
+              <div
                 className="grid border-b border-slate-100 bg-white text-sm font-bold text-slate-500"
                 style={{
-                  gridTemplateColumns: `92px repeat(${cabinList.length}, minmax(240px, 1fr))`,
+                  gridTemplateColumns: cabinBoardColumns,
                 }}
               >
-                <div className="border-r border-slate-100 p-4">Heure</div>
+                <div className="sticky left-0 z-20 border-r border-slate-100 bg-white p-4">
+                  Heure
+                </div>
                 {cabinList.map((cabin) => (
                   <div
                     key={cabin.id}
@@ -1338,14 +1382,14 @@ export default function AgendaBoard() {
                 <div
                   className="grid"
                   style={{
-                    gridTemplateColumns: `92px repeat(${cabinList.length}, minmax(240px, 1fr))`,
+                    gridTemplateColumns: cabinBoardColumns,
                     gridTemplateRows: `repeat(${agendaSlots.length}, ${SLOT_ROW_HEIGHT_REM}rem)`,
                   }}
                 >
                   {agendaSlots.map((hour, slotIndex) => (
                     <div
                       key={`hour-${hour}`}
-                      className="border-r border-b border-slate-100 bg-slate-50 p-4 text-sm font-bold text-slate-400"
+                      className="sticky left-0 z-20 border-r border-b border-slate-100 bg-slate-50 p-4 text-sm font-bold text-slate-400"
                       style={{
                         gridColumn: 1,
                         gridRow: slotIndex + 1,
@@ -1418,7 +1462,7 @@ export default function AgendaBoard() {
                                 setContactSearch("");
                                 setIsModalOpen(true);
                               }}
-                              className="flex h-full min-h-12 w-full items-center justify-center rounded-lg border border-dashed border-slate-200 text-[11px] font-semibold text-slate-300 transition-colors hover:border-blue-200 hover:bg-blue-50 hover:text-blue-600"
+                              className="flex h-full min-h-12 w-full items-center justify-center rounded-lg border border-dashed border-slate-200 text-[11px] font-semibold text-slate-300 transition-colors [touch-action:pan-x_pan-y] hover:border-blue-200 hover:bg-blue-50 hover:text-blue-600"
                             >
                               Créneau libre
                             </button>
@@ -1473,6 +1517,8 @@ export default function AgendaBoard() {
                   })}
                 </div>
               )}
+                </div>
+              </div>
             </CardContent>
           </Card>
         </section>
