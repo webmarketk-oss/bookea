@@ -1,5 +1,10 @@
 -- Liaison optionnelle entre les formulaires Facebook Lead Ads et les centres Bookea.
 -- A executer dans Supabase SQL Editor si un centre doit recevoir les leads d'un formulaire precis.
+--
+-- Webhook SaveMyLeads / POST manuel vers le CRM :
+-- POST https://www.bookeai.fr/api/meta/saveleads?center=clinicgap
+-- Champs : full_name, phone, email, form_name, page_name, center_slug
+-- Le slug doit exister dans public.centers (exemple : clinicgap).
 
 create table if not exists public.facebook_lead_forms (
   id uuid primary key default gen_random_uuid(),
