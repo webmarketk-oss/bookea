@@ -22,8 +22,8 @@ const stages: PipelineStage[] = [
     statuses: ["Nouveau"],
   },
   {
-    title: "À relancer",
-    description: "Appels, SMS, WhatsApp",
+    title: "À recontacter",
+    description: "Absents, SMS, mail, à relancer",
     statuses: [
       "À relancer",
       "Apl en abs",

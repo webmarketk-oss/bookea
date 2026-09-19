@@ -56,7 +56,13 @@ type CRMTab = "prospects" | "kpi";
 type QuickDateFilter = "Tous" | "Hier" | "7 derniers jours";
 
 const statusGroups: Partial<Record<LeadStatus, LeadStatus[]>> = {
-  "À relancer": ["À relancer", "Apl en abs"],
+  "À relancer": [
+    "Nouveau",
+    "Apl en abs",
+    "SMS envoyé",
+    "Mail envoyé",
+    "À relancer",
+  ],
   "RDV pris": ["RDV pris", "RDV confirmé", "Acompte reçu"],
   "Client converti": ["Client converti", "Vendu"],
   "Prospect perdu": [

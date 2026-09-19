@@ -55,14 +55,17 @@ export default function DashboardCards({
       status: "Nouveau" as const,
     },
     {
-      title: "À relancer",
+      title: "À recontacter",
       value: leads.filter((lead) =>
-        isLeadDueToday(lead) &&
-        ["À relancer", "Apl en abs"].includes(
-          lead.status
-        )
+        [
+          "Nouveau",
+          "Apl en abs",
+          "SMS envoyé",
+          "Mail envoyé",
+          "À relancer",
+        ].includes(lead.status)
       ).length,
-      subtitle: "Relances du jour",
+      subtitle: "Nouveau, absents, SMS, mail",
       icon: Phone,
       color: "text-orange-500",
       status: "À relancer" as const,
