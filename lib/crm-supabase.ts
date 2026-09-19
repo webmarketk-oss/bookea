@@ -361,6 +361,136 @@ export async function deleteCrmLeadActivity(activityId: string) {
   }
 }
 
+export async function mergeCrmDuplicateLeads(
+  primaryLeadId: string,
+  duplicateLeadIds: string[],
+) {
+  const supabase = createClient();
+  const uniqueDuplicateIds = [...new Set(duplicateLeadIds)].filter(
+    (id) => id && id !== primaryLeadId,
+  );
+
+  if (uniqueDuplicateIds.length === 0) {
+    return;
+  }
+
+  const { data: primary, error: primaryError } = await supabase
+    .from("leads")
+    .select("id,center_id,client_id,latest_comment,amount_cure_ttc,next_action,recall_date")
+    .eq("id", primaryLeadId)
+    .single();
+
+  if (primaryError) {
+    throw new Error(primaryError.message);
+  }
+
+  const { data: duplicates, error: duplicatesError } = await supabase
+    .from("leads")
+    .select("id,client_id,latest_comment,amount_cure_ttc,next_action,recall_date")
+    .in("id", uniqueDuplicateIds);
+
+  if (duplicatesError) {
+    throw new Error(duplicatesError.message);
+  }
+
+  const primaryClientId = (primary.client_id as string | null) ?? null;
+  let maxAmount = Number(primary.amount_cure_ttc || 0);
+  let latestComment = String(primary.latest_comment || "");
+  let nextAction = String(primary.next_action || "");
+  let recallDate = (primary.recall_date as string | null) ?? null;
+
+  for (const duplicate of duplicates ?? []) {
+    const duplicateId = String(duplicate.id);
+    const duplicateClientId = (duplicate.client_id as string | null) ?? null;
+    maxAmount = Math.max(maxAmount, Number(duplicate.amount_cure_ttc || 0));
+
+    if (!latestComment && duplicate.latest_comment) {
+      latestComment = String(duplicate.latest_comment);
+    }
+
+    if (!nextAction && duplicate.next_action) {
+      nextAction = String(duplicate.next_action);
+    }
+
+    if (!recallDate && duplicate.recall_date) {
+      recallDate = String(duplicate.recall_date);
+    }
+
+    const { error: eventsError } = await supabase
+      .from("lead_events")
+      .update({ lead_id: primaryLeadId })
+      .eq("lead_id", duplicateId);
+
+    if (eventsError) {
+      throw new Error(eventsError.message);
+    }
+
+    const appointmentPatch: Record<string, string> = { lead_id: primaryLeadId };
+
+    if (primaryClientId) {
+      appointmentPatch.client_id = primaryClientId;
+    }
+
+    const { error: appointmentLeadError } = await supabase
+      .from("appointments")
+      .update(appointmentPatch)
+      .eq("lead_id", duplicateId);
+
+    if (appointmentLeadError) {
+      throw new Error(appointmentLeadError.message);
+    }
+
+    if (duplicateClientId && primaryClientId && duplicateClientId !== primaryClientId) {
+      await supabase
+        .from("appointments")
+        .update({ client_id: primaryClientId })
+        .eq("client_id", duplicateClientId);
+      await supabase
+        .from("invoices")
+        .update({ client_id: primaryClientId })
+        .eq("client_id", duplicateClientId);
+      await supabase
+        .from("documents")
+        .update({ client_id: primaryClientId })
+        .eq("client_id", duplicateClientId);
+      await supabase
+        .from("conversations")
+        .update({ client_id: primaryClientId })
+        .eq("client_id", duplicateClientId);
+      await supabase
+        .from("clients")
+        .update({
+          merged_into_client_id: primaryClientId,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", duplicateClientId);
+    }
+
+    const { error: deleteError } = await supabase
+      .from("leads")
+      .delete()
+      .eq("id", duplicateId);
+
+    if (deleteError) {
+      throw new Error(deleteError.message);
+    }
+  }
+
+  await updateLeadFields(supabase, primaryLeadId, {
+    amount_cure_ttc: maxAmount,
+    latest_comment: latestComment || null,
+    next_action: nextAction || primary.next_action,
+    recall_date: recallDate,
+    updated_at: new Date().toISOString(),
+    last_activity_at: new Date().toISOString(),
+  });
+
+  await insertLeadEvent(supabase, primary.center_id as string, primaryLeadId, {
+    event_type: "system",
+    note: `Fiches fusionnées : ${uniqueDuplicateIds.length} doublon(s) regroupé(s) sur cette fiche.`,
+  });
+}
+
 export async function updateCrmLeadAmount(leadId: string, amount: number) {
   await updateLeadFields(createClient(), leadId, {
     amount_cure_ttc: amount,

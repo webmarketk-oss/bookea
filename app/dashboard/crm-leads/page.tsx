@@ -18,6 +18,7 @@ import {
   createCrmLead,
   deleteCrmLeadActivity,
   loadCrmLeads,
+  mergeCrmDuplicateLeads,
   updateCrmLeadAmount,
   updateCrmLeadReminder,
   updateCrmLeadStatus,
@@ -85,6 +86,7 @@ export default function CRMLeadsPage() {
   const [crmNotice, setCrmNotice] = useState<string | null>(null);
   const [isLeadDetailsOpen, setIsLeadDetailsOpen] = useState(false);
   const [isNewLeadOpen, setIsNewLeadOpen] = useState(false);
+  const [isMergingDuplicates, setIsMergingDuplicates] = useState(false);
   const [newLeadForm, setNewLeadForm] = useState(emptyLeadForm);
   const [activeTab, setActiveTab] = useState<CRMTab>("prospects");
   const [quickDateFilter, setQuickDateFilter] =
@@ -450,11 +452,46 @@ export default function CRMLeadsPage() {
     );
   }
 
-  function handleMergeDuplicate(primaryLeadId: string, duplicateLeadId: string) {
-    setLeadList((currentLeads) =>
-      mergeDuplicateLeads(currentLeads, primaryLeadId, duplicateLeadId)
-    );
-    setSelectedLeadId(primaryLeadId);
+  async function handleMergeDuplicate(group: Lead[]) {
+    const primaryLead = group[0];
+    const duplicateLeads = group.slice(1);
+
+    if (!primaryLead || duplicateLeads.length === 0 || isMergingDuplicates) {
+      return;
+    }
+
+    setIsMergingDuplicates(true);
+    setCrmError(null);
+    setCrmNotice(null);
+
+    try {
+      await mergeCrmDuplicateLeads(
+        primaryLead.id,
+        duplicateLeads.map((lead) => lead.id),
+      );
+
+      setLeadList((currentLeads) =>
+        duplicateLeads.reduce(
+          (leads, duplicateLead) =>
+            mergeDuplicateLeads(leads, primaryLead.id, duplicateLead.id),
+          currentLeads,
+        ),
+      );
+      setSelectedLeadId(primaryLead.id);
+      setCrmNotice(
+        `${duplicateLeads.length + 1} fiches fusionnées vers ${primaryLead.firstName} ${primaryLead.lastName}.`,
+      );
+      await refreshCrmLeads();
+    } catch (error) {
+      setCrmError(
+        error instanceof Error
+          ? error.message
+          : "Les fiches n'ont pas pu être fusionnées.",
+      );
+      await refreshCrmLeads();
+    } finally {
+      setIsMergingDuplicates(false);
+    }
   }
 
   function openNewLeadModal() {
@@ -665,14 +702,12 @@ export default function CRMLeadsPage() {
                     ))}
                     <Button
                       type="button"
-                      onClick={() =>
-                        handleMergeDuplicate(
-                          duplicateLeadGroups[0][0].id,
-                          duplicateLeadGroups[0][1].id
-                        )
-                      }
+                      disabled={isMergingDuplicates}
+                      onClick={() => handleMergeDuplicate(duplicateLeadGroups[0])}
                     >
-                      Fusionner vers la fiche 1
+                      {isMergingDuplicates
+                        ? "Fusion en cours..."
+                        : "Fusionner vers la fiche 1"}
                     </Button>
                   </div>
                 </div>
