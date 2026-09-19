@@ -45,17 +45,15 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
 
   return (
     <>
-      <div
-        className={`hidden shrink-0 lg:block ${sidebarCollapsed ? "w-20" : "w-72"}`}
-      >
-        <Sidebar
-          collapsed={sidebarCollapsed}
-          onCollapsedChange={setSidebarCollapsed}
-        />
-      </div>
+      <Sidebar
+        collapsed={sidebarCollapsed}
+        onCollapsedChange={setSidebarCollapsed}
+      />
 
       <main
-        className="relative z-0 min-w-0 flex-1 p-0 lg:py-3 lg:pr-3 lg:pl-2"
+        className={`relative z-0 min-w-0 flex-1 p-0 lg:py-3 lg:pr-3 ${
+          sidebarCollapsed ? "lg:pl-[5.5rem]" : "lg:pl-[18.5rem]"
+        }`}
         onClick={collapseSidebarFromContent}
       >
         {children}

@@ -54,7 +54,7 @@ export default function Sidebar({
 
   return (
     <aside
-      className={`sticky top-0 z-30 flex h-screen shrink-0 flex-col overflow-hidden border-r border-white/10 bg-[#11152e] text-white transition-all duration-200 ${
+      className={`fixed inset-y-0 left-0 z-40 hidden flex-col overflow-hidden border-r border-white/10 bg-[#11152e] text-white transition-all duration-200 lg:flex ${
         collapsed ? "w-20 p-2" : "w-72 p-4"
       }`}
     >

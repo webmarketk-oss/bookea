@@ -85,7 +85,6 @@ export default function ProspectsTable({
             <TableHead>Source</TableHead>
             <TableHead>Date</TableHead>
             <TableHead>Rappel</TableHead>
-            <TableHead>Action</TableHead>
             <TableHead>Commercial</TableHead>
             <TableHead>Statut</TableHead>
             <TableHead>Montant</TableHead>
@@ -158,10 +157,6 @@ export default function ProspectsTable({
                       "border-amber-200 bg-amber-100 text-amber-800"
                   )}
                 />
-              </TableCell>
-
-              <TableCell>
-                <span className="text-sm font-medium">{lead.nextAction}</span>
               </TableCell>
 
               <TableCell>
