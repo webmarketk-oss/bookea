@@ -38,7 +38,14 @@ const periodLabels: Record<KPIPeriod, string> = {
 };
 
 const soldStatuses = ["Vendu", "Client", "Client converti"];
-const rdvStatuses = ["RDV programmé", "RDV pris", "RDV fixé", "RDV confirmé"];
+const rdvStatuses = [
+  "RDV programmé",
+  "RDV pris",
+  "RDV fixé",
+  "RDV confirmé",
+  "Acompte reçu",
+  "Acompte validé",
+];
 const presentStatuses = [
   "Vendu",
   "Client",

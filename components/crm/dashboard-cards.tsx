@@ -71,7 +71,7 @@ export default function DashboardCards({
       title: "RDV programmés",
       value: leads.filter((lead) =>
         isLeadDueToday(lead) &&
-        ["RDV programmé", "RDV pris", "RDV fixé", "RDV confirmé"].includes(
+        ["RDV programmé", "RDV pris", "RDV fixé", "RDV confirmé", "Acompte reçu", "Acompte validé"].includes(
           lead.status
         )
       ).length,

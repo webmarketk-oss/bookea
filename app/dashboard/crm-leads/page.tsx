@@ -66,6 +66,8 @@ const statusGroups: Partial<Record<LeadStatus, LeadStatus[]>> = {
     "RDV pris",
     "RDV fixé",
     "RDV confirmé",
+    "Acompte reçu",
+    "Acompte validé",
   ],
   Client: ["Client", "Client converti", "Vendu"],
   "Prospect perdu": [
