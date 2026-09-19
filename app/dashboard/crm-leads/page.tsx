@@ -679,8 +679,15 @@ export default function CRMLeadsPage() {
               </div>
             )}
 
-            <div id="crm-leads-results" className="grid grid-cols-12 gap-6">
-              <section className={`min-w-0 ${isLeadDetailsOpen ? "col-span-9" : "col-span-12"}`}>
+            <div
+              id="crm-leads-results"
+              className={
+                isLeadDetailsOpen
+                  ? "grid grid-cols-[minmax(0,1fr)_20rem] gap-4"
+                  : ""
+              }
+            >
+              <section className="min-w-0">
                 <ProspectsTable
                   leads={filteredLeads}
                   selectedLead={selectedLead}
@@ -703,7 +710,7 @@ export default function CRMLeadsPage() {
               </section>
 
               {isLeadDetailsOpen && (
-              <aside className="col-span-3 min-w-0">
+              <aside className="min-w-0">
                 <LeadDetails
                   lead={selectedLead}
                   onAddActivity={handleAddActivity}
