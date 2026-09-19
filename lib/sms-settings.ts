@@ -406,3 +406,26 @@ export async function saveSmsHistory(
 
   return history;
 }
+
+export type SmsInboxItem = {
+  id: string;
+  phone: string;
+  text: string;
+  at: string;
+  clientName?: string;
+  unread?: boolean;
+};
+
+export async function loadSmsInbox() {
+  const context = await getActiveCenterContext();
+  const supabase = createClient();
+  const { data } = await supabase
+    .from("centers")
+    .select("settings")
+    .eq("id", context.centerId)
+    .maybeSingle();
+
+  const inbox = (data?.settings as { sms?: { inbox?: SmsInboxItem[] } } | null)?.sms?.inbox;
+
+  return Array.isArray(inbox) ? inbox : [];
+}

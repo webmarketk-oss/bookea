@@ -6,6 +6,7 @@ const {
   parseCenterSmsSettings,
   personalize,
   sendBrevoSms,
+  storeIncomingSms,
 } = require("./brevo");
 
 function isAuthorized(req) {
@@ -22,6 +23,39 @@ function isAuthorized(req) {
 function isDue(sendAt) {
   const timestamp = new Date(sendAt).getTime();
   return Number.isFinite(timestamp) && timestamp <= Date.now();
+}
+
+async function importBrevoReplies(supabase) {
+  const apiKey = process.env.BREVO_API_KEY;
+
+  if (!apiKey) {
+    return 0;
+  }
+
+  const response = await fetch(
+    "https://api.brevo.com/v3/transactionalSMS/statistics/events?event=replies&limit=50&sort=desc",
+    {
+      headers: { "api-key": apiKey, accept: "application/json" },
+    },
+  );
+  const payload = await response.json().catch(() => ({}));
+  const events = Array.isArray(payload?.events) ? payload.events : [];
+  let imported = 0;
+
+  for (const event of events) {
+    const result = await storeIncomingSms(supabase, {
+      phone: event.phoneNumber || event.to || event.phone,
+      text: event.reply || event.message || event.reason,
+      messageId: event.messageId || event.date,
+      at: event.date,
+    }).catch(() => ({ stored: false }));
+
+    if (result?.stored) {
+      imported += 1;
+    }
+  }
+
+  return imported;
 }
 
 module.exports = async function handler(req, res) {
@@ -44,6 +78,7 @@ module.exports = async function handler(req, res) {
 
   try {
     const supabase = createServiceClient();
+    const replies = await importBrevoReplies(supabase).catch(() => 0);
     const { data: centers, error } = await supabase
       .from("centers")
       .select("id,name,settings");
@@ -151,6 +186,7 @@ module.exports = async function handler(req, res) {
       sent,
       cancelled,
       failed,
+      replies,
     });
   } catch (error) {
     console.error("[sms/dispatch]", error);

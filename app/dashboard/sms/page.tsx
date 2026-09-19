@@ -20,12 +20,15 @@ import {
   defaultSmsSettings,
   loadCenterSmsSettings,
   loadSmsHistory,
+  loadSmsInbox,
   saveCenterSmsSettings,
   saveSmsHistory,
   type CenterSmsSettings,
+  type SmsInboxItem,
   type SmsTemplate,
   type StoredSmsCampaign,
 } from "@/lib/sms-settings";
+import { sendBookeaSms } from "@/lib/send-sms";
 import type { Appointment } from "@/types/agenda";
 import type { Lead } from "@/types/lead";
 import type { CrmClient } from "@/lib/crm-supabase";
@@ -76,13 +79,16 @@ export default function SmsPage() {
   const [templateBody, setTemplateBody] = useState("");
   const [editingTemplateId, setEditingTemplateId] = useState<string | null>(null);
   const [savingTemplates, setSavingTemplates] = useState(false);
+  const [inbox, setInbox] = useState<SmsInboxItem[]>([]);
+  const [replyDraft, setReplyDraft] = useState("");
+  const [replyingId, setReplyingId] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
 
     async function load() {
       try {
-        const [center, leadData, clientData, appointmentData, status, sms, history] =
+        const [center, leadData, clientData, appointmentData, status, sms, history, replies] =
           await Promise.all([
             getActiveCenterContext(),
             loadCrmLeads().catch(() => ({ leads: [] as Lead[] })),
@@ -94,9 +100,16 @@ export default function SmsPage() {
               settings: defaultSmsSettings,
             })),
             loadSmsHistory().catch(() => ({ campaigns: [] as SmsCampaign[] })),
+            loadSmsInbox().catch(() => [] as SmsInboxItem[]),
           ]);
 
-        void fetch("/api/sms/dispatch").catch(() => null);
+        void fetch("/api/sms/dispatch")
+          .then(() => loadSmsInbox())
+          .then((nextInbox) => {
+            if (!cancelled) setInbox(nextInbox);
+          })
+          .catch(() => null);
+        void fetch("/api/sms/inbound").catch(() => null);
 
         if (cancelled) {
           return;
@@ -108,6 +121,7 @@ export default function SmsPage() {
         setAppointments(appointmentData);
         setSmsSettings(sms.settings);
         setCampaigns(history.campaigns);
+        setInbox(replies);
         if (typeof status?.remainingCredits === "number") {
           setCredits(Math.floor(status.remainingCredits));
         } else if (typeof history.remainingCredits === "number") {
@@ -241,6 +255,41 @@ export default function SmsPage() {
           ? templates[0].id
           : smsSettings.leadWelcomeTemplateId,
     });
+  }
+
+  async function replyToInbox(item: SmsInboxItem) {
+    const message = replyDraft.trim();
+
+    if (!message) {
+      setIsError(true);
+      setConfirmation("Écris une réponse SMS.");
+      return;
+    }
+
+    setReplyingId(item.id);
+    setIsError(false);
+
+    try {
+      const result = await sendBookeaSms({
+        phone: item.phone,
+        firstName: item.clientName?.split(" ")[0] || "vous",
+        message,
+      });
+
+      if (!result.ok) {
+        throw new Error(result.error || "Réponse SMS refusée");
+      }
+
+      setReplyDraft("");
+      setConfirmation(`Réponse envoyée à ${item.clientName || item.phone}.`);
+    } catch (error) {
+      setIsError(true);
+      setConfirmation(
+        error instanceof Error ? error.message : "Impossible de répondre au SMS.",
+      );
+    } finally {
+      setReplyingId(null);
+    }
   }
 
   async function sendNow() {
@@ -644,6 +693,54 @@ export default function SmsPage() {
             </p>
           </div>
         </aside>
+      </section>
+
+      <section className="mt-6 rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+        <h2 className="text-xl font-black">Réponses SMS</h2>
+        <p className="mt-1 text-sm font-medium text-slate-500">
+          Les réponses des clientes arrivent ici et dans la fiche CRM. Active aussi “Réponses SMS” dans Brevo (SMS transactionnel → Configuration).
+        </p>
+        <div className="mt-5 grid gap-3">
+          {inbox.length === 0 ? (
+            <p className="font-semibold text-slate-500">
+              Aucune réponse reçue pour l’instant.
+            </p>
+          ) : (
+            inbox.map((item) => (
+              <article
+                key={item.id}
+                className="grid gap-3 rounded-2xl border border-violet-100 bg-violet-50 p-4"
+              >
+                <div>
+                  <p className="text-sm font-black">
+                    {item.clientName || "Cliente"} · {item.phone}
+                  </p>
+                  <p className="font-bold text-slate-500">{item.at}</p>
+                  <p className="mt-2 font-semibold text-slate-800">{item.text}</p>
+                </div>
+                <div className="flex flex-col gap-2 sm:flex-row">
+                  <input
+                    value={replyingId === item.id ? replyDraft : ""}
+                    onChange={(event) => {
+                      setReplyingId(item.id);
+                      setReplyDraft(event.target.value);
+                    }}
+                    placeholder="Répondre par SMS..."
+                    className="h-11 flex-1 rounded-2xl border border-slate-200 bg-white px-4 text-sm font-bold outline-none focus:border-blue-500"
+                  />
+                  <button
+                    type="button"
+                    disabled={replyingId === item.id && !replyDraft.trim()}
+                    onClick={() => void replyToInbox(item)}
+                    className="rounded-2xl bg-slate-950 px-4 py-3 text-sm font-black text-white disabled:opacity-60"
+                  >
+                    {replyingId === item.id ? "Envoyer" : "Répondre"}
+                  </button>
+                </div>
+              </article>
+            ))
+          )}
+        </div>
       </section>
 
       <section className="mt-6 rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
