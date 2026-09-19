@@ -9,6 +9,7 @@ import {
   Euro,
   Eye,
   FileText,
+  Gift,
   MessageCircle,
   MoreVertical,
   Phone,
@@ -285,6 +286,32 @@ export default function CRMClientsPage() {
     setIsFullClientOpen(false);
   }
 
+  async function saveBirthDate(birthDate: string) {
+    if (!selectedClient) return;
+
+    const updatedClient = {
+      ...selectedClient,
+      birthDate: birthDate || "À compléter",
+    };
+
+    try {
+      await updateCrmClient(updatedClient);
+    } catch (error) {
+      setClientError(
+        error instanceof Error
+          ? error.message
+          : "La date d'anniversaire n'a pas pu être sauvegardée.",
+      );
+      return;
+    }
+
+    setClientList((currentClients) =>
+      currentClients.map((client) =>
+        client.id === updatedClient.id ? updatedClient : client,
+      ),
+    );
+  }
+
   async function addClientDocument(
     clientId: string,
     document: Omit<ClientDocument, "id">
@@ -444,6 +471,7 @@ export default function CRMClientsPage() {
 
                 {filteredClients.map((client) => {
                   const selected = selectedClient?.id === client.id;
+                  const birthdayGift = getBirthdayGift(client.birthDate);
 
                   return (
                     <button
@@ -461,8 +489,16 @@ export default function CRMClientsPage() {
                             {client.lastName[0]}
                           </span>
                           <div className="min-w-0">
-                            <p className="truncate font-black text-slate-950">
-                              {client.firstName} {client.lastName}
+                            <p className="flex items-center gap-2 truncate font-black text-slate-950">
+                              <span className="truncate">
+                                {client.firstName} {client.lastName}
+                              </span>
+                              {birthdayGift && birthdayGift.tone !== "month" ? (
+                                <Gift
+                                  className="h-4 w-4 shrink-0 text-rose-500"
+                                  aria-label={birthdayGift.title}
+                                />
+                              ) : null}
                             </p>
                             <p className="truncate text-sm font-medium text-slate-500">
                               {client.phone} · {client.email}
@@ -505,6 +541,7 @@ export default function CRMClientsPage() {
               }
               onOpenFull={() => setIsFullClientOpen(true)}
               onOpenRdv={() => openRdvForClient(selectedClient)}
+              onBirthDateChange={saveBirthDate}
             />
           )}
         </section>
@@ -543,6 +580,7 @@ function ClientPanel({
   onNoteVisibilityChange,
   onOpenFull,
   onOpenRdv,
+  onBirthDateChange,
 }: {
   client: Client;
   noteDraft: string;
@@ -553,12 +591,14 @@ function ClientPanel({
   onNoteVisibilityChange: (value: "private" | "shared") => void;
   onOpenFull: () => void;
   onOpenRdv: () => void;
+  onBirthDateChange: (value: string) => void;
 }) {
   const [activePanel, setActivePanel] = useState<
     "cures" | "appointments" | "documents"
   >("cures");
   const [isMoreOpen, setIsMoreOpen] = useState(false);
   const appointmentHistory = getClientAppointmentHistory(client);
+  const birthdayGift = getBirthdayGift(client.birthDate);
 
   return (
     <Card className="h-fit border-slate-200 py-0 shadow-sm">
@@ -621,6 +661,58 @@ function ClientPanel({
           </div>
         </header>
 
+        <section
+          className={`rounded-xl border p-4 ${
+            birthdayGift?.tone === "today"
+              ? "border-rose-200 bg-rose-50"
+              : birthdayGift
+                ? "border-amber-200 bg-amber-50"
+                : "border-slate-100 bg-slate-50"
+          }`}
+        >
+          <div className="mb-3 flex items-start gap-3">
+            <span
+              className={`mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full ${
+                birthdayGift?.tone === "today"
+                  ? "bg-rose-100 text-rose-600"
+                  : birthdayGift
+                    ? "bg-amber-100 text-amber-700"
+                    : "bg-white text-slate-500"
+              }`}
+            >
+              <Gift className="h-4 w-4" />
+            </span>
+            <div className="min-w-0 flex-1">
+              <p className="text-[11px] font-black uppercase tracking-wide text-slate-500">
+                Date d&apos;anniversaire
+              </p>
+              {birthdayGift ? (
+                <>
+                  <p className="mt-1 text-sm font-black text-slate-950">
+                    {birthdayGift.title}
+                  </p>
+                  <p className="text-sm font-semibold text-slate-600">
+                    {birthdayGift.detail}
+                  </p>
+                </>
+              ) : (
+                <p className="mt-1 text-sm font-semibold text-slate-600">
+                  Pour le cadeau d&apos;anniversaire
+                </p>
+              )}
+            </div>
+          </div>
+          <Input
+            type="date"
+            value={toBirthDateInputValue(client.birthDate)}
+            onChange={(event) =>
+              onBirthDateChange(fromBirthDateInputValue(event.target.value))
+            }
+            className="h-10 bg-white"
+            aria-label="Date d'anniversaire"
+          />
+        </section>
+
         <section className="rounded-xl border border-slate-100 bg-slate-50 p-4">
           <div className="mb-3 flex items-center justify-between gap-3">
             <h3 className="text-sm font-black uppercase text-slate-500">
@@ -636,10 +728,6 @@ function ClientPanel({
             <ClientIdentity label="Nom" value={client.lastName} />
             <ClientIdentity label="Téléphone" value={client.phone} />
             <ClientIdentity label="Email" value={client.email} />
-            <ClientIdentity
-              label="Date de naissance"
-              value={client.birthDate}
-            />
             <ClientIdentity label="Genre" value={client.gender} />
             <ClientIdentity
               label="Adresse"
@@ -948,6 +1036,8 @@ function FullClientModal({
     }));
   }
 
+  const birthdayGift = getBirthdayGift(form.birthDate);
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-6 backdrop-blur-sm">
       <form
@@ -1003,6 +1093,11 @@ function FullClientModal({
                 <Sparkles className="h-4 w-4" />
                 Seya recommande
               </div>
+              {birthdayGift ? (
+                <p className="mb-2 text-sm font-black leading-6 text-violet-900">
+                  {birthdayGift.title} — {birthdayGift.detail}.
+                </p>
+              ) : null}
               <p className="text-sm leading-6 text-violet-800">
                 Vérifier les informations manquantes, contrôler le solde et
                 programmer la prochaine action.
@@ -1092,12 +1187,25 @@ function ClientFormFields<T extends Omit<Client, "id" | "notes" | "cares" | "doc
         value={form.email}
         onChange={(value) => onChange({ ...form, email: value })}
       />
-      <ClientInput
-        label="Date de naissance / anniversaire"
-        value={form.birthDate}
-        onChange={(value) => onChange({ ...form, birthDate: value })}
-        placeholder="JJ/MM/AAAA"
-      />
+      <label className="space-y-1.5">
+        <span className="text-sm font-semibold text-slate-700">
+          Date d&apos;anniversaire
+        </span>
+        <Input
+          type="date"
+          value={toBirthDateInputValue(form.birthDate)}
+          onChange={(event) =>
+            onChange({
+              ...form,
+              birthDate: fromBirthDateInputValue(event.target.value),
+            })
+          }
+          className="h-10"
+        />
+        <span className="text-xs font-medium text-slate-500">
+          Pour le cadeau d&apos;anniversaire et les SMS du jour J
+        </span>
+      </label>
       <label className="space-y-1.5">
         <span className="text-sm font-semibold text-slate-700">Genre</span>
         <select
@@ -1714,6 +1822,70 @@ function parseFrenchDate(date: string) {
   }
 
   return `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
+}
+
+function toBirthDateInputValue(value: string) {
+  return parseFrenchDate(value);
+}
+
+function fromBirthDateInputValue(value: string) {
+  if (!value) return "";
+  return formatDisplayDate(value);
+}
+
+function getBirthdayGift(birthDate: string) {
+  const iso = toBirthDateInputValue(birthDate);
+
+  if (!iso) return null;
+
+  const [, monthText, dayText] = iso.split("-");
+  const month = Number(monthText);
+  const day = Number(dayText);
+
+  if (!month || !day) return null;
+
+  const now = new Date();
+  const todayMonth = now.getMonth() + 1;
+  const todayDay = now.getDate();
+  const label = `${String(day).padStart(2, "0")}/${String(month).padStart(2, "0")}`;
+  const isToday = month === todayMonth && day === todayDay;
+  const thisYear = now.getFullYear();
+  const startToday = new Date(thisYear, todayMonth - 1, todayDay);
+  let nextBirthday = new Date(thisYear, month - 1, day);
+
+  if (nextBirthday < startToday) {
+    nextBirthday = new Date(thisYear + 1, month - 1, day);
+  }
+
+  const daysUntil = Math.round(
+    (nextBirthday.getTime() - startToday.getTime()) / 86_400_000,
+  );
+
+  if (isToday) {
+    return {
+      tone: "today" as const,
+      title: "Cadeau d'anniversaire aujourd'hui",
+      detail: `Anniversaire le ${label}`,
+    };
+  }
+
+  if (daysUntil > 0 && daysUntil <= 7) {
+    return {
+      tone: "soon" as const,
+      title: "Préparer le cadeau d'anniversaire",
+      detail: `Dans ${daysUntil} jour${daysUntil > 1 ? "s" : ""} — ${label}`,
+    };
+  }
+
+  if (month === todayMonth) {
+    return {
+      tone: "month" as const,
+      title: "Anniversaire ce mois-ci",
+      detail: `Le ${label} — cadeau à prévoir`,
+    };
+  }
+
+  return null;
 }
 
 function isCurrentMonth(date: string) {

@@ -809,7 +809,10 @@ function getAudienceRecipients(
     const today = todayIso().slice(5);
     return uniqueRecipients(
       data.clients
-        .filter((client) => client.birthDate?.slice(5) === today && client.phone)
+        .filter(
+          (client) =>
+            birthMonthDay(client.birthDate) === today && client.phone,
+        )
         .map((client) => ({
           phone: client.phone,
           firstName: client.firstName || "vous",
@@ -852,6 +855,17 @@ function uniqueRecipients(recipients: SmsRecipient[]) {
 
 function isMarketingAudience(audience: string) {
   return audience === "Tous les clients" || audience === "Clientes anniversaire";
+}
+
+function birthMonthDay(value: string | undefined) {
+  if (!value || value === "À compléter") return "";
+  if (/^\d{4}-\d{2}-\d{2}/.test(value)) return value.slice(5, 10);
+
+  const match = value.match(/^(\d{1,2})\/(\d{1,2})(?:\/\d{4})?/);
+
+  if (!match) return "";
+
+  return `${match[2].padStart(2, "0")}-${match[1].padStart(2, "0")}`;
 }
 
 function todayIso() {
