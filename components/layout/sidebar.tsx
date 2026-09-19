@@ -52,11 +52,31 @@ export default function Sidebar({
     router.replace("/login");
   }
 
+  function openSidebarFromColumn(event: React.MouseEvent<HTMLElement>) {
+    if (!collapsed) {
+      return;
+    }
+
+    const target = event.target;
+
+    if (!(target instanceof HTMLElement)) {
+      return;
+    }
+
+    if (target.closest("[data-sidebar-logout='true']")) {
+      return;
+    }
+
+    onCollapsedChange(false);
+  }
+
   return (
     <aside
       className={`fixed inset-y-0 left-0 z-40 hidden flex-col overflow-hidden border-r border-white/10 bg-[#11152e] text-white transition-all duration-200 lg:flex ${
-        collapsed ? "w-20 p-2" : "w-72 p-4"
+        collapsed ? "w-20 cursor-pointer p-2" : "w-72 p-4"
       }`}
+      title={collapsed ? "Ouvrir le menu" : undefined}
+      onClick={openSidebarFromColumn}
     >
       <div className={`mb-8 flex items-center ${collapsed ? "flex-col gap-3" : "justify-between gap-3"}`}>
         {collapsed ? (
@@ -192,6 +212,7 @@ export default function Sidebar({
         type="button"
         onClick={() => void handleLogout()}
         title="Déconnexion"
+        data-sidebar-logout="true"
         className={`mt-auto flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm font-bold text-white/62 transition-colors hover:bg-white/10 hover:text-white ${
           collapsed ? "justify-center" : ""
         }`}
