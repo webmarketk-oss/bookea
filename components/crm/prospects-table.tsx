@@ -71,8 +71,8 @@ export default function ProspectsTable({
     .map(({ lead }) => lead);
 
   return (
-    <div className="overflow-x-auto overflow-y-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-      <Table className="min-w-[1500px]">
+    <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm [&_[data-slot=table-container]]:overflow-x-hidden">
+      <Table className="w-full table-fixed">
         <TableHeader>
           <TableRow>
             <TableHead className="w-12">
@@ -87,7 +87,7 @@ export default function ProspectsTable({
             <TableHead>Action</TableHead>
             <TableHead>Commercial</TableHead>
             <TableHead>Statut</TableHead>
-            <TableHead>Commentaire</TableHead>
+            <TableHead className="w-[22%]">Commentaire</TableHead>
             <TableHead>Montant cure</TableHead>
           </TableRow>
         </TableHeader>
@@ -117,7 +117,7 @@ export default function ProspectsTable({
                 <Checkbox />
               </TableCell>
 
-              <TableCell>
+              <TableCell className="whitespace-normal">
                 <div className="flex items-center gap-4">
                   <Avatar className="h-11 w-11">
                     <AvatarFallback className="bg-blue-100 font-semibold text-blue-700">
@@ -208,7 +208,7 @@ export default function ProspectsTable({
                 </select>
               </TableCell>
 
-              <TableCell>
+              <TableCell className="min-w-0 whitespace-normal">
                 <textarea
                   key={latestComment?.id ?? `${lead.id}-empty-comment`}
                   defaultValue={latestComment?.text ?? ""}
@@ -233,7 +233,7 @@ export default function ProspectsTable({
                       event.currentTarget.blur();
                     }
                   }}
-                  className="line-clamp-2 min-h-14 w-72 resize-none rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold leading-5 text-slate-800 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                  className="line-clamp-2 min-h-14 w-full min-w-0 resize-none rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold leading-5 text-slate-800 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
                 />
               </TableCell>
 

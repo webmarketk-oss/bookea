@@ -99,7 +99,10 @@ export default function SmsPage() {
               centerName: "le centre",
               settings: defaultSmsSettings,
             })),
-            loadSmsHistory().catch(() => ({ campaigns: [] as SmsCampaign[] })),
+            loadSmsHistory().catch(() => ({
+              campaigns: [] as SmsCampaign[],
+              remainingCredits: undefined as number | undefined,
+            })),
             loadSmsInbox().catch(() => [] as SmsInboxItem[]),
           ]);
 
