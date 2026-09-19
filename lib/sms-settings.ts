@@ -278,3 +278,131 @@ export async function saveCenterSmsSettings(settings: CenterSmsSettings) {
     settings: nextSettings,
   };
 }
+
+export type StoredSmsCampaign = {
+  id: number;
+  name: string;
+  audience: string;
+  message: string;
+  plannedAt: string;
+  recipients: number;
+  status: "Envoyé" | "Planifié" | "Brouillon";
+};
+
+type StoredSmsHistory = {
+  campaigns: StoredSmsCampaign[];
+  remainingCredits?: number;
+};
+
+export function smsHistoryStorageKey(centerId: string) {
+  return `bookea-sms-history:${centerId}`;
+}
+
+export function readLocalSmsHistory(centerId: string): StoredSmsHistory {
+  if (typeof window === "undefined" || !centerId) {
+    return { campaigns: [] };
+  }
+
+  try {
+    const stored = window.localStorage.getItem(smsHistoryStorageKey(centerId));
+    if (!stored) {
+      return { campaigns: [] };
+    }
+
+    const parsed = JSON.parse(stored) as StoredSmsHistory;
+    return {
+      campaigns: Array.isArray(parsed.campaigns) ? parsed.campaigns.slice(0, 50) : [],
+      remainingCredits:
+        typeof parsed.remainingCredits === "number" ? parsed.remainingCredits : undefined,
+    };
+  } catch {
+    return { campaigns: [] };
+  }
+}
+
+export function writeLocalSmsHistory(centerId: string, history: StoredSmsHistory) {
+  if (typeof window === "undefined" || !centerId) {
+    return;
+  }
+
+  window.localStorage.setItem(
+    smsHistoryStorageKey(centerId),
+    JSON.stringify({
+      campaigns: history.campaigns.slice(0, 50),
+      remainingCredits: history.remainingCredits,
+    }),
+  );
+}
+
+export async function loadSmsHistory() {
+  const context = await getActiveCenterContext();
+  const local = readLocalSmsHistory(context.centerId);
+  const supabase = createClient();
+  const { data } = await supabase
+    .from("centers")
+    .select("settings")
+    .eq("id", context.centerId)
+    .maybeSingle();
+
+  const remote = (data?.settings as { sms?: { history?: StoredSmsHistory } } | null)?.sms
+    ?.history;
+  const remoteCampaigns = Array.isArray(remote?.campaigns) ? remote.campaigns : [];
+  const campaigns = [...local.campaigns, ...remoteCampaigns]
+    .filter((campaign, index, list) => list.findIndex((item) => item.id === campaign.id) === index)
+    .slice(0, 50);
+  const remainingCredits =
+    local.remainingCredits ??
+    (typeof remote?.remainingCredits === "number" ? remote.remainingCredits : undefined);
+
+  writeLocalSmsHistory(context.centerId, { campaigns, remainingCredits });
+
+  return {
+    centerId: context.centerId,
+    campaigns,
+    remainingCredits,
+  };
+}
+
+export async function saveSmsHistory(
+  campaigns: StoredSmsCampaign[],
+  remainingCredits?: number,
+) {
+  const context = await getActiveCenterContext();
+  const history = {
+    campaigns: campaigns.slice(0, 50),
+    remainingCredits,
+  };
+
+  writeLocalSmsHistory(context.centerId, history);
+
+  const supabase = createClient();
+  const { data } = await supabase
+    .from("centers")
+    .select("settings")
+    .eq("id", context.centerId)
+    .maybeSingle();
+
+  const currentSettings =
+    data?.settings && typeof data.settings === "object"
+      ? (data.settings as Record<string, unknown>)
+      : {};
+  const currentSms =
+    currentSettings.sms && typeof currentSettings.sms === "object"
+      ? (currentSettings.sms as Record<string, unknown>)
+      : {};
+
+  await supabase
+    .from("centers")
+    .update({
+      settings: {
+        ...currentSettings,
+        sms: {
+          ...currentSms,
+          history,
+        },
+      },
+    })
+    .eq("id", context.centerId);
+
+  return history;
+}

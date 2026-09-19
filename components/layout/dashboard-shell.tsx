@@ -1,11 +1,15 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import Sidebar from "@/components/layout/sidebar";
 
 export function DashboardShell({ children }: { children: React.ReactNode }) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+
+  useEffect(() => {
+    void fetch("/api/sms/dispatch").catch(() => null);
+  }, []);
 
   function collapseSidebarFromContent(event: React.MouseEvent<HTMLElement>) {
     if (sidebarCollapsed) {

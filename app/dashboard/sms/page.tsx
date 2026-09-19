@@ -19,23 +19,18 @@ import { loadCrmClients, loadCrmLeads } from "@/lib/crm-supabase";
 import {
   defaultSmsSettings,
   loadCenterSmsSettings,
+  loadSmsHistory,
   saveCenterSmsSettings,
+  saveSmsHistory,
   type CenterSmsSettings,
   type SmsTemplate,
+  type StoredSmsCampaign,
 } from "@/lib/sms-settings";
 import type { Appointment } from "@/types/agenda";
 import type { Lead } from "@/types/lead";
 import type { CrmClient } from "@/lib/crm-supabase";
 
-type SmsCampaign = {
-  id: number;
-  name: string;
-  audience: string;
-  message: string;
-  plannedAt: string;
-  recipients: number;
-  status: "Envoyé" | "Planifié" | "Brouillon";
-};
+type SmsCampaign = StoredSmsCampaign;
 
 type SmsRecipient = {
   phone: string;
@@ -87,7 +82,7 @@ export default function SmsPage() {
 
     async function load() {
       try {
-        const [center, leadData, clientData, appointmentData, status, sms] =
+        const [center, leadData, clientData, appointmentData, status, sms, history] =
           await Promise.all([
             getActiveCenterContext(),
             loadCrmLeads().catch(() => ({ leads: [] as Lead[] })),
@@ -98,6 +93,7 @@ export default function SmsPage() {
               centerName: "le centre",
               settings: defaultSmsSettings,
             })),
+            loadSmsHistory().catch(() => ({ campaigns: [] as SmsCampaign[] })),
           ]);
 
         void fetch("/api/sms/dispatch").catch(() => null);
@@ -111,8 +107,11 @@ export default function SmsPage() {
         setClients(clientData.clients);
         setAppointments(appointmentData);
         setSmsSettings(sms.settings);
+        setCampaigns(history.campaigns);
         if (typeof status?.remainingCredits === "number") {
           setCredits(Math.floor(status.remainingCredits));
+        } else if (typeof history.remainingCredits === "number") {
+          setCredits(Math.floor(history.remainingCredits));
         }
       } catch (error) {
         if (!cancelled) {
@@ -292,7 +291,16 @@ export default function SmsPage() {
         recipients: result.sent ?? recipients.length,
         status: "Envoyé",
       };
-      setCampaigns((current) => [nextCampaign, ...current]);
+      setCampaigns((current) => {
+        const nextCampaigns = [nextCampaign, ...current];
+        void saveSmsHistory(
+          nextCampaigns,
+          typeof result.remainingCredits === "number"
+            ? Math.floor(result.remainingCredits)
+            : credits,
+        );
+        return nextCampaigns;
+      });
       setConfirmation(
         result.failed
           ? `${result.sent} SMS envoyés, ${result.failed} échec(s).`
@@ -327,7 +335,11 @@ export default function SmsPage() {
       status,
     };
 
-    setCampaigns((current) => [nextCampaign, ...current]);
+    setCampaigns((current) => {
+      const nextCampaigns = [nextCampaign, ...current];
+      void saveSmsHistory(nextCampaigns, credits);
+      return nextCampaigns;
+    });
     setIsError(false);
     setConfirmation(`Envoi SMS planifié pour ${recipients} destinataire(s).`);
   }
