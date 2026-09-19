@@ -45,7 +45,9 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
 
   return (
     <>
-      <div className="hidden lg:block">
+      <div
+        className={`hidden shrink-0 lg:block ${sidebarCollapsed ? "w-20" : "w-72"}`}
+      >
         <Sidebar
           collapsed={sidebarCollapsed}
           onCollapsedChange={setSidebarCollapsed}
@@ -53,7 +55,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
       </div>
 
       <main
-        className="min-w-0 flex-1 p-0 lg:py-3 lg:pr-3 lg:pl-0"
+        className="relative z-0 min-w-0 flex-1 p-0 lg:py-3 lg:pr-3 lg:pl-2"
         onClick={collapseSidebarFromContent}
       >
         {children}

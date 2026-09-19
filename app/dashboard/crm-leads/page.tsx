@@ -536,7 +536,7 @@ export default function CRMLeadsPage() {
 
   return (
     <main className="min-h-screen bg-slate-100" data-sidebar-collapse-area="true">
-      <div className="w-full space-y-6 px-2 py-4 lg:px-2 lg:py-3">
+      <div className="w-full space-y-6 px-2 py-4 lg:px-2 lg:pt-5 lg:pb-3">
         <CRMHeader onNewLead={openNewLeadModal} />
 
         <section className="rounded-2xl border border-blue-100 bg-white p-4 shadow-sm">
@@ -683,7 +683,7 @@ export default function CRMLeadsPage() {
               id="crm-leads-results"
               className={
                 isLeadDetailsOpen
-                  ? "grid grid-cols-[minmax(0,1fr)_18rem] gap-3"
+                  ? "grid grid-cols-[minmax(0,1fr)_20rem] items-start gap-3"
                   : ""
               }
             >
@@ -710,7 +710,7 @@ export default function CRMLeadsPage() {
               </section>
 
               {isLeadDetailsOpen && (
-              <aside className="min-w-0">
+              <aside className="min-w-0 lg:sticky lg:top-3 lg:h-[calc(100vh-1.5rem)] lg:overflow-y-auto lg:overscroll-contain">
                 <LeadDetails
                   lead={selectedLead}
                   onAddActivity={handleAddActivity}
