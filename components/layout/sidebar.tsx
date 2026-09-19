@@ -3,6 +3,7 @@
 import {
   BarChart3,
   LayoutDashboard,
+  LogOut,
   Users,
   Calendar,
   Bot,
@@ -16,8 +17,9 @@ import {
   ShieldCheck,
   UserRound,
 } from "lucide-react";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { BookeaLogo } from "@/components/bookea-logo";
+import { createClient } from "@/lib/supabase";
 import { CenterSwitcher } from "./center-switcher";
 import NavItem from "./nav-item";
 import NavGroup from "./nav-group";
@@ -32,6 +34,7 @@ export default function Sidebar({
   onCollapsedChange,
 }: SidebarProps) {
   const pathname = usePathname();
+  const router = useRouter();
   const crmOpen =
     pathname.startsWith("/dashboard/crm-leads") ||
     pathname.startsWith("/dashboard/crm-clients") ||
@@ -43,9 +46,15 @@ export default function Sidebar({
     pathname.startsWith("/dashboard/statistiques") ||
     pathname.startsWith("/dashboard/facturation");
 
+  async function handleLogout() {
+    const supabase = createClient();
+    await supabase.auth.signOut();
+    router.replace("/login");
+  }
+
   return (
     <aside
-      className={`h-screen shrink-0 border-r border-white/10 bg-[#11152e] p-4 text-white transition-all duration-200 ${
+      className={`flex h-screen shrink-0 flex-col border-r border-white/10 bg-[#11152e] p-4 text-white transition-all duration-200 ${
         collapsed ? "w-20" : "w-72"
       }`}
     >
@@ -72,7 +81,7 @@ export default function Sidebar({
 
       <CenterSwitcher collapsed={collapsed} />
 
-      <nav className="space-y-2">
+      <nav className="min-h-0 flex-1 space-y-2 overflow-y-auto">
         <NavItem
           href="/dashboard"
           label="Dashboard"
@@ -178,6 +187,18 @@ export default function Sidebar({
           collapsed={collapsed}
         />
       </nav>
+
+      <button
+        type="button"
+        onClick={() => void handleLogout()}
+        title="Déconnexion"
+        className={`mt-auto flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm font-bold text-white/62 transition-colors hover:bg-white/10 hover:text-white ${
+          collapsed ? "justify-center" : ""
+        }`}
+      >
+        <LogOut size={20} />
+        {!collapsed && <span>Déconnexion</span>}
+      </button>
     </aside>
   );
 }
