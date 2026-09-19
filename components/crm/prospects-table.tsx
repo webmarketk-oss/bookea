@@ -1,3 +1,6 @@
+"use client";
+
+import { useState } from "react";
 import {
   Table,
   TableBody,
@@ -15,7 +18,7 @@ import {
 } from "@/lib/lead-statuses";
 import { cn } from "@/lib/utils";
 import { Lead, LeadStatus } from "@/types/lead";
-import { Globe } from "lucide-react";
+import { ChevronLeft, ChevronRight, Globe } from "lucide-react";
 
 interface ProspectsTableProps {
   leads: Lead[];
@@ -40,6 +43,7 @@ export default function ProspectsTable({
   onReminderDateChange,
   onCommercialChange,
 }: ProspectsTableProps) {
+  const [commentsOpen, setCommentsOpen] = useState(true);
   const sortedLeads = leads
     .map((lead, index) => ({ lead, index }))
     .sort((current, next) => {
@@ -222,11 +226,59 @@ export default function ProspectsTable({
       </Table>
       </div>
 
-      <div className="flex w-[19rem] shrink-0 flex-col border-l border-slate-200 bg-white">
-        <div className="flex h-10 items-center border-b px-3 text-sm font-medium text-slate-950">
-          Commentaire
+      <div
+        className={cn(
+          "flex shrink-0 cursor-pointer flex-col border-l border-slate-200 bg-white",
+          commentsOpen ? "w-[19rem]" : "w-10"
+        )}
+        onClick={(event) => {
+          const target = event.target;
+
+          if (!(target instanceof HTMLElement)) {
+            return;
+          }
+
+          if (target.closest("textarea, button, input, select, label")) {
+            return;
+          }
+
+          event.stopPropagation();
+          setCommentsOpen((open) => !open);
+        }}
+      >
+        <div className="flex h-10 items-center justify-between gap-1 border-b px-1.5">
+          {commentsOpen ? (
+            <span className="truncate px-1.5 text-sm font-medium text-slate-950">
+              Commentaire
+            </span>
+          ) : null}
+          <button
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              setCommentsOpen((open) => !open);
+            }}
+            className="ml-auto flex h-8 w-8 items-center justify-center rounded-lg text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-950"
+            aria-label={
+              commentsOpen
+                ? "Rabattre les commentaires"
+                : "Ouvrir les commentaires"
+            }
+            title={
+              commentsOpen
+                ? "Rabattre les commentaires"
+                : "Ouvrir les commentaires"
+            }
+          >
+            {commentsOpen ? (
+              <ChevronRight className="h-4 w-4" />
+            ) : (
+              <ChevronLeft className="h-4 w-4" />
+            )}
+          </button>
         </div>
-        {sortedLeads.map((lead) => {
+        {commentsOpen
+          ? sortedLeads.map((lead) => {
           const latestComment = lead.activityLog.find(
             (activity) => activity.type === "comment"
           );
@@ -242,7 +294,6 @@ export default function ProspectsTable({
                   "bg-amber-50",
                 selectedLead.id === lead.id && "bg-blue-50"
               )}
-              onClick={() => onSelectLead(lead)}
             >
               <textarea
                 key={latestComment?.id ?? `${lead.id}-empty-comment`}
@@ -272,7 +323,8 @@ export default function ProspectsTable({
               />
             </div>
           );
-        })}
+        })
+          : null}
       </div>
     </div>
   );

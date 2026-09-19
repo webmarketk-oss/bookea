@@ -725,11 +725,6 @@ export default function CRMLeadsPage() {
                   leads={filteredLeads}
                   selectedLead={selectedLead}
                   onSelectLead={(lead) => {
-                    if (isLeadDetailsOpen && selectedLeadId === lead.id) {
-                      setIsLeadDetailsOpen(false);
-                      return;
-                    }
-
                     setSelectedLeadId(lead.id);
                     setIsLeadDetailsOpen(true);
                   }}

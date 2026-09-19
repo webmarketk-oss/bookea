@@ -26,6 +26,7 @@ import {
   MessageCircle,
   MapPin,
   MoreVertical,
+  PanelRightClose,
   Pencil,
   Phone,
   Sparkles,
@@ -197,11 +198,33 @@ export default function LeadDetails({
     }
   }
 
+  function collapseFromUnusedSpace(event: React.MouseEvent<HTMLElement>) {
+    const target = event.target;
+
+    if (!(target instanceof HTMLElement)) {
+      return;
+    }
+
+    if (
+      target.closest(
+        "a, button, input, select, textarea, label, [role='button'], [data-fiche-keep-open='true']",
+      )
+    ) {
+      return;
+    }
+
+    event.stopPropagation();
+    onClose();
+  }
+
   return (
-    <Card className="h-fit overflow-hidden rounded-2xl border-slate-200 py-0 shadow-sm">
+    <Card
+      className="h-fit cursor-pointer overflow-hidden rounded-2xl border-slate-200 py-0 shadow-sm"
+      onClick={collapseFromUnusedSpace}
+    >
       <CardContent className="space-y-5 p-5">
         <header className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
+          <div className="min-w-0" data-fiche-keep-open="true">
             <div className="flex flex-wrap items-center gap-2">
               <h2 className="min-w-0 text-xl font-bold leading-tight text-slate-950">
                 {fullName}
@@ -219,13 +242,18 @@ export default function LeadDetails({
             type="button"
             variant="ghost"
             size="icon-sm"
-            onClick={onClose}
-            aria-label="Fermer la fiche"
+            onClick={(event) => {
+              event.stopPropagation();
+              onClose();
+            }}
+            aria-label="Rabattre la fiche"
+            title="Rabattre la fiche"
           >
-            <MoreVertical className="h-4 w-4" />
+            <PanelRightClose className="h-4 w-4" />
           </Button>
         </header>
 
+        <div data-fiche-keep-open="true" className="space-y-5">
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-5">
           <ActionButton
             label="Appeler"
@@ -477,6 +505,7 @@ export default function LeadDetails({
             </div>
             </div>
           )}
+        </div>
         </div>
       </CardContent>
     </Card>
