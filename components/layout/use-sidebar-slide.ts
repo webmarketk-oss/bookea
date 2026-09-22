@@ -33,11 +33,13 @@ export function useSidebarSlide(
   const visuallyCollapsed = width < SNAP_WIDTH;
 
   useEffect(() => {
-    const node = sidebarRef.current;
+    const sidebar = sidebarRef.current;
 
-    if (!node) {
+    if (!sidebar) {
       return;
     }
+
+    const node: HTMLElement = sidebar;
 
     function snap(nextWidth: number) {
       dragWidthRef.current = null;
