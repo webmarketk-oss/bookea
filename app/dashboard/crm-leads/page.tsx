@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import CRMHeader from "@/components/crm/crm-header";
 import DashboardCards from "@/components/crm/dashboard-cards";
@@ -60,6 +60,56 @@ const emptyLeadForm = {
 };
 
 type CRMTab = "prospects" | "kpi";
+type FicheBox = {
+  top: number;
+  left: number;
+  width: number;
+};
+
+const FICHE_BOTTOM_GAP = 12;
+
+function getLeadRow(leadId: string) {
+  return document.querySelector(`[data-lead-id="${leadId}"]`);
+}
+
+function ficheMinHeight() {
+  return Math.round(window.innerHeight * 0.62);
+}
+
+function ensureFicheHasRoom(row: Element) {
+  if (!(row instanceof HTMLElement)) {
+    return;
+  }
+
+  const minHeight = ficheMinHeight();
+  const room =
+    window.innerHeight - row.getBoundingClientRect().top - FICHE_BOTTOM_GAP;
+
+  if (room >= minHeight) {
+    return;
+  }
+
+  window.scrollBy({
+    top:
+      row.getBoundingClientRect().top -
+      (window.innerHeight - minHeight - FICHE_BOTTOM_GAP),
+    behavior: "auto",
+  });
+}
+
+function measureFicheBox(column: HTMLElement, row: Element | null): FicheBox {
+  const columnRect = column.getBoundingClientRect();
+  const minHeight = ficheMinHeight();
+  const maxTop = window.innerHeight - minHeight - FICHE_BOTTOM_GAP;
+  const rowTop =
+    row instanceof HTMLElement ? row.getBoundingClientRect().top : 12;
+
+  return {
+    top: Math.min(Math.max(rowTop, 8), Math.max(8, maxTop)),
+    left: columnRect.left,
+    width: columnRect.width,
+  };
+}
 type QuickDateFilter = CrmQuickFilter;
 
 const statusGroups: Partial<Record<LeadStatus, LeadStatus[]>> = {
@@ -90,6 +140,8 @@ export default function CRMLeadsPage() {
     useState<QuickDateFilter>("Tous");
   const centerNameRef = useRef("");
   const ficheRef = useRef<HTMLElement>(null);
+  const ficheColumnRef = useRef<HTMLDivElement>(null);
+  const [ficheBox, setFicheBox] = useState<FicheBox | null>(null);
   const [filters, setFilters] = useState<ProspectFilters>({
     search: "",
     source: "Tous",
@@ -275,6 +327,41 @@ export default function CRMLeadsPage() {
     );
   });
 
+  useLayoutEffect(() => {
+    if (!isLeadDetailsOpen || !selectedLeadId) {
+      setFicheBox(null);
+      return;
+    }
+
+    const row = getLeadRow(selectedLeadId);
+
+    if (row) {
+      ensureFicheHasRoom(row);
+    }
+
+    function placeFiche() {
+      const column = ficheColumnRef.current;
+      const currentRow = getLeadRow(selectedLeadId);
+
+      if (!column) {
+        return;
+      }
+
+      setFicheBox(measureFicheBox(column, currentRow));
+    }
+
+    placeFiche();
+    ficheRef.current?.scrollTo({ top: 0 });
+
+    window.addEventListener("resize", placeFiche);
+    window.addEventListener("scroll", placeFiche, true);
+
+    return () => {
+      window.removeEventListener("resize", placeFiche);
+      window.removeEventListener("scroll", placeFiche, true);
+    };
+  }, [isLeadDetailsOpen, selectedLeadId]);
+
   useEffect(() => {
     const node = ficheRef.current;
 
@@ -307,7 +394,7 @@ export default function CRMLeadsPage() {
     return () => {
       panel.removeEventListener("wheel", lockListScroll);
     };
-  }, [isLeadDetailsOpen, selectedLeadId]);
+  }, [ficheBox, isLeadDetailsOpen, selectedLeadId]);
 
   async function handleStatusChange(leadId: string, status: LeadStatus) {
     const leadBeforeUpdate = leadList.find((lead) => lead.id === leadId);
@@ -900,18 +987,31 @@ export default function CRMLeadsPage() {
               </section>
 
               {isLeadDetailsOpen && (
-              <aside
-                ref={ficheRef}
-                className="sticky top-0 h-dvh min-w-0 self-start overflow-y-auto overscroll-contain"
-              >
-                <LeadDetails
-                  lead={selectedLead}
-                  onAddActivity={handleAddActivity}
-                  onDeleteActivity={handleDeleteActivity}
-                  onUpdateLead={handleUpdateLead}
-                  onClose={() => setIsLeadDetailsOpen(false)}
-                />
-              </aside>
+              <div ref={ficheColumnRef} className="relative min-h-[50vh] min-w-0">
+                <aside
+                  ref={ficheRef}
+                  className="z-30 overflow-y-auto overscroll-contain"
+                  style={
+                    ficheBox
+                      ? {
+                          position: "fixed",
+                          top: ficheBox.top,
+                          left: ficheBox.left,
+                          width: ficheBox.width,
+                          bottom: FICHE_BOTTOM_GAP,
+                        }
+                      : undefined
+                  }
+                >
+                  <LeadDetails
+                    lead={selectedLead}
+                    onAddActivity={handleAddActivity}
+                    onDeleteActivity={handleDeleteActivity}
+                    onUpdateLead={handleUpdateLead}
+                    onClose={() => setIsLeadDetailsOpen(false)}
+                  />
+                </aside>
+              </div>
               )}
             </div>
               </>
