@@ -11,12 +11,19 @@ import {
   Plus,
   RefreshCw,
   ShieldCheck,
+  Smartphone,
   UserRoundPlus,
 } from "lucide-react";
 import type { FormEvent, ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
 
 import { createClient } from "@/lib/supabase";
+import {
+  creditSmsQuota,
+  MONTHLY_SMS_LIMIT,
+  normalizeSmsQuota,
+  type SmsQuotaRecord,
+} from "@/lib/sms-settings";
 
 type CenterRow = {
   id: string;
@@ -27,6 +34,11 @@ type CenterRow = {
   public_profile_enabled: boolean | null;
   owner_profile_id: string | null;
   created_at: string;
+  settings?: {
+    sms?: {
+      quota?: SmsQuotaRecord;
+    };
+  } | null;
 };
 
 type ProfileRow = {
@@ -51,12 +63,15 @@ type CenterMemberRow = {
     | null;
 };
 
-type CenterCardData = CenterRow & {
+type CenterCardData = Omit<CenterRow, "settings"> & {
   members: Array<{
     email: string;
     name: string;
     role: string;
   }>;
+  smsRemaining: number;
+  smsMonthlyGrant: number;
+  smsUsedThisMonth: number;
 };
 
 const defaultSources = [
@@ -72,6 +87,7 @@ export default function AdminCentresPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [attachingCenterId, setAttachingCenterId] = useState<string | null>(null);
+  const [creditingCenterId, setCreditingCenterId] = useState<string | null>(null);
   const [notice, setNotice] = useState<{
     type: "success" | "error" | "info";
     message: string;
@@ -96,7 +112,7 @@ export default function AdminCentresPage() {
     try {
       const { data: centerRows, error: centersError } = await supabase
         .from("centers")
-        .select("id,name,slug,city,email,public_profile_enabled,owner_profile_id,created_at")
+        .select("id,name,slug,city,email,public_profile_enabled,owner_profile_id,created_at,settings")
         .order("created_at", { ascending: false });
 
       if (centersError) throw new Error(centersError.message);
@@ -115,19 +131,33 @@ export default function AdminCentresPage() {
       }
 
       setCenters(
-        ((centerRows ?? []) as CenterRow[]).map((center) => ({
-          ...center,
-          members: memberRows
-            .filter((member) => member.center_id === center.id)
-            .map((member) => {
-              const profile = relationObject(member.profiles);
-              return {
-                email: profile?.email ?? "Compte sans email",
-                name: profile?.full_name ?? "Utilisateur Bookea",
-                role: member.role ?? "viewer",
-              };
-            }),
-        })),
+        ((centerRows ?? []) as CenterRow[]).map((center) => {
+          const quota = normalizeSmsQuota(center.settings?.sms?.quota);
+
+          return {
+            id: center.id,
+            name: center.name,
+            slug: center.slug,
+            city: center.city,
+            email: center.email,
+            public_profile_enabled: center.public_profile_enabled,
+            owner_profile_id: center.owner_profile_id,
+            created_at: center.created_at,
+            members: memberRows
+              .filter((member) => member.center_id === center.id)
+              .map((member) => {
+                const profile = relationObject(member.profiles);
+                return {
+                  email: profile?.email ?? "Compte sans email",
+                  name: profile?.full_name ?? "Utilisateur Bookea",
+                  role: member.role ?? "viewer",
+                };
+              }),
+            smsRemaining: quota.remaining,
+            smsMonthlyGrant: quota.monthlyGrant,
+            smsUsedThisMonth: quota.usedThisMonth,
+          };
+        }),
       );
     } catch (error) {
       setNotice({
@@ -247,6 +277,45 @@ export default function AdminCentresPage() {
       });
     } finally {
       setAttachingCenterId(null);
+    }
+  }
+
+  async function handleCreditSms(centerId: string, amount: number) {
+    setCreditingCenterId(centerId);
+    setNotice(null);
+
+    try {
+      if (!Number.isFinite(amount) || amount <= 0) {
+        throw new Error("Indiquez un nombre de SMS à ajouter.");
+      }
+
+      const nextQuota = await creditSmsQuota(centerId, amount);
+      setCenters((current) =>
+        current.map((center) =>
+          center.id === centerId
+            ? {
+                ...center,
+                smsRemaining: nextQuota.remaining,
+                smsMonthlyGrant: nextQuota.monthlyGrant,
+                smsUsedThisMonth: nextQuota.usedThisMonth,
+              }
+            : center,
+        ),
+      );
+      setNotice({
+        type: "success",
+        message: `${amount} SMS ajoutés au solde du centre. Nouveau solde : ${nextQuota.remaining}.`,
+      });
+    } catch (error) {
+      setNotice({
+        type: "error",
+        message:
+          error instanceof Error
+            ? error.message
+            : "Impossible d'ajouter des SMS à ce centre.",
+      });
+    } finally {
+      setCreditingCenterId(null);
     }
   }
 
@@ -457,7 +526,9 @@ export default function AdminCentresPage() {
                   key={center.id}
                   center={center}
                   attaching={attachingCenterId === center.id}
+                  crediting={creditingCenterId === center.id}
                   onAttachOwner={(email) => handleAttachOwner(center.id, email)}
+                  onCreditSms={(amount) => handleCreditSms(center.id, amount)}
                 />
               ))
             )}
@@ -471,14 +542,19 @@ export default function AdminCentresPage() {
 function CenterCard({
   center,
   attaching,
+  crediting,
   onAttachOwner,
+  onCreditSms,
 }: {
   center: CenterCardData;
   attaching: boolean;
+  crediting: boolean;
   onAttachOwner: (email: string) => void;
+  onCreditSms: (amount: number) => void;
 }) {
   const [ownerEmail, setOwnerEmail] = useState("");
   const [facebookPageId, setFacebookPageId] = useState("");
+  const [smsAmount, setSmsAmount] = useState("");
   const facebookConnectUrl =
     center.slug && facebookPageId.trim()
       ? `/api/meta/connect?center_slug=${encodeURIComponent(center.slug)}&page_id=${encodeURIComponent(facebookPageId.trim())}`
@@ -487,6 +563,18 @@ function CenterCard({
   function submitOwner(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     onAttachOwner(ownerEmail);
+  }
+
+  function submitSmsCredit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const amount = Math.floor(Number(smsAmount));
+
+    if (!Number.isFinite(amount) || amount <= 0) {
+      return;
+    }
+
+    onCreditSms(amount);
+    setSmsAmount("");
   }
 
   return (
@@ -576,6 +664,48 @@ function CenterCard({
             <p className="text-xs font-semibold text-slate-400">
               Le compte doit déjà avoir été créé sur la page connexion.
             </p>
+          </form>
+
+          <form onSubmit={submitSmsCredit} className="mt-5 border-t border-slate-200 pt-4">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <p className="text-sm font-black uppercase text-slate-400">SMS du centre</p>
+              <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-3 py-1 text-xs font-black text-blue-700">
+                <Smartphone className="h-3.5 w-3.5" />
+                {center.smsRemaining} restants
+              </span>
+            </div>
+            <p className="text-xs font-semibold text-slate-500">
+              Forfait {center.smsMonthlyGrant || MONTHLY_SMS_LIMIT} SMS / mois ·{" "}
+              {center.smsUsedThisMonth} utilisé{center.smsUsedThisMonth > 1 ? "s" : ""} ce
+              mois. Les recharges et le reliquat n’expirent pas.
+            </p>
+            <label className="mt-3 block text-sm font-black text-slate-500">
+              Ajouter des SMS
+            </label>
+            <div className="mt-2 flex flex-col gap-2 sm:flex-row">
+              <input
+                type="number"
+                min={1}
+                step={1}
+                value={smsAmount}
+                onChange={(event) => setSmsAmount(event.target.value.replace(/[^\d]/g, ""))}
+                placeholder="Ex. 100"
+                inputMode="numeric"
+                className="h-12 min-w-0 flex-1 rounded-xl border border-slate-200 bg-white px-3 font-bold text-slate-950 outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-100"
+              />
+              <button
+                type="submit"
+                disabled={crediting || Math.floor(Number(smsAmount)) <= 0}
+                className="inline-flex h-12 items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 font-black text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {crediting ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Plus className="h-4 w-4" />
+                )}
+                Ajouter
+              </button>
+            </div>
           </form>
 
           <div className="mt-5 border-t border-slate-200 pt-4">

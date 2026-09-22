@@ -10,6 +10,7 @@ const {
   normalizePhone,
   parseCenterSmsSettings,
   personalize,
+  readSmsQuota,
   sendBrevoSms,
   storeIncomingSms,
 } = require("./brevo");
@@ -98,6 +99,7 @@ module.exports = async function handler(req, res) {
 
     for (const center of centers ?? []) {
       const sms = parseCenterSmsSettings(center.settings);
+      const quotaState = readSmsQuota(sms);
       const hasPending = sms.jobs.some((job) => job?.status === "pending");
       const scanBirthdays = sms.birthdaySmsEnabled !== false;
 
@@ -115,6 +117,11 @@ module.exports = async function handler(req, res) {
 
         if (job?.kind === "birthday") {
           if (!scanBirthdays) {
+            nextJobs.push(job);
+            continue;
+          }
+
+          if (quotaState.remaining <= 0) {
             nextJobs.push(job);
             continue;
           }
@@ -144,6 +151,8 @@ module.exports = async function handler(req, res) {
               });
             }
             sent += 1;
+            quotaState.remaining -= 1;
+            quotaState.usedThisMonth += 1;
           } catch (sendError) {
             nextJobs.push({
               ...job,
@@ -189,6 +198,11 @@ module.exports = async function handler(req, res) {
           continue;
         }
 
+        if (quotaState.remaining <= 0) {
+          nextJobs.push(job);
+          continue;
+        }
+
         try {
           await sendBrevoSms({
             sender: defaultSender(),
@@ -202,6 +216,8 @@ module.exports = async function handler(req, res) {
             sentAt: new Date().toISOString(),
           });
           sent += 1;
+          quotaState.remaining -= 1;
+          quotaState.usedThisMonth += 1;
         } catch (sendError) {
           nextJobs.push({
             ...job,
@@ -274,6 +290,10 @@ module.exports = async function handler(req, res) {
             continue;
           }
 
+          if (quotaState.remaining <= 0) {
+            continue;
+          }
+
           try {
             await sendBrevoSms({
               sender: defaultSender(),
@@ -311,6 +331,8 @@ module.exports = async function handler(req, res) {
               });
             }
             sent += 1;
+            quotaState.remaining -= 1;
+            quotaState.usedThisMonth += 1;
           } catch (sendError) {
             nextJobs.push({
               id: crypto.randomUUID(),
@@ -365,6 +387,12 @@ module.exports = async function handler(req, res) {
         .update({
           settings: mergeCenterSmsSettings(center.settings, {
             jobs: [...otherJobs, ...keptBirthdayJobs],
+            quota: {
+              remaining: quotaState.remaining,
+              lastGrantMonth: quotaState.lastGrantMonth,
+              monthlyGrant: quotaState.monthlyGrant,
+              usedThisMonth: quotaState.usedThisMonth,
+            },
           }),
         })
         .eq("id", center.id);

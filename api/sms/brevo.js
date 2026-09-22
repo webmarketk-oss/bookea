@@ -116,7 +116,218 @@ function parseCenterSmsSettings(settings) {
     jobs: Array.isArray(sms.jobs) ? sms.jobs : [],
     inbox: Array.isArray(sms.inbox) ? sms.inbox : [],
     history: sms.history && typeof sms.history === "object" ? sms.history : null,
+    quota: sms.quota && typeof sms.quota === "object" ? sms.quota : null,
   };
+}
+
+const MONTHLY_SMS_LIMIT = 500;
+
+function currentSmsMonth() {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Europe/Paris",
+    year: "numeric",
+    month: "2-digit",
+  }).format(new Date());
+}
+
+function monthsBetween(fromMonth, toMonth) {
+  const [fromYear, fromMonthNumber] = String(fromMonth || "")
+    .split("-")
+    .map(Number);
+  const [toYear, toMonthNumber] = String(toMonth || "")
+    .split("-")
+    .map(Number);
+
+  if (
+    !fromYear ||
+    !fromMonthNumber ||
+    !toYear ||
+    !toMonthNumber
+  ) {
+    return 0;
+  }
+
+  return (toYear - fromYear) * 12 + (toMonthNumber - fromMonthNumber);
+}
+
+function applyMonthlySmsGrant(rawQuota) {
+  const month = currentSmsMonth();
+  const quota = rawQuota && typeof rawQuota === "object" ? rawQuota : {};
+  const monthlyGrant =
+    Number(quota.monthlyGrant || quota.limit) > 0
+      ? Math.floor(Number(quota.monthlyGrant || quota.limit))
+      : MONTHLY_SMS_LIMIT;
+
+  let remaining;
+  let lastGrantMonth;
+  let usedThisMonth;
+
+  if (typeof quota.remaining === "number") {
+    remaining = Math.max(0, Math.floor(quota.remaining));
+    lastGrantMonth = String(quota.lastGrantMonth || "").slice(0, 7);
+    usedThisMonth =
+      lastGrantMonth === month
+        ? Math.max(0, Math.floor(Number(quota.usedThisMonth) || 0))
+        : 0;
+  } else if (quota.month) {
+    const oldLimit =
+      Number(quota.limit) > 0 ? Math.floor(Number(quota.limit)) : monthlyGrant;
+    const oldUsed = Math.max(0, Math.floor(Number(quota.used) || 0));
+    remaining = Math.max(0, oldLimit - oldUsed);
+    lastGrantMonth = /^\d{4}-\d{2}$/.test(String(quota.month))
+      ? String(quota.month).slice(0, 7)
+      : "";
+    usedThisMonth = quota.month === month ? oldUsed : 0;
+  } else {
+    remaining = monthlyGrant;
+    lastGrantMonth = month;
+    usedThisMonth = 0;
+  }
+
+  let changed = typeof quota.remaining !== "number" || !quota.lastGrantMonth;
+
+  if (!/^\d{4}-\d{2}$/.test(lastGrantMonth)) {
+    lastGrantMonth = month;
+    changed = true;
+  } else if (lastGrantMonth < month) {
+    const missed = monthsBetween(lastGrantMonth, month);
+    if (missed > 0) {
+      remaining += monthlyGrant * missed;
+      lastGrantMonth = month;
+      usedThisMonth = 0;
+      changed = true;
+    }
+  }
+
+  return {
+    remaining,
+    lastGrantMonth,
+    monthlyGrant,
+    usedThisMonth,
+    month,
+    used: usedThisMonth,
+    limit: monthlyGrant,
+    changed,
+  };
+}
+
+function readSmsQuota(sms) {
+  return applyMonthlySmsGrant(sms?.quota);
+}
+
+function quotaRecord(quota) {
+  return {
+    remaining: quota.remaining,
+    lastGrantMonth: quota.lastGrantMonth,
+    monthlyGrant: quota.monthlyGrant,
+    usedThisMonth: quota.usedThisMonth,
+  };
+}
+
+async function loadCenterSmsQuotaRow(supabase, centerId) {
+  const { data, error } = await supabase
+    .from("centers")
+    .select("id,settings")
+    .eq("id", centerId)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  if (!data) {
+    throw new Error("center_not_found");
+  }
+
+  return data;
+}
+
+async function ensureCenterSmsQuota(supabase, centerId) {
+  const data = await loadCenterSmsQuotaRow(supabase, centerId);
+  const quota = applyMonthlySmsGrant(parseCenterSmsSettings(data.settings).quota);
+
+  if (quota.changed) {
+    const { error: updateError } = await supabase
+      .from("centers")
+      .update({
+        settings: mergeCenterSmsSettings(data.settings, {
+          quota: quotaRecord(quota),
+        }),
+      })
+      .eq("id", centerId);
+
+    if (updateError) {
+      throw new Error(updateError.message);
+    }
+  }
+
+  return quota;
+}
+
+async function consumeCenterSmsQuota(supabase, centerId, count = 1) {
+  const amount = Math.max(0, Math.floor(Number(count) || 0));
+  const data = await loadCenterSmsQuotaRow(supabase, centerId);
+  const quota = applyMonthlySmsGrant(parseCenterSmsSettings(data.settings).quota);
+
+  if (amount === 0) {
+    return quota;
+  }
+
+  if (quota.remaining < amount) {
+    const quotaError = new Error("sms_quota_exceeded");
+    quotaError.remaining = quota.remaining;
+    quotaError.limit = quota.monthlyGrant;
+    throw quotaError;
+  }
+
+  const nextQuota = {
+    ...quota,
+    remaining: quota.remaining - amount,
+    usedThisMonth: quota.usedThisMonth + amount,
+    used: quota.usedThisMonth + amount,
+    changed: false,
+  };
+
+  const { error: updateError } = await supabase
+    .from("centers")
+    .update({
+      settings: mergeCenterSmsSettings(data.settings, {
+        quota: quotaRecord(nextQuota),
+      }),
+    })
+    .eq("id", centerId);
+
+  if (updateError) {
+    throw new Error(updateError.message);
+  }
+
+  return nextQuota;
+}
+
+async function creditCenterSmsQuota(supabase, centerId, count = 0) {
+  const amount = Math.max(0, Math.floor(Number(count) || 0));
+  const data = await loadCenterSmsQuotaRow(supabase, centerId);
+  const quota = applyMonthlySmsGrant(parseCenterSmsSettings(data.settings).quota);
+  const nextQuota = {
+    ...quota,
+    remaining: quota.remaining + amount,
+    changed: false,
+  };
+
+  const { error: updateError } = await supabase
+    .from("centers")
+    .update({
+      settings: mergeCenterSmsSettings(data.settings, {
+        quota: quotaRecord(nextQuota),
+      }),
+    })
+    .eq("id", centerId);
+
+  if (updateError) {
+    throw new Error(updateError.message);
+  }
+
+  return nextQuota;
 }
 
 function getBirthdayTemplate(sms) {
@@ -227,6 +438,7 @@ function mergeCenterSmsSettings(currentSettings, smsPatch) {
       jobs: smsPatch.jobs ?? sms.jobs,
       inbox: smsPatch.inbox ?? sms.inbox,
       history: smsPatch.history ?? sms.history,
+      quota: smsPatch.quota ?? sms.quota,
     },
   };
 }
@@ -415,8 +627,13 @@ async function storeIncomingSms(supabase, incoming) {
 }
 
 module.exports = {
+  MONTHLY_SMS_LIMIT,
   birthdayYear,
+  consumeCenterSmsQuota,
+  creditCenterSmsQuota,
   createServiceClient,
+  ensureCenterSmsQuota,
+  currentSmsMonth,
   defaultSender,
   defaultSmsTemplates,
   findClientByPhone,
@@ -428,6 +645,7 @@ module.exports = {
   normalizePhone,
   parseCenterSmsSettings,
   personalize,
+  readSmsQuota,
   reminderSendAt,
   sendBrevoSms,
   storeIncomingSms,

@@ -21,6 +21,8 @@ import {
   loadCenterSmsSettings,
   loadSmsHistory,
   loadSmsInbox,
+  loadSmsQuota,
+  MONTHLY_SMS_LIMIT,
   saveCenterSmsSettings,
   saveSmsHistory,
   type CenterSmsSettings,
@@ -55,7 +57,10 @@ const statusStyles: Record<SmsCampaign["status"], string> = {
 };
 
 export default function SmsPage() {
-  const [credits, setCredits] = useState(0);
+  const [credits, setCredits] = useState(MONTHLY_SMS_LIMIT);
+  const [smsUsed, setSmsUsed] = useState(0);
+  const [smsLimit, setSmsLimit] = useState(MONTHLY_SMS_LIMIT);
+  const [centerId, setCenterId] = useState("");
   const [campaigns, setCampaigns] = useState<SmsCampaign[]>([]);
   const [name, setName] = useState("Relance prospects du jour");
   const [audience, setAudience] = useState("Prospects à rappeler");
@@ -89,13 +94,12 @@ export default function SmsPage() {
 
     async function load() {
       try {
-        const [center, leadData, clientData, appointmentData, status, sms, history, replies] =
+        const [center, leadData, clientData, appointmentData, sms, history, replies, quota] =
           await Promise.all([
             getActiveCenterContext(),
             loadCrmLeads().catch(() => ({ leads: [] as Lead[] })),
             loadCrmClients().catch(() => ({ clients: [] as CrmClient[] })),
             loadCrmAppointments().catch(() => [] as Appointment[]),
-            fetch("/api/sms/send").then((response) => response.json()).catch(() => null),
             loadCenterSmsSettings().catch(() => ({
               centerName: "le centre",
               settings: defaultSmsSettings,
@@ -105,6 +109,12 @@ export default function SmsPage() {
               remainingCredits: undefined as number | undefined,
             })),
             loadSmsInbox().catch(() => [] as SmsInboxItem[]),
+            loadSmsQuota().catch(() => ({
+              remaining: MONTHLY_SMS_LIMIT,
+              used: 0,
+              limit: MONTHLY_SMS_LIMIT,
+              month: "",
+            })),
           ]);
 
         void fetch("/api/sms/dispatch")
@@ -119,6 +129,7 @@ export default function SmsPage() {
           return;
         }
 
+        setCenterId(center.centerId);
         setCenterName(center.centerName);
         setLeads(leadData.leads);
         setClients(clientData.clients);
@@ -127,11 +138,9 @@ export default function SmsPage() {
         setBirthdaySms(sms.settings.birthdaySmsEnabled !== false);
         setCampaigns(history.campaigns);
         setInbox(replies);
-        if (typeof status?.remainingCredits === "number") {
-          setCredits(Math.floor(status.remainingCredits));
-        } else if (typeof history.remainingCredits === "number") {
-          setCredits(Math.floor(history.remainingCredits));
-        }
+        setCredits(quota.remaining);
+        setSmsUsed(quota.used);
+        setSmsLimit(quota.limit);
       } catch (error) {
         if (!cancelled) {
           setIsError(true);
@@ -165,11 +174,18 @@ export default function SmsPage() {
     [campaigns],
   );
 
-  function buyCredits(amount: number) {
-    setIsError(false);
-    setConfirmation(
-      `La recharge Bookea arrive ensuite. Pour l'instant, achetez les crédits SMS dans Brevo (${amount} SMS).`,
-    );
+  function applyQuota(remaining?: number, used?: number, limit?: number) {
+    if (typeof remaining === "number") {
+      setCredits(Math.floor(remaining));
+    }
+
+    if (typeof used === "number") {
+      setSmsUsed(Math.floor(used));
+    }
+
+    if (typeof limit === "number") {
+      setSmsLimit(Math.floor(limit));
+    }
   }
 
   async function persistSmsSettings(nextSettings: CenterSmsSettings) {
@@ -290,6 +306,9 @@ export default function SmsPage() {
       }
 
       setReplyDraft("");
+      if (typeof result.remainingCredits === "number") {
+        applyQuota(result.remainingCredits, smsUsed + 1);
+      }
       setConfirmation(`Réponse envoyée à ${item.clientName || item.phone}.`);
     } catch (error) {
       setIsError(true);
@@ -327,6 +346,8 @@ export default function SmsPage() {
           type: isMarketingAudience(audience) && !testPhone.trim()
             ? "marketing"
             : "transactional",
+          centerId,
+          centerName,
           recipients,
         }),
       });
@@ -336,9 +357,11 @@ export default function SmsPage() {
         throw new Error(result.error || result.results?.[0]?.error || "Envoi SMS refusé");
       }
 
-      if (typeof result.remainingCredits === "number") {
-        setCredits(Math.floor(result.remainingCredits));
-      }
+      applyQuota(
+        result.remainingCredits,
+        result.used,
+        result.monthlyLimit,
+      );
 
       const nextCampaign: SmsCampaign = {
         id: Date.now(),
@@ -424,10 +447,16 @@ export default function SmsPage() {
       </section>
 
       <section className="mb-6 grid gap-4 md:grid-cols-4">
-        <StatCard title="Solde SMS" value={credits} color="text-blue-600" icon={<Smartphone />} />
+        <StatCard
+          title="SMS restants"
+          value={credits}
+          detail={`+${smsLimit} chaque 1er · sans expiration`}
+          color="text-blue-600"
+          icon={<Smartphone />}
+        />
+        <StatCard title="Utilisés ce mois" value={smsUsed} color="text-orange-600" icon={<Zap />} />
         <StatCard title="Planifiés" value={stats.scheduled} color="text-violet-600" icon={<CalendarClock />} />
-        <StatCard title="Envoyés" value={stats.sent} color="text-emerald-600" icon={<CheckCircle2 />} />
-        <StatCard title="Consommés" value={stats.used} color="text-orange-600" icon={<Zap />} />
+        <StatCard title="Campagnes envoyées" value={stats.sent} color="text-emerald-600" icon={<CheckCircle2 />} />
       </section>
 
       {confirmation && (
@@ -575,29 +604,22 @@ export default function SmsPage() {
       </section>
 
       <section className="mb-6 rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-        <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
-          <div className="flex items-start gap-4">
-            <div className="grid h-12 w-12 place-items-center rounded-2xl bg-blue-50 text-blue-600">
-              <ShoppingCart className="h-6 w-6" />
-            </div>
-            <div>
-              <h2 className="text-xl font-black">Recharge SMS</h2>
-              <p className="mt-1 text-sm font-medium text-slate-500">
-                Les crédits se rechargent pour l’instant dans Brevo.
-              </p>
-            </div>
+        <div className="flex items-start gap-4">
+          <div className="grid h-12 w-12 place-items-center rounded-2xl bg-blue-50 text-blue-600">
+            <ShoppingCart className="h-6 w-6" />
           </div>
-          <div className="flex flex-wrap gap-3">
-            {[100, 500, 1000].map((amount) => (
-              <button
-                key={amount}
-                type="button"
-                onClick={() => buyCredits(amount)}
-                className="rounded-2xl border border-slate-200 bg-slate-50 px-5 py-3 font-black text-slate-700 hover:bg-blue-50 hover:text-blue-700"
-              >
-                Acheter {amount} SMS
-              </button>
-            ))}
+          <div>
+            <h2 className="text-xl font-black">Forfait du centre</h2>
+            <p className="mt-1 text-sm font-medium text-slate-500">
+              {centerName} reçoit {smsLimit} SMS chaque 1er du mois. Les SMS non
+              utilisés et les recharges admin n’expirent pas : s’il en reste 100,
+              le mois suivant le solde passe à {smsLimit + 100}. L’envoi s’arrête
+              uniquement quand le solde est à 0.
+            </p>
+            <p className="mt-2 text-sm font-black text-slate-800">
+              {credits} restant{credits > 1 ? "s" : ""} · {smsUsed} utilisé
+              {smsUsed > 1 ? "s" : ""}
+            </p>
           </div>
         </div>
       </section>
@@ -987,10 +1009,13 @@ function Toggle({
 function StatCard({
   title,
   value,
+  detail,
+  color,
   icon,
 }: {
   title: string;
   value: number | string;
+  detail?: string;
   color?: string;
   icon: ReactNode;
 }) {
@@ -999,7 +1024,10 @@ function StatCard({
       <div className="flex items-start justify-between gap-4">
         <div>
           <p className="text-sm font-black text-slate-500">{title}</p>
-          <p className="mt-3 text-3xl font-black">{value}</p>
+          <p className={`mt-3 text-3xl font-black ${color ?? ""}`}>{value}</p>
+          {detail ? (
+            <p className="mt-2 text-xs font-bold text-slate-400">{detail}</p>
+          ) : null}
         </div>
         <div className="grid h-12 w-12 place-items-center rounded-2xl bg-slate-50 text-blue-600">
           {icon}

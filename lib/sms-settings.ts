@@ -57,6 +57,217 @@ export const defaultSmsSettings: CenterSmsSettings = {
   birthdaySmsEnabled: true,
 };
 
+export const MONTHLY_SMS_LIMIT = 500;
+
+export type SmsQuotaRecord = {
+  remaining?: number;
+  lastGrantMonth?: string;
+  monthlyGrant?: number;
+  usedThisMonth?: number;
+  month?: string;
+  used?: number;
+  limit?: number;
+};
+
+export type SmsQuota = {
+  remaining: number;
+  lastGrantMonth: string;
+  monthlyGrant: number;
+  usedThisMonth: number;
+  month: string;
+  used: number;
+  limit: number;
+  changed: boolean;
+};
+
+export function currentSmsMonth() {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Europe/Paris",
+    year: "numeric",
+    month: "2-digit",
+  }).format(new Date());
+}
+
+function monthsBetween(fromMonth: string, toMonth: string) {
+  const [fromYear, fromMonthNumber] = String(fromMonth || "")
+    .split("-")
+    .map(Number);
+  const [toYear, toMonthNumber] = String(toMonth || "")
+    .split("-")
+    .map(Number);
+
+  if (!fromYear || !fromMonthNumber || !toYear || !toMonthNumber) {
+    return 0;
+  }
+
+  return (toYear - fromYear) * 12 + (toMonthNumber - fromMonthNumber);
+}
+
+function quotaRecord(quota: SmsQuota) {
+  return {
+    remaining: quota.remaining,
+    lastGrantMonth: quota.lastGrantMonth,
+    monthlyGrant: quota.monthlyGrant,
+    usedThisMonth: quota.usedThisMonth,
+  };
+}
+
+export function normalizeSmsQuota(value?: SmsQuotaRecord | null): SmsQuota {
+  const month = currentSmsMonth();
+  const quota = value && typeof value === "object" ? value : {};
+  const monthlyGrant =
+    Number(quota.monthlyGrant || quota.limit) > 0
+      ? Math.floor(Number(quota.monthlyGrant || quota.limit))
+      : MONTHLY_SMS_LIMIT;
+
+  let remaining: number;
+  let lastGrantMonth: string;
+  let usedThisMonth: number;
+
+  if (typeof quota.remaining === "number") {
+    remaining = Math.max(0, Math.floor(quota.remaining));
+    lastGrantMonth = String(quota.lastGrantMonth || "").slice(0, 7);
+    usedThisMonth =
+      lastGrantMonth === month
+        ? Math.max(0, Math.floor(Number(quota.usedThisMonth) || 0))
+        : 0;
+  } else if (quota.month) {
+    const oldLimit =
+      Number(quota.limit) > 0 ? Math.floor(Number(quota.limit)) : monthlyGrant;
+    const oldUsed = Math.max(0, Math.floor(Number(quota.used) || 0));
+    remaining = Math.max(0, oldLimit - oldUsed);
+    lastGrantMonth = /^\d{4}-\d{2}$/.test(String(quota.month))
+      ? String(quota.month).slice(0, 7)
+      : "";
+    usedThisMonth = quota.month === month ? oldUsed : 0;
+  } else {
+    remaining = monthlyGrant;
+    lastGrantMonth = month;
+    usedThisMonth = 0;
+  }
+
+  let changed = typeof quota.remaining !== "number" || !quota.lastGrantMonth;
+
+  if (!/^\d{4}-\d{2}$/.test(lastGrantMonth)) {
+    lastGrantMonth = month;
+    changed = true;
+  } else if (lastGrantMonth < month) {
+    const missed = monthsBetween(lastGrantMonth, month);
+
+    if (missed > 0) {
+      remaining += monthlyGrant * missed;
+      lastGrantMonth = month;
+      usedThisMonth = 0;
+      changed = true;
+    }
+  }
+
+  return {
+    remaining,
+    lastGrantMonth,
+    monthlyGrant,
+    usedThisMonth,
+    month,
+    used: usedThisMonth,
+    limit: monthlyGrant,
+    changed,
+  };
+}
+
+function readSettingsObject(value: unknown) {
+  return value && typeof value === "object"
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+async function persistCenterSmsQuota(
+  centerId: string,
+  quota: SmsQuota,
+  currentSettings: Record<string, unknown>,
+) {
+  const supabase = createClient();
+  const currentSms = readSettingsObject(currentSettings.sms);
+  const { error } = await supabase
+    .from("centers")
+    .update({
+      settings: {
+        ...currentSettings,
+        sms: {
+          ...currentSms,
+          quota: quotaRecord(quota),
+        },
+      },
+    })
+    .eq("id", centerId);
+
+  if (error) {
+    throw new Error(error.message);
+  }
+}
+
+export async function loadSmsQuota() {
+  const context = await getActiveCenterContext();
+  const supabase = createClient();
+  const { data, error } = await supabase
+    .from("centers")
+    .select("settings")
+    .eq("id", context.centerId)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  const currentSettings = readSettingsObject(data?.settings);
+  const quota = normalizeSmsQuota(
+    readSettingsObject(currentSettings.sms).quota as SmsQuotaRecord | undefined,
+  );
+
+  if (quota.changed) {
+    await persistCenterSmsQuota(context.centerId, quota, currentSettings);
+  }
+
+  return {
+    centerId: context.centerId,
+    ...quota,
+  };
+}
+
+export async function creditSmsQuota(centerId: string, count: number) {
+  const amount = Math.max(0, Math.floor(Number(count) || 0));
+  const supabase = createClient();
+  const { data, error } = await supabase
+    .from("centers")
+    .select("settings")
+    .eq("id", centerId)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  if (!data) {
+    throw new Error("Centre introuvable.");
+  }
+
+  const currentSettings = readSettingsObject(data.settings);
+  const quota = normalizeSmsQuota(
+    readSettingsObject(currentSettings.sms).quota as SmsQuotaRecord | undefined,
+  );
+  const nextQuota: SmsQuota = {
+    ...quota,
+    remaining: quota.remaining + amount,
+    changed: false,
+  };
+
+  await persistCenterSmsQuota(centerId, nextQuota, currentSettings);
+
+  return {
+    centerId,
+    ...nextQuota,
+  };
+}
+
 const SMS_SETTINGS_UPDATED_EVENT = "bookea-sms-settings-updated";
 
 export function smsSettingsStorageKey(centerId: string) {

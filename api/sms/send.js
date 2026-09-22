@@ -1,7 +1,13 @@
 const {
+  MONTHLY_SMS_LIMIT,
+  consumeCenterSmsQuota,
+  createServiceClient,
   defaultSender,
+  ensureCenterSmsQuota,
   normalizePhone,
+  parseCenterSmsSettings,
   personalize,
+  readSmsQuota,
   sendBrevoSms,
 } = require("./brevo");
 
@@ -38,11 +44,37 @@ module.exports = async function handler(req, res) {
   }
 
   if (req.method === "GET") {
+    const centerId = String(firstValue(req.query?.centerId) || "").trim();
+    let quota = {
+      remaining: MONTHLY_SMS_LIMIT,
+      used: 0,
+      limit: MONTHLY_SMS_LIMIT,
+      month: "",
+    };
+
+    if (centerId) {
+      try {
+        const supabase = createServiceClient();
+        quota = await ensureCenterSmsQuota(supabase, centerId);
+      } catch {
+        quota = {
+          remaining: MONTHLY_SMS_LIMIT,
+          used: 0,
+          limit: MONTHLY_SMS_LIMIT,
+          month: "",
+        };
+      }
+    }
+
     return res.status(200).json({
       ok: true,
       endpoint: "sms/send",
       configured: Boolean(process.env.BREVO_API_KEY),
       sender: process.env.BREVO_SMS_SENDER || "BOOKEA",
+      remainingCredits: quota.remaining,
+      used: quota.used,
+      monthlyLimit: quota.limit,
+      month: quota.month,
     });
   }
 
@@ -115,9 +147,44 @@ module.exports = async function handler(req, res) {
       return res.status(400).json({ ok: false, error: "too_many_recipients" });
     }
 
+    const supabase = createServiceClient();
+    const centerId = await resolveSmsCenterId(supabase, payload);
+
+    if (!centerId) {
+      return res.status(400).json({
+        ok: false,
+        error: "Centre introuvable pour décompter le quota SMS.",
+      });
+    }
+
+    const { data: centerRow, error: centerError } = await supabase
+      .from("centers")
+      .select("settings")
+      .eq("id", centerId)
+      .maybeSingle();
+
+    if (centerError) {
+      throw new Error(centerError.message);
+    }
+
+    const quota = readSmsQuota(parseCenterSmsSettings(centerRow?.settings));
+
+    if (quota.remaining <= 0) {
+      return res.status(402).json({
+        ok: false,
+        error: "Plus de SMS disponibles. Le solde se recharge de 500 SMS chaque 1er du mois, ou via une recharge admin.",
+        remainingCredits: 0,
+        used: quota.used,
+        monthlyLimit: quota.limit,
+        month: quota.month,
+      });
+    }
+
+    const allowedRecipients = recipients.slice(0, quota.remaining);
+    const skipped = recipients.length - allowedRecipients.length;
     const results = [];
 
-    for (const recipient of recipients) {
+    for (const recipient of allowedRecipients) {
       try {
         const sent = await sendBrevoSms({
           sender,
@@ -141,14 +208,20 @@ module.exports = async function handler(req, res) {
     }
 
     const sentCount = results.filter((item) => item.ok).length;
-    const remainingCredits = results.find((item) => item.remainingCredits != null)
-      ?.remainingCredits;
+    let nextQuota = quota;
+
+    if (sentCount > 0) {
+      nextQuota = await consumeCenterSmsQuota(supabase, centerId, sentCount);
+    }
 
     return res.status(sentCount > 0 ? 200 : 502).json({
       ok: sentCount > 0,
       sent: sentCount,
-      failed: results.length - sentCount,
-      remainingCredits: remainingCredits ?? null,
+      failed: results.length - sentCount + skipped,
+      remainingCredits: nextQuota.remaining,
+      used: nextQuota.used,
+      monthlyLimit: nextQuota.limit,
+      month: nextQuota.month,
       results,
     });
   } catch (error) {
@@ -159,3 +232,39 @@ module.exports = async function handler(req, res) {
     });
   }
 };
+
+async function resolveSmsCenterId(supabase, payload) {
+  const centerId = String(firstValue(payload.centerId) || "").trim();
+
+  if (centerId) {
+    return centerId;
+  }
+
+  const centerName = String(
+    firstValue(payload.centerName) || firstValue(payload.centre) || "",
+  ).trim();
+
+  if (!centerName) {
+    return "";
+  }
+
+  const { data, error } = await supabase
+    .from("centers")
+    .select("id,name")
+    .ilike("name", centerName);
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  if ((data ?? []).length === 1) {
+    return data[0].id;
+  }
+
+  return (
+    (data ?? []).find(
+      (center) =>
+        String(center.name || "").trim().toLowerCase() === centerName.toLowerCase(),
+    )?.id || ""
+  );
+}

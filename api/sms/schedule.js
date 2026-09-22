@@ -11,6 +11,8 @@ const {
   parseCenterSmsSettings,
   personalize,
   reminderSendAt,
+  consumeCenterSmsQuota,
+  readSmsQuota,
   sendBrevoSms,
   toIsoBirthDate,
 } = require("./brevo");
@@ -215,12 +217,23 @@ async function handleBirthdayJob(res, payload, action) {
     isBirthdayToday(birthDate) && !alreadySentThisYear && Number(sendAt.slice(0, 4)) !== year;
 
   if (sendNow) {
+    const quota = readSmsQuota(sms);
+
+    if (quota.remaining <= 0) {
+      return res.status(402).json({
+        ok: false,
+        error: "Plus de SMS disponibles. Le solde se recharge de 500 SMS chaque 1er du mois, ou via une recharge admin.",
+        remainingCredits: 0,
+      });
+    }
+
     await sendBrevoSms({
       sender: defaultSender(),
       recipient: phone,
       content: personalize(message, vars),
       type: "transactional",
     });
+    const nextQuota = await consumeCenterSmsQuota(supabase, centerId, 1);
 
     const jobs = [
       ...otherJobs,
@@ -255,7 +268,16 @@ async function handleBirthdayJob(res, payload, action) {
 
     await supabase
       .from("centers")
-      .update({ settings: mergeCenterSmsSettings(centerRow.settings, { jobs }) })
+      .update({
+        settings: mergeCenterSmsSettings(centerRow.settings, {
+          jobs,
+          quota: {
+            month: nextQuota.month,
+            used: nextQuota.used,
+            limit: nextQuota.limit,
+          },
+        }),
+      })
       .eq("id", centerId);
 
     return res.status(200).json({
@@ -263,6 +285,7 @@ async function handleBirthdayJob(res, payload, action) {
       sent: 1,
       scheduled: true,
       sendAt,
+      remainingCredits: nextQuota.remaining,
     });
   }
 
@@ -465,18 +488,37 @@ module.exports = async function handler(req, res) {
     const dueNow = new Date(sendAt).getTime() <= Date.now();
 
     if (dueNow) {
-      const sent = await sendBrevoSms({
+      if (!centerRow) {
+        return res.status(404).json({ ok: false, error: "center_not_found" });
+      }
+
+      const quota = readSmsQuota(parseCenterSmsSettings(centerRow.settings));
+
+      if (quota.remaining <= 0) {
+        return res.status(402).json({
+          ok: false,
+          error: "Plus de SMS disponibles. Le solde se recharge de 500 SMS chaque 1er du mois, ou via une recharge admin.",
+          remainingCredits: 0,
+        });
+      }
+
+      await sendBrevoSms({
         sender: defaultSender(),
         recipient: vars.phone,
         content: personalize(message, vars),
         type: "transactional",
       });
+      const nextQuota = await consumeCenterSmsQuota(
+        supabase,
+        appointment.center_id,
+        1,
+      );
 
       return res.status(200).json({
         ok: true,
         sent: 1,
         scheduled: false,
-        remainingCredits: sent?.remainingCredits ?? null,
+        remainingCredits: nextQuota.remaining,
       });
     }
 

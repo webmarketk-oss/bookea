@@ -1,3 +1,4 @@
+import { getActiveCenterContext } from "@/lib/center-access";
 import {
   fillSmsTemplate,
   getSmsTemplate,
@@ -10,6 +11,7 @@ export type SendSmsInput = SmsTemplateVars & {
   phone: string;
   message: string;
   type?: "transactional" | "marketing";
+  centerId?: string;
 };
 
 export type SendSmsResult = {
@@ -36,12 +38,25 @@ export async function sendBookeaSms(input: SendSmsInput): Promise<SendSmsResult>
     };
   }
 
+  let centerId = input.centerId || "";
+
+  if (!centerId) {
+    try {
+      const context = await getActiveCenterContext();
+      centerId = context.centerId;
+    } catch {
+      centerId = "";
+    }
+  }
+
   const response = await fetch("/api/sms/send", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       message: input.message,
       type: input.type || "transactional",
+      centerId,
+      centerName: input.centerName || "",
       recipients: [
         {
           phone,
