@@ -4,7 +4,7 @@ const {
   appendStatusHistory,
   appointmentSlot,
   confirmationExpiresAt,
-  confirmationUrlForToken,
+  confirmationSmsLinkForToken,
   createConfirmationToken,
   hashConfirmationToken,
 } = require("./token-utils");
@@ -73,7 +73,7 @@ async function issueAppointmentConfirmationUrl(appointmentId) {
     throw new Error(updateError.message);
   }
 
-  return confirmationUrlForToken(token);
+  return confirmationSmsLinkForToken(token);
 }
 
 module.exports = {

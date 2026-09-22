@@ -44,10 +44,24 @@ function personalize(message, vars = {}) {
     !output.includes(confirmationLink) &&
     !/\{\{lien(?:_confirmation)?\}\}/.test(String(message || ""))
   ) {
-    output = `${output}\n\nConfirmez ou annulez ici : ${confirmationLink}`;
+    output = `${output}\nConfirmez ou annulez : ${confirmationLink}`;
   }
 
-  return output.replace(/[ \t]{2,}/g, " ").replace(/ +\n/g, "\n").trim();
+  return toDeliverableSmsContent(output);
+}
+
+function toDeliverableSmsContent(content) {
+  return String(content || "")
+    .replace(/[–—−]/g, "-")
+    .replace(/[’‘‛]/g, "'")
+    .replace(/[“”«»]/g, '"')
+    .replace(/\u00a0/g, " ")
+    .replace(/\r\n?/g, "\n")
+    .replace(/\n{2,}/g, "\n")
+    .replace(/https?:\/\//gi, "")
+    .replace(/[ \t]{2,}/g, " ")
+    .replace(/ +\n/g, "\n")
+    .trim();
 }
 
 function defaultSender() {
@@ -61,12 +75,12 @@ function defaultSmsTemplates() {
     {
       id: "confirmation-rdv",
       name: "Confirmation RDV",
-      body: "BOOKEA – Rappel : votre RDV chez {{centre}} est prévu le {{date}} à {{heure}}.\n\nConfirmez ou annulez ici : {{lien_confirmation}}",
+      body: "BOOKEA - Rappel : votre RDV chez {{centre}} est prévu le {{date}} à {{heure}}. Confirmez ou annulez : {{lien_confirmation}}",
     },
     {
       id: "rappel-48h",
       name: "Rappel 48h avant RDV",
-      body: "Bonjour {{prenom}}, rappel : votre rendez-vous {{soin}} est dans 48h, le {{date}} à {{heure}} chez {{centre}}.\nConfirmez ou annulez ici : {{lien_confirmation}}",
+      body: "Bonjour {{prenom}}, rappel RDV {{soin}} le {{date}} à {{heure}} chez {{centre}}. Confirmez ou annulez : {{lien_confirmation}}",
     },
     {
       id: "accueil-prospect",
@@ -475,12 +489,17 @@ function createServiceClient() {
   });
 }
 
-async function sendBrevoSms({ sender, recipient, content, type }) {
+async function sendBrevoSms({ sender, recipient, content: rawContent, type }) {
   const apiKey = process.env.BREVO_API_KEY;
 
   if (!apiKey) {
     throw new Error("missing_brevo_api_key");
   }
+
+  const content = toDeliverableSmsContent(rawContent);
+  const unicodeEnabled = /[^\u000a\u000d\u0020-\u007eàâäçéèêëîïôöùûüÿÀÂÄÇÉÈÊËÎÏÔÖÙÛÜŸ€]/.test(
+    content,
+  );
 
   const response = await fetch("https://api.brevo.com/v3/transactionalSMS/sms", {
     method: "POST",
@@ -494,6 +513,7 @@ async function sendBrevoSms({ sender, recipient, content, type }) {
       recipient,
       content,
       type: type === "marketing" ? "marketing" : "transactional",
+      unicodeEnabled,
     }),
   });
 

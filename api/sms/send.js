@@ -135,6 +135,9 @@ module.exports = async function handler(req, res) {
           time: String(item?.time || item?.heure || "").trim(),
           treatment: String(item?.treatment || item?.soin || "").trim(),
           centerName: String(item?.centerName || item?.centre || centerName).trim(),
+          confirmationLink: String(
+            item?.confirmationLink || item?.lien_confirmation || item?.lien || "",
+          ).trim(),
         };
       })
       .filter((item) => item.phone);

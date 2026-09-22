@@ -4,7 +4,7 @@ const CLIENT_CONFIRMED = "confirmed par le client";
 const CLIENT_CANCELLED = "annuler";
 
 function createConfirmationToken() {
-  return crypto.randomBytes(32).toString("base64url");
+  return crypto.randomBytes(12).toString("base64url");
 }
 
 function hashConfirmationToken(token) {
@@ -104,6 +104,10 @@ function confirmationUrlForToken(token) {
   return `${publicSiteUrl()}/r/${encodeURIComponent(token)}`;
 }
 
+function confirmationSmsLinkForToken(token) {
+  return confirmationUrlForToken(token).replace(/^https?:\/\//i, "");
+}
+
 function formatPublicAppointmentDate(dateYmd) {
   const date = new Date(`${String(dateYmd || "").slice(0, 10)}T12:00:00`);
 
@@ -149,6 +153,7 @@ module.exports = {
   appendStatusHistory,
   appointmentSlot,
   confirmationExpiresAt,
+  confirmationSmsLinkForToken,
   confirmationUrlForToken,
   createConfirmationToken,
   formatPublicAppointmentDate,

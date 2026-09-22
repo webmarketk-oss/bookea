@@ -66,6 +66,7 @@ export async function sendBookeaSms(input: SendSmsInput): Promise<SendSmsResult>
           time: input.time || "",
           treatment: input.treatment || "",
           centerName: input.centerName || "",
+          confirmationLink: input.confirmationLink || "",
         },
       ],
     }),
