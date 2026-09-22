@@ -736,36 +736,36 @@ export default function CenterSettingsPage() {
     <div className="min-h-screen bg-[#f4f7fb] text-slate-950">
       <header className="mb-6 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
         <div>
-          <p className="text-sm font-black text-violet-600">Bookea Pro</p>
-          <h1 className="mt-1 text-5xl font-black tracking-tight">
+          <p className="text-xs font-medium text-violet-600">Bookea Pro</p>
+          <h1 className="mt-1 text-2xl font-semibold tracking-tight">
             Paramètres du centre
           </h1>
-          <p className="mt-3 max-w-3xl text-xl font-medium text-slate-500">
+          <p className="mt-2 max-w-3xl text-sm text-slate-500">
             Configurez la fiche publique, les prestations, les sources, les
             produits, les acomptes et la réservation en ligne.
           </p>
         </div>
-        <div className="flex flex-wrap gap-3">
+        <div className="flex flex-wrap gap-2">
           <Link
             href={`/centres/${center.slug}`}
-            className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-5 py-3 font-black text-slate-700 shadow-sm"
+            className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm"
           >
-            <Eye className="h-5 w-5" />
+            <Eye className="h-4 w-4" />
             Voir la fiche publique
           </Link>
           <button
             type="button"
             onClick={saveSettings}
-            className="inline-flex items-center gap-2 rounded-2xl bg-slate-950 px-5 py-3 font-black text-white shadow-sm"
+            className="inline-flex items-center gap-2 rounded-xl bg-slate-950 px-4 py-2 text-sm font-medium text-white shadow-sm"
           >
-            <Save className="h-5 w-5" />
+            <Save className="h-4 w-4" />
             Enregistrer
           </button>
         </div>
       </header>
 
       {savedMessage && (
-        <div className="mb-5 rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-3 font-black text-emerald-700">
+        <div className="mb-5 rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-3 text-sm font-medium text-emerald-700">
           {savedMessage}
         </div>
       )}
@@ -775,28 +775,28 @@ export default function CenterSettingsPage() {
           title="Prestations visibles"
           value={visibleServices.length.toString()}
           detail={`${services.length} prestations au total`}
-          icon={<Eye className="h-6 w-6" />}
+          icon={<Eye className="h-4 w-4" />}
           color="text-blue-600"
         />
         <MetricCard
           title="Acompte activé"
           value={depositServices.toString()}
           detail="Prestations avec acompte"
-          icon={<BadgeEuro className="h-6 w-6" />}
+          icon={<BadgeEuro className="h-4 w-4" />}
           color="text-emerald-600"
         />
         <MetricCard
           title="Paiement"
           value={stripeConnected ? "Actif" : "À connecter"}
           detail="Stripe Connect"
-          icon={<CreditCard className="h-6 w-6" />}
+          icon={<CreditCard className="h-4 w-4" />}
           color={stripeConnected ? "text-emerald-600" : "text-orange-600"}
         />
         <MetricCard
           title="Fiche publique"
           value={center.published ? "Publiée" : "Masquée"}
           detail={`/centres/${center.slug}`}
-          icon={<Building2 className="h-6 w-6" />}
+          icon={<Building2 className="h-4 w-4" />}
           color={center.published ? "text-violet-600" : "text-slate-500"}
         />
       </section>
@@ -815,7 +815,7 @@ export default function CenterSettingsPage() {
             key={id}
             type="button"
             onClick={() => setActiveTab(id)}
-            className={`shrink-0 border-b-4 px-4 py-4 text-lg font-black transition ${
+            className={`shrink-0 border-b-2 px-3 py-3 text-sm font-medium transition ${
               activeTab === id
                 ? "border-violet-600 text-violet-600"
                 : "border-transparent text-slate-500"
@@ -830,7 +830,7 @@ export default function CenterSettingsPage() {
         <div className="grid gap-6 xl:grid-cols-[1.05fr_0.95fr]">
           <section className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-sm">
             <SectionTitle
-              icon={<Building2 className="h-6 w-6" />}
+              icon={<Building2 className="h-4 w-4" />}
               title="Fiche publique du centre"
               subtitle="Ces informations seront visibles par les clientes qui cherchent un prestataire."
             />
@@ -861,7 +861,7 @@ export default function CenterSettingsPage() {
                 onChange={(value) => setCenter({ ...center, email: value })}
               />
               <label className="space-y-2">
-                <span className="text-sm font-black uppercase text-slate-500">
+                <span className="text-xs font-medium text-slate-500">
                   Visibilité
                 </span>
                 <button
@@ -872,7 +872,7 @@ export default function CenterSettingsPage() {
                       published: !current.published,
                     }))
                   }
-                  className={`flex h-14 w-full items-center justify-center gap-2 rounded-2xl border px-4 font-black ${
+                  className={`flex h-11 w-full items-center justify-center gap-2 rounded-xl border px-4 text-sm font-medium ${
                     center.published
                       ? "border-emerald-200 bg-emerald-50 text-emerald-700"
                       : "border-slate-200 bg-slate-50 text-slate-500"
@@ -887,11 +887,11 @@ export default function CenterSettingsPage() {
                 </button>
               </label>
               <label className="space-y-2 md:col-span-2">
-                <span className="text-sm font-black uppercase text-slate-500">
+                <span className="text-xs font-medium text-slate-500">
                   Adresse complète
                 </span>
                 <input
-                  className="h-14 w-full rounded-2xl border border-slate-200 px-4 text-lg font-bold outline-none focus:border-blue-500"
+                  className="h-11 w-full rounded-xl border border-slate-200 px-3 text-sm font-medium text-slate-800 outline-none focus:border-blue-500"
                   value={center.address}
                   onChange={(event) =>
                     setCenter({ ...center, address: event.target.value })
@@ -900,10 +900,10 @@ export default function CenterSettingsPage() {
               </label>
               <div className="space-y-3 md:col-span-2">
                 <div>
-                  <span className="text-sm font-black uppercase text-slate-500">
+                  <span className="text-xs font-medium text-slate-500">
                     Couleur du profil
                   </span>
-                  <p className="mt-1 text-sm font-bold text-slate-500">
+                  <p className="mt-1 text-sm font-normal text-slate-500">
                     Adaptez la fiche publique à la direction artistique du centre.
                   </p>
                 </div>
@@ -918,7 +918,7 @@ export default function CenterSettingsPage() {
                           profileColor: preset.color,
                         }))
                       }
-                      className={`flex items-center gap-2 rounded-full border px-3 py-2 text-sm font-black transition ${
+                      className={`flex items-center gap-2 rounded-full border px-3 py-2 text-sm font-semibold transition ${
                         center.profileColor === preset.color
                           ? "border-slate-950 bg-slate-950 text-white"
                           : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
@@ -931,7 +931,7 @@ export default function CenterSettingsPage() {
                       {preset.name}
                     </button>
                   ))}
-                  <label className="flex h-11 items-center gap-3 rounded-full border border-slate-200 bg-white px-3 text-sm font-black text-slate-600">
+                  <label className="flex h-11 items-center gap-3 rounded-full border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-600">
                     Perso
                     <input
                       type="color"
@@ -950,10 +950,10 @@ export default function CenterSettingsPage() {
               </div>
               <div className="space-y-3 md:col-span-2">
                 <div>
-                  <span className="text-sm font-black uppercase text-slate-500">
+                  <span className="text-xs font-medium text-slate-500">
                     Catégories publiques
                   </span>
-                  <p className="mt-1 text-sm font-bold text-slate-500">
+                  <p className="mt-1 text-sm font-normal text-slate-500">
                     Le centre peut apparaître dans plusieurs catégories côté cliente.
                   </p>
                 </div>
@@ -965,7 +965,7 @@ export default function CenterSettingsPage() {
                         key={category}
                         type="button"
                         onClick={() => toggleCenterCategory(category)}
-                        className={`rounded-full border px-4 py-2 text-sm font-black transition ${
+                        className={`rounded-full border px-4 py-2 text-sm font-semibold transition ${
                           selected
                             ? "border-blue-200 bg-blue-600 text-white shadow-sm"
                             : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
@@ -978,11 +978,11 @@ export default function CenterSettingsPage() {
                 </div>
               </div>
               <label className="space-y-2 md:col-span-2">
-                <span className="text-sm font-black uppercase text-slate-500">
+                <span className="text-xs font-medium text-slate-500">
                   Description
                 </span>
                 <textarea
-                  className="min-h-32 w-full rounded-2xl border border-slate-200 p-4 text-lg font-bold outline-none focus:border-blue-500"
+                  className="min-h-28 w-full rounded-xl border border-slate-200 p-3 text-sm font-medium text-slate-800 outline-none focus:border-blue-500"
                   value={center.description}
                   onChange={(event) =>
                     setCenter({ ...center, description: event.target.value })
@@ -991,21 +991,21 @@ export default function CenterSettingsPage() {
               </label>
               <div className="grid gap-3 rounded-3xl border border-slate-200 bg-slate-50 p-4 md:col-span-2 md:grid-cols-2">
                 <div className="md:col-span-2">
-                  <span className="text-sm font-black uppercase text-slate-500">
+                  <span className="text-xs font-medium text-slate-500">
                     Réseaux sociaux visibles dans la bio
                   </span>
-                  <p className="mt-1 text-sm font-bold text-slate-500">
+                  <p className="mt-1 text-sm font-normal text-slate-500">
                     Les clientes pourront cliquer directement sur Instagram,
                     TikTok ou Facebook depuis la fiche publique.
                   </p>
                 </div>
                 <label className="space-y-2">
-                  <span className="flex items-center gap-2 text-sm font-black uppercase text-slate-500">
+                  <span className="flex items-center gap-2 text-xs font-medium text-slate-500">
                     <InstagramGlyph className="h-4 w-4 text-pink-600" />
                     Instagram
                   </span>
                   <input
-                    className="h-14 w-full rounded-2xl border border-slate-200 bg-white px-4 text-lg font-bold outline-none focus:border-pink-500"
+                    className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-medium text-slate-800 outline-none focus:border-pink-500"
                     value={center.socialLinks.instagram}
                     onChange={(event) =>
                       setCenter((current) => ({
@@ -1020,12 +1020,12 @@ export default function CenterSettingsPage() {
                   />
                 </label>
                 <label className="space-y-2">
-                  <span className="flex items-center gap-2 text-sm font-black uppercase text-slate-500">
+                  <span className="flex items-center gap-2 text-xs font-medium text-slate-500">
                     <TikTokGlyph className="h-4 w-4 text-slate-950" />
                     TikTok
                   </span>
                   <input
-                    className="h-14 w-full rounded-2xl border border-slate-200 bg-white px-4 text-lg font-bold outline-none focus:border-slate-950"
+                    className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-medium text-slate-800 outline-none focus:border-slate-950"
                     value={center.socialLinks.tiktok ?? ""}
                     onChange={(event) =>
                       setCenter((current) => ({
@@ -1040,12 +1040,12 @@ export default function CenterSettingsPage() {
                   />
                 </label>
                 <label className="space-y-2">
-                  <span className="flex items-center gap-2 text-sm font-black uppercase text-slate-500">
+                  <span className="flex items-center gap-2 text-xs font-medium text-slate-500">
                     <FacebookGlyph className="h-4 w-4 text-blue-600" />
                     Facebook
                   </span>
                   <input
-                    className="h-14 w-full rounded-2xl border border-slate-200 bg-white px-4 text-lg font-bold outline-none focus:border-blue-500"
+                    className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-medium text-slate-800 outline-none focus:border-blue-500"
                     value={center.socialLinks.facebook}
                     onChange={(event) =>
                       setCenter((current) => ({
@@ -1062,7 +1062,7 @@ export default function CenterSettingsPage() {
               </div>
             </div>
             <div className="mt-5 grid gap-4 rounded-3xl border border-blue-100 bg-blue-50/60 p-4 md:grid-cols-3">
-              <label className="flex cursor-pointer items-center justify-center gap-2 rounded-2xl border border-dashed border-cyan-300 bg-white px-5 py-4 font-black text-cyan-700 transition hover:bg-cyan-50">
+              <label className="flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-dashed border-cyan-300 bg-white px-4 py-3 text-sm font-medium text-cyan-700 transition hover:bg-cyan-50">
                 <ImagePlus className="h-5 w-5" />
                 Importer la couverture
                 <input
@@ -1072,7 +1072,7 @@ export default function CenterSettingsPage() {
                   onChange={uploadCover}
                 />
               </label>
-              <label className="flex cursor-pointer items-center justify-center gap-2 rounded-2xl border border-dashed border-blue-300 bg-white px-5 py-4 font-black text-blue-700 transition hover:bg-blue-50">
+              <label className="flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-dashed border-blue-300 bg-white px-4 py-3 text-sm font-medium text-blue-700 transition hover:bg-blue-50">
                 <ImagePlus className="h-5 w-5" />
                 Importer le logo
                 <input
@@ -1082,7 +1082,7 @@ export default function CenterSettingsPage() {
                   onChange={uploadLogo}
                 />
               </label>
-              <label className="flex cursor-pointer items-center justify-center gap-2 rounded-2xl border border-dashed border-violet-300 bg-white px-5 py-4 font-black text-violet-700 transition hover:bg-violet-50">
+              <label className="flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-dashed border-violet-300 bg-white px-4 py-3 text-sm font-medium text-violet-700 transition hover:bg-violet-50">
                 <ImagePlus className="h-5 w-5" />
                 Importer les photos
                 <input
@@ -1097,7 +1097,7 @@ export default function CenterSettingsPage() {
               {(coverPreview || logoPreview || photoPreviews.length > 0) && (
                 <div className="grid gap-3 md:col-span-3 md:grid-cols-[1.2fr_120px_1fr]">
                   <div className="rounded-3xl bg-white p-3 shadow-sm">
-                    <p className="mb-2 text-xs font-black uppercase text-slate-500">
+                    <p className="mb-2 text-xs font-medium text-slate-500">
                       Couverture
                     </p>
                     <div className="grid h-32 overflow-hidden rounded-2xl bg-gradient-to-r from-violet-600 via-blue-500 to-cyan-400">
@@ -1108,17 +1108,17 @@ export default function CenterSettingsPage() {
                           className="h-full w-full object-cover"
                         />
                       ) : (
-                        <div className="grid h-full place-items-center bg-white/15 font-black text-white">
+                        <div className="grid h-full place-items-center bg-white/15 font-semibold text-white">
                           Image de couverture
                         </div>
                       )}
                     </div>
                   </div>
                   <div className="rounded-3xl bg-white p-3 shadow-sm">
-                    <p className="mb-2 text-xs font-black uppercase text-slate-500">
+                    <p className="mb-2 text-xs font-medium text-slate-500">
                       Logo
                     </p>
-                    <div className="grid aspect-square place-items-center overflow-hidden rounded-2xl bg-slate-50 text-3xl font-black text-blue-600">
+                    <div className="grid aspect-square place-items-center overflow-hidden rounded-2xl bg-slate-50 text-xl font-semibold text-blue-600">
                       {logoPreview ? (
                         <img
                           src={logoPreview}
@@ -1131,7 +1131,7 @@ export default function CenterSettingsPage() {
                     </div>
                   </div>
                   <div className="rounded-3xl bg-white p-3 shadow-sm">
-                    <p className="mb-2 text-xs font-black uppercase text-slate-500">
+                    <p className="mb-2 text-xs font-medium text-slate-500">
                       Photos du bandeau
                     </p>
                     <div className="grid min-h-24 gap-2 overflow-hidden rounded-2xl bg-gradient-to-r from-violet-600 via-blue-500 to-cyan-400 p-2 sm:grid-cols-4">
@@ -1145,7 +1145,7 @@ export default function CenterSettingsPage() {
                           />
                         ))
                       ) : (
-                        <div className="col-span-full grid h-24 place-items-center rounded-xl bg-white/15 font-black text-white">
+                        <div className="col-span-full grid h-24 place-items-center rounded-xl bg-white/15 font-semibold text-white">
                           Bandeau public
                         </div>
                       )}
@@ -1157,18 +1157,18 @@ export default function CenterSettingsPage() {
               <div className="space-y-4 rounded-3xl border border-slate-200 bg-white p-4 md:col-span-3">
                 <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                   <div>
-                    <p className="text-sm font-black uppercase text-slate-500">
+                    <p className="text-xs font-medium text-slate-500">
                       Avis externes
                     </p>
-                    <h3 className="mt-1 text-2xl font-black text-slate-950">
+                    <h3 className="mt-1 text-base font-semibold text-slate-950">
                       Importer les avis Google ou autre plateforme
                     </h3>
-                    <p className="mt-1 text-sm font-bold text-slate-500">
+                    <p className="mt-1 text-sm font-normal text-slate-500">
                       Version prête pour Google Business Profile, Planity, Facebook ou
                       import manuel.
                     </p>
                   </div>
-                  <label className="inline-flex cursor-pointer items-center justify-center rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-black text-slate-700 transition hover:bg-white">
+                  <label className="inline-flex cursor-pointer items-center justify-center rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-700 transition hover:bg-white">
                     Import CSV
                     <input
                       type="file"
@@ -1183,7 +1183,7 @@ export default function CenterSettingsPage() {
                   <select
                     value={reviewSource}
                     onChange={(event) => setReviewSource(event.target.value)}
-                    className="h-12 rounded-2xl border border-slate-200 bg-white px-4 font-black outline-none focus:border-blue-500"
+                    className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm font-medium outline-none focus:border-blue-500"
                   >
                     <option>Google</option>
                     <option>Planity</option>
@@ -1195,12 +1195,12 @@ export default function CenterSettingsPage() {
                     value={reviewUrl}
                     onChange={(event) => setReviewUrl(event.target.value)}
                     placeholder="Lien fiche Google, Planity ou fichier export..."
-                    className="h-12 rounded-2xl border border-slate-200 px-4 font-bold outline-none focus:border-blue-500"
+                    className="h-10 rounded-xl border border-slate-200 px-3 text-sm font-medium outline-none focus:border-blue-500"
                   />
                   <button
                     type="button"
                     onClick={importExternalReviews}
-                    className="rounded-2xl bg-blue-600 px-5 py-3 font-black text-white shadow-sm"
+                    className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow-sm"
                   >
                     Importer
                   </button>
@@ -1216,7 +1216,7 @@ export default function CenterSettingsPage() {
                       }))
                     }
                     placeholder="Nom cliente"
-                    className="h-12 rounded-2xl border border-slate-200 px-4 font-bold outline-none focus:border-blue-500"
+                    className="h-10 rounded-xl border border-slate-200 px-3 text-sm font-medium outline-none focus:border-blue-500"
                   />
                   <select
                     value={manualReview.rating}
@@ -1226,7 +1226,7 @@ export default function CenterSettingsPage() {
                         rating: Number(event.target.value),
                       }))
                     }
-                    className="h-12 rounded-2xl border border-slate-200 bg-white px-4 font-black outline-none focus:border-blue-500"
+                    className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm font-medium outline-none focus:border-blue-500"
                   >
                     {[5, 4, 3, 2, 1].map((rating) => (
                       <option key={rating} value={rating}>
@@ -1243,12 +1243,12 @@ export default function CenterSettingsPage() {
                       }))
                     }
                     placeholder="Commentaire de l'avis"
-                    className="h-12 rounded-2xl border border-slate-200 px-4 font-bold outline-none focus:border-blue-500"
+                    className="h-10 rounded-xl border border-slate-200 px-3 text-sm font-medium outline-none focus:border-blue-500"
                   />
                   <button
                     type="button"
                     onClick={addManualReview}
-                    className="rounded-2xl border border-slate-200 bg-slate-950 px-5 py-3 font-black text-white"
+                    className="rounded-xl border border-slate-200 bg-slate-950 px-4 py-2 text-sm font-medium text-white"
                   >
                     Ajouter
                   </button>
@@ -1262,13 +1262,13 @@ export default function CenterSettingsPage() {
                     >
                       <div>
                         <div className="flex flex-wrap items-center gap-2">
-                          <p className="font-black text-slate-950">
+                          <p className="font-semibold text-slate-950">
                             {review.author}
                           </p>
-                          <span className="rounded-full bg-amber-100 px-2 py-1 text-xs font-black text-amber-700">
+                          <span className="rounded-full bg-amber-100 px-2 py-1 text-xs font-semibold text-amber-700">
                             {"★".repeat(review.rating)}
                           </span>
-                          <span className="rounded-full bg-blue-100 px-2 py-1 text-xs font-black text-blue-700">
+                          <span className="rounded-full bg-blue-100 px-2 py-1 text-xs font-semibold text-blue-700">
                             {review.source}
                           </span>
                         </div>
@@ -1292,20 +1292,20 @@ export default function CenterSettingsPage() {
               <div className="space-y-4 rounded-3xl border border-violet-100 bg-violet-50/70 p-4 md:col-span-2">
                 <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                   <div>
-                    <p className="text-sm font-black uppercase text-violet-700">
+                    <p className="text-xs font-medium text-violet-700">
                       Offres publiques
                     </p>
-                    <h3 className="mt-1 text-2xl font-black text-slate-950">
+                    <h3 className="mt-1 text-base font-semibold text-slate-950">
                       Offres du moment et offres bientôt épuisées
                     </h3>
-                    <p className="mt-1 text-sm font-bold text-slate-500">
+                    <p className="mt-1 text-sm font-normal text-slate-500">
                       L'ordre ci-dessous est l'ordre affiché sur la fiche publique.
                     </p>
                   </div>
                   <button
                     type="button"
                     onClick={addOffer}
-                    className="inline-flex items-center justify-center gap-2 rounded-2xl bg-violet-600 px-5 py-3 font-black text-white shadow-sm"
+                    className="inline-flex items-center justify-center gap-2 rounded-xl bg-violet-600 px-4 py-2 text-sm font-medium text-white shadow-sm"
                   >
                     <Plus className="h-5 w-5" />
                     Ajouter une offre
@@ -1325,11 +1325,11 @@ export default function CenterSettingsPage() {
                           onChange={(value) => updateOffer(offer.id, "title", value)}
                         />
                         <label className="space-y-2">
-                          <span className="text-sm font-black uppercase text-slate-500">
+                          <span className="text-xs font-medium text-slate-500">
                             Prestation
                           </span>
                           <select
-                            className="h-14 w-full rounded-2xl border border-slate-200 bg-white px-4 text-lg font-bold outline-none focus:border-blue-500"
+                            className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-medium text-slate-800 outline-none focus:border-blue-500"
                             value={offer.serviceName}
                             onChange={(event) =>
                               updateOffer(offer.id, "serviceName", event.target.value)
@@ -1353,11 +1353,11 @@ export default function CenterSettingsPage() {
                           onChange={(value) => updateOffer(offer.id, "price", value)}
                         />
                         <label className="space-y-2">
-                          <span className="text-sm font-black uppercase text-slate-500">
+                          <span className="text-xs font-medium text-slate-500">
                             Badge
                           </span>
                           <select
-                            className="h-14 w-full rounded-2xl border border-slate-200 bg-white px-4 text-lg font-bold outline-none focus:border-blue-500"
+                            className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-medium text-slate-800 outline-none focus:border-blue-500"
                             value={offer.tag}
                             onChange={(event) =>
                               updateOffer(offer.id, "tag", event.target.value)
@@ -1402,7 +1402,7 @@ export default function CenterSettingsPage() {
                       </div>
                       <div className="mt-4 flex flex-wrap items-center gap-3">
                         <label className="space-y-2">
-                          <span className="text-sm font-black uppercase text-slate-500">
+                          <span className="text-xs font-medium text-slate-500">
                             Fin de l'offre
                           </span>
                           <input
@@ -1411,7 +1411,7 @@ export default function CenterSettingsPage() {
                             onChange={(event) =>
                               updateOffer(offer.id, "endsAt", event.target.value)
                             }
-                            className="h-12 rounded-2xl border border-slate-200 px-4 font-black outline-none focus:border-blue-500"
+                            className="h-12 rounded-2xl border border-slate-200 px-4 font-semibold outline-none focus:border-blue-500"
                           />
                         </label>
                         <Toggle
@@ -1427,10 +1427,10 @@ export default function CenterSettingsPage() {
 
               <div className="grid gap-4 rounded-3xl border border-emerald-100 bg-emerald-50/70 p-4 md:col-span-2 lg:grid-cols-[1fr_1fr]">
                 <div>
-                  <p className="text-sm font-black uppercase text-emerald-700">
+                  <p className="text-xs font-medium text-emerald-700">
                     Avis client + fidélité
                   </p>
-                  <h3 className="mt-1 text-2xl font-black text-slate-950">
+                  <h3 className="mt-1 text-base font-semibold text-slate-950">
                     Mail automatique après chaque rendez-vous
                   </h3>
                   <p className="mt-2 font-semibold leading-7 text-slate-600">
@@ -1487,7 +1487,7 @@ export default function CenterSettingsPage() {
               <button
                 type="button"
                 onClick={saveSettings}
-                className="inline-flex items-center justify-center gap-2 rounded-2xl bg-slate-950 px-5 py-4 font-black text-white shadow-sm md:col-span-2"
+                className="inline-flex items-center justify-center gap-2 rounded-xl bg-slate-950 px-4 py-2 text-sm font-medium text-white shadow-sm md:col-span-2"
               >
                 <Save className="h-5 w-5" />
                 Enregistrer la fiche publique
@@ -1512,14 +1512,14 @@ export default function CenterSettingsPage() {
         <section className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-sm">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
             <SectionTitle
-              icon={<Settings2 className="h-6 w-6" />}
+              icon={<Settings2 className="h-4 w-4" />}
               title="Prestations proposées"
               subtitle="Tarif, durée, acompte, ordre d'affichage et compatibilité cabine/praticienne."
             />
             <button
               type="button"
               onClick={addService}
-              className="inline-flex items-center justify-center gap-2 rounded-2xl bg-blue-600 px-5 py-3 font-black text-white"
+              className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-sm font-medium text-white"
             >
               <Plus className="h-5 w-5" />
               Ajouter une prestation
@@ -1545,7 +1545,7 @@ export default function CenterSettingsPage() {
                           service.color ?? serviceColorFallback(index),
                       }}
                     />
-                    <span className="text-sm font-black uppercase text-slate-500">
+                    <span className="text-xs font-medium text-slate-500">
                       Couleur prestation
                     </span>
                     <input
@@ -1687,14 +1687,14 @@ export default function CenterSettingsPage() {
         <section className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-sm">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
             <SectionTitle
-              icon={<Share2 className="h-6 w-6" />}
+              icon={<Share2 className="h-4 w-4" />}
               title="Sources & provenances"
               subtitle="Ces sources alimentent le CRM, les KPI par campagne et les réservations organiques Bookea."
             />
             <button
               type="button"
               onClick={addSource}
-              className="inline-flex items-center justify-center gap-2 rounded-2xl bg-blue-600 px-5 py-3 font-black text-white"
+              className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-sm font-medium text-white"
             >
               <Plus className="h-5 w-5" />
               Ajouter une source
@@ -1750,7 +1750,7 @@ export default function CenterSettingsPage() {
                     }
                   />
                   <span
-                    className={`rounded-full px-4 py-2 text-sm font-black ${source.color}`}
+                    className={`rounded-full px-4 py-2 text-sm font-semibold ${source.color}`}
                   >
                     Aperçu : {source.name}
                   </span>
@@ -1762,7 +1762,7 @@ export default function CenterSettingsPage() {
           <button
             type="button"
             onClick={saveSettings}
-            className="mt-6 inline-flex items-center justify-center gap-2 rounded-2xl bg-slate-950 px-5 py-4 font-black text-white shadow-sm"
+            className="mt-6 inline-flex items-center justify-center gap-2 rounded-xl bg-slate-950 px-4 py-2 text-sm font-medium text-white shadow-sm"
           >
             <Save className="h-5 w-5" />
             Enregistrer les sources
@@ -1774,14 +1774,14 @@ export default function CenterSettingsPage() {
         <section className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-sm">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
             <SectionTitle
-              icon={<Package className="h-6 w-6" />}
+              icon={<Package className="h-4 w-4" />}
               title="Produits du centre"
               subtitle="Produits vendus en cabine, utilisés pour la facturation, les cures et plus tard le stock."
             />
             <button
               type="button"
               onClick={addProduct}
-              className="inline-flex items-center justify-center gap-2 rounded-2xl bg-blue-600 px-5 py-3 font-black text-white"
+              className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-sm font-medium text-white"
             >
               <Plus className="h-5 w-5" />
               Ajouter un produit
@@ -1856,7 +1856,7 @@ export default function CenterSettingsPage() {
                       updateProduct(product.id, "visible", !product.visible)
                     }
                   />
-                  <span className="rounded-full bg-white px-4 py-2 text-sm font-black text-slate-600">
+                  <span className="rounded-full bg-white px-4 py-2 text-sm font-semibold text-slate-600">
                     Total stock : {(product.price * product.stock).toFixed(2)} €
                   </span>
                 </div>
@@ -1867,7 +1867,7 @@ export default function CenterSettingsPage() {
           <button
             type="button"
             onClick={saveSettings}
-            className="mt-6 inline-flex items-center justify-center gap-2 rounded-2xl bg-slate-950 px-5 py-4 font-black text-white shadow-sm"
+            className="mt-6 inline-flex items-center justify-center gap-2 rounded-xl bg-slate-950 px-4 py-2 text-sm font-medium text-white shadow-sm"
           >
             <Save className="h-5 w-5" />
             Enregistrer les produits
@@ -1879,7 +1879,7 @@ export default function CenterSettingsPage() {
         <section className="grid gap-6 xl:grid-cols-[0.95fr_1.05fr]">
           <div className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-sm">
             <SectionTitle
-              icon={<CreditCard className="h-6 w-6" />}
+              icon={<CreditCard className="h-4 w-4" />}
               title="Stripe Connect"
               subtitle="Chaque centre doit pouvoir recevoir ses acomptes directement sur son compte."
             />
@@ -1897,7 +1897,7 @@ export default function CenterSettingsPage() {
                   }`}
                 />
                 <div>
-                  <p className="text-xl font-black">
+                  <p className="text-base font-semibold">
                     {stripeConnected
                       ? "Compte Stripe connecté"
                       : "Compte Stripe non connecté"}
@@ -1911,7 +1911,7 @@ export default function CenterSettingsPage() {
               <button
                 type="button"
                 onClick={() => setStripeConnected((value) => !value)}
-                className="mt-5 rounded-2xl bg-slate-950 px-5 py-3 font-black text-white"
+                className="mt-5 rounded-xl bg-slate-950 px-4 py-2 text-sm font-medium text-white"
               >
                 {stripeConnected ? "Déconnecter la maquette" : "Connecter Stripe"}
               </button>
@@ -1920,7 +1920,7 @@ export default function CenterSettingsPage() {
 
           <div className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-sm">
             <SectionTitle
-              icon={<BadgeEuro className="h-6 w-6" />}
+              icon={<BadgeEuro className="h-4 w-4" />}
               title="Règles d'acompte"
               subtitle="Ces règles seront affichées avant la réservation de la cliente."
             />
@@ -1933,7 +1933,7 @@ export default function CenterSettingsPage() {
               ].map((rule) => (
                 <div
                   key={rule}
-                  className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 font-bold text-slate-700"
+                  className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm text-slate-700"
                 >
                   {rule}
                 </div>
@@ -1947,14 +1947,14 @@ export default function CenterSettingsPage() {
         <section className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-sm">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
             <SectionTitle
-              icon={<BadgeEuro className="h-6 w-6" />}
+              icon={<BadgeEuro className="h-4 w-4" />}
               title="Liens d'acompte"
               subtitle="Ces liens seront proposés dans le bouton SMS acompte de Seya CRM."
             />
             <button
               type="button"
               onClick={addDepositLink}
-              className="inline-flex items-center justify-center gap-2 rounded-2xl bg-blue-600 px-5 py-3 font-black text-white"
+              className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-sm font-medium text-white"
             >
               <Plus className="h-5 w-5" />
               Ajouter un lien
@@ -1999,7 +1999,7 @@ export default function CenterSettingsPage() {
                   </div>
                 </div>
                 <label className="mt-3 block space-y-2">
-                  <span className="text-sm font-black uppercase text-slate-500">
+                  <span className="text-xs font-medium text-slate-500">
                     Message SMS avant le lien
                   </span>
                   <textarea
@@ -2007,7 +2007,7 @@ export default function CenterSettingsPage() {
                     onChange={(event) =>
                       updateDepositLink(link.id, "message", event.target.value)
                     }
-                    className="min-h-24 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-base font-bold outline-none focus:border-blue-500"
+                    className="min-h-24 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-medium text-slate-800 outline-none focus:border-blue-500"
                   />
                 </label>
               </article>
@@ -2017,7 +2017,7 @@ export default function CenterSettingsPage() {
           <button
             type="button"
             onClick={saveSettings}
-            className="mt-6 inline-flex items-center justify-center gap-2 rounded-2xl bg-slate-950 px-5 py-4 font-black text-white shadow-sm"
+            className="mt-6 inline-flex items-center justify-center gap-2 rounded-xl bg-slate-950 px-4 py-2 text-sm font-medium text-white shadow-sm"
           >
             <Save className="h-5 w-5" />
             Enregistrer les liens d'acompte
@@ -2029,17 +2029,17 @@ export default function CenterSettingsPage() {
         <section className="grid gap-6 xl:grid-cols-[1fr_1fr]">
           <div className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-sm">
             <SectionTitle
-              icon={<CalendarClock className="h-6 w-6" />}
+              icon={<CalendarClock className="h-4 w-4" />}
               title="Réservation en ligne"
               subtitle="Bookea doit proposer uniquement les vrais créneaux disponibles."
             />
             <div className="mt-6 grid gap-4">
               <label className="space-y-2">
-                <span className="text-sm font-black uppercase text-slate-500">
+                <span className="text-xs font-medium text-slate-500">
                   Mode de réservation
                 </span>
                 <select
-                  className="h-14 w-full rounded-2xl border border-slate-200 px-4 text-lg font-bold outline-none"
+                  className="h-11 w-full rounded-xl border border-slate-200 px-3 text-sm font-medium text-slate-800 outline-none"
                   value={center.bookingMode}
                   onChange={(event) =>
                     setCenter({ ...center, bookingMode: event.target.value })
@@ -2059,7 +2059,7 @@ export default function CenterSettingsPage() {
               ].map((item) => (
                 <div
                   key={item}
-                  className="flex items-center gap-3 rounded-2xl border border-blue-100 bg-blue-50 px-4 py-3 font-black text-blue-700"
+                  className="flex items-center gap-3 rounded-xl border border-blue-100 bg-blue-50 px-4 py-2.5 text-sm font-medium text-blue-700"
                 >
                   <CheckCircle2 className="h-5 w-5" />
                   {item}
@@ -2070,7 +2070,7 @@ export default function CenterSettingsPage() {
 
           <div className="rounded-[28px] border border-violet-200 bg-violet-50 p-6 shadow-sm">
             <SectionTitle
-              icon={<Sparkles className="h-6 w-6" />}
+              icon={<Sparkles className="h-4 w-4" />}
               title="Ce que Seya utilisera"
               subtitle="La cliente pourra parler naturellement, Bookea liera la demande au bon centre."
             />
@@ -2086,7 +2086,7 @@ export default function CenterSettingsPage() {
               ].map((item) => (
                 <div
                   key={item}
-                  className="rounded-2xl bg-white px-4 py-3 font-black text-violet-700"
+                  className="rounded-xl bg-white px-4 py-2.5 text-sm font-medium text-violet-700"
                 >
                   {item}
                 </div>
@@ -2113,14 +2113,14 @@ function MetricCard({
   color: string;
 }) {
   return (
-    <div className="rounded-[24px] border border-slate-200 bg-white p-5 shadow-sm">
+    <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <p className="text-lg font-black text-slate-500">{title}</p>
-          <p className={`mt-3 text-4xl font-black ${color}`}>{value}</p>
-          <p className="mt-2 font-bold text-slate-500">{detail}</p>
+          <p className="text-sm font-medium text-slate-500">{title}</p>
+          <p className={`mt-2 text-2xl font-semibold ${color}`}>{value}</p>
+          <p className="mt-1 text-sm text-slate-500">{detail}</p>
         </div>
-        <div className="grid h-14 w-14 place-items-center rounded-2xl bg-slate-50 text-slate-700">
+        <div className="grid h-10 w-10 place-items-center rounded-xl bg-slate-50 text-slate-600">
           {icon}
         </div>
       </div>
@@ -2138,15 +2138,15 @@ function SectionTitle({
   subtitle: string;
 }) {
   return (
-    <div className="flex items-start gap-4">
-      <div className="grid h-12 w-12 place-items-center rounded-2xl bg-blue-50 text-blue-600">
+    <div className="flex items-start gap-3">
+      <div className="grid h-9 w-9 place-items-center rounded-xl bg-blue-50 text-blue-600">
         {icon}
       </div>
       <div>
-        <h2 className="text-3xl font-black tracking-tight text-slate-950">
+        <h2 className="text-lg font-semibold tracking-tight text-slate-950">
           {title}
         </h2>
-        <p className="mt-1 text-lg font-medium text-slate-500">{subtitle}</p>
+        <p className="mt-0.5 text-sm text-slate-500">{subtitle}</p>
       </div>
     </div>
   );
@@ -2162,12 +2162,12 @@ function Field({
   onChange: (value: string) => void;
 }) {
   return (
-    <label className="space-y-2">
-      <span className="text-sm font-black uppercase text-slate-500">
+    <label className="space-y-1.5">
+      <span className="text-xs font-medium text-slate-500">
         {label}
       </span>
       <input
-        className="h-14 w-full rounded-2xl border border-slate-200 px-4 text-lg font-bold outline-none focus:border-blue-500"
+        className="h-11 w-full rounded-xl border border-slate-200 px-3 text-sm font-medium text-slate-800 outline-none focus:border-blue-500"
         value={value}
         onChange={(event) => onChange(event.target.value)}
       />
@@ -2189,20 +2189,20 @@ function NumberField({
   onChange: (value: number) => void;
 }) {
   return (
-    <label className="space-y-2">
-      <span className="text-sm font-black uppercase text-slate-500">
+    <label className="space-y-1.5">
+      <span className="text-xs font-medium text-slate-500">
         {label}
       </span>
-      <div className="flex h-14 items-center rounded-2xl border border-slate-200 bg-white px-4 focus-within:border-blue-500">
+      <div className="flex h-11 items-center rounded-xl border border-slate-200 bg-white px-3 focus-within:border-blue-500">
         <input
           type="number"
           min={0}
           disabled={disabled}
-          className="w-full bg-transparent text-lg font-bold outline-none disabled:text-slate-300"
+          className="w-full bg-transparent text-sm font-medium text-slate-800 outline-none disabled:text-slate-300"
           value={value}
           onChange={(event) => onChange(Number(event.target.value))}
         />
-        <span className="font-black text-slate-400">{suffix}</span>
+        <span className="text-sm font-medium text-slate-400">{suffix}</span>
       </div>
     </label>
   );
@@ -2221,7 +2221,7 @@ function Toggle({
     <button
       type="button"
       onClick={onClick}
-      className={`rounded-full px-4 py-2 text-sm font-black ${
+      className={`rounded-full px-3 py-1.5 text-sm font-medium ${
         checked
           ? "bg-emerald-100 text-emerald-700"
           : "bg-slate-200 text-slate-600"
@@ -2249,7 +2249,7 @@ function IconButton({
       title={label}
       disabled={disabled}
       onClick={onClick}
-      className="grid h-14 w-14 place-items-center rounded-2xl border border-slate-200 bg-white text-slate-600 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-35"
+      className="grid h-10 w-10 place-items-center rounded-xl border border-slate-200 bg-white text-slate-600 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-35"
     >
       {children}
     </button>
@@ -2352,7 +2352,7 @@ function PublicPreview({
   return (
     <aside className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-sm">
       <SectionTitle
-        icon={<Eye className="h-6 w-6" />}
+        icon={<Eye className="h-4 w-4" />}
         title="Aperçu public"
         subtitle="Ce que la cliente verra dans Bookea."
       />
@@ -2384,7 +2384,7 @@ function PublicPreview({
         </div>
         <div className="p-5">
           <div
-            className="-mt-12 mb-4 grid h-20 w-20 place-items-center overflow-hidden rounded-3xl border-4 border-white bg-white text-3xl font-black shadow-sm"
+            className="-mt-12 mb-4 grid h-20 w-20 place-items-center overflow-hidden rounded-3xl border-4 border-white bg-white text-xl font-semibold shadow-sm"
             style={{ color: center.profileColor }}
           >
             {logoPreview ? (
@@ -2399,18 +2399,18 @@ function PublicPreview({
           </div>
           <div className="flex items-start justify-between gap-3">
             <div>
-              <h3 className="text-3xl font-black">{center.name}</h3>
-              <p className="mt-2 flex items-center gap-2 font-bold text-slate-500">
+              <h3 className="text-lg font-semibold">{center.name}</h3>
+              <p className="mt-2 flex items-center gap-2 text-sm text-slate-500">
                 <MapPin className="h-5 w-5" />
                 {center.city}
               </p>
-              <p className="mt-2 font-black text-amber-500">
+              <p className="mt-2 font-semibold text-amber-500">
                 ★ {averageRating.replace(".", ",")} · {externalReviews.length} avis
                 importés
               </p>
             </div>
             <span
-              className={`rounded-full px-3 py-1 text-xs font-black ${
+              className={`rounded-full px-3 py-1 text-xs font-semibold ${
                 center.published
                   ? "bg-emerald-100 text-emerald-700"
                   : "bg-slate-200 text-slate-600"
@@ -2431,7 +2431,7 @@ function PublicPreview({
                   href={center.socialLinks.instagram}
                   target="_blank"
                   rel="noreferrer"
-                  className="inline-flex items-center gap-2 rounded-full bg-gradient-to-r from-pink-500 via-fuchsia-500 to-orange-400 px-4 py-2 text-sm font-black text-white shadow-sm"
+                  className="inline-flex items-center gap-2 rounded-full bg-gradient-to-r from-pink-500 via-fuchsia-500 to-orange-400 px-4 py-2 text-sm font-semibold text-white shadow-sm"
                 >
                   <InstagramGlyph className="h-4 w-4" />
                   Instagram
@@ -2442,7 +2442,7 @@ function PublicPreview({
                   href={center.socialLinks.tiktok}
                   target="_blank"
                   rel="noreferrer"
-                  className="inline-flex items-center gap-2 rounded-full bg-slate-950 px-4 py-2 text-sm font-black text-white shadow-sm"
+                  className="inline-flex items-center gap-2 rounded-full bg-slate-950 px-4 py-2 text-sm font-semibold text-white shadow-sm"
                 >
                   <TikTokGlyph className="h-4 w-4" />
                   TikTok
@@ -2453,7 +2453,7 @@ function PublicPreview({
                   href={center.socialLinks.facebook}
                   target="_blank"
                   rel="noreferrer"
-                  className="inline-flex items-center gap-2 rounded-full bg-blue-600 px-4 py-2 text-sm font-black text-white shadow-sm"
+                  className="inline-flex items-center gap-2 rounded-full bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm"
                 >
                   <FacebookGlyph className="h-4 w-4" />
                   Facebook
@@ -2462,14 +2462,14 @@ function PublicPreview({
             </div>
           )}
           <p
-            className="mt-3 rounded-2xl bg-white px-4 py-3 text-sm font-black"
+            className="mt-3 rounded-2xl bg-white px-4 py-3 text-sm font-semibold"
             style={{ color: center.profileColor }}
           >
             {center.bookingMode}
           </p>
           {visibleOffers.length > 0 && (
             <div className="mt-5 space-y-3">
-              <p className="text-xs font-black uppercase text-slate-400">
+              <p className="text-xs font-medium text-slate-400">
                 Offres visibles
               </p>
               {visibleOffers.slice(0, 3).map((offer) => (
@@ -2479,20 +2479,20 @@ function PublicPreview({
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div>
-                      <p className="font-black text-slate-950">{offer.title}</p>
-                      <p className="mt-1 text-sm font-bold text-slate-500">
+                      <p className="font-semibold text-slate-950">{offer.title}</p>
+                      <p className="mt-1 text-sm font-normal text-slate-500">
                         {offer.serviceName} · fin {offer.endsAt}
                       </p>
                     </div>
-                    <span className="rounded-full bg-violet-100 px-3 py-1 text-xs font-black text-violet-700">
+                    <span className="rounded-full bg-violet-100 px-3 py-1 text-xs font-semibold text-violet-700">
                       {offer.tag}
                     </span>
                   </div>
                   <div className="mt-3 flex items-center justify-between gap-3">
-                    <p className="text-sm font-bold text-slate-400 line-through">
+                    <p className="text-sm font-normal text-slate-400 line-through">
                       {offer.oldPrice} €
                     </p>
-                    <p className="text-xl font-black text-violet-700">
+                    <p className="text-base font-semibold text-violet-700">
                       {offer.price} €
                     </p>
                   </div>
@@ -2501,10 +2501,10 @@ function PublicPreview({
             </div>
           )}
           <div className="mt-5 rounded-2xl border border-emerald-100 bg-emerald-50 p-3">
-            <p className="text-xs font-black uppercase text-emerald-700">
+            <p className="text-xs font-medium text-emerald-700">
               Avis après RDV
             </p>
-            <p className="mt-1 text-sm font-bold leading-6 text-slate-600">
+            <p className="mt-1 text-sm font-normal leading-6 text-slate-600">
               {reviewAutomation.enabled
                 ? `Email envoyé ${reviewAutomation.emailDelayHours}h après le RDV · ${reviewAutomation.loyaltyPointsReward} points fidélité si avis déposé.`
                 : "Email d'avis désactivé pour le moment."}
@@ -2512,7 +2512,7 @@ function PublicPreview({
           </div>
           {externalReviews.length > 0 && (
             <div className="mt-5 space-y-3">
-              <p className="text-xs font-black uppercase text-slate-400">
+              <p className="text-xs font-medium text-slate-400">
                 Derniers avis
               </p>
               {externalReviews.slice(0, 3).map((review) => (
@@ -2521,8 +2521,8 @@ function PublicPreview({
                   className="rounded-2xl border border-slate-200 bg-white p-3"
                 >
                   <div className="flex items-center justify-between gap-3">
-                    <p className="font-black text-slate-950">{review.author}</p>
-                    <span className="rounded-full bg-amber-100 px-2 py-1 text-xs font-black text-amber-700">
+                    <p className="font-semibold text-slate-950">{review.author}</p>
+                    <span className="rounded-full bg-amber-100 px-2 py-1 text-xs font-semibold text-amber-700">
                       {review.source} · {review.rating}/5
                     </span>
                   </div>
@@ -2541,25 +2541,25 @@ function PublicPreview({
               >
                 <div className="flex items-start justify-between gap-4">
                   <div>
-                    <p className="text-xl font-black">{service.name}</p>
-                    <p className="mt-1 font-semibold text-slate-500">
+                    <p className="text-base font-semibold">{service.name}</p>
+                    <p className="mt-1 text-sm text-slate-500">
                       {service.category} · {service.duration} min
                     </p>
                   </div>
-                  <p className="text-2xl font-black text-slate-950">
+                  <p className="text-base font-semibold text-slate-950">
                     {service.price} €
                   </p>
                 </div>
                 <div className="mt-3 flex flex-wrap gap-2">
                   {service.topListed && (
-                    <span className="rounded-full bg-violet-100 px-3 py-1 text-xs font-black text-violet-700">
+                    <span className="rounded-full bg-violet-100 px-3 py-1 text-xs font-semibold text-violet-700">
                       En avant
                     </span>
                   )}
-                  <span className="rounded-full bg-blue-100 px-3 py-1 text-xs font-black text-blue-700">
+                  <span className="rounded-full bg-blue-100 px-3 py-1 text-xs font-semibold text-blue-700">
                     {service.cabins}
                   </span>
-                  <span className="rounded-full bg-emerald-100 px-3 py-1 text-xs font-black text-emerald-700">
+                  <span className="rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-700">
                     {service.depositEnabled
                       ? `Acompte ${service.depositAmount} €`
                       : "Sans acompte"}
