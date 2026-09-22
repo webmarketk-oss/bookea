@@ -16,6 +16,22 @@ function normalizePhone(value) {
   return digits;
 }
 
+function hasConfirmationLink(text, confirmationLink = "") {
+  const output = String(text || "");
+  const link = String(confirmationLink || "").trim();
+  const bare = link.replace(/^https?:\/\//i, "").replace(/^www\./i, "");
+
+  if (link && output.includes(link)) {
+    return true;
+  }
+
+  if (bare && output.includes(bare)) {
+    return true;
+  }
+
+  return /(?:www\.)?bookeai\.fr\/r\/[A-Za-z0-9_-]+/i.test(output);
+}
+
 function personalize(message, vars = {}) {
   const centerName = String(vars.centerName || vars.centre || vars.nom_centre || "").trim();
   const confirmationLink = String(
@@ -42,11 +58,7 @@ function personalize(message, vars = {}) {
     output = output.replaceAll(`{{${key}}}`, value);
   }
 
-  if (
-    confirmationLink &&
-    !output.includes(confirmationLink) &&
-    !/\{\{lien(?:_confirmation)?\}\}/.test(String(message || ""))
-  ) {
+  if (confirmationLink && !hasConfirmationLink(output, confirmationLink)) {
     output = `${output}\n\nConfirmez ou annulez ici : ${confirmationLink}`;
   }
 

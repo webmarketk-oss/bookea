@@ -1,6 +1,5 @@
 import { getActiveCenterContext } from "@/lib/center-access";
 import {
-  fillSmsTemplate,
   getSmsTemplate,
   loadCenterSmsSettings,
   toBirthDateIso,
@@ -116,7 +115,7 @@ export async function sendSavedTemplateSms(
 
   return sendBookeaSms({
     ...vars,
-    message: fillSmsTemplate(template.body, vars),
+    message: template.body,
   });
 }
 

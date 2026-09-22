@@ -375,12 +375,15 @@ export function fillSmsTemplate(template: string, vars: SmsTemplateVars) {
     output = output.replaceAll(`{{${key}}}`, value);
   }
 
-  if (
-    confirmationLink &&
-    !output.includes(confirmationLink) &&
-    !/\{\{lien(?:_confirmation)?\}\}/.test(template)
-  ) {
-    output = `${output}\n\nConfirmez ou annulez ici : ${confirmationLink}`;
+  if (confirmationLink && !output.includes(confirmationLink)) {
+    const bare = confirmationLink.replace(/^https?:\/\//i, "").replace(/^www\./i, "");
+    const alreadyThere =
+      (bare && output.includes(bare)) ||
+      /(?:www\.)?bookeai\.fr\/r\/[A-Za-z0-9_-]+/i.test(output);
+
+    if (!alreadyThere) {
+      output = `${output}\n\nConfirmez ou annulez ici : ${confirmationLink}`;
+    }
   }
 
   return output
