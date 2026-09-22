@@ -84,7 +84,7 @@ export function CenterSwitcher({ collapsed }: CenterSwitcherProps) {
       data-sidebar-keep-open="true"
       className="mb-5 block rounded-2xl border border-white/10 bg-white/5 p-3"
     >
-      <span className="mb-2 flex items-center gap-2 text-xs font-black uppercase tracking-wide text-white/40">
+      <span className="mb-2 flex items-center gap-2 text-xs font-medium tracking-wide text-white/40">
         <Building2 className="h-4 w-4" />
         Centre actif
       </span>
@@ -92,7 +92,7 @@ export function CenterSwitcher({ collapsed }: CenterSwitcherProps) {
         <select
           value={activeCenterId}
           onChange={(event) => handleChange(event.target.value)}
-          className="h-11 w-full appearance-none rounded-xl border border-white/10 bg-[#171b38] px-3 pr-10 text-sm font-black text-white outline-none transition focus:border-blue-400"
+          className="h-11 w-full appearance-none rounded-xl border border-white/10 bg-[#171b38] px-3 pr-10 text-sm font-medium text-white outline-none transition focus:border-blue-400"
         >
           {centers.map((center) => (
             <option key={center.id} value={center.id}>

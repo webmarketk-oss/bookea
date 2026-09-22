@@ -20,7 +20,7 @@ export default function NavItem({
     <Link
       href={href}
       title={collapsed ? label : undefined}
-      className={`flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-bold transition-colors ${
+      className={`flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
         active
           ? "bookea-gradient text-white shadow-lg shadow-blue-950/20"
           : "text-white/62 hover:bg-white/10 hover:text-white"

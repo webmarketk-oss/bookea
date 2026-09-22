@@ -1082,13 +1082,13 @@ export default function BillingPage() {
       <div className="mx-auto max-w-[1800px] space-y-6 p-8">
         <header className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
           <div>
-            <p className="text-sm font-black text-violet-600">
+            <p className="text-sm font-medium text-violet-600">
               Bookea Facturation
             </p>
-            <h1 className="mt-1 text-5xl font-black tracking-tight text-slate-950">
+            <h1 className="mt-1 text-2xl font-semibold tracking-tight text-slate-950">
               Facturation
             </h1>
-            <p className="mt-3 max-w-3xl text-xl font-medium text-slate-500">
+            <p className="mt-3 max-w-3xl text-sm text-slate-500">
               Factures d&apos;acompte, factures finales, avoirs et suivi des
               encaissements du centre.
             </p>
@@ -1098,7 +1098,7 @@ export default function BillingPage() {
             <button
               type="button"
               onClick={() => void refreshInvoices()}
-              className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-5 py-3 font-black text-slate-700 shadow-sm"
+              className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-5 py-3 font-semibold text-slate-700 shadow-sm"
               disabled={isLoadingBilling}
             >
               <RotateCcw className="h-5 w-5" />
@@ -1107,7 +1107,7 @@ export default function BillingPage() {
             <button
               type="button"
               onClick={() => openInvoiceCreation("Devis")}
-              className="inline-flex items-center gap-2 rounded-2xl bg-amber-500 px-5 py-3 font-black text-white shadow-sm"
+              className="inline-flex items-center gap-2 rounded-2xl bg-amber-500 px-5 py-3 font-semibold text-white shadow-sm"
             >
               <FileCheck2 className="h-5 w-5" />
               Devis
@@ -1115,7 +1115,7 @@ export default function BillingPage() {
             <button
               type="button"
               onClick={() => openInvoiceCreation("Acompte")}
-              className="inline-flex items-center gap-2 rounded-2xl bg-violet-600 px-5 py-3 font-black text-white shadow-sm"
+              className="inline-flex items-center gap-2 rounded-2xl bg-violet-600 px-5 py-3 font-semibold text-white shadow-sm"
             >
               <CreditCard className="h-5 w-5" />
               Facture acompte
@@ -1123,7 +1123,7 @@ export default function BillingPage() {
             <button
               type="button"
               onClick={() => openInvoiceCreation("Facture finale")}
-              className="inline-flex items-center gap-2 rounded-2xl bg-slate-950 px-5 py-3 font-black text-white shadow-sm"
+              className="inline-flex items-center gap-2 rounded-2xl bg-slate-950 px-5 py-3 font-semibold text-white shadow-sm"
             >
               <FilePlus2 className="h-5 w-5" />
               Facture finale
@@ -1153,7 +1153,7 @@ export default function BillingPage() {
           <button
             type="button"
             onClick={() => setActiveTab("factures")}
-            className={`border-b-4 px-4 py-3 font-black transition ${
+            className={`border-b-4 px-4 py-3 font-semibold transition ${
               activeTab === "factures"
                 ? "border-violet-600 text-violet-700"
                 : "border-transparent text-slate-500 hover:text-slate-900"
@@ -1164,7 +1164,7 @@ export default function BillingPage() {
           <button
             type="button"
             onClick={() => setActiveTab("reglages")}
-            className={`inline-flex items-center gap-2 border-b-4 px-4 py-3 font-black transition ${
+            className={`inline-flex items-center gap-2 border-b-4 px-4 py-3 font-semibold transition ${
               activeTab === "reglages"
                 ? "border-violet-600 text-violet-700"
                 : "border-transparent text-slate-500 hover:text-slate-900"
@@ -1218,7 +1218,7 @@ export default function BillingPage() {
           <div className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-sm">
             <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
               <div>
-                <h2 className="text-3xl font-black tracking-tight">
+                <h2 className="text-xl font-semibold tracking-tight">
                   Journal des factures
                 </h2>
                 <p className="mt-1 font-semibold text-slate-500">
@@ -1240,7 +1240,7 @@ export default function BillingPage() {
                   onChange={(event) =>
                     setTypeFilter(event.target.value as "Toutes" | InvoiceType)
                   }
-                  className="h-12 rounded-2xl border border-slate-200 bg-white px-4 font-black outline-none"
+                  className="h-12 rounded-2xl border border-slate-200 bg-white px-4 font-semibold outline-none"
                 >
                   <option>Toutes</option>
                   <option>Devis</option>
@@ -1252,7 +1252,7 @@ export default function BillingPage() {
             </div>
 
             <div className="mt-6 overflow-hidden rounded-3xl border border-slate-200">
-              <div className="grid grid-cols-[150px_1.1fr_1fr_150px_120px_130px_150px] bg-slate-50 px-5 py-4 text-sm font-black uppercase text-slate-500">
+              <div className="grid grid-cols-[150px_1.1fr_1fr_150px_120px_130px_150px] bg-slate-50 px-5 py-4 text-xs font-medium text-slate-500">
                 <span>Numéro</span>
                 <span>Cliente</span>
                 <span>Soin</span>
@@ -1284,7 +1284,7 @@ export default function BillingPage() {
                     selectedInvoice.id === invoice.id ? "bg-blue-50" : "bg-white"
                   }`}
                 >
-                  <span className="font-black text-slate-950">
+                  <span className="font-semibold text-slate-950">
                     {invoice.number}
                   </span>
                   <span>
@@ -1301,7 +1301,7 @@ export default function BillingPage() {
                       {invoice.type}
                     </InvoicePill>
                   </span>
-                  <span className="font-black text-slate-950">
+                  <span className="font-semibold text-slate-950">
                     {formatCurrency(invoice.total)}
                   </span>
                   <span>
@@ -1360,17 +1360,17 @@ export default function BillingPage() {
                 aria-expanded={isInvoiceDetailOpen}
               >
                 <div>
-                  <p className="text-sm font-black uppercase text-slate-500">
+                  <p className="text-xs font-medium text-slate-500">
                     {selectedInvoice.type === "Devis"
                       ? "Devis sélectionné"
                       : "Facture sélectionnée"}
                   </p>
-                  <h2 className="mt-2 text-3xl font-black">
+                  <h2 className="mt-2 text-xl font-semibold">
                     {selectedInvoice.number}
                   </h2>
                   {!isInvoiceDetailOpen && (
                     <div className="mt-3 space-y-1">
-                      <p className="font-black text-slate-950">
+                      <p className="font-semibold text-slate-950">
                         {selectedInvoice.client}
                       </p>
                       <p className="font-bold text-slate-500">
@@ -1400,7 +1400,7 @@ export default function BillingPage() {
                       }`}
                     />
                   </span>
-                  <span className="text-xs font-black uppercase text-slate-400">
+                  <span className="text-xs font-medium text-slate-400">
                     {isInvoiceDetailOpen ? "Fermer" : "Ouvrir"}
                   </span>
                 </span>
@@ -1445,7 +1445,7 @@ export default function BillingPage() {
 
                   {selectedRemaining > 0 && selectedInvoice.type !== "Devis" && (
                     <div className="mt-5 rounded-3xl border border-orange-100 bg-orange-50 p-4">
-                      <p className="text-sm font-black uppercase text-orange-700">
+                      <p className="text-xs font-medium text-orange-700">
                         Ajouter un règlement
                       </p>
                       <div className="mt-3 grid grid-cols-[1fr_auto] gap-2">
@@ -1458,12 +1458,12 @@ export default function BillingPage() {
                             setPaymentAmount(Number(event.target.value))
                           }
                           placeholder="Montant encaissé"
-                          className="h-12 rounded-2xl border border-orange-200 bg-white px-4 font-black outline-none focus:border-orange-500"
+                          className="h-12 rounded-2xl border border-orange-200 bg-white px-4 font-semibold outline-none focus:border-orange-500"
                         />
                         <button
                           type="button"
                           onClick={() => registerPayment(selectedInvoice.id)}
-                          className="rounded-2xl bg-orange-600 px-4 font-black text-white"
+                          className="rounded-2xl bg-orange-600 px-4 font-semibold text-white"
                         >
                           Enregistrer
                         </button>
@@ -1480,7 +1480,7 @@ export default function BillingPage() {
                         <button
                           type="button"
                           onClick={() => editQuote(selectedInvoice)}
-                          className="col-span-2 inline-flex items-center justify-center gap-2 rounded-2xl bg-amber-500 px-4 py-3 font-black text-white"
+                          className="col-span-2 inline-flex items-center justify-center gap-2 rounded-2xl bg-amber-500 px-4 py-3 font-semibold text-white"
                         >
                           <FileCheck2 className="h-5 w-5" />
                           Modifier le devis
@@ -1488,7 +1488,7 @@ export default function BillingPage() {
                         <button
                           type="button"
                           onClick={() => deleteQuote(selectedInvoice.id)}
-                          className="inline-flex items-center justify-center gap-2 rounded-2xl bg-rose-600 px-4 py-3 font-black text-white"
+                          className="inline-flex items-center justify-center gap-2 rounded-2xl bg-rose-600 px-4 py-3 font-semibold text-white"
                         >
                           <Trash2 className="h-5 w-5" />
                           Supprimer
@@ -1496,7 +1496,7 @@ export default function BillingPage() {
                         <button
                           type="button"
                           onClick={() => convertQuoteToFinalInvoice(selectedInvoice)}
-                          className="inline-flex items-center justify-center gap-2 rounded-2xl bg-slate-950 px-4 py-3 font-black text-white"
+                          className="inline-flex items-center justify-center gap-2 rounded-2xl bg-slate-950 px-4 py-3 font-semibold text-white"
                         >
                           <FilePlus2 className="h-5 w-5" />
                           Convertir
@@ -1507,7 +1507,7 @@ export default function BillingPage() {
                         <button
                           type="button"
                           onClick={() => markAsPaid(selectedInvoice.id)}
-                          className="inline-flex items-center justify-center gap-2 rounded-2xl bg-emerald-600 px-4 py-3 font-black text-white"
+                          className="inline-flex items-center justify-center gap-2 rounded-2xl bg-emerald-600 px-4 py-3 font-semibold text-white"
                         >
                           <CheckCircle2 className="h-5 w-5" />
                           Encaisser
@@ -1515,7 +1515,7 @@ export default function BillingPage() {
                         <button
                           type="button"
                           onClick={() => createInvoice("Avoir")}
-                          className="inline-flex items-center justify-center gap-2 rounded-2xl bg-rose-600 px-4 py-3 font-black text-white"
+                          className="inline-flex items-center justify-center gap-2 rounded-2xl bg-rose-600 px-4 py-3 font-semibold text-white"
                         >
                           <RotateCcw className="h-5 w-5" />
                           Avoir
@@ -1525,7 +1525,7 @@ export default function BillingPage() {
                     <button
                       type="button"
                       onClick={() => setPreviewInvoiceId(selectedInvoice.id)}
-                      className="inline-flex items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 font-black text-slate-800"
+                      className="inline-flex items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 font-semibold text-slate-800"
                     >
                       <Eye className="h-5 w-5" />
                       Voir
@@ -1533,7 +1533,7 @@ export default function BillingPage() {
                     <button
                       type="button"
                       onClick={() => downloadInvoice(selectedInvoice)}
-                      className="inline-flex items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 font-black text-slate-800"
+                      className="inline-flex items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 font-semibold text-slate-800"
                     >
                       <Download className="h-5 w-5" />
                       Télécharger
@@ -1541,7 +1541,7 @@ export default function BillingPage() {
                     <button
                       type="button"
                       onClick={() => sendInvoiceByEmail(selectedInvoice)}
-                      className="col-span-2 inline-flex items-center justify-center gap-2 rounded-2xl border border-violet-200 bg-violet-50 px-4 py-3 font-black text-violet-700"
+                      className="col-span-2 inline-flex items-center justify-center gap-2 rounded-2xl border border-violet-200 bg-violet-50 px-4 py-3 font-semibold text-violet-700"
                     >
                       <Mail className="h-5 w-5" />
                       Envoyer
@@ -1560,10 +1560,10 @@ export default function BillingPage() {
                   <FilePlus2 className="h-6 w-6" />
                 </div>
                 <div>
-                  <p className="text-xs font-black uppercase text-blue-600">
+                  <p className="text-xs font-medium text-blue-600">
                     Fiche de création
                   </p>
-                  <h2 className="text-2xl font-black">{creationTitle}</h2>
+                  <h2 className="text-lg font-semibold">{creationTitle}</h2>
                   <p className="text-sm font-semibold text-slate-500">
                     {editingQuoteId
                       ? "Modifiez les prestations, remises et informations du devis sélectionné."
@@ -1576,7 +1576,7 @@ export default function BillingPage() {
                 <button
                   type="button"
                   onClick={fillMariePaymentExample}
-                  className="rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 text-left font-black text-blue-700 transition hover:bg-blue-100"
+                  className="rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 text-left font-semibold text-blue-700 transition hover:bg-blue-100"
                 >
                   Exemple : Marie Dubois, cryo 900 € + pressothérapie 500 €, 500 € réglés
                 </button>
@@ -1605,13 +1605,13 @@ export default function BillingPage() {
                 />
                 <div className="rounded-3xl border border-slate-200 bg-slate-50 p-4">
                   <div className="mb-3 flex items-center justify-between gap-3">
-                    <p className="text-sm font-black uppercase text-slate-500">
+                    <p className="text-xs font-medium text-slate-500">
                       Prestations
                     </p>
                     <button
                       type="button"
                       onClick={addDraftLine}
-                      className="rounded-xl bg-blue-600 px-3 py-2 text-sm font-black text-white"
+                      className="rounded-xl bg-blue-600 px-3 py-2 text-sm font-medium text-white"
                     >
                       + Ajouter
                     </button>
@@ -1635,7 +1635,7 @@ export default function BillingPage() {
                               updateDraftLine(line.id, "vatRate", service.vatRate);
                             }
                           }}
-                          className="h-11 rounded-xl border border-slate-200 bg-white px-3 font-black outline-none focus:border-blue-500"
+                          className="h-11 rounded-xl border border-slate-200 bg-white px-3 font-semibold outline-none focus:border-blue-500"
                         >
                           {billingServices.map((care) => (
                             <option key={care.id}>{care.name}</option>
@@ -1657,12 +1657,12 @@ export default function BillingPage() {
                           onChange={(event) =>
                             updateDraftLine(line.id, "label", event.target.value)
                           }
-                          className="h-11 rounded-xl border border-slate-200 px-3 font-black outline-none focus:border-blue-500"
+                          className="h-11 rounded-xl border border-slate-200 px-3 font-semibold outline-none focus:border-blue-500"
                           placeholder="Nom affiché sur la facture"
                         />
                         <div className="grid grid-cols-[1fr_1fr_0.8fr_auto] gap-2">
                           <label className="space-y-1">
-                            <span className="text-xs font-black uppercase text-slate-400">
+                            <span className="text-xs font-medium text-slate-400">
                               Qté
                             </span>
                             <input
@@ -1676,11 +1676,11 @@ export default function BillingPage() {
                                   Number(event.target.value),
                                 )
                               }
-                              className="h-11 w-full rounded-xl border border-slate-200 px-3 font-black outline-none focus:border-blue-500"
+                              className="h-11 w-full rounded-xl border border-slate-200 px-3 font-semibold outline-none focus:border-blue-500"
                             />
                           </label>
                           <label className="space-y-1">
-                            <span className="text-xs font-black uppercase text-slate-400">
+                            <span className="text-xs font-medium text-slate-400">
                               Prix TTC
                             </span>
                             <input
@@ -1694,11 +1694,11 @@ export default function BillingPage() {
                                   Number(event.target.value),
                                 )
                               }
-                              className="h-11 w-full rounded-xl border border-slate-200 px-3 font-black outline-none focus:border-blue-500"
+                              className="h-11 w-full rounded-xl border border-slate-200 px-3 font-semibold outline-none focus:border-blue-500"
                             />
                           </label>
                           <label className="space-y-1">
-                            <span className="text-xs font-black uppercase text-slate-400">
+                            <span className="text-xs font-medium text-slate-400">
                               TVA
                             </span>
                             <input
@@ -1712,20 +1712,20 @@ export default function BillingPage() {
                                   Number(event.target.value),
                                 )
                               }
-                              className="h-11 w-full rounded-xl border border-slate-200 px-3 font-black outline-none focus:border-blue-500"
+                              className="h-11 w-full rounded-xl border border-slate-200 px-3 font-semibold outline-none focus:border-blue-500"
                             />
                           </label>
                           <button
                             type="button"
                             onClick={() => removeDraftLine(line.id)}
-                            className="mt-6 h-11 rounded-xl border border-rose-100 px-3 text-sm font-black text-rose-500 hover:bg-rose-50"
+                            className="mt-6 h-11 rounded-xl border border-rose-100 px-3 text-sm font-medium text-rose-500 hover:bg-rose-50"
                           >
                             Suppr.
                           </button>
                         </div>
                         <div className="grid gap-2 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
                           <label className="space-y-1">
-                            <span className="text-xs font-black uppercase text-slate-400">
+                            <span className="text-xs font-medium text-slate-400">
                               Remise prestation
                             </span>
                             <select
@@ -1737,7 +1737,7 @@ export default function BillingPage() {
                                   event.target.value as DiscountType,
                                 )
                               }
-                              className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 font-black outline-none focus:border-blue-500"
+                              className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 font-semibold outline-none focus:border-blue-500"
                             >
                               <option>Aucune</option>
                               <option>€</option>
@@ -1745,7 +1745,7 @@ export default function BillingPage() {
                             </select>
                           </label>
                           <label className="space-y-1">
-                            <span className="text-xs font-black uppercase text-slate-400">
+                            <span className="text-xs font-medium text-slate-400">
                               Valeur remise
                             </span>
                             <input
@@ -1760,10 +1760,10 @@ export default function BillingPage() {
                                   Number(event.target.value),
                                 )
                               }
-                              className="h-11 w-full rounded-xl border border-slate-200 px-3 font-black outline-none focus:border-blue-500 disabled:bg-slate-100 disabled:text-slate-400"
+                              className="h-11 w-full rounded-xl border border-slate-200 px-3 font-semibold outline-none focus:border-blue-500 disabled:bg-slate-100 disabled:text-slate-400"
                             />
                           </label>
-                          <p className="rounded-xl bg-white px-3 py-3 text-sm font-black text-slate-600">
+                          <p className="rounded-xl bg-white px-3 py-3 text-sm font-medium text-slate-600">
                             Net ligne : {formatCurrency(calculateLineTotal(line))}
                           </p>
                         </div>
@@ -1785,7 +1785,7 @@ export default function BillingPage() {
                     }
                   />
                   <label className="space-y-2">
-                    <span className="text-sm font-black uppercase text-slate-500">
+                    <span className="text-xs font-medium text-slate-500">
                       Valeur remise globale
                     </span>
                     <input
@@ -1798,13 +1798,13 @@ export default function BillingPage() {
                           discountValue: Number(event.target.value),
                         }))
                       }
-                      className="h-12 w-full rounded-2xl border border-slate-200 px-4 font-black outline-none focus:border-blue-500"
+                      className="h-12 w-full rounded-2xl border border-slate-200 px-4 font-semibold outline-none focus:border-blue-500"
                     />
                   </label>
                 </div>
 
                 <label className="space-y-2">
-                  <span className="text-sm font-black uppercase text-slate-500">
+                  <span className="text-xs font-medium text-slate-500">
                     Déjà payé
                   </span>
                   <input
@@ -1817,7 +1817,7 @@ export default function BillingPage() {
                         paid: Number(event.target.value),
                       }))
                     }
-                    className="h-12 w-full rounded-2xl border border-slate-200 px-4 font-black outline-none focus:border-blue-500"
+                    className="h-12 w-full rounded-2xl border border-slate-200 px-4 font-semibold outline-none focus:border-blue-500"
                   />
                 </label>
 
@@ -1849,7 +1849,7 @@ export default function BillingPage() {
                 <button
                   type="button"
                   onClick={() => createInvoice()}
-                  className="mt-2 inline-flex items-center justify-center gap-2 rounded-2xl bg-slate-950 px-5 py-3 font-black text-white"
+                  className="mt-2 inline-flex items-center justify-center gap-2 rounded-2xl bg-slate-950 px-5 py-3 font-semibold text-white"
                 >
                   <ReceiptText className="h-5 w-5" />
                   {creationAction}
@@ -1884,7 +1884,7 @@ export default function BillingPage() {
               <div className="mb-4 grid h-12 w-12 place-items-center rounded-2xl bg-violet-50 text-violet-700">
                 {item.icon}
               </div>
-              <h3 className="text-xl font-black">{item.title}</h3>
+              <h3 className="text-base font-semibold">{item.title}</h3>
               <p className="mt-2 font-semibold leading-7 text-slate-500">
                 {item.text}
               </p>
@@ -1976,7 +1976,7 @@ function BillingSettings({
       <div className="rounded-[24px] border border-slate-200 bg-white p-5 shadow-sm">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <div>
-            <h2 className="text-2xl font-black text-slate-950">
+            <h2 className="text-lg font-semibold text-slate-950">
               Catégories de facturation
             </h2>
             <p className="mt-1 font-semibold text-slate-500">
@@ -1986,7 +1986,7 @@ function BillingSettings({
           <button
             type="button"
             onClick={onAddCategory}
-            className="inline-flex items-center justify-center gap-2 rounded-2xl bg-slate-950 px-4 py-3 font-black text-white"
+            className="inline-flex items-center justify-center gap-2 rounded-2xl bg-slate-950 px-4 py-3 font-semibold text-white"
           >
             <Plus className="h-5 w-5" />
             Ajouter une catégorie
@@ -1996,7 +1996,7 @@ function BillingSettings({
           {categories.map((category) => (
             <span
               key={category}
-              className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-black text-slate-700"
+              className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-700"
             >
               {category}
               <button
@@ -2019,7 +2019,7 @@ function BillingSettings({
             <div className="mb-3 grid h-12 w-12 place-items-center rounded-2xl bg-violet-50 text-violet-700">
               <ReceiptText className="h-6 w-6" />
             </div>
-            <h2 className="text-2xl font-black text-slate-950">
+            <h2 className="text-lg font-semibold text-slate-950">
               Prestations facturables
             </h2>
             <p className="mt-1 font-semibold text-slate-500">
@@ -2029,7 +2029,7 @@ function BillingSettings({
           <button
             type="button"
             onClick={onAddService}
-            className="inline-flex items-center gap-2 rounded-2xl bg-violet-600 px-4 py-3 font-black text-white"
+            className="inline-flex items-center gap-2 rounded-2xl bg-violet-600 px-4 py-3 font-semibold text-white"
           >
             <Plus className="h-5 w-5" />
             Ajouter
@@ -2111,7 +2111,7 @@ function BillingSettings({
             <div className="mb-3 grid h-12 w-12 place-items-center rounded-2xl bg-blue-50 text-blue-700">
               <Package className="h-6 w-6" />
             </div>
-            <h2 className="text-2xl font-black text-slate-950">
+            <h2 className="text-lg font-semibold text-slate-950">
               Produits facturables
             </h2>
             <p className="mt-1 font-semibold text-slate-500">
@@ -2121,7 +2121,7 @@ function BillingSettings({
           <button
             type="button"
             onClick={onAddProduct}
-            className="inline-flex items-center gap-2 rounded-2xl bg-blue-600 px-4 py-3 font-black text-white"
+            className="inline-flex items-center gap-2 rounded-2xl bg-blue-600 px-4 py-3 font-semibold text-white"
           >
             <Plus className="h-5 w-5" />
             Ajouter
@@ -2216,11 +2216,11 @@ function SettingsSelect({
 
   return (
     <label className="space-y-1.5">
-      <span className="text-xs font-black uppercase text-slate-500">{label}</span>
+      <span className="text-xs font-medium text-slate-500">{label}</span>
       <select
         value={value}
         onChange={(event) => onChange(event.target.value)}
-        className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 font-black outline-none focus:border-blue-500"
+        className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 font-semibold outline-none focus:border-blue-500"
       >
         {selectOptions.map((option) => (
           <option key={option}>{option}</option>
@@ -2243,12 +2243,12 @@ function SettingsInput({
 }) {
   return (
     <label className="space-y-1.5">
-      <span className="text-xs font-black uppercase text-slate-500">{label}</span>
+      <span className="text-xs font-medium text-slate-500">{label}</span>
       <input
         type={type}
         value={value}
         onChange={(event) => onChange(event.target.value)}
-        className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 font-black outline-none focus:border-blue-500"
+        className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 font-semibold outline-none focus:border-blue-500"
       />
     </label>
   );
@@ -2301,7 +2301,7 @@ function InvoicePreview({
         <button
           type="button"
           onClick={onClose}
-          className="sticky top-0 float-right z-10 -mr-2 -mt-2 inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 font-black text-slate-700 shadow-sm transition hover:bg-slate-50"
+          className="sticky top-0 float-right z-10 -mr-2 -mt-2 inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50"
           aria-label="Fermer l'aperçu facture"
         >
           <X className="h-5 w-5" />
@@ -2309,10 +2309,10 @@ function InvoicePreview({
         </button>
         <div className="flex flex-col gap-4 border-b border-slate-200 pb-6 sm:flex-row sm:items-start sm:justify-between">
           <div>
-            <p className="text-sm font-black uppercase text-blue-600">
+            <p className="text-xs font-medium text-blue-600">
               Aperçu facture
             </p>
-            <h2 className="mt-2 text-4xl font-black text-slate-950">
+            <h2 className="mt-2 text-2xl font-semibold text-slate-950">
               {invoice.number}
             </h2>
             <p className="mt-2 font-bold text-slate-500">{invoice.date}</p>
@@ -2324,19 +2324,19 @@ function InvoicePreview({
 
         <div className="grid gap-5 py-6 sm:grid-cols-2">
           <div className="rounded-3xl bg-slate-50 p-5">
-            <p className="text-sm font-black uppercase text-slate-500">
+            <p className="text-xs font-medium text-slate-500">
               Cliente
             </p>
-            <p className="mt-3 text-2xl font-black text-slate-950">
+            <p className="mt-3 text-lg font-semibold text-slate-950">
               {invoice.client}
             </p>
             <p className="mt-1 font-bold text-slate-500">{invoice.email}</p>
           </div>
           <div className="rounded-3xl bg-slate-50 p-5">
-            <p className="text-sm font-black uppercase text-slate-500">
+            <p className="text-xs font-medium text-slate-500">
               Centre
             </p>
-            <p className="mt-3 text-2xl font-black text-slate-950">
+            <p className="mt-3 text-lg font-semibold text-slate-950">
               JFG Clinique Clermont
             </p>
             <p className="mt-1 font-bold text-slate-500">Bookea Pro</p>
@@ -2344,7 +2344,7 @@ function InvoicePreview({
         </div>
 
         <div className="overflow-hidden rounded-3xl border border-slate-200">
-          <div className="grid grid-cols-[1fr_60px_95px_75px_115px] bg-slate-50 px-5 py-4 text-sm font-black uppercase text-slate-500">
+          <div className="grid grid-cols-[1fr_60px_95px_75px_115px] bg-slate-50 px-5 py-4 text-xs font-medium text-slate-500">
             <span>Description</span>
             <span className="text-right">Qté</span>
             <span className="text-right">Prix</span>
@@ -2359,28 +2359,28 @@ function InvoicePreview({
                 className="grid grid-cols-[1fr_60px_95px_75px_115px] border-t border-slate-100 px-5 py-5"
               >
                 <span>
-                  <strong className="block text-lg font-black text-slate-950">
+                  <strong className="block text-sm font-medium text-slate-950">
                     {line.label}
                   </strong>
                   <span className="mt-1 block font-bold text-slate-500">
                     {invoice.type}
                   </span>
                   {lineDiscount > 0 ? (
-                    <span className="mt-1 block text-sm font-black text-emerald-600">
+                    <span className="mt-1 block text-sm font-medium text-emerald-600">
                       Remise prestation : -{formatCurrency(lineDiscount)}
                     </span>
                   ) : null}
                 </span>
-                <span className="text-right font-black text-slate-700">
+                <span className="text-right font-semibold text-slate-700">
                   {line.quantity}
                 </span>
-                <span className="text-right font-black text-slate-700">
+                <span className="text-right font-semibold text-slate-700">
                   {formatCurrency(line.unitPrice)}
                 </span>
-                <span className="text-right font-black text-slate-700">
+                <span className="text-right font-semibold text-slate-700">
                   {line.vatRate} %
                 </span>
-                <span className="text-right text-lg font-black text-slate-950">
+                <span className="text-right text-sm font-medium text-slate-950">
                   {formatCurrency(calculateLineTotal(line))}
                 </span>
               </div>
@@ -2415,21 +2415,21 @@ function InvoicePreview({
           <div className="mt-6 rounded-3xl border border-emerald-100 bg-emerald-50 p-5">
             <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
               <div>
-                <p className="text-sm font-black uppercase text-emerald-700">
+                <p className="text-xs font-medium text-emerald-700">
                   Ajouter un paiement
                 </p>
                 <p className="mt-1 font-semibold text-emerald-900/70">
                   Encaisser une partie ou le solde restant de cette facture.
                 </p>
               </div>
-              <p className="font-black text-emerald-700">
+              <p className="font-semibold text-emerald-700">
                 Reste dû : {formatCurrency(remaining)}
               </p>
             </div>
 
             <div className="mt-4 grid gap-3 lg:grid-cols-[1fr_1fr_auto]">
               <label className="space-y-1.5">
-                <span className="text-xs font-black uppercase text-emerald-700">
+                <span className="text-xs font-medium text-emerald-700">
                   Montant encaissé
                 </span>
                 <input
@@ -2440,12 +2440,12 @@ function InvoicePreview({
                   onChange={(event) =>
                     setPreviewPaymentAmount(Number(event.target.value) || 0)
                   }
-                  className="h-12 w-full rounded-2xl border border-emerald-200 bg-white px-4 font-black text-slate-950 outline-none focus:border-emerald-500"
+                  className="h-12 w-full rounded-2xl border border-emerald-200 bg-white px-4 font-semibold text-slate-950 outline-none focus:border-emerald-500"
                 />
               </label>
 
               <label className="space-y-1.5">
-                <span className="text-xs font-black uppercase text-emerald-700">
+                <span className="text-xs font-medium text-emerald-700">
                   Mode de paiement
                 </span>
                 <select
@@ -2455,7 +2455,7 @@ function InvoicePreview({
                       event.target.value as Invoice["paymentMethod"],
                     )
                   }
-                  className="h-12 w-full rounded-2xl border border-emerald-200 bg-white px-4 font-black text-slate-950 outline-none focus:border-emerald-500"
+                  className="h-12 w-full rounded-2xl border border-emerald-200 bg-white px-4 font-semibold text-slate-950 outline-none focus:border-emerald-500"
                 >
                   <option>CB centre</option>
                   <option>Espèces</option>
@@ -2474,7 +2474,7 @@ function InvoicePreview({
                   );
                 }}
                 disabled={previewPaymentAmount <= 0}
-                className="self-end rounded-2xl bg-emerald-600 px-5 py-3 font-black text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+                className="self-end rounded-2xl bg-emerald-600 px-5 py-3 font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-300"
               >
                 Ajouter le paiement
               </button>
@@ -2487,14 +2487,14 @@ function InvoicePreview({
             <button
               type="button"
               onClick={onCancelPending}
-              className="rounded-2xl border border-slate-200 px-5 py-3 font-black text-slate-700 transition hover:bg-slate-50"
+              className="rounded-2xl border border-slate-200 px-5 py-3 font-semibold text-slate-700 transition hover:bg-slate-50"
             >
               Annuler
             </button>
             <button
               type="button"
               onClick={onValidateFinal}
-              className="rounded-2xl bg-slate-950 px-5 py-3 font-black text-white transition hover:bg-slate-800"
+              className="rounded-2xl bg-slate-950 px-5 py-3 font-semibold text-white transition hover:bg-slate-800"
             >
               Valider la facture finale
             </button>
@@ -2504,7 +2504,7 @@ function InvoicePreview({
             <button
               type="button"
               onClick={() => onSaveQuote(invoice.id)}
-              className="inline-flex items-center justify-center gap-2 rounded-2xl bg-amber-500 px-5 py-3 font-black text-white transition hover:bg-amber-600"
+              className="inline-flex items-center justify-center gap-2 rounded-2xl bg-amber-500 px-5 py-3 font-semibold text-white transition hover:bg-amber-600"
             >
               <FileCheck2 className="h-5 w-5" />
               Enregistrer le devis
@@ -2512,7 +2512,7 @@ function InvoicePreview({
             <button
               type="button"
               onClick={() => onDeleteQuote(invoice.id)}
-              className="inline-flex items-center justify-center gap-2 rounded-2xl bg-rose-600 px-5 py-3 font-black text-white transition hover:bg-rose-700"
+              className="inline-flex items-center justify-center gap-2 rounded-2xl bg-rose-600 px-5 py-3 font-semibold text-white transition hover:bg-rose-700"
             >
               <Trash2 className="h-5 w-5" />
               Supprimer le devis
@@ -2520,7 +2520,7 @@ function InvoicePreview({
             <button
               type="button"
               onClick={() => onConvertQuote(invoice)}
-              className="inline-flex items-center justify-center gap-2 rounded-2xl bg-slate-950 px-5 py-3 font-black text-white transition hover:bg-slate-800"
+              className="inline-flex items-center justify-center gap-2 rounded-2xl bg-slate-950 px-5 py-3 font-semibold text-white transition hover:bg-slate-800"
             >
               <FilePlus2 className="h-5 w-5" />
               Convertir en facture
@@ -2531,14 +2531,14 @@ function InvoicePreview({
             <button
               type="button"
               onClick={onClose}
-              className="rounded-2xl border border-slate-200 px-5 py-3 font-black text-slate-700"
+              className="rounded-2xl border border-slate-200 px-5 py-3 font-semibold text-slate-700"
             >
               Fermer
             </button>
             <button
               type="button"
               onClick={() => onDownload(invoice)}
-              className="inline-flex items-center justify-center gap-2 rounded-2xl bg-emerald-600 px-5 py-3 font-black text-white"
+              className="inline-flex items-center justify-center gap-2 rounded-2xl bg-emerald-600 px-5 py-3 font-semibold text-white"
             >
               <Download className="h-5 w-5" />
               Télécharger
@@ -2546,7 +2546,7 @@ function InvoicePreview({
             <button
               type="button"
               onClick={() => onSend(invoice)}
-              className="inline-flex items-center justify-center gap-2 rounded-2xl bg-violet-600 px-5 py-3 font-black text-white"
+              className="inline-flex items-center justify-center gap-2 rounded-2xl bg-violet-600 px-5 py-3 font-semibold text-white"
             >
               <Mail className="h-5 w-5" />
               Envoyer par mail
@@ -2575,8 +2575,8 @@ function BillingMetric({
     <div className="rounded-[24px] border border-slate-200 bg-white p-5 shadow-sm">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <p className="text-lg font-black text-slate-500">{title}</p>
-          <p className={`mt-3 text-4xl font-black ${color}`}>{value}</p>
+          <p className="text-sm font-medium text-slate-500">{title}</p>
+          <p className={`mt-3 text-2xl font-semibold ${color}`}>{value}</p>
           <p className="mt-2 font-bold text-slate-500">{detail}</p>
         </div>
         <div className="grid h-14 w-14 place-items-center rounded-2xl bg-slate-50 text-slate-700">
@@ -2596,7 +2596,7 @@ function InvoicePill({
 }) {
   return (
     <span
-      className={`inline-flex rounded-full border px-3 py-1 text-xs font-black ${className}`}
+      className={`inline-flex rounded-full border px-3 py-1 text-xs font-medium ${className}`}
     >
       {children}
     </span>
@@ -2606,8 +2606,8 @@ function InvoicePill({
 function DetailLine({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex items-center justify-between gap-4">
-      <span className="text-sm font-black uppercase text-slate-500">{label}</span>
-      <span className="text-right font-black text-slate-950">{value}</span>
+      <span className="text-xs font-medium text-slate-500">{label}</span>
+      <span className="text-right font-semibold text-slate-950">{value}</span>
     </div>
   );
 }
@@ -2625,11 +2625,11 @@ function FormSelect({
 }) {
   return (
     <label className="space-y-2">
-      <span className="text-sm font-black uppercase text-slate-500">{label}</span>
+      <span className="text-xs font-medium text-slate-500">{label}</span>
       <select
         value={value}
         onChange={(event) => onChange(event.target.value)}
-        className="h-12 w-full rounded-2xl border border-slate-200 bg-white px-4 font-black outline-none focus:border-blue-500"
+        className="h-12 w-full rounded-2xl border border-slate-200 bg-white px-4 font-semibold outline-none focus:border-blue-500"
       >
         {options.map((option) => (
           <option key={option}>{option}</option>

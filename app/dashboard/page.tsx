@@ -216,13 +216,13 @@ export default function DashboardPage() {
       <div className="mx-auto max-w-[1800px] space-y-5 p-4 sm:p-6 lg:space-y-6 lg:p-8">
         <header className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
           <div>
-            <p className="text-sm font-black uppercase text-[#6415e8]">
+            <p className="text-xs font-medium text-[#6415e8]">
               Bookea Dashboard
             </p>
-            <h1 className="mt-1 text-3xl font-black text-[#11152e] sm:text-4xl">
+            <h1 className="mt-1 text-xl font-semibold text-[#11152e] sm:text-2xl">
               Tableau de bord
             </h1>
-            <p className="mt-2 max-w-2xl text-slate-500">
+            <p className="mt-2 max-w-2xl text-sm text-slate-500">
               Les chiffres du jour, les tâches à traiter et les optimisations
               proposées par Seya.
             </p>
@@ -301,7 +301,7 @@ export default function DashboardPage() {
                   <Sparkles className="h-5 w-5" />
                 </div>
                 <div>
-                  <h2 className="text-xl font-black text-[#11152e]">
+                  <h2 className="text-base font-semibold text-[#11152e]">
                     Optimisations Seya
                   </h2>
                   <p className="text-sm font-medium text-slate-500">
@@ -330,7 +330,7 @@ export default function DashboardPage() {
                   <ClipboardCheck className="h-5 w-5" />
                 </div>
                 <div>
-                  <h2 className="text-xl font-black text-[#11152e]">
+                  <h2 className="text-base font-semibold text-[#11152e]">
                     Tâches journalières
                   </h2>
                   <p className="text-sm font-medium text-slate-500">
@@ -351,7 +351,7 @@ export default function DashboardPage() {
                     </span>
                     <span
                       className={cn(
-                        "shrink-0 rounded-full border px-3 py-1 text-sm font-black",
+                        "shrink-0 rounded-full border px-3 py-1 text-sm font-medium",
                         taskToneClass(task.tone)
                       )}
                     >
@@ -367,7 +367,7 @@ export default function DashboardPage() {
         <section className="grid gap-6 xl:grid-cols-2">
           <Card className="py-0">
             <CardContent className="p-6">
-              <h2 className="text-xl font-black text-[#11152e]">
+              <h2 className="text-base font-semibold text-[#11152e]">
                 Rendez-vous du jour
               </h2>
               <div className="mt-4 divide-y divide-slate-100">
@@ -386,11 +386,11 @@ export default function DashboardPage() {
                       href="/dashboard/agenda"
                       className="grid grid-cols-[64px_minmax(0,1fr)] items-center gap-3 py-4 sm:grid-cols-[88px_minmax(0,1fr)_120px] sm:gap-4"
                     >
-                      <span className="font-black text-[#247af2]">
+                      <span className="font-semibold text-[#247af2]">
                         {appointment.start}
                       </span>
                       <div className="min-w-0">
-                        <p className="truncate font-black text-[#11152e]">
+                        <p className="truncate font-semibold text-[#11152e]">
                           {appointment.personName}
                         </p>
                         <p className="truncate text-sm font-semibold text-slate-500">
@@ -399,7 +399,7 @@ export default function DashboardPage() {
                       </div>
                       <span
                         className={cn(
-                          "col-span-2 w-fit rounded-full border px-3 py-1 text-center text-xs font-black sm:col-span-1 sm:w-auto",
+                          "col-span-2 w-fit rounded-full border px-3 py-1 text-center text-xs font-medium sm:col-span-1 sm:w-auto",
                           appointmentStatusClass(appointment.status)
                         )}
                       >
@@ -419,7 +419,7 @@ export default function DashboardPage() {
                   <PhoneCall className="h-5 w-5" />
                 </div>
                 <div>
-                  <h2 className="text-xl font-black text-[#11152e]">
+                  <h2 className="text-base font-semibold text-[#11152e]">
                     Contacts à traiter
                   </h2>
                   <p className="text-sm font-medium text-slate-500">
@@ -445,14 +445,14 @@ export default function DashboardPage() {
                       className="flex items-center justify-between gap-4 rounded-xl border border-[#dfe5f2] bg-white p-4 transition-colors hover:bg-[#fff7ed]"
                     >
                       <div className="min-w-0">
-                        <p className="truncate font-black text-[#11152e]">
+                        <p className="truncate font-semibold text-[#11152e]">
                           {lead.firstName} {lead.lastName}
                         </p>
                         <p className="truncate text-sm font-semibold text-slate-500">
                           {lead.nextAction || lead.treatment}
                         </p>
                       </div>
-                      <span className="shrink-0 rounded-full bg-orange-50 px-3 py-1 text-xs font-black text-orange-700">
+                      <span className="shrink-0 rounded-full bg-orange-50 px-3 py-1 text-xs font-medium text-orange-700">
                         {lead.status}
                       </span>
                     </Link>
@@ -488,7 +488,7 @@ function DashboardStat({
       <CardContent className="flex min-h-32 items-center justify-between gap-4 p-4 sm:min-h-36 sm:p-5">
         <div>
           <p className="text-sm font-semibold text-slate-500">{label}</p>
-          <p className={`mt-2 text-3xl font-black ${color}`}>{value}</p>
+          <p className={`mt-2 text-xl font-semibold ${color}`}>{value}</p>
           <p className="mt-2 text-sm font-semibold text-slate-500">
             {subtitle}
           </p>

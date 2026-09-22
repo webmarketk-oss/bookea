@@ -68,7 +68,7 @@ export function MobileDashboardNav() {
               key={item.href}
               href={item.href}
               className={cn(
-                "flex min-w-fit items-center gap-2 rounded-xl px-3 py-2 text-xs font-black",
+                "flex min-w-fit items-center gap-2 rounded-xl px-3 py-2 text-xs font-medium",
                 active
                   ? "bookea-gradient text-white"
                   : "bg-white/8 text-white/70"

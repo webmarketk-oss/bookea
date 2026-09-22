@@ -324,13 +324,13 @@ export default function DocumentsPage() {
       <div className="mx-auto max-w-[1800px] space-y-6 p-8">
         <header className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
           <div>
-            <p className="text-sm font-black text-violet-600">
+            <p className="text-sm font-medium text-violet-600">
               Bookea Documents
             </p>
-            <h1 className="mt-1 text-5xl font-black tracking-tight text-slate-950">
+            <h1 className="mt-1 text-2xl font-semibold tracking-tight text-slate-950">
               Documents
             </h1>
-            <p className="mt-3 max-w-4xl text-xl font-medium text-slate-500">
+            <p className="mt-3 max-w-4xl text-sm text-slate-500">
               Stockez les consentements, fiches à signer, devis, PDF,
               PowerPoint et fichiers importants du centre.
             </p>
@@ -340,7 +340,7 @@ export default function DocumentsPage() {
             <button
               type="button"
               onClick={createFolder}
-              className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-5 py-3 font-black text-slate-900 shadow-sm transition hover:bg-slate-50"
+              className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-5 py-3 font-semibold text-slate-900 shadow-sm transition hover:bg-slate-50"
             >
               <FolderOpen className="h-5 w-5 text-blue-600" />
               Nouveau dossier
@@ -348,7 +348,7 @@ export default function DocumentsPage() {
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
-              className="inline-flex items-center gap-2 rounded-2xl bg-blue-600 px-5 py-3 font-black text-white shadow-sm transition hover:bg-blue-700"
+              className="inline-flex items-center gap-2 rounded-2xl bg-blue-600 px-5 py-3 font-semibold text-white shadow-sm transition hover:bg-blue-700"
             >
               <UploadCloud className="h-5 w-5" />
               Ajouter un fichier
@@ -401,7 +401,7 @@ export default function DocumentsPage() {
         <section className="grid gap-6 xl:grid-cols-[420px_minmax(0,1fr)]">
           <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
             <div className="mb-4 flex items-center justify-between">
-              <h2 className="text-2xl font-black text-slate-950">Dossiers</h2>
+              <h2 className="text-lg font-semibold text-slate-950">Dossiers</h2>
               <button
                 type="button"
                 onClick={createFolder}
@@ -466,19 +466,19 @@ export default function DocumentsPage() {
                                 }
                               }}
                               autoFocus
-                              className="min-w-0 flex-1 rounded-xl border border-slate-200 px-3 py-2 text-base font-black outline-none focus:border-blue-400"
+                              className="min-w-0 flex-1 rounded-xl border border-slate-200 px-3 py-2 text-sm font-medium outline-none focus:border-blue-400"
                             />
                             <button
                               type="button"
                               onClick={() => saveFolderName(folder.id)}
-                              className="rounded-xl bg-blue-600 px-3 py-2 text-sm font-black text-white"
+                              className="rounded-xl bg-blue-600 px-3 py-2 text-sm font-medium text-white"
                             >
                               OK
                             </button>
                           </span>
                         ) : (
                           <>
-                            <span className="block truncate text-lg font-black text-slate-950">
+                            <span className="block truncate text-sm font-medium text-slate-950">
                               {folder.name}
                             </span>
                             <span className="mt-1 block text-sm font-bold text-slate-500">
@@ -544,10 +544,10 @@ export default function DocumentsPage() {
           <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
             <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
               <div>
-                <p className="text-sm font-black uppercase text-slate-400">
+                <p className="text-xs font-medium text-slate-400">
                   Dossier actif
                 </p>
-                <h2 className="text-3xl font-black text-slate-950">
+                <h2 className="text-xl font-semibold text-slate-950">
                   {activeFolder.name}
                 </h2>
               </div>
@@ -565,7 +565,7 @@ export default function DocumentsPage() {
                 <button
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
-                  className="inline-flex min-h-12 items-center justify-center gap-2 rounded-2xl bg-slate-950 px-5 font-black text-white"
+                  className="inline-flex min-h-12 items-center justify-center gap-2 rounded-2xl bg-slate-950 px-5 font-semibold text-white"
                 >
                   <FilePlus2 className="h-5 w-5" />
                   Ajouter
@@ -587,7 +587,7 @@ export default function DocumentsPage() {
               }`}
             >
               <UploadCloud className="mx-auto h-8 w-8 text-blue-600" />
-              <p className="mt-2 text-lg font-black text-slate-900">
+              <p className="mt-2 text-sm font-medium text-slate-900">
                 Glissez vos fichiers ici
               </p>
               <p className="mt-1 text-sm font-bold text-slate-500">
@@ -596,7 +596,7 @@ export default function DocumentsPage() {
             </div>
 
             <div className="mt-5 overflow-x-auto rounded-3xl border border-slate-200">
-              <div className="grid min-w-[1120px] grid-cols-[minmax(360px,1.4fr)_minmax(170px,.6fr)_110px_180px_150px] gap-4 border-b border-slate-200 bg-slate-50 px-4 py-3 text-sm font-black uppercase text-slate-500">
+              <div className="grid min-w-[1120px] grid-cols-[minmax(360px,1.4fr)_minmax(170px,.6fr)_110px_180px_150px] gap-4 border-b border-slate-200 bg-slate-50 px-4 py-3 text-xs font-medium text-slate-500">
                 <span>Document</span>
                 <span>Client</span>
                 <span>Type</span>
@@ -607,7 +607,7 @@ export default function DocumentsPage() {
               {filteredDocuments.length === 0 ? (
                 <div className="p-8 text-center">
                   <FileText className="mx-auto h-10 w-10 text-slate-300" />
-                  <p className="mt-3 text-xl font-black text-slate-900">
+                  <p className="mt-3 text-base font-semibold text-slate-900">
                     Aucun document ici
                   </p>
                   <p className="mt-1 font-bold text-slate-500">
@@ -638,12 +638,12 @@ export default function DocumentsPage() {
                                 }
                               }}
                               autoFocus
-                              className="min-w-0 flex-1 rounded-xl border border-slate-200 px-3 py-2 text-base font-black outline-none focus:border-blue-400"
+                              className="min-w-0 flex-1 rounded-xl border border-slate-200 px-3 py-2 text-sm font-medium outline-none focus:border-blue-400"
                             />
                             <button
                               type="button"
                               onClick={() => saveDocumentName(document.id)}
-                              className="rounded-xl bg-blue-600 px-3 py-2 text-sm font-black text-white"
+                              className="rounded-xl bg-blue-600 px-3 py-2 text-sm font-medium text-white"
                             >
                               OK
                             </button>
@@ -652,7 +652,7 @@ export default function DocumentsPage() {
                           <button
                             type="button"
                             onClick={() => openDocument(document)}
-                            className="block max-w-full truncate text-left text-base font-black text-slate-950 hover:text-blue-600"
+                            className="block max-w-full truncate text-left text-sm font-medium text-slate-950 hover:text-blue-600"
                             title={document.name}
                           >
                             {document.name}
@@ -677,7 +677,7 @@ export default function DocumentsPage() {
                           event.target.value as DocumentStatus,
                         )
                       }
-                      className={`w-full rounded-2xl border px-3 py-2 text-sm font-black outline-none ${statusStyles[document.status]}`}
+                      className={`w-full rounded-2xl border px-3 py-2 text-sm font-medium outline-none ${statusStyles[document.status]}`}
                     >
                       <option>À signer</option>
                       <option>Signé</option>
@@ -751,8 +751,8 @@ function DocumentMetric({
     <article className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <p className="text-lg font-black text-slate-500">{title}</p>
-          <p className={`mt-4 text-5xl font-black ${color}`}>{value}</p>
+          <p className="text-sm font-medium text-slate-500">{title}</p>
+          <p className={`mt-4 text-2xl font-semibold ${color}`}>{value}</p>
           <p className="mt-3 text-base font-bold text-slate-500">{detail}</p>
         </div>
         <span className={`rounded-3xl bg-slate-50 p-4 ${color}`}>{icon}</span>

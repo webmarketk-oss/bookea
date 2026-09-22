@@ -385,11 +385,11 @@ export default function AdminCentresPage() {
       <div className="mx-auto max-w-[1800px] space-y-8 p-8">
         <header className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
           <div>
-            <p className="text-sm font-black text-violet-600">Bookea Admin</p>
-            <h1 className="mt-1 text-5xl font-black tracking-tight">
+            <p className="text-sm font-medium text-violet-600">Bookea Admin</p>
+            <h1 className="mt-1 text-2xl font-semibold tracking-tight">
               Admin centres
             </h1>
-            <p className="mt-3 max-w-4xl text-xl font-medium text-slate-500">
+            <p className="mt-3 max-w-4xl text-sm text-slate-500">
               Créez un centre vierge, rattachez un responsable et gardez les
               données de chaque établissement séparées.
             </p>
@@ -398,7 +398,7 @@ export default function AdminCentresPage() {
           <button
             type="button"
             onClick={() => void loadCenters()}
-            className="inline-flex h-12 items-center gap-2 rounded-2xl border border-slate-200 bg-white px-5 font-black text-slate-700 shadow-sm transition hover:bg-slate-50"
+            className="inline-flex h-12 items-center gap-2 rounded-2xl border border-slate-200 bg-white px-5 font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50"
           >
             <RefreshCw className="h-5 w-5" />
             Actualiser
@@ -434,7 +434,7 @@ export default function AdminCentresPage() {
                 <Plus className="h-6 w-6" />
               </div>
               <div>
-                <h2 className="text-2xl font-black">Créer un centre</h2>
+                <h2 className="text-lg font-semibold">Créer un centre</h2>
                 <p className="font-medium text-slate-500">
                   Base vierge, prête pour CRM, agenda et factures.
                 </p>
@@ -491,7 +491,7 @@ export default function AdminCentresPage() {
             <button
               type="submit"
               disabled={saving}
-              className="mt-6 inline-flex h-14 w-full items-center justify-center gap-2 rounded-2xl bg-blue-600 px-5 font-black text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+              className="mt-6 inline-flex h-14 w-full items-center justify-center gap-2 rounded-2xl bg-blue-600 px-5 font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {saving ? <Loader2 className="h-5 w-5 animate-spin" /> : <Plus className="h-5 w-5" />}
               Créer le centre vierge
@@ -507,7 +507,7 @@ export default function AdminCentresPage() {
           <div className="space-y-4">
             {loading ? (
               <div className="grid min-h-80 place-items-center rounded-[2rem] border border-slate-200 bg-white text-slate-500">
-                <div className="flex items-center gap-3 font-black">
+                <div className="flex items-center gap-3 font-semibold">
                   <Loader2 className="h-5 w-5 animate-spin" />
                   Chargement des centres...
                 </div>
@@ -515,7 +515,7 @@ export default function AdminCentresPage() {
             ) : centers.length === 0 ? (
               <div className="rounded-[2rem] border border-dashed border-slate-200 bg-white p-10 text-center">
                 <Building2 className="mx-auto h-10 w-10 text-slate-300" />
-                <p className="mt-4 text-xl font-black">Aucun centre</p>
+                <p className="mt-4 text-base font-semibold">Aucun centre</p>
                 <p className="mt-2 font-medium text-slate-500">
                   Créez le premier centre Bookea.
                 </p>
@@ -586,7 +586,7 @@ function CenterCard({
               <Building2 className="h-6 w-6" />
             </div>
             <div>
-              <h3 className="text-2xl font-black">{center.name}</h3>
+              <h3 className="text-lg font-semibold">{center.name}</h3>
               <p className="font-mono text-sm font-bold text-slate-400">
                 {center.slug}
               </p>
@@ -607,7 +607,7 @@ function CenterCard({
         </div>
 
         <div className="rounded-2xl bg-slate-50 p-4 xl:min-w-80">
-          <p className="mb-3 text-sm font-black uppercase text-slate-400">
+          <p className="mb-3 text-xs font-medium text-slate-400">
             Accès centre
           </p>
           {center.members.length > 0 ? (
@@ -618,12 +618,12 @@ function CenterCard({
                   className="flex items-center justify-between gap-3 rounded-xl bg-white px-3 py-2"
                 >
                   <div className="min-w-0">
-                    <p className="truncate font-black">{member.name}</p>
+                    <p className="truncate font-semibold">{member.name}</p>
                     <p className="truncate text-sm font-semibold text-slate-400">
                       {member.email}
                     </p>
                   </div>
-                  <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-black text-blue-700">
+                  <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-medium text-blue-700">
                     {member.role}
                   </span>
                 </div>
@@ -637,7 +637,7 @@ function CenterCard({
           )}
 
           <form onSubmit={submitOwner} className="mt-4 space-y-2">
-            <label className="block text-sm font-black text-slate-500">
+            <label className="block text-sm font-medium text-slate-500">
               Rattacher un responsable
             </label>
             <div className="flex flex-col gap-2 sm:flex-row">
@@ -651,7 +651,7 @@ function CenterCard({
               <button
                 type="submit"
                 disabled={attaching}
-                className="inline-flex h-12 items-center justify-center gap-2 rounded-xl bg-slate-950 px-4 font-black text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+                className="inline-flex h-12 items-center justify-center gap-2 rounded-xl bg-slate-950 px-4 font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {attaching ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
@@ -668,8 +668,8 @@ function CenterCard({
 
           <form onSubmit={submitSmsCredit} className="mt-5 border-t border-slate-200 pt-4">
             <div className="mb-3 flex items-center justify-between gap-3">
-              <p className="text-sm font-black uppercase text-slate-400">SMS du centre</p>
-              <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-3 py-1 text-xs font-black text-blue-700">
+              <p className="text-xs font-medium text-slate-400">SMS du centre</p>
+              <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-3 py-1 text-xs font-medium text-blue-700">
                 <Smartphone className="h-3.5 w-3.5" />
                 {center.smsRemaining} restants
               </span>
@@ -679,7 +679,7 @@ function CenterCard({
               {center.smsUsedThisMonth} utilisé{center.smsUsedThisMonth > 1 ? "s" : ""} ce
               mois. Les recharges et le reliquat n’expirent pas.
             </p>
-            <label className="mt-3 block text-sm font-black text-slate-500">
+            <label className="mt-3 block text-sm font-medium text-slate-500">
               Ajouter des SMS
             </label>
             <div className="mt-2 flex flex-col gap-2 sm:flex-row">
@@ -696,7 +696,7 @@ function CenterCard({
               <button
                 type="submit"
                 disabled={crediting || Math.floor(Number(smsAmount)) <= 0}
-                className="inline-flex h-12 items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 font-black text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+                className="inline-flex h-12 items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {crediting ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
@@ -709,7 +709,7 @@ function CenterCard({
           </form>
 
           <div className="mt-5 border-t border-slate-200 pt-4">
-            <label className="block text-sm font-black text-slate-500">
+            <label className="block text-sm font-medium text-slate-500">
               Connecter les leads Facebook
             </label>
             <div className="mt-2 flex flex-col gap-2 sm:flex-row">
@@ -724,7 +724,7 @@ function CenterCard({
               <a
                 href={facebookConnectUrl || undefined}
                 aria-disabled={!facebookConnectUrl}
-                className={`inline-flex h-12 items-center justify-center gap-2 rounded-xl px-4 font-black text-white transition ${
+                className={`inline-flex h-12 items-center justify-center gap-2 rounded-xl px-4 font-semibold text-white transition ${
                   facebookConnectUrl
                     ? "bg-blue-600 hover:bg-blue-700"
                     : "pointer-events-none bg-slate-300"
@@ -762,7 +762,7 @@ function TextField({
 }) {
   return (
     <label className="block">
-      <span className="mb-2 block font-black text-slate-700">{label}</span>
+      <span className="mb-2 block font-semibold text-slate-700">{label}</span>
       <input
         type={type}
         required={required}
@@ -783,7 +783,7 @@ function Badge({
   icon: ReactNode;
 }) {
   return (
-    <span className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-black text-slate-600">
+    <span className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-600">
       {icon}
       {children}
     </span>

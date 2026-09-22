@@ -149,7 +149,7 @@ export default function Sidebar({
             icon={Bot}
             active={pathname.startsWith("/dashboard/seya-crm")}
           />
-          <div className="px-3 pt-3 pb-1 text-xs font-black uppercase text-white/40">
+          <div className="px-3 pt-3 pb-1 text-xs font-medium text-white/40">
             Messagerie Bookea
           </div>
           <NavItem
@@ -158,7 +158,7 @@ export default function Sidebar({
             icon={MessageCircle}
             active={pathname.startsWith("/dashboard/messagerie")}
           />
-          <div className="px-3 pt-3 pb-1 text-xs font-black uppercase text-white/40">
+          <div className="px-3 pt-3 pb-1 text-xs font-medium text-white/40">
             Marketing
           </div>
           <NavItem
@@ -173,7 +173,7 @@ export default function Sidebar({
             icon={MessageCircle}
             active={pathname.startsWith("/dashboard/sms")}
           />
-          <div className="px-3 pt-3 pb-1 text-xs font-black uppercase text-white/40">
+          <div className="px-3 pt-3 pb-1 text-xs font-medium text-white/40">
             Facturation
           </div>
           <NavItem

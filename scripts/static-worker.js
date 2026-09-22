@@ -26,6 +26,16 @@ export default {
       }
     }
 
+    if (/^\/r\/[^/]+$/.test(pathname)) {
+      const confirmationPage = await env.ASSETS.fetch(
+        withPath(request, "/r/index.html"),
+      );
+
+      if (confirmationPage.status !== 404) {
+        return confirmationPage;
+      }
+    }
+
     return env.ASSETS.fetch(withPath(request, "/404.html"));
   },
 };

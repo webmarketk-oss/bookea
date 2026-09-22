@@ -14,6 +14,7 @@ import {
   loadCrmAppointments,
   persistCrmAppointment,
 } from "@/lib/agenda-supabase";
+import { issueAppointmentConfirmationUrl } from "@/lib/appointment-confirmation";
 import {
   loadCrmAgendaContacts,
   type CrmAgendaContact,
@@ -407,8 +408,16 @@ export default function AgendaBoard() {
 
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void refreshAgenda();
+    function refreshIfVisible() {
+      if (document.visibilityState === "visible") {
+        void refreshAgenda();
+      }
+    }
+
     window.addEventListener(PUBLIC_BOOKINGS_UPDATED_EVENT, syncPublicBookings);
     window.addEventListener("storage", syncPublicBookings);
+    window.addEventListener("focus", refreshAgenda);
+    document.addEventListener("visibilitychange", refreshIfVisible);
 
     return () => {
       window.removeEventListener(
@@ -416,6 +425,8 @@ export default function AgendaBoard() {
         syncPublicBookings
       );
       window.removeEventListener("storage", syncPublicBookings);
+      window.removeEventListener("focus", refreshAgenda);
+      document.removeEventListener("visibilitychange", refreshIfVisible);
     };
   }, []);
 
@@ -708,6 +719,7 @@ export default function AgendaBoard() {
         date: formatSmsDate(savedAppointment.date),
         time: savedAppointment.start,
         treatment: savedAppointment.treatment,
+        confirmationLink: "",
       };
       const notices = ["RDV enregistré."];
 
@@ -717,6 +729,16 @@ export default function AgendaBoard() {
         appointment.kind !== "Indisponible" &&
         savedAppointment.phone
       ) {
+        if (sendSmsNow || sendSms48h) {
+          try {
+            smsVars.confirmationLink = await issueAppointmentConfirmationUrl(
+              savedAppointment.id,
+            );
+          } catch {
+            smsVars.confirmationLink = "";
+          }
+        }
+
         if (sendSmsNow) {
           const confirmation = await sendSavedTemplateSms(
             smsSettings?.confirmationTemplateId,
@@ -1115,10 +1137,10 @@ export default function AgendaBoard() {
             <p className="text-sm font-semibold text-violet-600">
               Bookea Agenda
             </p>
-            <h1 className="mt-1 text-4xl font-black tracking-tight text-slate-950">
+            <h1 className="mt-1 text-2xl font-semibold tracking-tight text-slate-950">
               Agenda
             </h1>
-            <p className="mt-2 text-slate-500">
+            <p className="mt-2 text-sm text-slate-500">
               Organisez les cabines, les praticiennes et les rendez-vous du
               centre.
             </p>
@@ -1244,10 +1266,10 @@ export default function AgendaBoard() {
                 <CalendarClock className="h-5 w-5" />
               </div>
               <div>
-                <p className="text-xs font-black uppercase text-slate-400">
+                <p className="text-xs font-medium text-slate-400">
                   Horaires du jour
                 </p>
-                <p className="text-base font-black text-slate-950">
+                <p className="text-sm font-medium text-slate-950">
                   {selectedDayHours.label} ·{" "}
                   {isSelectedDayClosed
                     ? "Centre fermé"
@@ -1258,7 +1280,7 @@ export default function AgendaBoard() {
             <button
               type="button"
               onClick={() => setIsHoursModalOpen(true)}
-              className="inline-flex h-11 items-center justify-center rounded-2xl border border-slate-200 bg-slate-50 px-4 text-sm font-black text-slate-700 transition hover:bg-blue-50 hover:text-blue-700"
+              className="inline-flex h-11 items-center justify-center rounded-2xl border border-slate-200 bg-slate-50 px-4 text-sm font-medium text-slate-700 transition hover:bg-blue-50 hover:text-blue-700"
             >
               Modifier les horaires
             </button>
@@ -1268,10 +1290,10 @@ export default function AgendaBoard() {
         <Card className="border-amber-100 bg-amber-50 py-0 shadow-sm">
           <CardContent className="grid gap-4 p-5 lg:grid-cols-[240px_1fr] lg:items-start">
             <div>
-              <p className="text-xs font-black uppercase text-amber-700">
+              <p className="text-xs font-medium text-amber-700">
                 À lire avant la journée
               </p>
-              <h2 className="mt-1 text-xl font-black text-slate-950">
+              <h2 className="mt-1 text-base font-semibold text-slate-950">
                 Informations importantes
               </h2>
               <p className="mt-2 text-sm font-medium leading-6 text-amber-800">
@@ -1337,7 +1359,7 @@ export default function AgendaBoard() {
                         <p className="text-sm font-semibold text-slate-500">
                           {stat.label}
                         </p>
-                        <p className={`mt-2 text-3xl font-black ${stat.color}`}>
+                        <p className={`mt-2 text-xl font-semibold ${stat.color}`}>
                           {stat.value}
                         </p>
                       </div>
@@ -1351,7 +1373,7 @@ export default function AgendaBoard() {
                         <p className="text-sm font-semibold text-slate-500">
                           {stat.label}
                         </p>
-                        <p className={`mt-2 text-3xl font-black ${stat.color}`}>
+                        <p className={`mt-2 text-xl font-semibold ${stat.color}`}>
                           {stat.value}
                         </p>
                       </div>
@@ -1372,7 +1394,7 @@ export default function AgendaBoard() {
                           <Link
                             key={appointment.id}
                             href={clientFicheHref(appointment)}
-                            className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-black text-amber-900 transition-colors hover:border-amber-300 hover:bg-amber-100"
+                            className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-medium text-amber-900 transition-colors hover:border-amber-300 hover:bg-amber-100"
                           >
                             {appointment.personName}
                           </Link>
@@ -1391,7 +1413,7 @@ export default function AgendaBoard() {
             <div>
               <div className="mb-3 flex items-center gap-2 text-violet-900">
                 <Sparkles className="h-5 w-5" />
-                <h2 className="font-black">Seya Agenda</h2>
+                <h2 className="font-semibold">Seya Agenda</h2>
               </div>
               <p className="text-sm leading-6 text-violet-800">
                 Seya pourra proposer automatiquement un créneau selon la
@@ -1435,7 +1457,7 @@ export default function AgendaBoard() {
         <Card className="relative z-20 border-slate-200 py-0 shadow-sm">
           <CardContent className="flex flex-wrap items-center justify-between gap-3 p-4">
             <div className="flex flex-wrap items-center gap-3">
-              <p className="mr-2 text-sm font-black uppercase text-slate-500">
+              <p className="mr-2 text-xs font-medium text-slate-500">
                 Praticiennes du jour
               </p>
               {practitionersOfDay.map((practitioner) => (
@@ -1557,7 +1579,7 @@ export default function AgendaBoard() {
               {isSelectedDayClosed ? (
                 <div className="flex min-h-60 items-center justify-center border-t border-slate-100 p-8 text-center">
                   <div>
-                    <p className="text-lg font-black text-slate-900">
+                    <p className="text-sm font-medium text-slate-900">
                       Centre fermé ce jour
                     </p>
                     <p className="mt-2 text-sm font-semibold text-slate-500">
@@ -1739,10 +1761,10 @@ export default function AgendaBoard() {
           <div className="w-full max-w-3xl rounded-3xl bg-white p-6 shadow-2xl">
             <div className="mb-5 flex items-start justify-between gap-4">
               <div>
-                <p className="text-sm font-black uppercase text-blue-600">
+                <p className="text-xs font-medium text-blue-600">
                   Paramètres agenda
                 </p>
-                <h2 className="mt-1 text-3xl font-black text-slate-950">
+                <h2 className="mt-1 text-xl font-semibold text-slate-950">
                   Horaires du centre
                 </h2>
                 <p className="mt-2 text-sm font-semibold text-slate-500">
@@ -1770,7 +1792,7 @@ export default function AgendaBoard() {
                       : "border-slate-200 bg-slate-50"
                   }`}
                 >
-                  <p className="text-lg font-black text-slate-900">
+                  <p className="text-sm font-medium text-slate-900">
                     {day.label}
                   </p>
                   <div className="flex items-center gap-2">
@@ -1782,7 +1804,7 @@ export default function AgendaBoard() {
                           startTime: event.target.value,
                         })
                       }
-                      className="h-11 flex-1 rounded-xl border border-slate-200 bg-white px-3 text-sm font-black outline-none disabled:opacity-40"
+                      className="h-11 flex-1 rounded-xl border border-slate-200 bg-white px-3 text-sm font-medium outline-none disabled:opacity-40"
                     >
                       {timeOptions
                         .filter(
@@ -1802,7 +1824,7 @@ export default function AgendaBoard() {
                           endTime: event.target.value,
                         })
                       }
-                      className="h-11 flex-1 rounded-xl border border-slate-200 bg-white px-3 text-sm font-black outline-none disabled:opacity-40"
+                      className="h-11 flex-1 rounded-xl border border-slate-200 bg-white px-3 text-sm font-medium outline-none disabled:opacity-40"
                     >
                       {timeOptions
                         .filter(
@@ -1821,7 +1843,7 @@ export default function AgendaBoard() {
                         closed: !day.closed,
                       })
                     }
-                    className={`h-11 rounded-xl px-4 text-sm font-black ${
+                    className={`h-11 rounded-xl px-4 text-sm font-medium ${
                       day.closed
                         ? "bg-red-50 text-red-600"
                         : "bg-emerald-50 text-emerald-700"
@@ -1837,7 +1859,7 @@ export default function AgendaBoard() {
               <button
                 type="button"
                 onClick={() => setIsHoursModalOpen(false)}
-                className="rounded-2xl bg-slate-950 px-5 py-3 font-black text-white"
+                className="rounded-2xl bg-slate-950 px-5 py-3 font-semibold text-white"
               >
                 Valider les horaires
               </button>
@@ -1866,7 +1888,7 @@ export default function AgendaBoard() {
           >
             <div className="mb-6 flex items-start justify-between gap-4">
               <div>
-                <h2 className="text-2xl font-black text-slate-950">
+                <h2 className="text-lg font-semibold text-slate-950">
                   Nouveau rendez-vous
                 </h2>
                 <p className="mt-1 text-sm text-slate-500">
@@ -2334,7 +2356,7 @@ function AgendaDateNav({
         aria-label={`Choisir une date, actuellement ${formatAgendaDateLong(selectedDate)}`}
       >
         <CalendarDays className="h-4 w-4 shrink-0 text-violet-600" />
-        <p className="text-sm font-black text-slate-950">
+        <p className="text-sm font-medium text-slate-950">
           {formatAgendaDateLong(selectedDate)}
         </p>
       </button>
@@ -2369,7 +2391,7 @@ function AgendaDateNav({
             >
               <ChevronLeft className="h-4 w-4" />
             </button>
-            <p className="text-sm font-black capitalize text-slate-950">
+            <p className="text-sm font-medium capitalize text-slate-950">
               {formatMonthTitle(visibleMonth)}
             </p>
             <button
@@ -2386,7 +2408,7 @@ function AgendaDateNav({
             {weekDays.map((day) => (
               <p
                 key={day.label}
-                className="py-1 text-center text-[11px] font-black uppercase text-slate-400"
+                className="py-1 text-center text-[11px] font-semibold uppercase text-slate-400"
               >
                 {day.label}
               </p>
@@ -2493,7 +2515,7 @@ function WeekSchedule({
       <CardContent className="p-4">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h2 className="text-xl font-black text-slate-950">Vue semaine</h2>
+            <h2 className="text-base font-semibold text-slate-950">Vue semaine</h2>
             <p className="text-sm font-semibold text-slate-500">
               Du {formatAgendaDate(weekDates[0])} au{" "}
               {formatAgendaDate(weekDates[6])}
@@ -2515,7 +2537,7 @@ function WeekSchedule({
               className="min-h-72 rounded-2xl border border-slate-200 bg-slate-50 p-3"
             >
               <div className="mb-3 rounded-xl bg-white p-3">
-                <p className="text-sm font-black text-slate-950">
+                <p className="text-sm font-medium text-slate-950">
                   {formatWeekday(date)}
                 </p>
                 <p className="text-xs font-bold text-slate-400">
@@ -2547,7 +2569,7 @@ function WeekSchedule({
                       >
                         <div className="flex items-start justify-between gap-2">
                           <div>
-                            <p className="font-black">
+                            <p className="font-semibold">
                               {appointment.start} · {appointment.personName}
                             </p>
                             <p className="mt-1 text-xs font-semibold opacity-75">
@@ -2606,7 +2628,7 @@ function TeamPlanning({
           <div>
             <div className="flex items-center gap-2 text-violet-700">
               <CalendarCheck className="h-5 w-5" />
-              <h2 className="text-xl font-black text-slate-950">
+              <h2 className="text-base font-semibold text-slate-950">
                 Planning équipe
               </h2>
             </div>
@@ -2647,12 +2669,12 @@ function TeamPlanning({
                       className={`h-3.5 w-3.5 rounded-full ${practitioner.color}`}
                     />
                     <div>
-                      <p className="text-lg font-black text-slate-950">
+                      <p className="text-sm font-medium text-slate-950">
                         {practitioner.name}
                       </p>
                     </div>
                   </div>
-                  <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-black text-slate-500">
+                  <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-500">
                     {activeDays.length} j / semaine
                   </span>
                 </div>
@@ -2767,7 +2789,7 @@ function TeamPlanning({
                                 : [...schedule.workingDays, day.value].sort(),
                             })
                           }
-                          className={`min-h-16 rounded-xl border text-sm font-black transition-colors ${
+                          className={`min-h-16 rounded-xl border text-sm font-medium transition-colors ${
                             checked
                               ? "border-emerald-200 bg-emerald-50 text-emerald-700"
                               : "border-slate-200 bg-slate-50 text-slate-300"
@@ -2807,7 +2829,7 @@ function TeamPlanning({
                             onScheduleChange
                           )
                         }
-                        className="rounded-lg bg-sky-100 px-3 py-2 text-xs font-black text-sky-700 transition-colors hover:bg-sky-200"
+                        className="rounded-lg bg-sky-100 px-3 py-2 text-xs font-medium text-sky-700 transition-colors hover:bg-sky-200"
                       >
                         Vacance
                       </button>
@@ -2820,7 +2842,7 @@ function TeamPlanning({
                             onScheduleChange
                           )
                         }
-                        className="rounded-lg bg-rose-100 px-3 py-2 text-xs font-black text-rose-700 transition-colors hover:bg-rose-200"
+                        className="rounded-lg bg-rose-100 px-3 py-2 text-xs font-medium text-rose-700 transition-colors hover:bg-rose-200"
                       >
                         Repos exceptionnel
                       </button>
@@ -3496,7 +3518,7 @@ function AppointmentCard({
     >
       <div className="mb-2 flex items-start justify-between gap-2">
         <div className="min-w-0 flex-1">
-          <p className="break-words font-black leading-tight">
+          <p className="break-words font-semibold leading-tight">
             {appointment.personName}
           </p>
           <p className="text-xs font-semibold opacity-75">
@@ -3628,7 +3650,7 @@ function AppointmentDetailsModal({
       >
         <div className="mb-5 flex items-start justify-between gap-4">
           <div>
-            <h2 className="text-2xl font-black text-slate-950">
+            <h2 className="text-lg font-semibold text-slate-950">
               Modifier le rendez-vous
             </h2>
             <p className="mt-1 text-sm font-semibold text-slate-500">

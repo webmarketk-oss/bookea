@@ -218,26 +218,26 @@ export default function StatisticsPage() {
       <div className="mx-auto max-w-[1800px] space-y-6 p-8">
         <header className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
           <div>
-            <p className="text-sm font-black text-violet-600">
+            <p className="text-sm font-medium text-violet-600">
               Bookea Statistiques
             </p>
-            <h1 className="mt-1 text-5xl font-black tracking-tight">
+            <h1 className="mt-1 text-2xl font-semibold tracking-tight">
               Statistiques
             </h1>
-            <p className="mt-3 max-w-4xl text-xl font-medium text-slate-500">
+            <p className="mt-3 max-w-4xl text-sm text-slate-500">
               Activité Bookea, performance des prestations, comportement des
               clientes, remplissage planning et recommandations Seya.
             </p>
           </div>
 
           <div className="flex flex-wrap gap-3">
-            <select className="h-12 rounded-2xl border border-slate-200 bg-white px-4 font-black text-slate-700 shadow-sm outline-none">
+            <select className="h-12 rounded-2xl border border-slate-200 bg-white px-4 font-semibold text-slate-700 shadow-sm outline-none">
               <option>Ce mois-ci</option>
               <option>15 derniers jours</option>
               <option>30 derniers jours</option>
               <option>Mois dernier</option>
             </select>
-            <button className="inline-flex h-12 items-center gap-2 rounded-2xl bg-slate-950 px-5 font-black text-white shadow-sm">
+            <button className="inline-flex h-12 items-center gap-2 rounded-2xl bg-slate-950 px-5 font-semibold text-white shadow-sm">
               <Sparkles className="h-5 w-5" />
               Analyse Seya
             </button>
@@ -300,7 +300,7 @@ export default function StatisticsPage() {
                   <div key={service.name} className="rounded-3xl border border-slate-200 bg-slate-50 p-4">
                     <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                       <div>
-                        <h3 className="text-xl font-black">{service.name}</h3>
+                        <h3 className="text-base font-semibold">{service.name}</h3>
                         <p className="mt-1 text-sm font-bold text-slate-500">
                           {service.reservations} réservations · {formatCurrency(service.revenue)}
                         </p>
@@ -319,7 +319,7 @@ export default function StatisticsPage() {
                     </div>
                     <div className="mt-4 grid gap-2 md:grid-cols-[1fr_100px] md:items-center">
                       <Progress value={honoredRate} color={toneBarClass[rateTone(honoredRate)]} />
-                      <p className="text-right text-sm font-black text-slate-600">
+                      <p className="text-right text-sm font-medium text-slate-600">
                         {service.honored}/{service.reservations}
                       </p>
                     </div>
@@ -443,14 +443,14 @@ export default function StatisticsPage() {
             <div className="grid gap-3 sm:grid-cols-2">
               {seyaActivity.map((item) => (
                 <div key={item.label} className="rounded-3xl border border-violet-100 bg-violet-50/60 p-4">
-                  <p className="text-sm font-black text-slate-600">{item.label}</p>
-                  <p className={`mt-3 text-4xl font-black ${item.color}`}>{item.value}</p>
+                  <p className="text-sm font-medium text-slate-600">{item.label}</p>
+                  <p className={`mt-3 text-2xl font-semibold ${item.color}`}>{item.value}</p>
                   <p className="mt-2 text-sm font-bold text-slate-500">{item.detail}</p>
                 </div>
               ))}
             </div>
             <div className="mt-4 rounded-3xl border border-violet-100 bg-white p-4">
-              <p className="text-xs font-black uppercase tracking-wide text-violet-600">
+              <p className="text-xs font-medium tracking-wide text-violet-600">
                 Lecture rapide
               </p>
               <p className="mt-2 text-sm font-bold leading-6 text-slate-600">
@@ -487,7 +487,7 @@ export default function StatisticsPage() {
                 ] as string[]
               ).map((text, index) => (
                 <div key={text} className="flex gap-3 rounded-3xl border border-slate-200 bg-white p-4">
-                  <span className="grid h-9 w-9 shrink-0 place-items-center rounded-2xl bg-slate-950 text-sm font-black text-white">
+                  <span className="grid h-9 w-9 shrink-0 place-items-center rounded-2xl bg-slate-950 text-sm font-medium text-white">
                     {index + 1}
                   </span>
                   <p className="font-bold leading-7 text-slate-700">{text}</p>
@@ -523,12 +523,12 @@ function MetricCard({
   return (
     <div className={`rounded-[26px] border p-5 shadow-sm ${cardClass}`}>
       <div className="flex items-start justify-between gap-3">
-        <p className="text-sm font-black text-slate-500">{title}</p>
+        <p className="text-sm font-medium text-slate-500">{title}</p>
         <div className={`grid h-11 w-11 place-items-center rounded-2xl ${iconWrapClass} ${textColor}`}>
           {icon}
         </div>
       </div>
-      <p className={`mt-5 text-4xl font-black ${textColor}`}>{value}</p>
+      <p className={`mt-5 text-2xl font-semibold ${textColor}`}>{value}</p>
       <p className="mt-2 text-sm font-bold text-slate-500">{detail}</p>
     </div>
   );
@@ -552,7 +552,7 @@ function Panel({
           {icon}
         </div>
         <div>
-          <h2 className="text-2xl font-black">{title}</h2>
+          <h2 className="text-lg font-semibold">{title}</h2>
           <p className="mt-1 font-semibold text-slate-500">{subtitle}</p>
         </div>
       </div>
@@ -581,8 +581,8 @@ function InsightCard({
 
   return (
     <div className={`rounded-3xl border p-4 ${tones[tone]}`}>
-      <p className="text-xs font-black uppercase opacity-80">{title}</p>
-      <p className="mt-2 text-xl font-black">{value}</p>
+      <p className="text-xs font-medium opacity-80">{title}</p>
+      <p className="mt-2 text-base font-semibold">{value}</p>
       <p className="mt-2 text-sm font-bold leading-6 opacity-80">{detail}</p>
     </div>
   );
@@ -611,19 +611,19 @@ function RankList({
         <div key={row.label}>
           <div className="mb-2 flex items-start justify-between gap-3">
             <div>
-              <p className="font-black text-slate-950">{row.label}</p>
+              <p className="font-semibold text-slate-950">{row.label}</p>
               <p className={`text-sm font-semibold ${row.tone ? toneTextClass[row.tone] : "text-slate-500"}`}>
                 {row.sub}
               </p>
             </div>
-            <p className="font-black text-slate-700">{row.value}</p>
+            <p className="font-semibold text-slate-700">{row.value}</p>
           </div>
           <Progress
             value={row.percent}
             color="bg-gradient-to-r from-violet-500 to-cyan-400"
           />
           {row.progressLabel ? (
-            <p className="mt-1 text-xs font-black uppercase tracking-wide text-slate-400">
+            <p className="mt-1 text-xs font-medium tracking-wide text-slate-400">
               {row.progressLabel}
             </p>
           ) : null}
@@ -648,7 +648,7 @@ function Badge({
   };
 
   return (
-    <span className={`rounded-full px-3 py-1 text-xs font-black ${tones[tone]}`}>
+    <span className={`rounded-full px-3 py-1 text-xs font-medium ${tones[tone]}`}>
       {children}
     </span>
   );

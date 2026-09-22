@@ -23,18 +23,19 @@ export type SmsTemplateVars = {
   time?: string;
   treatment?: string;
   centerName?: string;
+  confirmationLink?: string;
 };
 
 export const defaultSmsTemplates: SmsTemplate[] = [
   {
     id: "confirmation-rdv",
     name: "Confirmation RDV",
-    body: "Bonjour {{prenom}} {{nom}}, votre rendez-vous {{soin}} est confirmé le {{date}} à {{heure}} chez {{centre}}. À bientôt !",
+    body: "BOOKEA – Rappel : votre RDV chez {{centre}} est prévu le {{date}} à {{heure}}.\n\nConfirmez ou annulez ici : {{lien_confirmation}}",
   },
   {
     id: "rappel-48h",
     name: "Rappel 48h avant RDV",
-    body: "Bonjour {{prenom}}, rappel : votre rendez-vous {{soin}} est dans 48h, le {{date}} à {{heure}} chez {{centre}}. Merci de prévenir en cas d'empêchement.",
+    body: "Bonjour {{prenom}}, rappel : votre rendez-vous {{soin}} est dans 48h, le {{date}} à {{heure}} chez {{centre}}.\nConfirmez ou annulez ici : {{lien_confirmation}}",
   },
   {
     id: "accueil-prospect",
@@ -351,19 +352,32 @@ export function toBirthDateIso(value?: string | null) {
 }
 
 export function fillSmsTemplate(template: string, vars: SmsTemplateVars) {
+  const centerName = vars.centerName?.trim() || "";
+  const confirmationLink = vars.confirmationLink?.trim() || "";
   const replacements: Record<string, string> = {
     prenom: vars.firstName?.trim() || "vous",
     nom: vars.lastName?.trim() || "",
     date: vars.date?.trim() || "",
     heure: vars.time?.trim() || "",
     soin: vars.treatment?.trim() || "",
-    centre: vars.centerName?.trim() || "",
+    centre: centerName,
+    nom_centre: centerName,
+    lien_confirmation: confirmationLink,
+    lien: confirmationLink,
   };
 
   let output = template;
 
   for (const [key, value] of Object.entries(replacements)) {
     output = output.replaceAll(`{{${key}}}`, value);
+  }
+
+  if (
+    confirmationLink &&
+    !output.includes(confirmationLink) &&
+    !/\{\{lien(?:_confirmation)?\}\}/.test(template)
+  ) {
+    output = `${output}\n\nConfirmez ou annulez ici : ${confirmationLink}`;
   }
 
   return output.replace(/[ \t]{2,}/g, " ").replace(/ +\n/g, "\n").trim();

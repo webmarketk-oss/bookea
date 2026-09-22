@@ -17,19 +17,34 @@ function normalizePhone(value) {
 }
 
 function personalize(message, vars = {}) {
+  const centerName = String(vars.centerName || vars.centre || vars.nom_centre || "").trim();
+  const confirmationLink = String(
+    vars.confirmationLink || vars.lien_confirmation || vars.lien || "",
+  ).trim();
   const replacements = {
     prenom: String(vars.firstName || vars.prenom || "vous").trim() || "vous",
     nom: String(vars.lastName || vars.nom || "").trim(),
     date: String(vars.date || "").trim(),
     heure: String(vars.time || vars.heure || "").trim(),
     soin: String(vars.treatment || vars.soin || "").trim(),
-    centre: String(vars.centerName || vars.centre || "").trim(),
+    centre: centerName,
+    nom_centre: centerName,
+    lien_confirmation: confirmationLink,
+    lien: confirmationLink,
   };
 
   let output = String(message || "");
 
   for (const [key, value] of Object.entries(replacements)) {
     output = output.replaceAll(`{{${key}}}`, value);
+  }
+
+  if (
+    confirmationLink &&
+    !output.includes(confirmationLink) &&
+    !/\{\{lien(?:_confirmation)?\}\}/.test(String(message || ""))
+  ) {
+    output = `${output}\n\nConfirmez ou annulez ici : ${confirmationLink}`;
   }
 
   return output.replace(/[ \t]{2,}/g, " ").replace(/ +\n/g, "\n").trim();
@@ -46,12 +61,12 @@ function defaultSmsTemplates() {
     {
       id: "confirmation-rdv",
       name: "Confirmation RDV",
-      body: "Bonjour {{prenom}} {{nom}}, votre rendez-vous {{soin}} est confirmé le {{date}} à {{heure}} chez {{centre}}. À bientôt !",
+      body: "BOOKEA – Rappel : votre RDV chez {{centre}} est prévu le {{date}} à {{heure}}.\n\nConfirmez ou annulez ici : {{lien_confirmation}}",
     },
     {
       id: "rappel-48h",
       name: "Rappel 48h avant RDV",
-      body: "Bonjour {{prenom}}, rappel : votre rendez-vous {{soin}} est dans 48h, le {{date}} à {{heure}} chez {{centre}}. Merci de prévenir en cas d'empêchement.",
+      body: "Bonjour {{prenom}}, rappel : votre rendez-vous {{soin}} est dans 48h, le {{date}} à {{heure}} chez {{centre}}.\nConfirmez ou annulez ici : {{lien_confirmation}}",
     },
     {
       id: "accueil-prospect",

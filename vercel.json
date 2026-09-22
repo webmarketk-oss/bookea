@@ -4,5 +4,11 @@
       "path": "/api/sms/dispatch",
       "schedule": "0 8 * * *"
     }
+  ],
+  "rewrites": [
+    {
+      "source": "/r/:token",
+      "destination": "/r"
+    }
   ]
 }

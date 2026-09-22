@@ -53,7 +53,7 @@ export default function NavGroup({
   return (
     <Collapsible.Root open={open} onOpenChange={setOpen}>
       <Collapsible.Trigger
-        className={`flex w-full items-center justify-between rounded-lg px-3 py-2 text-sm font-bold transition-colors ${
+        className={`flex w-full items-center justify-between rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
           active
             ? "bg-white/10 text-white"
             : "text-white/62 hover:bg-white/10 hover:text-white"

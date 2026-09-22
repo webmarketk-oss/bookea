@@ -429,9 +429,9 @@ export default function SmsPage() {
     <main className="min-h-screen bg-[#eef3f9] px-6 py-6 text-slate-950">
       <section className="mb-6 flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
         <div>
-          <p className="text-sm font-black text-violet-600">Bookea CRM</p>
-          <h1 className="mt-1 text-3xl font-black tracking-tight">Envoi SMS</h1>
-          <p className="mt-2 max-w-3xl text-base font-medium text-slate-500">
+          <p className="text-sm font-medium text-violet-600">Bookea CRM</p>
+          <h1 className="mt-1 text-xl font-semibold tracking-tight">Envoi SMS</h1>
+          <p className="mt-2 max-w-3xl text-sm text-slate-500">
             SMS réels via Brevo pour {centerName}. Mets d’abord ton numéro en test.
           </p>
         </div>
@@ -439,7 +439,7 @@ export default function SmsPage() {
           type="button"
           disabled={sending}
           onClick={() => createCampaign("Envoyé")}
-          className="inline-flex items-center justify-center gap-2 rounded-2xl bg-slate-950 px-4 py-3 text-sm font-black text-white shadow-sm disabled:opacity-60"
+          className="inline-flex items-center justify-center gap-2 rounded-2xl bg-slate-950 px-4 py-3 text-sm font-medium text-white shadow-sm disabled:opacity-60"
         >
           <Send className="h-6 w-6" />
           {sending ? "Envoi..." : "Envoyer SMS"}
@@ -461,7 +461,7 @@ export default function SmsPage() {
 
       {confirmation && (
         <div
-          className={`mb-6 rounded-2xl border px-4 py-3 text-base font-black ${
+          className={`mb-6 rounded-2xl border px-4 py-3 text-sm font-medium ${
             isError
               ? "border-red-200 bg-red-50 text-red-700"
               : "border-emerald-200 bg-emerald-50 text-emerald-700"
@@ -474,15 +474,15 @@ export default function SmsPage() {
       <section className="mb-6 rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
         <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
           <div>
-            <h2 className="text-xl font-black">Modèles SMS de {centerName}</h2>
+            <h2 className="text-base font-semibold">Modèles SMS de {centerName}</h2>
             <p className="mt-1 max-w-2xl text-sm font-medium text-slate-500">
-              Crée tes textes, enregistre-les, puis choisis lequel part à la confirmation RDV, 48h avant, ou depuis le CRM. Variables : {"{{prenom}} {{nom}} {{date}} {{heure}} {{soin}} {{centre}}"}.
+              Crée tes textes, enregistre-les, puis choisis lequel part à la confirmation RDV, 48h avant, ou depuis le CRM. Variables : {"{{prenom}} {{nom}} {{date}} {{heure}} {{soin}} {{centre}} {{lien_confirmation}}"}.
             </p>
           </div>
           <button
             type="button"
             onClick={startNewTemplate}
-            className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-black text-slate-700"
+            className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-700"
           >
             Nouveau modèle
           </button>
@@ -501,7 +501,7 @@ export default function SmsPage() {
               >
                 <div className="flex items-start justify-between gap-3">
                   <div>
-                    <p className="font-black">{template.name}</p>
+                    <p className="font-semibold">{template.name}</p>
                     <p className="mt-1 line-clamp-2 text-sm font-semibold text-slate-600">
                       {template.body}
                     </p>
@@ -510,14 +510,14 @@ export default function SmsPage() {
                     <button
                       type="button"
                       onClick={() => editTemplate(template)}
-                      className="rounded-xl bg-white px-3 py-2 text-sm font-black text-slate-700"
+                      className="rounded-xl bg-white px-3 py-2 text-sm font-medium text-slate-700"
                     >
                       Modifier
                     </button>
                     <button
                       type="button"
                       onClick={() => void deleteTemplate(template.id)}
-                      className="rounded-xl bg-white px-3 py-2 text-sm font-black text-red-600"
+                      className="rounded-xl bg-white px-3 py-2 text-sm font-medium text-red-600"
                     >
                       Supprimer
                     </button>
@@ -535,7 +535,7 @@ export default function SmsPage() {
               placeholder="Confirmation Gap, Rappel Clermont..."
             />
             <label className="mt-4 block space-y-2">
-              <span className="text-sm font-black uppercase text-slate-500">
+              <span className="text-xs font-medium text-slate-500">
                 Texte du modèle
               </span>
               <textarea
@@ -548,7 +548,7 @@ export default function SmsPage() {
               type="button"
               disabled={savingTemplates}
               onClick={() => void saveTemplate()}
-              className="mt-4 rounded-2xl bg-slate-950 px-5 py-3 font-black text-white disabled:opacity-60"
+              className="mt-4 rounded-2xl bg-slate-950 px-5 py-3 font-semibold text-white disabled:opacity-60"
             >
               {savingTemplates ? "Enregistrement..." : "Enregistrer le modèle"}
             </button>
@@ -609,14 +609,14 @@ export default function SmsPage() {
             <ShoppingCart className="h-6 w-6" />
           </div>
           <div>
-            <h2 className="text-xl font-black">Forfait du centre</h2>
+            <h2 className="text-base font-semibold">Forfait du centre</h2>
             <p className="mt-1 text-sm font-medium text-slate-500">
               {centerName} reçoit {smsLimit} SMS chaque 1er du mois. Les SMS non
               utilisés et les recharges admin n’expirent pas : s’il en reste 100,
               le mois suivant le solde passe à {smsLimit + 100}. L’envoi s’arrête
               uniquement quand le solde est à 0.
             </p>
-            <p className="mt-2 text-sm font-black text-slate-800">
+            <p className="mt-2 text-sm font-medium text-slate-800">
               {credits} restant{credits > 1 ? "s" : ""} · {smsUsed} utilisé
               {smsUsed > 1 ? "s" : ""}
             </p>
@@ -631,7 +631,7 @@ export default function SmsPage() {
               <MessageCircle className="h-6 w-6" />
             </div>
             <div>
-              <h2 className="text-xl font-black">Créer un envoi</h2>
+              <h2 className="text-base font-semibold">Créer un envoi</h2>
               <p className="mt-1 text-sm font-medium text-slate-500">
                 Si le numéro test est rempli, un seul SMS part vers ce numéro.
               </p>
@@ -641,7 +641,7 @@ export default function SmsPage() {
           <div className="mt-6 grid gap-4 md:grid-cols-2">
             <Input label="Nom de l'envoi" value={name} onChange={setName} />
             <label className="space-y-2">
-              <span className="text-sm font-black uppercase text-slate-500">
+              <span className="text-xs font-medium text-slate-500">
                 Audience
               </span>
               <select
@@ -664,7 +664,7 @@ export default function SmsPage() {
               placeholder="06 12 34 56 78"
             />
             <label className="space-y-2 md:col-span-2">
-              <span className="text-sm font-black uppercase text-slate-500">
+              <span className="text-xs font-medium text-slate-500">
                 Message SMS
               </span>
               <textarea
@@ -679,7 +679,7 @@ export default function SmsPage() {
             <button
               type="button"
               onClick={() => createCampaign("Planifié")}
-              className="rounded-2xl border border-slate-200 bg-white px-5 py-3 font-black text-slate-700"
+              className="rounded-2xl border border-slate-200 bg-white px-5 py-3 font-semibold text-slate-700"
             >
               Planifier l'envoi
             </button>
@@ -687,7 +687,7 @@ export default function SmsPage() {
               type="button"
               disabled={sending}
               onClick={() => createCampaign("Envoyé")}
-              className="rounded-2xl bg-blue-600 px-5 py-3 font-black text-white disabled:opacity-60"
+              className="rounded-2xl bg-blue-600 px-5 py-3 font-semibold text-white disabled:opacity-60"
             >
               {sending ? "Envoi..." : "Envoyer maintenant"}
             </button>
@@ -700,7 +700,7 @@ export default function SmsPage() {
               <Gift className="h-6 w-6" />
             </div>
             <div>
-              <h2 className="text-xl font-black">Automatiques</h2>
+              <h2 className="text-base font-semibold">Automatiques</h2>
               <p className="mt-1 text-sm font-medium text-slate-500">
                 Les rappels RDV et le SMS d&apos;anniversaire partiront ensuite tout seuls. Le bouton envoie déjà via Brevo.
               </p>
@@ -731,13 +731,13 @@ export default function SmsPage() {
             />
           </div>
           <div className="mt-5 rounded-2xl bg-slate-50 p-4">
-            <p className="text-sm font-black uppercase text-slate-500">
+            <p className="text-xs font-medium text-slate-500">
               Aperçu
             </p>
             <p className="mt-3 text-base font-bold leading-7 text-slate-700">
               {message.replace("{{prenom}}", "Marie")}
             </p>
-            <p className="mt-3 font-black text-blue-600">
+            <p className="mt-3 font-semibold text-blue-600">
               {testPhone.trim() ? 1 : audienceRecipients.length} destinataire(s)
             </p>
           </div>
@@ -745,7 +745,7 @@ export default function SmsPage() {
       </section>
 
       <section className="mt-6 rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-        <h2 className="text-xl font-black">Réponses SMS</h2>
+        <h2 className="text-base font-semibold">Réponses SMS</h2>
         <p className="mt-1 text-sm font-medium text-slate-500">
           Les réponses des clientes arrivent ici et dans la fiche CRM. Active aussi “Réponses SMS” dans Brevo (SMS transactionnel → Configuration).
         </p>
@@ -761,7 +761,7 @@ export default function SmsPage() {
                 className="grid gap-3 rounded-2xl border border-violet-100 bg-violet-50 p-4"
               >
                 <div>
-                  <p className="text-sm font-black">
+                  <p className="text-sm font-medium">
                     {item.clientName || "Cliente"} · {item.phone}
                   </p>
                   <p className="font-bold text-slate-500">{item.at}</p>
@@ -781,7 +781,7 @@ export default function SmsPage() {
                     type="button"
                     disabled={replyingId === item.id && !replyDraft.trim()}
                     onClick={() => void replyToInbox(item)}
-                    className="rounded-2xl bg-slate-950 px-4 py-3 text-sm font-black text-white disabled:opacity-60"
+                    className="rounded-2xl bg-slate-950 px-4 py-3 text-sm font-medium text-white disabled:opacity-60"
                   >
                     {replyingId === item.id ? "Envoyer" : "Répondre"}
                   </button>
@@ -793,7 +793,7 @@ export default function SmsPage() {
       </section>
 
       <section className="mt-6 rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-        <h2 className="text-xl font-black">Historique SMS</h2>
+        <h2 className="text-base font-semibold">Historique SMS</h2>
         <div className="mt-5 grid gap-3">
           {campaigns.length === 0 ? (
             <p className="font-semibold text-slate-500">
@@ -806,7 +806,7 @@ export default function SmsPage() {
                 className="grid gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4 lg:grid-cols-[1fr_auto_auto]"
               >
                 <div>
-                  <p className="text-sm font-black">{campaign.name}</p>
+                  <p className="text-sm font-medium">{campaign.name}</p>
                   <p className="font-bold text-slate-500">
                     {campaign.audience} · {campaign.plannedAt}
                   </p>
@@ -814,10 +814,10 @@ export default function SmsPage() {
                     {campaign.message}
                   </p>
                 </div>
-                <p className="self-center font-black text-slate-700">
+                <p className="self-center font-semibold text-slate-700">
                   {campaign.recipients} SMS
                 </p>
-                <span className={`self-center rounded-full px-4 py-2 text-center font-black ${statusStyles[campaign.status]}`}>
+                <span className={`self-center rounded-full px-4 py-2 text-center font-semibold ${statusStyles[campaign.status]}`}>
                   {campaign.status}
                 </span>
               </article>
@@ -938,7 +938,7 @@ function Input({
 }) {
   return (
     <label className="space-y-2">
-      <span className="text-sm font-black uppercase text-slate-500">{label}</span>
+      <span className="text-xs font-medium text-slate-500">{label}</span>
       <input
         type={type}
         value={value}
@@ -963,7 +963,7 @@ function TemplateSelect({
 }) {
   return (
     <label className="space-y-2">
-      <span className="text-sm font-black uppercase text-slate-500">{label}</span>
+      <span className="text-xs font-medium text-slate-500">{label}</span>
       <select
         value={value}
         onChange={(event) => onChange(event.target.value)}
@@ -992,7 +992,7 @@ function Toggle({
     <button
       type="button"
       onClick={onClick}
-      className={`flex items-center justify-between gap-4 rounded-2xl border px-4 py-4 text-left font-black ${
+      className={`flex items-center justify-between gap-4 rounded-2xl border px-4 py-4 text-left font-semibold ${
         active
           ? "border-emerald-200 bg-emerald-50 text-emerald-700"
           : "border-slate-200 bg-slate-50 text-slate-500"
@@ -1023,8 +1023,8 @@ function StatCard({
     <div className="rounded-[24px] border border-slate-200 bg-white p-5 shadow-sm">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <p className="text-sm font-black text-slate-500">{title}</p>
-          <p className={`mt-3 text-3xl font-black ${color ?? ""}`}>{value}</p>
+          <p className="text-sm font-medium text-slate-500">{title}</p>
+          <p className={`mt-3 text-xl font-semibold ${color ?? ""}`}>{value}</p>
           {detail ? (
             <p className="mt-2 text-xs font-bold text-slate-400">{detail}</p>
           ) : null}

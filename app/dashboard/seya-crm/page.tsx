@@ -276,9 +276,9 @@ export default function SeyaCrmPage() {
     >
       <section className="mb-6 flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
         <div>
-          <p className="text-sm font-black text-violet-600">Bookea Agent IA</p>
-          <h1 className="mt-1 text-3xl font-black tracking-tight">Seya CRM</h1>
-          <p className="mt-2 max-w-3xl text-base font-medium text-slate-500">
+          <p className="text-sm font-medium text-violet-600">Bookea Agent IA</p>
+          <h1 className="mt-1 text-xl font-semibold tracking-tight">Seya CRM</h1>
+          <p className="mt-2 max-w-3xl text-sm text-slate-500">
             L&apos;agent qui prépare les relances, vérifie les doublons, surveille les
             acomptes et aide les équipes à traiter les leads.
           </p>
@@ -286,7 +286,7 @@ export default function SeyaCrmPage() {
         <button
           type="button"
           onClick={runSeya}
-          className="inline-flex items-center justify-center gap-2 rounded-2xl bg-slate-950 px-4 py-3 text-sm font-black text-white shadow-sm"
+          className="inline-flex items-center justify-center gap-2 rounded-2xl bg-slate-950 px-4 py-3 text-sm font-medium text-white shadow-sm"
         >
           <Wand2 className="h-6 w-6" />
           Lancer l&apos;analyse
@@ -303,7 +303,7 @@ export default function SeyaCrmPage() {
       <section className="mb-6 rounded-3xl border border-violet-200 bg-violet-50 p-5 shadow-sm">
         <div className="grid gap-4 xl:grid-cols-[1fr_auto]">
           <label className="block">
-            <span className="mb-2 block text-sm font-black uppercase text-violet-700">
+            <span className="mb-2 block text-xs font-medium text-violet-700">
               Demander à Seya
             </span>
             <input
@@ -315,7 +315,7 @@ export default function SeyaCrmPage() {
           <button
             type="button"
             onClick={runSeya}
-            className="self-end rounded-2xl bg-violet-600 px-4 py-3 text-sm font-black text-white"
+            className="self-end rounded-2xl bg-violet-600 px-4 py-3 text-sm font-medium text-white"
           >
             Préparer
           </button>
@@ -340,17 +340,17 @@ export default function SeyaCrmPage() {
             <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
               <div>
                 <div className="flex flex-wrap gap-2">
-                  <span className={`rounded-full border px-3 py-1 text-sm font-black ${priorityStyles[task.priority]}`}>
+                  <span className={`rounded-full border px-3 py-1 text-sm font-medium ${priorityStyles[task.priority]}`}>
                     {task.priority}
                   </span>
-                  <span className={`rounded-full border px-3 py-1 text-sm font-black ${channelStyles[task.channel]}`}>
+                  <span className={`rounded-full border px-3 py-1 text-sm font-medium ${channelStyles[task.channel]}`}>
                     {task.channel}
                   </span>
-                  <span className="rounded-full bg-slate-100 px-3 py-1 text-sm font-black text-slate-600">
+                  <span className="rounded-full bg-slate-100 px-3 py-1 text-sm font-medium text-slate-600">
                     {task.status}
                   </span>
                 </div>
-                <h2 className="mt-4 text-base font-black">{task.title}</h2>
+                <h2 className="mt-4 text-sm font-medium">{task.title}</h2>
                 <p className="mt-1 text-base font-bold text-slate-500">{task.client}</p>
                 <p className="mt-4 max-w-4xl rounded-2xl bg-slate-50 p-4 text-base font-semibold leading-7 text-slate-700">
                   {task.suggestion}
@@ -358,7 +358,7 @@ export default function SeyaCrmPage() {
                 {task.title.toLowerCase().includes("acompte") && (
                   <div className="mt-4 grid gap-3 rounded-2xl border border-blue-100 bg-blue-50 p-4 md:grid-cols-[1fr_auto]">
                     <label className="block">
-                      <span className="mb-2 block text-sm font-black uppercase text-blue-700">
+                      <span className="mb-2 block text-xs font-medium text-blue-700">
                         Lien d&apos;acompte à envoyer
                       </span>
                       <select
@@ -366,7 +366,7 @@ export default function SeyaCrmPage() {
                         onChange={(event) =>
                           setSelectedDepositLinkId(event.target.value)
                         }
-                        className="h-12 w-full rounded-2xl border border-blue-200 bg-white px-4 text-sm font-black text-slate-800 outline-none"
+                        className="h-12 w-full rounded-2xl border border-blue-200 bg-white px-4 text-sm font-medium text-slate-800 outline-none"
                       >
                         {depositLinks.map((link) => (
                           <option key={link.id} value={link.id}>
@@ -378,13 +378,13 @@ export default function SeyaCrmPage() {
                     <button
                       type="button"
                       onClick={() => sendDepositSms(task)}
-                      className="self-end rounded-2xl bg-blue-600 px-5 py-3 text-sm font-black text-white"
+                      className="self-end rounded-2xl bg-blue-600 px-5 py-3 text-sm font-medium text-white"
                     >
                       SMS acompte
                     </button>
                     <p className="text-sm font-semibold leading-6 text-blue-700 md:col-span-2">
                       {selectedDepositLink?.message}{" "}
-                      <span className="font-black">{selectedDepositLink?.url}</span>
+                      <span className="font-semibold">{selectedDepositLink?.url}</span>
                     </p>
                   </div>
                 )}
@@ -393,14 +393,14 @@ export default function SeyaCrmPage() {
                 <button
                   type="button"
                   onClick={() => validateTask(task.id)}
-                  className="rounded-2xl border border-slate-200 bg-white px-5 py-3 font-black text-slate-700"
+                  className="rounded-2xl border border-slate-200 bg-white px-5 py-3 font-semibold text-slate-700"
                 >
                   Valider
                 </button>
                 <button
                   type="button"
                   onClick={() => sendTask(task.id)}
-                  className="inline-flex items-center gap-2 rounded-2xl bg-blue-600 px-5 py-3 font-black text-white"
+                  className="inline-flex items-center gap-2 rounded-2xl bg-blue-600 px-5 py-3 font-semibold text-white"
                 >
                   <Send className="h-5 w-5" />
                   Envoyer
@@ -412,7 +412,7 @@ export default function SeyaCrmPage() {
       </section>
 
       <section className="mt-6 rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-        <h2 className="text-xl font-black">Automatisations prévues</h2>
+        <h2 className="text-base font-semibold">Automatisations prévues</h2>
         <div className="mt-4 grid gap-3 md:grid-cols-3">
           {[
             "Relance WhatsApp automatique après validation Meta",
@@ -448,8 +448,8 @@ function StatCard({
     <div className="rounded-[24px] border border-slate-200 bg-white p-5 shadow-sm">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <p className="text-sm font-black text-slate-500">{title}</p>
-          <p className={`mt-3 text-3xl font-black ${color}`}>{value}</p>
+          <p className="text-sm font-medium text-slate-500">{title}</p>
+          <p className={`mt-3 text-xl font-semibold ${color}`}>{value}</p>
         </div>
         <div className="grid h-12 w-12 place-items-center rounded-2xl bg-slate-50 text-blue-600">
           {icon}

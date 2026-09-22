@@ -232,12 +232,20 @@ export default function CRMLeadsPage() {
       );
     }
 
+    function refreshIfVisible() {
+      if (document.visibilityState === "visible") {
+        void refreshCrmLeads();
+      }
+    }
+
     window.addEventListener(PUBLIC_BOOKINGS_UPDATED_EVENT, syncPublicBookings);
     window.addEventListener(
       APPOINTMENT_STATUS_UPDATED_EVENT,
       syncAppointmentStatuses
     );
     window.addEventListener("storage", syncPublicBookings);
+    window.addEventListener("focus", refreshCrmLeads);
+    document.addEventListener("visibilitychange", refreshIfVisible);
 
     return () => {
       window.removeEventListener(
@@ -249,6 +257,8 @@ export default function CRMLeadsPage() {
         syncAppointmentStatuses
       );
       window.removeEventListener("storage", syncPublicBookings);
+      window.removeEventListener("focus", refreshCrmLeads);
+      document.removeEventListener("visibilitychange", refreshIfVisible);
     };
   }, []);
 
