@@ -12,6 +12,8 @@ export type CenterSmsSettings = {
   confirmationTemplateId: string;
   reminder48hTemplateId: string;
   leadWelcomeTemplateId: string;
+  birthdayTemplateId: string;
+  birthdaySmsEnabled: boolean;
 };
 
 export type SmsTemplateVars = {
@@ -39,6 +41,11 @@ export const defaultSmsTemplates: SmsTemplate[] = [
     name: "Accueil prospect",
     body: "Bonjour {{prenom}}, merci pour votre demande {{soin}}. L'équipe de {{centre}} vous contacte rapidement.",
   },
+  {
+    id: "anniversaire",
+    name: "Anniversaire",
+    body: "Bonjour {{prenom}}, toute l'équipe de {{centre}} vous souhaite un très bel anniversaire 🎂. Une petite attention vous attend au centre. À très vite !",
+  },
 ];
 
 export const defaultSmsSettings: CenterSmsSettings = {
@@ -46,6 +53,8 @@ export const defaultSmsSettings: CenterSmsSettings = {
   confirmationTemplateId: "confirmation-rdv",
   reminder48hTemplateId: "rappel-48h",
   leadWelcomeTemplateId: "accueil-prospect",
+  birthdayTemplateId: "anniversaire",
+  birthdaySmsEnabled: true,
 };
 
 const SMS_SETTINGS_UPDATED_EVENT = "bookea-sms-settings-updated";
@@ -57,7 +66,7 @@ export function smsSettingsStorageKey(centerId: string) {
 export function normalizeSmsSettings(
   value?: Partial<CenterSmsSettings> | null,
 ): CenterSmsSettings {
-  const templates =
+  const templates = withDefaultTemplates(
     Array.isArray(value?.templates) && value.templates.length > 0
       ? value.templates
           .map((template) => ({
@@ -66,7 +75,8 @@ export function normalizeSmsSettings(
             body: String(template?.body || "").trim(),
           }))
           .filter((template) => template.id && template.body)
-      : defaultSmsTemplates;
+      : defaultSmsTemplates,
+  );
 
   const templateIds = new Set(templates.map((template) => template.id));
   const fallbackId = templates[0]?.id || "confirmation-rdv";
@@ -88,7 +98,45 @@ export function normalizeSmsSettings(
       : templateIds.has("accueil-prospect")
         ? "accueil-prospect"
         : fallbackId,
+    birthdayTemplateId: templateIds.has(value?.birthdayTemplateId || "")
+      ? value!.birthdayTemplateId!
+      : templateIds.has("anniversaire")
+        ? "anniversaire"
+        : fallbackId,
+    birthdaySmsEnabled: value?.birthdaySmsEnabled !== false,
   };
+}
+
+function withDefaultTemplates(templates: SmsTemplate[]) {
+  const byId = new Map(templates.map((template) => [template.id, template]));
+
+  for (const fallback of defaultSmsTemplates) {
+    if (!byId.has(fallback.id)) {
+      byId.set(fallback.id, fallback);
+    }
+  }
+
+  return [...byId.values()];
+}
+
+export function toBirthDateIso(value?: string | null) {
+  const trimmed = String(value || "").trim();
+
+  if (!trimmed || trimmed === "À compléter") {
+    return "";
+  }
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+    return trimmed;
+  }
+
+  const slash = trimmed.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+
+  if (!slash) {
+    return "";
+  }
+
+  return `${slash[3]}-${slash[2].padStart(2, "0")}-${slash[1].padStart(2, "0")}`;
 }
 
 export function fillSmsTemplate(template: string, vars: SmsTemplateVars) {
@@ -138,14 +186,15 @@ export function splitPersonName(fullName: string) {
 }
 
 export function mergeTemplateLists(
-  remote: SmsTemplate[] = [],
-  local: SmsTemplate[] = [],
+  ...lists: Array<SmsTemplate[] | undefined>
 ) {
   const templates = new Map<string, SmsTemplate>();
 
-  for (const template of [...remote, ...local]) {
-    if (template.id && template.body) {
-      templates.set(template.id, template);
+  for (const list of lists) {
+    for (const template of list ?? []) {
+      if (template.id && template.body) {
+        templates.set(template.id, template);
+      }
     }
   }
 
@@ -218,7 +267,13 @@ export async function loadCenterSmsSettings() {
       remoteSettings.reminder48hTemplateId || localSettings?.reminder48hTemplateId,
     leadWelcomeTemplateId:
       remoteSettings.leadWelcomeTemplateId || localSettings?.leadWelcomeTemplateId,
+    birthdayTemplateId:
+      remoteSettings.birthdayTemplateId || localSettings?.birthdayTemplateId,
+    birthdaySmsEnabled: hasRemote
+      ? remoteSettings.birthdaySmsEnabled
+      : (localSettings?.birthdaySmsEnabled ?? true),
     templates: mergeTemplateLists(
+      defaultSmsTemplates,
       hasRemote ? remoteSettings.templates : [],
       localSettings?.templates ?? [],
     ),

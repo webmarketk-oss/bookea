@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { Card, CardContent } from "@/components/ui/card";
+import { inactiveLeadStatuses } from "@/lib/lead-statuses";
 import { Lead } from "@/types/lead";
 import {
   AlertCircle,
@@ -53,16 +54,7 @@ const presentStatuses = [
   "Acompte reçu",
   "Acompte validé",
 ];
-const redStatuses = [
-  "Pas intéressé",
-  "Prospect perdu",
-  "Intraitable",
-  "Perdu",
-  "Numéro invalide",
-  "Doublon",
-  "Hors zone",
-  "No show",
-];
+const lostStatuses = [...inactiveLeadStatuses, "Perdu"];
 
 export default function KPIDashboard({ leads }: KPIDashboardProps) {
   const [period, setPeriod] = useState<KPIPeriod>("month");
@@ -86,7 +78,7 @@ export default function KPIDashboard({ leads }: KPIDashboardProps) {
     "Acompte validé",
   ]);
   const waitingDepositCount = countByStatus(periodLeads, ["Acompte en attente"]);
-  const lostCount = countByStatus(periodLeads, redStatuses);
+  const lostCount = countByStatus(periodLeads, lostStatuses);
   const remainingCount = periodLeads.filter((lead) =>
     ["Nouveau", "À relancer", "À rappeler", "Acompte envoyé", "Acompte en attente"].includes(
       lead.status
@@ -150,9 +142,9 @@ export default function KPIDashboard({ leads }: KPIDashboardProps) {
       color: "text-yellow-600",
     },
     {
-      title: "Leads rouges",
+      title: "Perdus",
       value: lostCount,
-      subtitle: "Perdus",
+      subtitle: "Classés en bas",
       icon: XCircle,
       color: "text-red-600",
     },
@@ -260,7 +252,7 @@ export default function KPIDashboard({ leads }: KPIDashboardProps) {
               <Rate label="Taux de présentiel" value={attendanceRate} color="text-cyan-600" />
               <Rate label="Taux de prise RDV" value={rdvRate} color="text-blue-600" />
               <Rate label="% prise d'acompte" value={depositRate} color="text-green-600" />
-              <Rate label="% leads rouges" value={redRate} color="text-red-600" />
+              <Rate label="% classés en bas" value={redRate} color="text-red-600" />
               <Rate label="% reste à traiter" value={remainingRate} color="text-violet-600" />
             </div>
           </CardContent>

@@ -1,6 +1,20 @@
+import type { ReactNode } from "react";
 import { Card, CardContent } from "@/components/ui/card";
+import { inactiveLeadStatuses } from "@/lib/lead-statuses";
+import {
+  addDaysIso,
+  isLeadCreatedBetween,
+  isLeadCreatedOn,
+  isLeadCreatedSince,
+  isLeadRdvTakenBetween,
+  isLeadRdvTakenOn,
+  monthStartIso,
+  todayIso,
+  type CrmQuickFilter,
+} from "@/lib/crm-stats";
 import { Lead, LeadStatus } from "@/types/lead";
 import {
+  CalendarCheck2,
   CalendarDays,
   CircleCheck,
   CircleX,
@@ -13,11 +27,9 @@ type DashboardCardsProps = {
   leads: Lead[];
   activeStatus: "Tous" | LeadStatus;
   onStatusFilter: (status: "Tous" | LeadStatus) => void;
-  activeQuickFilter: "Tous" | "Hier" | "7 derniers jours";
-  onQuickFilter: (filter: "Tous" | "Hier" | "7 derniers jours") => void;
+  activeQuickFilter: CrmQuickFilter;
+  onQuickFilter: (filter: CrmQuickFilter) => void;
 };
-
-type QuickFilter = "Hier" | "7 derniers jours";
 
 type StatCard = {
   title: string;
@@ -25,8 +37,8 @@ type StatCard = {
   subtitle: string;
   icon: typeof Users;
   color: string;
-  status: LeadStatus | null;
-  quickFilter?: QuickFilter;
+  status?: LeadStatus | null;
+  quickFilter?: Exclude<CrmQuickFilter, "Tous">;
 };
 
 export default function DashboardCards({
@@ -39,21 +51,75 @@ export default function DashboardCards({
   const today = todayIso();
   const yesterday = addDaysIso(today, -1);
   const sevenDaysAgo = addDaysIso(today, -6);
-  const todayCreatedLeads = leads.filter(isLeadCreatedToday);
-  const yesterdayLeads = leads.filter((lead) => isLeadCreatedOn(lead, yesterday));
-  const last7DaysLeads = leads.filter((lead) =>
-    isLeadCreatedBetween(lead, sevenDaysAgo, today)
-  );
-  const stats: StatCard[] = [
+  const monthStart = monthStartIso(today);
+
+  const acquisitionStats: StatCard[] = [
     {
       title: "Nouveaux",
-      value: todayCreatedLeads.filter((lead) => lead.status === "Nouveau")
-        .length,
-      subtitle: "Reçus aujourd'hui",
+      value: leads.filter((lead) => isLeadCreatedOn(lead, today)).length,
+      subtitle: "Leads acquis aujourd'hui",
       icon: Users,
       color: "text-blue-600",
-      status: "Nouveau" as const,
+      quickFilter: "Aujourd'hui",
     },
+    {
+      title: "Hier",
+      value: leads.filter((lead) => isLeadCreatedOn(lead, yesterday)).length,
+      subtitle: "Prospects acquis la veille",
+      icon: History,
+      color: "text-slate-600",
+      quickFilter: "Hier",
+    },
+    {
+      title: "7 derniers jours",
+      value: leads.filter((lead) =>
+        isLeadCreatedBetween(lead, sevenDaysAgo, today),
+      ).length,
+      subtitle: "Prospects acquis",
+      icon: CalendarDays,
+      color: "text-cyan-600",
+      quickFilter: "7 derniers jours",
+    },
+    {
+      title: "Ce mois",
+      value: leads.filter((lead) => isLeadCreatedSince(lead, monthStart)).length,
+      subtitle: "Depuis le 1er du mois",
+      icon: CalendarDays,
+      color: "text-indigo-600",
+      quickFilter: "Ce mois",
+    },
+  ];
+
+  const rdvStats: StatCard[] = [
+    {
+      title: "RDV pris aujourd'hui",
+      value: leads.filter((lead) => isLeadRdvTakenOn(lead, today)).length,
+      subtitle: "Même convertis, no-show ou annulés",
+      icon: CalendarCheck2,
+      color: "text-violet-600",
+      quickFilter: "RDV aujourd'hui",
+    },
+    {
+      title: "RDV pris hier",
+      value: leads.filter((lead) => isLeadRdvTakenOn(lead, yesterday)).length,
+      subtitle: "Même convertis, no-show ou annulés",
+      icon: CalendarCheck2,
+      color: "text-fuchsia-600",
+      quickFilter: "RDV hier",
+    },
+    {
+      title: "RDV pris 7 jours",
+      value: leads.filter((lead) =>
+        isLeadRdvTakenBetween(lead, sevenDaysAgo, today),
+      ).length,
+      subtitle: "Même convertis, no-show ou annulés",
+      icon: CalendarCheck2,
+      color: "text-purple-600",
+      quickFilter: "RDV 7 jours",
+    },
+  ];
+
+  const followUpStats: StatCard[] = [
     {
       title: "À recontacter",
       value: leads.filter((lead) =>
@@ -63,172 +129,140 @@ export default function DashboardCards({
           "SMS envoyé",
           "Mail envoyé",
           "À relancer",
-        ].includes(lead.status)
+        ].includes(lead.status),
       ).length,
       subtitle: "Nouveau, absents, SMS, mail",
       icon: Phone,
       color: "text-orange-500",
-      status: "À relancer" as const,
-    },
-    {
-      title: "RDV programmés",
-      value: leads.filter((lead) =>
-        isLeadDueToday(lead) &&
-        ["RDV pris", "RDV confirmé", "Acompte reçu"].includes(
-          lead.status
-        )
-      ).length,
-      subtitle: "Rendez-vous du jour",
-      icon: CalendarDays,
-      color: "text-violet-600",
-      status: "RDV pris" as const,
+      status: "À relancer",
     },
     {
       title: "Clients",
-      value: todayCreatedLeads.filter((lead) =>
-        ["Client converti", "Vendu"].includes(lead.status)
+      value: leads.filter((lead) =>
+        ["Client converti", "Vendu"].includes(lead.status),
       ).length,
-      subtitle: "Convertis aujourd'hui",
+      subtitle: "Convertis",
       icon: CircleCheck,
       color: "text-green-600",
-      status: "Client converti" as const,
+      status: "Client converti",
     },
     {
       title: "Perdus",
-      value: todayCreatedLeads.filter((lead) =>
-        [
-          "Pas intéressé",
-          "Prospect perdu",
-          "Intraitable",
-          "Numéro invalide",
-          "Doublon",
-          "Hors zone",
-          "No show",
-        ].includes(lead.status)
+      value: leads.filter((lead) =>
+        inactiveLeadStatuses.includes(lead.status),
       ).length,
       subtitle: "Classés en bas",
       icon: CircleX,
       color: "text-red-600",
-      status: "Prospect perdu" as const,
-    },
-    {
-      title: "Hier",
-      value: yesterdayLeads.length,
-      subtitle: "Leads reçus la veille",
-      icon: History,
-      color: "text-slate-600",
-      status: null,
-      quickFilter: "Hier" as const,
-    },
-    {
-      title: "7 derniers jours",
-      value: last7DaysLeads.length,
-      subtitle: "Leads reçus",
-      icon: CalendarDays,
-      color: "text-cyan-600",
-      status: null,
-      quickFilter: "7 derniers jours" as const,
+      status: "Prospect perdu",
     },
   ];
 
   return (
-    <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-7">
-      {stats.map((stat) => {
-        const Icon = stat.icon;
-        const active =
-          (stat.status !== null && activeStatus === stat.status) ||
-          (stat.quickFilter && activeQuickFilter === stat.quickFilter);
-
-        const content = (
-            <Card
-              className={`h-full border-0 shadow-sm transition-all duration-200 hover:-translate-y-1 hover:shadow-lg ${
-                active ? "ring-2 ring-violet-400" : ""
-              }`}
-            >
-              <CardContent className="p-6">
-
-              <div className="flex items-center justify-between">
-
-                <div>
-                  <p className="text-sm text-muted-foreground">
-                    {stat.title}
-                  </p>
-
-                  <h2 className={`mt-3 text-4xl font-bold ${stat.color}`}>
-                    {stat.value}
-                  </h2>
-
-                  <p className="mt-3 text-sm text-muted-foreground">
-                    {stat.subtitle}
-                  </p>
-                </div>
-
-                <div className="rounded-xl bg-slate-100 p-3">
-                  <Icon className={`h-6 w-6 ${stat.color}`} />
-                </div>
-
-              </div>
-
-              </CardContent>
-            </Card>
-        );
-
-        return (
-          <button
-            key={stat.title}
-            type="button"
-            onClick={() => {
-              if (stat.quickFilter) {
-                onQuickFilter(active ? "Tous" : stat.quickFilter);
-                return;
-              }
-
-              if (stat.status) {
-                onStatusFilter(active ? "Tous" : stat.status);
-              }
-            }}
-            className="cursor-pointer text-left"
-            aria-label={`Filtrer les prospects : ${stat.title}`}
-          >
-            {content}
-          </button>
-        );
-      })}
+    <div className="space-y-5">
+      <StatGroup title="Prospects acquis" cards={acquisitionStats} columns="xl:grid-cols-4">
+        {(stat) =>
+          renderStatCard(stat, activeStatus, activeQuickFilter, onStatusFilter, onQuickFilter)
+        }
+      </StatGroup>
+      <StatGroup
+        title="RDV pris"
+        hint="Comptés à la date où le rendez-vous a été pris, même si le statut a ensuite changé."
+        cards={rdvStats}
+        columns="md:grid-cols-3"
+      >
+        {(stat) =>
+          renderStatCard(stat, activeStatus, activeQuickFilter, onStatusFilter, onQuickFilter)
+        }
+      </StatGroup>
+      <StatGroup title="Suivi" cards={followUpStats} columns="md:grid-cols-3">
+        {(stat) =>
+          renderStatCard(stat, activeStatus, activeQuickFilter, onStatusFilter, onQuickFilter)
+        }
+      </StatGroup>
     </div>
   );
 }
 
-function isLeadCreatedToday(lead: Lead) {
-  return lead.createdAt.toLowerCase().includes("aujourd") || isLeadCreatedOn(lead, todayIso());
+function StatGroup({
+  title,
+  hint,
+  cards,
+  columns,
+  children,
+}: {
+  title: string;
+  hint?: string;
+  cards: StatCard[];
+  columns: string;
+  children: (stat: StatCard) => ReactNode;
+}) {
+  return (
+    <section>
+      <div className="mb-3">
+        <p className="text-xs font-bold uppercase tracking-[0.18em] text-slate-500">
+          {title}
+        </p>
+        {hint ? (
+          <p className="mt-1 text-xs font-medium text-slate-500">{hint}</p>
+        ) : null}
+      </div>
+      <div className={`grid gap-5 md:grid-cols-2 ${columns}`}>
+        {cards.map(children)}
+      </div>
+    </section>
+  );
 }
 
-function isLeadDueToday(lead: Lead) {
-  return lead.reminderDate === todayIso() || lead.createdAt.toLowerCase().includes("aujourd");
-}
+function renderStatCard(
+  stat: StatCard,
+  activeStatus: "Tous" | LeadStatus,
+  activeQuickFilter: CrmQuickFilter,
+  onStatusFilter: (status: "Tous" | LeadStatus) => void,
+  onQuickFilter: (filter: CrmQuickFilter) => void,
+) {
+  const Icon = stat.icon;
+  const active =
+    (stat.status != null && activeStatus === stat.status) ||
+    (stat.quickFilter != null && activeQuickFilter === stat.quickFilter);
 
-function isLeadCreatedOn(lead: Lead, date: string) {
-  if (date === addDaysIso(todayIso(), -1) && lead.createdAt.toLowerCase().includes("hier")) {
-    return true;
-  }
+  return (
+    <button
+      key={stat.title}
+      type="button"
+      onClick={() => {
+        if (stat.quickFilter) {
+          onQuickFilter(active ? "Tous" : stat.quickFilter);
+          return;
+        }
 
-  return lead.createdDate === date;
-}
-
-function isLeadCreatedBetween(lead: Lead, startDate: string, endDate: string) {
-  if (lead.createdAt.toLowerCase().includes("aujourd") || lead.createdAt.toLowerCase().includes("hier")) {
-    return true;
-  }
-
-  return lead.createdDate >= startDate && lead.createdDate <= endDate;
-}
-
-function todayIso() {
-  return new Date().toISOString().slice(0, 10);
-}
-
-function addDaysIso(date: string, days: number) {
-  const nextDate = new Date(`${date}T00:00:00`);
-  nextDate.setDate(nextDate.getDate() + days);
-
-  return nextDate.toISOString().slice(0, 10);
+        if (stat.status) {
+          onStatusFilter(active ? "Tous" : stat.status);
+        }
+      }}
+      className="cursor-pointer text-left"
+      aria-label={`Filtrer les prospects : ${stat.title}`}
+    >
+      <Card
+        className={`h-full border-0 shadow-sm transition-all duration-200 hover:-translate-y-1 hover:shadow-lg ${
+          active ? "ring-2 ring-violet-400" : ""
+        }`}
+      >
+        <CardContent className="p-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm text-muted-foreground">{stat.title}</p>
+              <h2 className={`mt-3 text-4xl font-bold ${stat.color}`}>
+                {stat.value}
+              </h2>
+              <p className="mt-3 text-sm text-muted-foreground">{stat.subtitle}</p>
+            </div>
+            <div className="rounded-xl bg-slate-100 p-3">
+              <Icon className={`h-6 w-6 ${stat.color}`} />
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    </button>
+  );
 }

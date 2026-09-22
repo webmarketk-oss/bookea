@@ -1,4 +1,5 @@
 import { getActiveCenterContext } from "@/lib/center-access";
+import { toLocalIsoDate } from "@/lib/crm-stats";
 import { createClient } from "@/lib/supabase";
 import { normalizeLeadStatus } from "@/lib/lead-statuses";
 import type { Lead, LeadActivity, LeadStatus } from "@/types/lead";
@@ -34,6 +35,11 @@ type LeadRow = {
     last_name: string | null;
     phone: string | null;
     email: string | null;
+    birthdate: string | null;
+    gender: string | null;
+    address_line1: string | null;
+    postal_code: string | null;
+    city: string | null;
   }>;
   lead_sources: Relation<{ name: string | null; slug: string | null }>;
   campaigns: Relation<{ name: string | null }>;
@@ -47,7 +53,6 @@ type LeadRow = {
         to_value: string | null;
         note: string | null;
         created_at: string;
-        profiles: Relation<{ full_name: string | null }>;
       }>
     | null;
 };
@@ -180,6 +185,11 @@ export type NewCrmLeadInput = {
   lastName: string;
   phone: string;
   email: string;
+  birthDate?: string;
+  gender?: string;
+  address?: string;
+  postalCode?: string;
+  city?: string;
   treatment: string;
   source: LeadSource;
   campaign: string;
@@ -214,7 +224,7 @@ export async function loadCrmLeads() {
         created_at,
         updated_at,
         last_activity_at,
-        clients(first_name,last_name,phone,email),
+        clients(first_name,last_name,phone,email,birthdate,gender,address_line1,postal_code,city),
         lead_sources(name,slug),
         campaigns(name),
         services(name),
@@ -225,8 +235,7 @@ export async function loadCrmLeads() {
           from_value,
           to_value,
           note,
-          created_at,
-          profiles(full_name)
+          created_at
         )
       `,
     )
@@ -261,6 +270,7 @@ export async function createCrmLead(input: NewCrmLeadInput) {
       last_name: input.lastName.trim(),
       phone: input.phone.trim() || null,
       email: input.email.trim() || null,
+      birthdate: toIsoDate(input.birthDate || ""),
       source_id: sourceId,
       campaign_id: campaignId,
       status: "prospect",
@@ -340,11 +350,23 @@ export async function updateCrmLeadStatus(
 export async function addCrmLeadActivity(leadId: string, text: string) {
   const supabase = createClient();
   const centerId = await getLeadCenterId(supabase, leadId);
+  const { data: leadRow, error: leadError } = await supabase
+    .from("leads")
+    .select("status")
+    .eq("id", leadId)
+    .single();
+
+  if (leadError) {
+    throw new Error(leadError.message);
+  }
+
+  const now = new Date().toISOString();
+  const status = normalizeLeadStatus(leadRow?.status);
 
   await updateLeadFields(supabase, leadId, {
     latest_comment: text,
-    updated_at: new Date().toISOString(),
-    last_activity_at: new Date().toISOString(),
+    updated_at: now,
+    ...(status === "Nouveau" ? {} : { last_activity_at: now }),
   });
 
   await insertLeadEvent(supabase, centerId, leadId, {
@@ -514,7 +536,138 @@ export async function updateCrmLeadNextAction(leadId: string, nextAction: string
   });
 }
 
-export async function loadCrmClients() {
+export async function updateCrmLeadDetails(lead: Lead, input: NewCrmLeadInput) {
+  if (!isPersistedLeadId(lead.id)) {
+    return;
+  }
+
+  const supabase = createClient();
+  const centerId = await getLeadCenterId(supabase, lead.id);
+  const { data: currentLead, error: leadError } = await supabase
+    .from("leads")
+    .select("client_id")
+    .eq("id", lead.id)
+    .single();
+
+  if (leadError) {
+    throw new Error(leadError.message);
+  }
+
+  const [sourceId, campaignId, serviceId] = await Promise.all([
+    ensureLeadSource(supabase, centerId, input.source),
+    ensureCampaign(supabase, centerId, input.campaign),
+    ensureService(supabase, centerId, input.treatment),
+  ]);
+
+  const clientId = (currentLead.client_id as string | null) ?? null;
+
+  if (clientId) {
+    const { error: clientError } = await supabase
+      .from("clients")
+      .update({
+        first_name: input.firstName.trim() || "Prospect",
+        last_name: input.lastName.trim(),
+        phone: input.phone.trim() || null,
+        email: input.email.trim() || null,
+        birthdate: toIsoDate(input.birthDate || ""),
+        gender:
+          input.gender && input.gender !== "À compléter"
+            ? input.gender
+            : null,
+        address_line1: input.address?.trim() || null,
+        postal_code: input.postalCode?.trim() || null,
+        city: input.city?.trim() || null,
+        source_id: sourceId,
+        campaign_id: campaignId,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", clientId);
+
+    if (clientError) {
+      throw new Error(clientError.message);
+    }
+  }
+
+  const now = new Date().toISOString();
+  const nextStatus = normalizeLeadStatus(input.status);
+  const assignedToProfileId = await findAssignedProfileId(
+    supabase,
+    centerId,
+    input.commercial,
+  );
+
+  await updateLeadFields(supabase, lead.id, {
+    source_id: sourceId,
+    campaign_id: campaignId,
+    service_id: serviceId,
+    status: nextStatus,
+    recall_date: input.reminderDate || null,
+    next_action: input.nextAction.trim() || "À contacter",
+    amount_cure_ttc: input.dealAmount || 0,
+    ...(assignedToProfileId !== undefined
+      ? { assigned_to_profile_id: assignedToProfileId }
+      : {}),
+    updated_at: now,
+    last_activity_at: now,
+  });
+
+  if (nextStatus !== lead.status) {
+    await insertLeadEvent(supabase, centerId, lead.id, {
+      event_type: "status",
+      from_value: lead.status,
+      to_value: nextStatus,
+      note: `Statut changé : ${lead.status} → ${nextStatus}.`,
+    });
+
+    if (clientLeadStatuses.includes(nextStatus)) {
+      await ensureClientForConvertedLead(supabase, centerId, lead.id, {
+        ...lead,
+        ...input,
+        status: nextStatus,
+      });
+    }
+  }
+}
+
+function isPersistedLeadId(id: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+    id,
+  );
+}
+
+async function findAssignedProfileId(
+  supabase: SupabaseClient,
+  centerId: string,
+  name?: string,
+) {
+  const commercial = (name || "").trim();
+
+  if (!commercial || commercial === "Équipe") {
+    return null;
+  }
+
+  const { data, error } = await supabase
+    .from("center_members")
+    .select("profile_id, profiles(full_name)")
+    .eq("center_id", centerId)
+    .eq("is_active", true);
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  const match = (data ?? []).find((row) => {
+    const profile = Array.isArray(row.profiles) ? row.profiles[0] : row.profiles;
+    return (
+      String(profile?.full_name || "").trim().toLowerCase() ===
+      commercial.toLowerCase()
+    );
+  });
+
+  return (match?.profile_id as string | undefined) ?? undefined;
+}
+
+export async function loadCrmClients(options?: { includeClientId?: string | null }) {
   const supabase = createClient();
   const context = await getCrmCenterContext(supabase);
 
@@ -566,7 +719,11 @@ export async function loadCrmClients() {
   return {
     center: context,
     clients: ((data ?? []) as unknown as ClientRow[])
-      .filter(isVisibleCrmClientRow)
+      .filter(
+        (row) =>
+          isVisibleCrmClientRow(row) ||
+          Boolean(options?.includeClientId && row.id === options.includeClientId),
+      )
       .map(toCrmClient),
   };
 }
@@ -578,6 +735,7 @@ export type CrmAgendaContact = {
   email: string;
   treatment: string;
   type: "Prospect" | "Client";
+  birthDate: string;
 };
 
 export async function loadCrmAgendaContacts(): Promise<CrmAgendaContact[]> {
@@ -587,7 +745,7 @@ export async function loadCrmAgendaContacts(): Promise<CrmAgendaContact[]> {
     loadCrmLeads(),
     supabase
       .from("clients")
-      .select("id,first_name,last_name,phone,email,status")
+      .select("id,first_name,last_name,phone,email,status,birthdate")
       .eq("center_id", context.centerId)
       .is("merged_into_client_id", null),
   ]);
@@ -613,6 +771,7 @@ export async function loadCrmAgendaContacts(): Promise<CrmAgendaContact[]> {
       type: ["Vendu", "Client converti", "Client"].includes(lead.status)
         ? "Client"
         : "Prospect",
+      birthDate: lead.birthDate || "",
     });
 
     if (phoneKey) seenPhones.add(phoneKey);
@@ -634,6 +793,7 @@ export async function loadCrmAgendaContacts(): Promise<CrmAgendaContact[]> {
       email: client.email || "",
       treatment: "",
       type: client.status === "prospect" ? "Prospect" : "Client",
+      birthDate: client.birthdate ? String(client.birthdate).slice(0, 10) : "",
     });
   }
 
@@ -851,6 +1011,7 @@ async function ensureClientForConvertedLead(
       last_name: lead.lastName.trim() || "Bookea",
       email: lead.email.trim() || null,
       phone: lead.phone.trim() || null,
+      birthdate: toIsoDate(lead.birthDate || ""),
       source_id: currentLead.source_id,
       campaign_id: currentLead.campaign_id,
       status: "in_care",
@@ -940,6 +1101,9 @@ async function updateConvertedClient(
       last_name: lead.lastName.trim() || "Bookea",
       email: lead.email.trim() || null,
       phone: lead.phone.trim() || null,
+      ...(lead.birthDate
+        ? { birthdate: toIsoDate(lead.birthDate) }
+        : {}),
       source_id: links.sourceId,
       campaign_id: links.campaignId,
       status: "in_care",
@@ -1108,20 +1272,44 @@ function toLead(row: LeadRow): Lead {
   const service = relationObject(row.services);
   const assignee = relationObject(row.profiles);
   const source = normalizeSource(leadSource?.name);
-  const createdDate = row.created_at.slice(0, 10);
   const events = row.lead_events ?? [];
   const activityLog: LeadActivity[] = events
     .slice()
     .sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at))
-    .map((event) => ({
-      id: event.id,
-      author:
-        relationObject(event.profiles)?.full_name ??
-        authorFromEvent(event.event_type),
-      date: formatLeadDateTime(event.created_at),
-      text: event.note ?? event.to_value ?? "Activité CRM",
-      type: normalizeEventType(event.event_type),
-    }));
+    .map((event) => {
+      const text = (event.note || event.to_value || "Activité CRM").trim();
+      const type = normalizeEventType(event.event_type);
+      const isComment =
+        type === "comment" ||
+        (type === "system" && isUserFacingComment(event.note) && !event.from_value);
+
+      return {
+        id: event.id,
+        author: authorFromEvent(event.event_type),
+        date: formatLeadDateTime(event.created_at),
+        text,
+        type: isComment ? ("comment" as const) : type,
+        occurredAt: event.created_at,
+      };
+    });
+  const storedComment = (row.latest_comment || "").trim();
+  const latestComment = isUserFacingComment(storedComment) ? storedComment : "";
+
+  if (
+    latestComment &&
+    !activityLog.some(
+      (activity) =>
+        activity.type === "comment" && activity.text.trim() === latestComment
+    )
+  ) {
+    activityLog.unshift({
+      id: `${row.id}-latest-comment`,
+      author: "Équipe",
+      date: formatLeadDateTime(row.updated_at || row.created_at),
+      text: latestComment,
+      type: "comment",
+    });
+  }
 
   if (activityLog.length === 0) {
     activityLog.push({
@@ -1139,6 +1327,11 @@ function toLead(row: LeadRow): Lead {
     lastName: client?.last_name || "",
     phone: client?.phone || "",
     email: client?.email || "",
+    birthDate: client?.birthdate ? client.birthdate.slice(0, 10) : "",
+    gender: client?.gender || "",
+    address: client?.address_line1 || "",
+    postalCode: client?.postal_code || "",
+    city: client?.city || "",
     treatment: service?.name || "Soin à préciser",
     source,
     campaign: campaign?.name || "CRM manuel",
@@ -1146,10 +1339,12 @@ function toLead(row: LeadRow): Lead {
     dealAmount: Number(row.amount_cure_ttc ?? 0),
     commercial: assignee?.full_name || "Équipe",
     createdAt: formatLeadDateTime(row.created_at),
-    createdDate,
+    createdDate: toLocalIsoDate(row.created_at),
+    lastActivityAt: row.last_activity_at,
     updatedDate: row.updated_at?.slice(0, 10),
     nextAction: row.next_action || "À contacter",
     reminderDate: row.recall_date ?? undefined,
+    latestComment: latestComment || undefined,
     activityLog,
   };
 }
@@ -1475,9 +1670,26 @@ function normalizeSource(value?: string | null): LeadSource {
 }
 
 function normalizeEventType(value: string): LeadActivity["type"] {
-  if (value === "comment") return "comment";
-  if (value === "status") return "status";
+  const type = (value || "").trim().toLowerCase();
+
+  if (["comment", "commentaire", "note", "notes"].includes(type)) {
+    return "comment";
+  }
+
+  if (type === "status") return "status";
   return "system";
+}
+
+function isUserFacingComment(value?: string | null) {
+  const text = (value || "").trim();
+
+  if (!text) {
+    return false;
+  }
+
+  return !/^(Lead (créé|reçu)|Statut changé|Réservation publique)\b/i.test(
+    text,
+  );
 }
 
 function authorFromEvent(value: string) {

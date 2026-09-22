@@ -2,16 +2,17 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { appointments, cabins, practitioners } from "@/lib/agenda-data";
+import { cabins, practitioners } from "@/lib/agenda-data";
 import {
   createCrmAppointment,
   deleteCrmAppointment,
   loadCrmAppointments,
-  updateCrmAppointment,
+  persistCrmAppointment,
 } from "@/lib/agenda-supabase";
 import {
   loadCrmAgendaContacts,
@@ -23,7 +24,13 @@ import {
   rescheduleAppointmentSmsJobs,
   scheduleAppointmentReminderSms,
   sendSavedTemplateSms,
+  syncBirthdaySms,
 } from "@/lib/send-sms";
+import {
+  addCenterService,
+  getCenterServices,
+  type CenterServiceSetting,
+} from "@/lib/center-settings";
 import {
   formatSmsDate,
   loadCenterSmsSettings,
@@ -31,9 +38,11 @@ import {
   type CenterSmsSettings,
 } from "@/lib/sms-settings";
 import {
+  getPublicBookingIdFromAppointment,
   mergePublicBookingsIntoAppointments,
   PUBLIC_BOOKINGS_UPDATED_EVENT,
   readPublicBookings,
+  removePublicBooking,
 } from "@/lib/public-bookings";
 import {
   Appointment,
@@ -89,6 +98,29 @@ const cabinPalette = [
   },
 ];
 
+const appointmentDurationOptions = [
+  "15",
+  "30",
+  "45",
+  "60",
+  "75",
+  "90",
+  "105",
+  "120",
+  "720",
+];
+const appointmentDurationLabels: Record<string, string> = {
+  "15": "15 min",
+  "30": "30 min",
+  "45": "45 min",
+  "60": "1 h",
+  "75": "1 h 15",
+  "90": "1 h 30",
+  "105": "1 h 45",
+  "120": "2 h",
+  "720": "Toute la journée",
+};
+
 const emptyAppointment = {
   personName: "",
   phone: "",
@@ -103,6 +135,7 @@ const emptyAppointment = {
   source: "Client" as AppointmentSource,
   kind: "Rendez-vous" as AppointmentKind,
   notes: "",
+  birthDate: "",
 };
 
 const statusClasses: Record<AppointmentStatus, string> = {
@@ -259,7 +292,7 @@ const defaultTeamSchedules: TeamSchedule[] = [
 export default function AgendaBoard() {
   const searchParams = useSearchParams();
   const rdvPrefill = getRdvPrefill(searchParams);
-  const [appointmentList, setAppointmentList] = useState(appointments);
+  const [appointmentList, setAppointmentList] = useState<Appointment[]>([]);
   const [cabinList, setCabinList] = useState(cabins);
   const [isLoadingAgenda, setIsLoadingAgenda] = useState(true);
   const [agendaError, setAgendaError] = useState("");
@@ -282,6 +315,7 @@ export default function AgendaBoard() {
     null
   );
   const [isHoursModalOpen, setIsHoursModalOpen] = useState(false);
+  const [isToConfirmOpen, setIsToConfirmOpen] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(Boolean(rdvPrefill));
   const [agendaContacts, setAgendaContacts] = useState<CrmAgendaContact[]>([]);
   const [selectedAppointmentId, setSelectedAppointmentId] = useState<
@@ -295,8 +329,9 @@ export default function AgendaBoard() {
     ...emptyAppointment,
     ...rdvPrefill,
   }));
-  const [sendSmsNow, setSendSmsNow] = useState(false);
+  const [sendSmsNow, setSendSmsNow] = useState(true);
   const [sendSms48h, setSendSms48h] = useState(false);
+  const [sendBirthdaySms, setSendBirthdaySms] = useState(true);
   const [smsSettings, setSmsSettings] = useState<CenterSmsSettings | null>(null);
   const [contactSearch, setContactSearch] = useState(
     rdvPrefill?.personName ?? ""
@@ -305,6 +340,8 @@ export default function AgendaBoard() {
     null
   );
   const [portalTarget, setPortalTarget] = useState<HTMLElement | null>(null);
+  const [isSavingAppointment, setIsSavingAppointment] = useState(false);
+  const savingAppointmentRef = useRef(false);
 
   async function refreshAgenda() {
     setAgendaError("");
@@ -313,12 +350,10 @@ export default function AgendaBoard() {
       const loadedAppointments = await loadCrmAppointments();
 
       setAppointmentList(
-        loadedAppointments.length > 0
-          ? mergePublicBookingsIntoAppointments(
-              loadedAppointments,
-              readPublicBookings(),
-            )
-          : appointments,
+        mergePublicBookingsIntoAppointments(
+          loadedAppointments,
+          readPublicBookings(),
+        ),
       );
     } catch (error) {
       setAgendaError(
@@ -326,7 +361,9 @@ export default function AgendaBoard() {
           ? error.message
           : "Impossible de charger l'agenda.",
       );
-      setAppointmentList(appointments);
+      setAppointmentList(
+        mergePublicBookingsIntoAppointments([], readPublicBookings()),
+      );
     } finally {
       setIsLoadingAgenda(false);
     }
@@ -436,11 +473,6 @@ export default function AgendaBoard() {
     }
   }
 
-  function changeSelectedDateByDays(amount: number) {
-    setSelectedDate((currentDate) => addDaysIso(currentDate, amount));
-    setDailyInfoSavedDate(null);
-  }
-
   function updateCenterDayHours(
     weekday: number,
     updates: Partial<CenterDayHours>
@@ -452,12 +484,34 @@ export default function AgendaBoard() {
     );
   }
 
+  const appointmentsToConfirm = useMemo(() => {
+    const seen = new Set<string>();
+
+    return visibleAppointments.filter((appointment) => {
+      if (appointment.status !== "À confirmer") {
+        return false;
+      }
+
+      if (appointment.kind && appointment.kind !== "Rendez-vous") {
+        return false;
+      }
+
+      const key =
+        appointment.clientId ||
+        `${appointment.personName.trim().toLowerCase()}|${appointment.phone}`;
+
+      if (seen.has(key)) {
+        return false;
+      }
+
+      seen.add(key);
+      return true;
+    });
+  }, [visibleAppointments]);
+
   const stats = useMemo(() => {
     const confirmed = visibleAppointments.filter(
       (appointment) => appointment.status === "Confirmé"
-    ).length;
-    const toConfirm = visibleAppointments.filter(
-      (appointment) => appointment.status === "À confirmer"
     ).length;
     const occupancy = Math.round(
       (visibleAppointments.reduce(
@@ -487,7 +541,7 @@ export default function AgendaBoard() {
       },
       {
         label: "À confirmer",
-        value: toConfirm,
+        value: appointmentsToConfirm.length,
         icon: Clock3,
         color: "text-amber-600",
       },
@@ -499,6 +553,7 @@ export default function AgendaBoard() {
       },
     ];
   }, [
+    appointmentsToConfirm.length,
     centerEndTime,
     centerStartTime,
     visibleAppointments,
@@ -587,16 +642,20 @@ export default function AgendaBoard() {
     setAppointmentForm({ ...emptyAppointment, date: selectedDate });
     setContactSearch("");
     setPickedContact(null);
-    setSendSmsNow(false);
+    setSendSmsNow(true);
     setSendSms48h(false);
+    setSendBirthdaySms(true);
     setIsModalOpen(true);
     void loadCrmAgendaContacts()
       .then(setAgendaContacts)
       .catch(() => null);
   }
 
-  async function addAppointment(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  async function addAppointment() {
+    if (savingAppointmentRef.current) {
+      return;
+    }
+
     setAgendaError("");
 
     const appointment: Appointment = {
@@ -614,7 +673,28 @@ export default function AgendaBoard() {
       email: appointmentForm.email.trim() || undefined,
       kind: appointmentForm.kind,
       notes: appointmentForm.notes.trim() || undefined,
+      birthDate: appointmentForm.birthDate || undefined,
     };
+
+    if (!appointment.personName) {
+      setAgendaError("Indiquez un nom.");
+      return;
+    }
+
+    if (appointment.kind === "Rendez-vous" && !appointment.treatment) {
+      setAgendaError("Choisissez une prestation.");
+      return;
+    }
+
+    if (appointment.kind === "Rendez-vous" && appointment.treatment) {
+      addCenterService({
+        name: appointment.treatment,
+        duration: appointment.duration,
+      });
+    }
+
+    savingAppointmentRef.current = true;
+    setIsSavingAppointment(true);
 
     try {
       const savedAppointment = await createCrmAppointment(appointment);
@@ -659,6 +739,26 @@ export default function AgendaBoard() {
               : "Le SMS 48h n'a pas pu être programmé.",
           );
         }
+
+        if (appointment.birthDate) {
+          const birthday = await syncBirthdaySms({
+            clientId: savedAppointment.clientId,
+            birthDate: appointment.birthDate,
+            phone: savedAppointment.phone,
+            firstName: smsVars.firstName,
+            lastName: smsVars.lastName,
+            enabled: sendBirthdaySms,
+          });
+          notices.push(
+            sendBirthdaySms
+              ? birthday.ok
+                ? birthday.sent
+                  ? "SMS anniversaire envoyé."
+                  : "SMS anniversaire programmé pour le jour J."
+                : "Le SMS anniversaire n'a pas pu être programmé."
+              : "Date d'anniversaire enregistrée.",
+          );
+        }
       }
 
       setAppointmentList((currentAppointments) => [
@@ -667,8 +767,9 @@ export default function AgendaBoard() {
       ]);
       setSelectedDate(savedAppointment.date);
       setAgendaNotice(notices.join(" "));
-      setSendSmsNow(false);
+      setSendSmsNow(true);
       setSendSms48h(false);
+      setSendBirthdaySms(true);
       setIsModalOpen(false);
       void loadCrmAgendaContacts()
         .then(setAgendaContacts)
@@ -679,6 +780,9 @@ export default function AgendaBoard() {
           ? error.message
           : "Le RDV n'a pas pu être enregistré.",
       );
+    } finally {
+      savingAppointmentRef.current = false;
+      setIsSavingAppointment(false);
     }
   }
 
@@ -720,8 +824,12 @@ export default function AgendaBoard() {
           : cabinTreatment,
     };
 
-    updateCrmAppointment(updatedAppointment)
-      .then(() => rescheduleAppointmentSmsJobs(updatedAppointment.id))
+    persistCrmAppointment(updatedAppointment)
+      .then((savedAppointment) => {
+        replaceAppointment(appointmentId, savedAppointment);
+        unlinkPublicBooking(appointmentBeforeMove);
+        return rescheduleAppointmentSmsJobs(savedAppointment.id);
+      })
       .catch((error) => {
       setAgendaError(
         error instanceof Error
@@ -745,9 +853,12 @@ export default function AgendaBoard() {
     );
 
     if (!confirmed) {
-      return;
+      return false;
     }
 
+    const appointmentToDelete = appointmentList.find(
+      (appointment) => appointment.id === appointmentId
+    );
     const previousAppointments = appointmentList;
     setAppointmentList((currentAppointments) =>
       currentAppointments.filter((appointment) => appointment.id !== appointmentId)
@@ -758,9 +869,11 @@ export default function AgendaBoard() {
     }
 
     try {
+      unlinkPublicBooking(appointmentToDelete);
       await cancelAppointmentSmsJobs(appointmentId);
       await deleteCrmAppointment(appointmentId);
       setAgendaNotice("RDV supprimé. Les SMS 48h prévus pour ce rendez-vous sont annulés.");
+      return true;
     } catch (error) {
       setAppointmentList(previousAppointments);
       setAgendaError(
@@ -768,26 +881,30 @@ export default function AgendaBoard() {
           ? error.message
           : "Le RDV n'a pas pu être supprimé.",
       );
+      return false;
     }
   }
 
   async function updateAppointment(updatedAppointment: Appointment) {
     const previousAppointments = appointmentList;
+    const localId = updatedAppointment.id;
     setAppointmentList((currentAppointments) =>
       currentAppointments.map((appointment) =>
-        appointment.id === updatedAppointment.id ? updatedAppointment : appointment
+        appointment.id === localId ? updatedAppointment : appointment
       )
     );
     saveAppointmentStatusOverride(updatedAppointment);
     setSelectedDate(updatedAppointment.date);
 
     try {
-      await updateCrmAppointment(updatedAppointment);
-      if (updatedAppointment.status === "Annulation") {
-        await cancelAppointmentSmsJobs(updatedAppointment.id);
+      const savedAppointment = await persistCrmAppointment(updatedAppointment);
+      replaceAppointment(localId, savedAppointment);
+      unlinkPublicBooking(updatedAppointment);
+      if (savedAppointment.status === "Annulation") {
+        await cancelAppointmentSmsJobs(savedAppointment.id);
         setAgendaNotice("RDV mis à jour. Les SMS 48h prévus sont annulés.");
       } else {
-        await rescheduleAppointmentSmsJobs(updatedAppointment.id);
+        await rescheduleAppointmentSmsJobs(savedAppointment.id);
         setAgendaNotice("RDV mis à jour.");
       }
     } catch (error) {
@@ -800,23 +917,48 @@ export default function AgendaBoard() {
     }
   }
 
+  function replaceAppointment(localId: string, savedAppointment: Appointment) {
+    setAppointmentList((currentAppointments) =>
+      currentAppointments.map((appointment) =>
+        appointment.id === localId ? savedAppointment : appointment
+      )
+    );
+  }
+
+  function unlinkPublicBooking(appointment?: Appointment) {
+    if (!appointment) {
+      return;
+    }
+
+    const bookingId = getPublicBookingIdFromAppointment(appointment);
+    if (bookingId) {
+      removePublicBooking(bookingId);
+    }
+  }
+
   function updateAppointmentStatus(
     appointment: Appointment,
     status: AppointmentStatus
   ) {
     const updatedAppointment = { ...appointment, status };
     const previousAppointments = appointmentList;
+    const localId = appointment.id;
 
     setAppointmentList((currentAppointments) =>
       currentAppointments.map((currentAppointment) =>
-        currentAppointment.id === appointment.id
+        currentAppointment.id === localId
           ? updatedAppointment
           : currentAppointment
       )
     );
     saveAppointmentStatusOverride(updatedAppointment);
 
-    updateCrmAppointment(updatedAppointment).catch((error) => {
+    persistCrmAppointment(updatedAppointment)
+      .then((savedAppointment) => {
+        replaceAppointment(localId, savedAppointment);
+        unlinkPublicBooking(appointment);
+      })
+      .catch((error) => {
       setAppointmentList(previousAppointments);
       setAgendaError(
         error instanceof Error
@@ -843,6 +985,7 @@ export default function AgendaBoard() {
       treatment: contact.treatment,
       source: contact.type,
       email: contact.email,
+      birthDate: contact.birthDate || "",
       kind: "Rendez-vous",
     }));
   }
@@ -1165,21 +1308,74 @@ export default function AgendaBoard() {
         <div className="grid gap-4 xl:grid-cols-4">
           {stats.map((stat) => {
             const Icon = stat.icon;
+            const isToConfirm = stat.label === "À confirmer";
 
             return (
-              <Card key={stat.label} className="border-slate-200 py-0 shadow-sm">
-                <CardContent className="flex items-center justify-between p-5">
-                  <div>
-                    <p className="text-sm font-semibold text-slate-500">
-                      {stat.label}
-                    </p>
-                    <p className={`mt-2 text-3xl font-black ${stat.color}`}>
-                      {stat.value}
-                    </p>
-                  </div>
-                  <div className="rounded-2xl bg-slate-50 p-3">
-                    <Icon className={`h-6 w-6 ${stat.color}`} />
-                  </div>
+              <Card
+                key={stat.label}
+                className={`border-slate-200 py-0 shadow-sm ${
+                  isToConfirm ? "ring-0" : ""
+                } ${
+                  isToConfirm && isToConfirmOpen
+                    ? "ring-2 ring-amber-300"
+                    : ""
+                }`}
+              >
+                <CardContent className="p-5">
+                  {isToConfirm ? (
+                    <button
+                      type="button"
+                      onClick={() => setIsToConfirmOpen((open) => !open)}
+                      className="flex w-full items-center justify-between text-left"
+                      aria-expanded={isToConfirmOpen}
+                    >
+                      <div>
+                        <p className="text-sm font-semibold text-slate-500">
+                          {stat.label}
+                        </p>
+                        <p className={`mt-2 text-3xl font-black ${stat.color}`}>
+                          {stat.value}
+                        </p>
+                      </div>
+                      <div className="rounded-2xl bg-slate-50 p-3">
+                        <Icon className={`h-6 w-6 ${stat.color}`} />
+                      </div>
+                    </button>
+                  ) : (
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm font-semibold text-slate-500">
+                          {stat.label}
+                        </p>
+                        <p className={`mt-2 text-3xl font-black ${stat.color}`}>
+                          {stat.value}
+                        </p>
+                      </div>
+                      <div className="rounded-2xl bg-slate-50 p-3">
+                        <Icon className={`h-6 w-6 ${stat.color}`} />
+                      </div>
+                    </div>
+                  )}
+
+                  {isToConfirm && isToConfirmOpen ? (
+                    <div className="mt-4 flex flex-wrap gap-2">
+                      {appointmentsToConfirm.length === 0 ? (
+                        <p className="text-sm font-semibold text-slate-500">
+                          Personne à confirmer
+                        </p>
+                      ) : (
+                        appointmentsToConfirm.map((appointment) => (
+                          <Link
+                            key={appointment.id}
+                            href={clientFicheHref(appointment)}
+                            className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-black text-amber-900 transition-colors hover:border-amber-300 hover:bg-amber-100"
+                          >
+                            {appointment.personName}
+                          </Link>
+                        ))
+                      )}
+                    </div>
+                  ) : null}
                 </CardContent>
               </Card>
             );
@@ -1232,7 +1428,7 @@ export default function AgendaBoard() {
           </div>
         )}
 
-        <Card className="border-slate-200 py-0 shadow-sm">
+        <Card className="relative z-20 border-slate-200 py-0 shadow-sm">
           <CardContent className="flex flex-wrap items-center justify-between gap-3 p-4">
             <div className="flex flex-wrap items-center gap-3">
               <p className="mr-2 text-sm font-black uppercase text-slate-500">
@@ -1260,38 +1456,50 @@ export default function AgendaBoard() {
               )}
             </div>
 
-            <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white p-1 shadow-sm">
-              <button
-                type="button"
-                onClick={() => changeSelectedDateByDays(-1)}
-                className="flex h-9 w-9 items-center justify-center rounded-lg text-slate-500 transition-colors hover:bg-slate-50 hover:text-slate-950"
-                aria-label="Jour précédent"
-              >
-                <ChevronLeft className="h-5 w-5" />
-              </button>
-              <div className="min-w-48 px-2 text-center">
-                <p className="text-sm font-black text-slate-950">
-                  {formatAgendaDateLong(selectedDate)}
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => changeSelectedDateByDays(1)}
-                className="flex h-9 w-9 items-center justify-center rounded-lg text-slate-500 transition-colors hover:bg-slate-50 hover:text-slate-950"
-                aria-label="Jour suivant"
-              >
-                <ChevronRight className="h-5 w-5" />
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setSelectedDate(todayIso());
+            <div className="flex flex-wrap items-center gap-2">
+              {agendaView === "day" ? (
+                <div className="flex items-center gap-1 rounded-xl border border-slate-200 bg-white p-1 shadow-sm">
+                  <button
+                    type="button"
+                    onClick={() => slideCabinBoard(-1)}
+                    className="flex h-9 w-9 items-center justify-center rounded-lg text-slate-500 transition-colors hover:bg-slate-50 hover:text-slate-950"
+                    aria-label="Voir les cabines à gauche"
+                  >
+                    <ChevronLeft className="h-4 w-4" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => slideCabinBoard(1)}
+                    className="flex h-9 w-9 items-center justify-center rounded-lg text-slate-500 transition-colors hover:bg-slate-50 hover:text-slate-950"
+                    aria-label="Voir les cabines à droite"
+                  >
+                    <ChevronRight className="h-4 w-4" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={removeCabin}
+                    className="flex h-9 w-9 items-center justify-center rounded-lg text-slate-500 transition-colors hover:bg-red-50 hover:text-red-600"
+                    aria-label="Retirer une cabine"
+                  >
+                    <Minus className="h-4 w-4" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={addCabin}
+                    className="flex h-9 w-9 items-center justify-center rounded-lg bg-blue-600 text-white transition-colors hover:bg-blue-700"
+                    aria-label="Ajouter une cabine"
+                  >
+                    <Plus className="h-4 w-4" />
+                  </button>
+                </div>
+              ) : null}
+              <AgendaDateNav
+                selectedDate={selectedDate}
+                onSelectDate={(date) => {
+                  setSelectedDate(date);
                   setDailyInfoSavedDate(null);
                 }}
-                className="h-9 rounded-lg px-3 text-sm font-bold text-violet-700 transition-colors hover:bg-violet-50"
-              >
-                Aujourd&apos;hui
-              </button>
+              />
             </div>
           </CardContent>
         </Card>
@@ -1300,55 +1508,21 @@ export default function AgendaBoard() {
         <section className="min-w-0">
           <Card className="relative z-0 overflow-hidden border-slate-200 py-0 shadow-sm">
             <CardContent className="relative min-w-0 p-0">
-              <div className="absolute right-3 top-3 z-30 flex items-center gap-2 rounded-xl bg-white/95 p-1 shadow-sm ring-1 ring-slate-200">
-                <button
-                  type="button"
-                  onClick={() => slideCabinBoard(-1)}
-                  className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-500 transition-colors hover:bg-slate-50 hover:text-slate-950"
-                  aria-label="Voir les cabines à gauche"
-                >
-                  <ChevronLeft className="h-4 w-4" />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => slideCabinBoard(1)}
-                  className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-500 transition-colors hover:bg-slate-50 hover:text-slate-950"
-                  aria-label="Voir les cabines à droite"
-                >
-                  <ChevronRight className="h-4 w-4" />
-                </button>
-                <button
-                  type="button"
-                  onClick={removeCabin}
-                  className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-500 transition-colors hover:bg-red-50 hover:text-red-600"
-                  aria-label="Retirer une cabine"
-                >
-                  <Minus className="h-4 w-4" />
-                </button>
-                <button
-                  type="button"
-                  onClick={addCabin}
-                  className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-600 text-white transition-colors hover:bg-blue-700"
-                  aria-label="Ajouter une cabine"
-                >
-                  <Plus className="h-4 w-4" />
-                </button>
-              </div>
               <div
                 ref={boardScrollRef}
-                className="isolate overflow-x-auto overscroll-x-contain"
+                className="isolate max-h-[70vh] overflow-auto overscroll-contain"
               >
                 <div
                   className="min-w-full"
                   style={{ minWidth: cabinBoardMinWidth }}
                 >
               <div
-                className="grid border-b border-slate-100 bg-white text-sm font-bold text-slate-500"
+                className="sticky top-0 z-30 grid border-b border-slate-200 bg-white text-sm font-bold text-slate-500 shadow-[0_8px_16px_-10px_rgba(15,23,42,0.45)]"
                 style={{
                   gridTemplateColumns: cabinBoardColumns,
                 }}
               >
-                <div className="sticky left-0 z-20 border-r border-slate-100 bg-white p-4">
+                <div className="sticky left-0 z-40 border-r border-slate-100 bg-white p-4">
                   Heure
                 </div>
                 {cabinList.map((cabin) => (
@@ -1471,6 +1645,9 @@ export default function AgendaBoard() {
                                 });
                                 setContactSearch("");
                                 setPickedContact(null);
+                                setSendSmsNow(true);
+                                setSendSms48h(false);
+                                setSendBirthdaySms(true);
                                 setIsModalOpen(true);
                               }}
                               className="flex h-full min-h-12 w-full items-center justify-center rounded-lg border border-dashed border-slate-200 text-[11px] font-semibold text-slate-300 transition-colors [touch-action:pan-x_pan-y] hover:border-blue-200 hover:bg-blue-50 hover:text-blue-600"
@@ -1668,16 +1845,20 @@ export default function AgendaBoard() {
         {isModalOpen &&
         portalTarget &&
         createPortal(
-        <div className="fixed inset-0 z-[200]">
-          <div
-            className="absolute inset-0 z-0 bg-slate-950/40"
-            onMouseDown={() => setIsModalOpen(false)}
-          />
-          <div className="pointer-events-none relative z-10 flex h-full items-center justify-center overflow-y-auto p-6">
+        <div
+          className="fixed inset-0 z-[200] flex items-center justify-center overflow-y-auto bg-slate-950/40 p-6"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget && !isSavingAppointment) {
+              setIsModalOpen(false);
+            }
+          }}
+        >
           <form
-            onSubmit={addAppointment}
-            onMouseDown={(event) => event.stopPropagation()}
-            className="pointer-events-auto relative max-h-[92vh] w-full max-w-2xl overflow-y-auto rounded-2xl bg-white p-6 shadow-2xl"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void addAppointment();
+            }}
+            className="relative max-h-[92vh] w-full max-w-2xl overflow-y-auto rounded-2xl bg-white p-6 shadow-2xl"
           >
             <div className="mb-6 flex items-start justify-between gap-4">
               <div>
@@ -1796,6 +1977,19 @@ export default function AgendaBoard() {
                 />
               </Field>
 
+              <Field label="Date d'anniversaire">
+                <Input
+                  type="date"
+                  value={appointmentForm.birthDate}
+                  onChange={(event) =>
+                    setAppointmentForm((form) => ({
+                      ...form,
+                      birthDate: event.target.value,
+                    }))
+                  }
+                />
+              </Field>
+
               <Field label="Type">
                 <Select
                   value={appointmentForm.kind}
@@ -1821,17 +2015,37 @@ export default function AgendaBoard() {
                 />
               </Field>
 
-              <Field label="Soin ou motif">
-                <Input
-                  required
-                  value={appointmentForm.treatment}
-                  onChange={(event) =>
-                    setAppointmentForm((form) => ({
-                      ...form,
-                      treatment: event.target.value,
-                    }))
-                  }
-                />
+              <Field label="Prestation">
+                {appointmentForm.kind === "Rendez-vous" ? (
+                  <TreatmentPicker
+                    cabinList={cabinList}
+                    duration={appointmentForm.duration}
+                    value={appointmentForm.treatment}
+                    onChange={(next) =>
+                      setAppointmentForm((form) => ({
+                        ...form,
+                        treatment: next.treatment,
+                        duration: next.duration ?? form.duration,
+                        cabinId:
+                          next.cabinId &&
+                          cabinList.some((cabin) => cabin.id === next.cabinId)
+                            ? next.cabinId
+                            : form.cabinId,
+                      }))
+                    }
+                  />
+                ) : (
+                  <Input
+                    required
+                    value={appointmentForm.treatment}
+                    onChange={(event) =>
+                      setAppointmentForm((form) => ({
+                        ...form,
+                        treatment: event.target.value,
+                      }))
+                    }
+                  />
+                )}
               </Field>
 
               <Field label="Provenance">
@@ -1858,7 +2072,10 @@ export default function AgendaBoard() {
                     setAppointmentForm((form) => ({
                       ...form,
                       cabinId: value,
-                      treatment: getCabinTreatment(cabinList, value),
+                      treatment:
+                        form.kind !== "Rendez-vous" || form.treatment
+                          ? form.treatment
+                          : getCabinTreatment(cabinList, value),
                     }))
                   }
                 />
@@ -1910,28 +2127,8 @@ export default function AgendaBoard() {
               <Field label="Durée">
                 <Select
                   value={String(appointmentForm.duration)}
-                  options={[
-                    "15",
-                    "30",
-                    "45",
-                    "60",
-                    "75",
-                    "90",
-                    "105",
-                    "120",
-                    "720",
-                  ]}
-                  labels={{
-                    "15": "15 min",
-                    "30": "30 min",
-                    "45": "45 min",
-                    "60": "1 h",
-                    "75": "1 h 15",
-                    "90": "1 h 30",
-                    "105": "1 h 45",
-                    "120": "2 h",
-                    "720": "Toute la journée",
-                  }}
+                  options={durationSelectOptions(appointmentForm.duration)}
+                  labels={appointmentDurationLabels}
                   onChange={(value) =>
                     setAppointmentForm((form) => ({
                       ...form,
@@ -1990,20 +2187,45 @@ export default function AgendaBoard() {
                   </span>
                 </span>
               </label>
+              <label className="flex items-start gap-3 text-sm font-bold text-slate-800">
+                <input
+                  type="checkbox"
+                  checked={sendBirthdaySms}
+                  disabled={
+                    !appointmentForm.phone.trim() || !appointmentForm.birthDate
+                  }
+                  onChange={(event) => setSendBirthdaySms(event.target.checked)}
+                  className="mt-1 h-4 w-4"
+                />
+                <span>
+                  Envoyer le SMS anniversaire le jour J
+                  <span className="mt-1 block text-xs font-semibold text-slate-500">
+                    Utilise le modèle Anniversaire. Envoyé automatiquement le jour de son anniversaire.
+                  </span>
+                </span>
+              </label>
             </div>
 
             <div className="mt-6 flex justify-end gap-3">
               <Button
                 type="button"
                 variant="outline"
+                disabled={isSavingAppointment}
                 onClick={() => setIsModalOpen(false)}
               >
                 Annuler
               </Button>
-              <Button type="submit">Créer le RDV</Button>
+              <Button
+                type="button"
+                disabled={isSavingAppointment}
+                onClick={() => {
+                  void addAppointment();
+                }}
+              >
+                {isSavingAppointment ? "Création…" : "Créer le RDV"}
+              </Button>
             </div>
           </form>
-          </div>
         </div>,
         portalTarget,
       )}
@@ -2022,6 +2244,184 @@ export default function AgendaBoard() {
           portalTarget,
         )}
     </main>
+  );
+}
+
+function AgendaDateNav({
+  selectedDate,
+  onSelectDate,
+}: {
+  selectedDate: string;
+  onSelectDate: (date: string) => void;
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [visibleMonth, setVisibleMonth] = useState(() =>
+    parseIsoDate(selectedDate)
+  );
+  const containerRef = useRef<HTMLDivElement>(null);
+  const today = todayIso();
+  const calendarDays = getCalendarGrid(
+    visibleMonth.getFullYear(),
+    visibleMonth.getMonth()
+  );
+
+  useEffect(() => {
+    if (!isOpen) {
+      return;
+    }
+
+    function handlePointerDown(event: MouseEvent) {
+      if (!containerRef.current?.contains(event.target as Node)) {
+        setIsOpen(false);
+      }
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setIsOpen(false);
+      }
+    }
+
+    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [isOpen]);
+
+  function shiftMonth(amount: number) {
+    setVisibleMonth(
+      (currentMonth) =>
+        new Date(currentMonth.getFullYear(), currentMonth.getMonth() + amount, 1)
+    );
+  }
+
+  function chooseDate(date: string) {
+    onSelectDate(date);
+    setIsOpen(false);
+  }
+
+  return (
+    <div
+      ref={containerRef}
+      className="relative flex items-center gap-2 rounded-xl border border-slate-200 bg-white p-1 shadow-sm"
+    >
+      <button
+        type="button"
+        onClick={() => onSelectDate(addDaysIso(selectedDate, -1))}
+        className="flex h-9 w-9 items-center justify-center rounded-lg text-slate-500 transition-colors hover:bg-slate-50 hover:text-slate-950"
+        aria-label="Jour précédent"
+      >
+        <ChevronLeft className="h-5 w-5" />
+      </button>
+      <button
+        type="button"
+        onClick={() => {
+          setVisibleMonth(parseIsoDate(selectedDate));
+          setIsOpen((open) => !open);
+        }}
+        className={`flex min-w-48 items-center justify-center gap-2 rounded-lg px-2 py-1 text-center transition-colors hover:bg-slate-50 ${
+          isOpen ? "bg-violet-50" : ""
+        }`}
+        aria-expanded={isOpen}
+        aria-haspopup="dialog"
+        aria-label={`Choisir une date, actuellement ${formatAgendaDateLong(selectedDate)}`}
+      >
+        <CalendarDays className="h-4 w-4 shrink-0 text-violet-600" />
+        <p className="text-sm font-black text-slate-950">
+          {formatAgendaDateLong(selectedDate)}
+        </p>
+      </button>
+      <button
+        type="button"
+        onClick={() => onSelectDate(addDaysIso(selectedDate, 1))}
+        className="flex h-9 w-9 items-center justify-center rounded-lg text-slate-500 transition-colors hover:bg-slate-50 hover:text-slate-950"
+        aria-label="Jour suivant"
+      >
+        <ChevronRight className="h-5 w-5" />
+      </button>
+      <button
+        type="button"
+        onClick={() => chooseDate(today)}
+        className="h-9 rounded-lg px-3 text-sm font-bold text-violet-700 transition-colors hover:bg-violet-50"
+      >
+        Aujourd&apos;hui
+      </button>
+
+      {isOpen ? (
+        <div
+          role="dialog"
+          aria-label="Choisir une date"
+          className="absolute right-0 top-[calc(100%+8px)] z-50 w-72 rounded-2xl border border-slate-200 bg-white p-3 shadow-xl"
+        >
+          <div className="mb-3 flex items-center justify-between">
+            <button
+              type="button"
+              onClick={() => shiftMonth(-1)}
+              className="grid h-8 w-8 place-items-center rounded-lg text-slate-500 transition-colors hover:bg-slate-50 hover:text-slate-950"
+              aria-label="Mois précédent"
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </button>
+            <p className="text-sm font-black capitalize text-slate-950">
+              {formatMonthTitle(visibleMonth)}
+            </p>
+            <button
+              type="button"
+              onClick={() => shiftMonth(1)}
+              className="grid h-8 w-8 place-items-center rounded-lg text-slate-500 transition-colors hover:bg-slate-50 hover:text-slate-950"
+              aria-label="Mois suivant"
+            >
+              <ChevronRight className="h-4 w-4" />
+            </button>
+          </div>
+
+          <div className="mb-1 grid grid-cols-7 gap-1">
+            {weekDays.map((day) => (
+              <p
+                key={day.label}
+                className="py-1 text-center text-[11px] font-black uppercase text-slate-400"
+              >
+                {day.label}
+              </p>
+            ))}
+          </div>
+
+          <div className="grid grid-cols-7 gap-1">
+            {calendarDays.map((day) => {
+              const isoDate = formatDateInput(day);
+              const isCurrentMonth = day.getMonth() === visibleMonth.getMonth();
+              const isSelected = isoDate === selectedDate;
+              const isToday = isoDate === today;
+
+              return (
+                <button
+                  key={isoDate}
+                  type="button"
+                  onClick={() => chooseDate(isoDate)}
+                  className={`h-9 rounded-lg text-sm font-bold transition-colors ${
+                    isSelected
+                      ? "bg-violet-600 text-white shadow-sm"
+                      : isToday
+                        ? "text-violet-700 ring-1 ring-violet-200 hover:bg-violet-50"
+                        : isCurrentMonth
+                          ? "text-slate-800 hover:bg-slate-100"
+                          : "text-slate-300 hover:bg-slate-50"
+                  }`}
+                  aria-current={isToday ? "date" : undefined}
+                  aria-label={formatAgendaDateLong(isoDate)}
+                  aria-pressed={isSelected}
+                >
+                  {day.getDate()}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      ) : null}
+    </div>
   );
 }
 
@@ -2811,11 +3211,34 @@ function getFirstWorkingPractitionerId(
 }
 
 function addDaysIso(date: string, amount: number) {
-  const [year, month, day] = date.split("-").map(Number);
-  const nextDate = new Date(year, month - 1, day);
+  const nextDate = parseIsoDate(date);
   nextDate.setDate(nextDate.getDate() + amount);
 
   return formatDateInput(nextDate);
+}
+
+function parseIsoDate(value: string) {
+  const [year, month, day] = value.split("-").map(Number);
+
+  return new Date(year, month - 1, day);
+}
+
+function getCalendarGrid(year: number, monthIndex: number) {
+  const start = getMonday(new Date(year, monthIndex, 1));
+
+  return Array.from({ length: 42 }, (_, index) => {
+    const date = new Date(start);
+    date.setDate(start.getDate() + index);
+
+    return date;
+  });
+}
+
+function formatMonthTitle(date: Date) {
+  return date.toLocaleDateString("fr-FR", {
+    month: "long",
+    year: "numeric",
+  });
 }
 
 function getWeekdayFromIso(date: string) {
@@ -2981,7 +3404,7 @@ function isSlotCoveredByEarlierAppointment(
 }
 
 function todayIso() {
-  return new Date().toISOString().slice(0, 10);
+  return formatDateInput(new Date());
 }
 
 function loadStoredDailyInfo() {
@@ -3155,7 +3578,7 @@ function AppointmentDetailsModal({
   appointment: Appointment;
   cabinList: Cabin[];
   onClose: () => void;
-  onDelete: () => void;
+  onDelete: () => boolean | void | Promise<boolean | void>;
   onSave: (appointment: Appointment) => void;
 }) {
   const [form, setForm] = useState({
@@ -3165,8 +3588,8 @@ function AppointmentDetailsModal({
     notes: appointment.notes ?? "",
   });
 
-  function saveAppointment(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  function saveAppointment(event?: React.FormEvent<HTMLFormElement>) {
+    event?.preventDefault();
 
     onSave({
       ...appointment,
@@ -3177,20 +3600,27 @@ function AppointmentDetailsModal({
       email: form.email.trim() || undefined,
       notes: form.notes.trim() || undefined,
     });
+    if ((form.kind ?? "Rendez-vous") === "Rendez-vous" && form.treatment.trim()) {
+      addCenterService({
+        name: form.treatment.trim(),
+        duration: form.duration,
+      });
+    }
     onClose();
   }
 
   return (
-    <div className="fixed inset-0 z-[200]">
-      <div
-        className="absolute inset-0 z-0 bg-slate-950/40"
-        onMouseDown={onClose}
-      />
-      <div className="pointer-events-none relative z-10 flex h-full items-center justify-center overflow-y-auto p-6">
+    <div
+      className="fixed inset-0 z-[200] flex items-center justify-center overflow-y-auto bg-slate-950/40 p-6"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) {
+          onClose();
+        }
+      }}
+    >
       <form
         onSubmit={saveAppointment}
-        onMouseDown={(event) => event.stopPropagation()}
-        className="pointer-events-auto relative max-h-[92vh] w-full max-w-3xl overflow-y-auto rounded-2xl bg-white p-6 shadow-2xl"
+        className="relative max-h-[92vh] w-full max-w-3xl overflow-y-auto rounded-2xl bg-white p-6 shadow-2xl"
       >
         <div className="mb-5 flex items-start justify-between gap-4">
           <div>
@@ -3267,17 +3697,37 @@ function AppointmentDetailsModal({
             />
           </Field>
 
-          <Field label="Soin ou motif">
-            <Input
-              required
-              value={form.treatment}
-              onChange={(event) =>
-                setForm((currentForm) => ({
-                  ...currentForm,
-                  treatment: event.target.value,
-                }))
-              }
-            />
+          <Field label="Prestation">
+            {form.kind === "Rendez-vous" ? (
+              <TreatmentPicker
+                cabinList={cabinList}
+                duration={form.duration}
+                value={form.treatment}
+                onChange={(next) =>
+                  setForm((currentForm) => ({
+                    ...currentForm,
+                    treatment: next.treatment,
+                    duration: next.duration ?? currentForm.duration,
+                    cabinId:
+                      next.cabinId &&
+                      cabinList.some((cabin) => cabin.id === next.cabinId)
+                        ? next.cabinId
+                        : currentForm.cabinId,
+                  }))
+                }
+              />
+            ) : (
+              <Input
+                required
+                value={form.treatment}
+                onChange={(event) =>
+                  setForm((currentForm) => ({
+                    ...currentForm,
+                    treatment: event.target.value,
+                  }))
+                }
+              />
+            )}
           </Field>
 
           <Field label="Statut">
@@ -3320,18 +3770,8 @@ function AppointmentDetailsModal({
           <Field label="Durée">
             <Select
               value={String(form.duration)}
-              options={["15", "30", "45", "60", "75", "90", "105", "120", "720"]}
-              labels={{
-                "15": "15 min",
-                "30": "30 min",
-                "45": "45 min",
-                "60": "1 h",
-                "75": "1 h 15",
-                "90": "1 h 30",
-                "105": "1 h 45",
-                "120": "2 h",
-                "720": "Toute la journée",
-              }}
+              options={durationSelectOptions(form.duration)}
+              labels={appointmentDurationLabels}
               onChange={(value) =>
                 setForm((currentForm) => ({
                   ...currentForm,
@@ -3355,7 +3795,8 @@ function AppointmentDetailsModal({
                   treatment:
                     currentForm.kind && currentForm.kind !== "Rendez-vous"
                       ? currentForm.treatment
-                      : getCabinTreatment(cabinList, value),
+                      : currentForm.treatment ||
+                        getCabinTreatment(cabinList, value),
                 }))
               }
             />
@@ -3411,24 +3852,32 @@ function AppointmentDetailsModal({
         </div>
 
         <div className="mt-6 flex justify-end gap-3">
-          <Button variant="outline" onClick={onClose}>
+          <Button type="button" variant="outline" onClick={onClose}>
             Fermer
           </Button>
           <Button
             variant="destructive"
             type="button"
-            onClick={() => {
-              onDelete();
-              onClose();
+            onClick={async () => {
+              const deleted = await onDelete();
+              if (deleted !== false) {
+                onClose();
+              }
             }}
           >
             <Trash2 className="mr-2 h-4 w-4" />
             Supprimer
           </Button>
-          <Button type="submit">Enregistrer</Button>
+          <Button
+            type="button"
+            onClick={() => {
+              saveAppointment();
+            }}
+          >
+            Enregistrer
+          </Button>
         </div>
       </form>
-      </div>
     </div>
   );
 }
@@ -3456,19 +3905,228 @@ function Field({
   );
 }
 
+const NEW_TREATMENT_VALUE = "__new_treatment__";
+const CUSTOM_TREATMENT_VALUE = "__custom_treatment__";
+
+function durationSelectOptions(current: number) {
+  const value = String(current);
+
+  return appointmentDurationOptions.includes(value)
+    ? appointmentDurationOptions
+    : [...appointmentDurationOptions, value];
+}
+
+function TreatmentPicker({
+  cabinList,
+  duration,
+  onChange,
+  value,
+}: {
+  cabinList: Cabin[];
+  duration: number;
+  onChange: (next: {
+    cabinId?: string;
+    duration?: number;
+    treatment: string;
+  }) => void;
+  value: string;
+}) {
+  const [services, setServices] = useState(getCenterServices);
+  const [mode, setMode] = useState<"list" | "new" | "custom">(() =>
+    getTreatmentPickerMode(value, getCenterServices())
+  );
+  const [newName, setNewName] = useState(
+    getTreatmentPickerMode(value, getCenterServices()) === "new" ? value : ""
+  );
+  const [newDuration, setNewDuration] = useState(String(duration || 60));
+
+  useEffect(() => {
+    function refreshServices() {
+      setServices(getCenterServices());
+    }
+
+    refreshServices();
+    window.addEventListener("bookea-center-settings-updated", refreshServices);
+
+    return () => {
+      window.removeEventListener(
+        "bookea-center-settings-updated",
+        refreshServices
+      );
+    };
+  }, []);
+
+  const matchedService = services.find((service) => service.name === value);
+  const selectValue =
+    mode === "new"
+      ? NEW_TREATMENT_VALUE
+      : mode === "custom"
+        ? CUSTOM_TREATMENT_VALUE
+        : matchedService?.name ?? "";
+
+  function selectTreatment(nextValue: string) {
+    if (nextValue === NEW_TREATMENT_VALUE) {
+      setMode("new");
+      setNewName(value && !matchedService ? value : "");
+      setNewDuration(String(duration || 60));
+      onChange({ treatment: "" });
+      return;
+    }
+
+    if (nextValue === CUSTOM_TREATMENT_VALUE) {
+      setMode("custom");
+      onChange({ treatment: matchedService ? "" : value });
+      return;
+    }
+
+    const service = services.find((item) => item.name === nextValue);
+    setMode("list");
+    onChange({
+      treatment: nextValue,
+      duration: service?.duration,
+      cabinId: findCabinIdForService(service, cabinList),
+    });
+  }
+
+  function addNewTreatment() {
+    const name = newName.trim();
+
+    if (!name) {
+      return;
+    }
+
+    const created = addCenterService({
+      name,
+      duration: Number(newDuration) || 60,
+    });
+    setServices(getCenterServices());
+    setMode("list");
+    onChange({
+      treatment: created.name,
+      duration: created.duration,
+    });
+  }
+
+  return (
+    <div className="space-y-2">
+      <Select
+        value={selectValue}
+        options={[
+          "",
+          ...services.map((service) => service.name),
+          NEW_TREATMENT_VALUE,
+          CUSTOM_TREATMENT_VALUE,
+        ]}
+        labels={{
+          "": "Choisir une prestation",
+          ...Object.fromEntries(
+            services.map((service) => [
+              service.name,
+              `${service.name} · ${formatDurationLabel(service.duration)}`,
+            ])
+          ),
+          [NEW_TREATMENT_VALUE]: "Nouvelle prestation…",
+          [CUSTOM_TREATMENT_VALUE]: "Saisie libre",
+        }}
+        onChange={selectTreatment}
+      />
+
+      {mode === "new" ? (
+        <div className="grid gap-2 sm:grid-cols-[1fr_7.5rem_auto]">
+          <Input
+            required
+            placeholder="Nom de la prestation"
+            value={newName}
+            onChange={(event) => {
+              const nextName = event.target.value;
+              setNewName(nextName);
+              onChange({
+                treatment: nextName,
+                duration: Number(newDuration) || 60,
+              });
+            }}
+          />
+          <Select
+            value={newDuration}
+            options={durationSelectOptions(Number(newDuration) || 60)}
+            labels={appointmentDurationLabels}
+            onChange={(nextDuration) => {
+              setNewDuration(nextDuration);
+              onChange({
+                treatment: newName,
+                duration: Number(nextDuration),
+              });
+            }}
+          />
+          <Button type="button" variant="outline" onClick={addNewTreatment}>
+            Ajouter
+          </Button>
+        </div>
+      ) : null}
+
+      {mode === "custom" ? (
+        <Input
+          required
+          placeholder="Nom du soin ou motif"
+          value={value}
+          onChange={(event) => onChange({ treatment: event.target.value })}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+function getTreatmentPickerMode(
+  value: string,
+  services: CenterServiceSetting[]
+): "list" | "new" | "custom" {
+  if (!value || services.some((service) => service.name === value)) {
+    return "list";
+  }
+
+  return "custom";
+}
+
+function findCabinIdForService(
+  service: CenterServiceSetting | undefined,
+  cabinList: Cabin[]
+) {
+  if (!service?.cabins || service.cabins === "Toutes") {
+    return undefined;
+  }
+
+  const cabinName = service.cabins.split(",")[0]?.trim();
+  if (!cabinName) {
+    return undefined;
+  }
+
+  return cabinList.find(
+    (cabin) =>
+      normalize(cabin.name) === normalize(cabinName) ||
+      normalize(cabinName).includes(normalize(cabin.name))
+  )?.id;
+}
+
+function formatDurationLabel(minutes: number) {
+  return appointmentDurationLabels[String(minutes)] ?? `${minutes} min`;
+}
+
 function Select({
   value,
   options,
   labels,
   onChange,
+  required,
 }: {
   value: string;
   options: string[];
   labels?: Record<string, string>;
   onChange: (value: string) => void;
+  required?: boolean;
 }) {
   return (
     <select
+      required={required}
       value={value}
       onChange={(event) => onChange(event.target.value)}
       className="h-8 w-full rounded-lg border border-input bg-white px-2.5 py-1 text-sm outline-none transition-colors focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
@@ -3480,4 +4138,23 @@ function Select({
       ))}
     </select>
   );
+}
+
+function clientFicheHref(appointment: Appointment) {
+  const params = new URLSearchParams();
+
+  if (appointment.clientId) {
+    params.set("client", appointment.clientId);
+  }
+
+  if (appointment.phone.trim()) {
+    params.set("phone", appointment.phone.trim());
+  }
+
+  if (appointment.personName.trim()) {
+    params.set("q", appointment.personName.trim());
+  }
+
+  params.set("fiche", "1");
+  return `/dashboard/crm-clients?${params.toString()}`;
 }

@@ -32,6 +32,11 @@ export interface Lead {
   lastName: string;
   phone: string;
   email: string;
+  birthDate?: string;
+  gender?: string;
+  address?: string;
+  postalCode?: string;
+  city?: string;
   treatment: string;
   source: "Facebook" | "Instagram" | "Google" | "Site Web" | "Organique";
   campaign: string;
@@ -40,9 +45,11 @@ export interface Lead {
   commercial: string;
   createdAt: string;
   createdDate: string;
+  lastActivityAt?: string;
   updatedDate?: string;
   nextAction: string;
   reminderDate?: string;
+  latestComment?: string;
   activityLog: LeadActivity[];
 }
 
@@ -52,4 +59,5 @@ export interface LeadActivity {
   date: string;
   text: string;
   type: "comment" | "status" | "system";
+  occurredAt?: string;
 }

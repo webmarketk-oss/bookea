@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
   CalendarDays,
@@ -43,6 +43,7 @@ import {
   type CrmClientNote as ClientNote,
   type CrmClientStatus as ClientStatus,
 } from "@/lib/crm-supabase";
+import { syncBirthdaySms } from "@/lib/send-sms";
 
 const statusStyles: Record<ClientStatus, string> = {
   Actif: "bg-emerald-50 text-emerald-700 border-emerald-100",
@@ -112,16 +113,24 @@ export default function CRMClientsPage() {
   const [isClientFormOpen, setIsClientFormOpen] = useState(false);
   const [isFullClientOpen, setIsFullClientOpen] = useState(false);
   const [clientForm, setClientForm] = useState(emptyClientForm);
+  const openedFicheFromUrlRef = useRef(false);
 
   async function refreshClients() {
     setIsLoadingClients(true);
     setClientError("");
 
     try {
-      const { clients } = await loadCrmClients();
+      const { clientId } = getClientFicheParams();
+      const { clients } = await loadCrmClients({ includeClientId: clientId });
 
       setClientList(clients);
       setSelectedClientId((currentId) => {
+        const fromUrl = findClientFromFicheParams(clients);
+
+        if (fromUrl) {
+          return fromUrl.id;
+        }
+
         if (currentId && clients.some((client) => client.id === currentId)) {
           return currentId;
         }
@@ -145,6 +154,33 @@ export default function CRMClientsPage() {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void refreshClients();
   }, []);
+
+  useEffect(() => {
+    if (isLoadingClients || openedFicheFromUrlRef.current) {
+      return;
+    }
+
+    const params = getClientFicheParams();
+
+    if (!params.clientId && !params.phone && !params.query) {
+      return;
+    }
+
+    const match = findClientFromFicheParams(clientList);
+
+    if (!match) {
+      if (params.query) {
+        setSearch(params.query);
+      }
+      return;
+    }
+
+    openedFicheFromUrlRef.current = true;
+    setSelectedClientId(match.id);
+    if (params.openFiche) {
+      setIsFullClientOpen(true);
+    }
+  }, [clientList, isLoadingClients]);
 
   useEffect(() => {
     function syncSourceSettings() {
@@ -253,6 +289,16 @@ export default function CRMClientsPage() {
     try {
       const client = await createCrmClient(clientForm);
 
+      if (client.birthDate && client.phone) {
+        void syncBirthdaySms({
+          clientId: client.id,
+          birthDate: client.birthDate,
+          phone: client.phone,
+          firstName: client.firstName,
+          lastName: client.lastName,
+        }).catch(() => null);
+      }
+
       setClientList((currentClients) => [client, ...currentClients]);
       setSelectedClientId(client.id);
       setIsClientFormOpen(false);
@@ -268,6 +314,18 @@ export default function CRMClientsPage() {
   async function saveFullClient(updatedClient: Client) {
     try {
       await updateCrmClient(updatedClient);
+      if (updatedClient.phone) {
+        void syncBirthdaySms({
+          clientId: updatedClient.id,
+          birthDate: updatedClient.birthDate,
+          phone: updatedClient.phone,
+          firstName: updatedClient.firstName,
+          lastName: updatedClient.lastName,
+          enabled: Boolean(
+            updatedClient.birthDate && updatedClient.birthDate !== "À compléter",
+          ),
+        }).catch(() => null);
+      }
     } catch (error) {
       setClientError(
         error instanceof Error
@@ -296,6 +354,16 @@ export default function CRMClientsPage() {
 
     try {
       await updateCrmClient(updatedClient);
+      if (updatedClient.phone) {
+        void syncBirthdaySms({
+          clientId: updatedClient.id,
+          birthDate,
+          phone: updatedClient.phone,
+          firstName: updatedClient.firstName,
+          lastName: updatedClient.lastName,
+          enabled: Boolean(birthDate),
+        }).catch(() => null);
+      }
     } catch (error) {
       setClientError(
         error instanceof Error
@@ -448,12 +516,10 @@ export default function CRMClientsPage() {
         <section className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_420px]">
           <Card className="overflow-hidden border-slate-200 py-0 shadow-sm">
             <CardContent className="p-0">
-              <div className="grid grid-cols-[1.35fr_1fr_0.9fr_1fr_0.9fr_120px] border-b border-slate-100 bg-white px-5 py-3 text-xs font-black uppercase text-slate-500">
+              <div className="grid grid-cols-[minmax(0,2.2fr)_1fr_1fr_96px] border-b border-slate-100 bg-white px-5 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">
                 <span>Cliente</span>
                 <span>Soin principal</span>
-                <span>Provenance</span>
                 <span>Prochain RDV</span>
-                <span>Commercial</span>
                 <span className="text-right">CA</span>
               </div>
 
@@ -478,18 +544,22 @@ export default function CRMClientsPage() {
                       key={client.id}
                       type="button"
                       onClick={() => setSelectedClientId(client.id)}
-                      className={`grid w-full grid-cols-[1.35fr_1fr_0.9fr_1fr_0.9fr_120px] items-center gap-4 px-5 py-4 text-left transition-colors hover:bg-blue-50/70 ${
+                      onDoubleClick={() => {
+                        setSelectedClientId(client.id);
+                        setIsFullClientOpen(true);
+                      }}
+                      className={`grid w-full grid-cols-[minmax(0,2.2fr)_1fr_1fr_96px] items-center gap-4 px-5 py-3 text-left transition-colors hover:bg-blue-50/70 ${
                         selected ? "bg-blue-50 ring-1 ring-inset ring-blue-200" : "bg-white"
                       }`}
                     >
                       <div className="min-w-0">
-                        <div className="flex items-center gap-3">
-                          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-slate-900 text-sm font-black text-white">
+                        <div className="flex min-w-0 items-center gap-3">
+                          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-slate-900 text-xs font-bold text-white">
                             {client.firstName[0]}
                             {client.lastName[0]}
                           </span>
                           <div className="min-w-0">
-                            <p className="flex items-center gap-2 truncate font-black text-slate-950">
+                            <p className="flex min-w-0 items-center gap-2 text-sm font-semibold text-slate-950">
                               <span className="truncate">
                                 {client.firstName} {client.lastName}
                               </span>
@@ -500,25 +570,19 @@ export default function CRMClientsPage() {
                                 />
                               ) : null}
                             </p>
-                            <p className="truncate text-sm font-medium text-slate-500">
+                            <p className="truncate text-xs font-medium text-slate-500">
                               {client.phone} · {client.email}
                             </p>
                           </div>
                         </div>
                       </div>
-                      <span className="truncate font-semibold text-slate-700">
+                      <span className="truncate text-sm font-medium text-slate-700">
                         {client.mainCare}
                       </span>
-                      <span className="w-fit max-w-full truncate rounded-full border border-blue-100 bg-blue-50 px-3 py-1 text-sm font-black text-blue-700">
-                        {client.source || "À compléter"}
-                      </span>
-                      <span className="truncate text-sm font-semibold text-slate-500">
+                      <span className="truncate text-sm font-medium text-slate-500">
                         {client.nextAppointment}
                       </span>
-                      <span className="truncate text-sm font-semibold text-slate-600">
-                        {client.commercial}
-                      </span>
-                      <span className="text-right font-black text-emerald-600">
+                      <span className="text-right text-sm font-semibold text-emerald-600">
                         {formatCurrency(client.totalSpent)}
                       </span>
                     </button>
@@ -697,7 +761,7 @@ function ClientPanel({
                 </>
               ) : (
                 <p className="mt-1 text-sm font-semibold text-slate-600">
-                  Pour le cadeau d&apos;anniversaire
+                  Pour le cadeau d&apos;anniversaire et le SMS du jour J
                 </p>
               )}
             </div>
@@ -728,6 +792,14 @@ function ClientPanel({
             <ClientIdentity label="Nom" value={client.lastName} />
             <ClientIdentity label="Téléphone" value={client.phone} />
             <ClientIdentity label="Email" value={client.email} />
+            <ClientIdentity
+              label="Date d'anniversaire"
+              value={
+                client.birthDate && client.birthDate !== "À compléter"
+                  ? client.birthDate
+                  : "À renseigner"
+              }
+            />
             <ClientIdentity label="Genre" value={client.gender} />
             <ClientIdentity
               label="Adresse"
@@ -1890,4 +1962,64 @@ function getBirthdayGift(birthDate: string) {
 
 function isCurrentMonth(date: string) {
   return date.slice(0, 7) === new Date().toISOString().slice(0, 7);
+}
+
+function getClientFicheParams() {
+  if (typeof window === "undefined") {
+    return {
+      clientId: null as string | null,
+      phone: null as string | null,
+      query: null as string | null,
+      openFiche: false,
+    };
+  }
+
+  const params = new URLSearchParams(window.location.search);
+
+  return {
+    clientId: params.get("client"),
+    phone: params.get("phone"),
+    query: params.get("q"),
+    openFiche: params.get("fiche") === "1",
+  };
+}
+
+function findClientFromFicheParams(clients: Client[]) {
+  const { clientId, phone, query } = getClientFicheParams();
+
+  if (clientId) {
+    const byId = clients.find((client) => client.id === clientId);
+    if (byId) {
+      return byId;
+    }
+  }
+
+  if (phone) {
+    const digits = phone.replace(/\D/g, "").slice(-9);
+    const byPhone = clients.find(
+      (client) => client.phone.replace(/\D/g, "").slice(-9) === digits,
+    );
+    if (byPhone) {
+      return byPhone;
+    }
+  }
+
+  if (query) {
+    const normalized = query.trim().toLowerCase();
+    return (
+      clients.find(
+        (client) =>
+          `${client.firstName} ${client.lastName}`.trim().toLowerCase() ===
+          normalized,
+      ) ??
+      clients.find((client) =>
+        `${client.firstName} ${client.lastName}`
+          .trim()
+          .toLowerCase()
+          .includes(normalized),
+      )
+    );
+  }
+
+  return undefined;
 }

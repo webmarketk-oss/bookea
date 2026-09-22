@@ -2,6 +2,7 @@ import {
   fillSmsTemplate,
   getSmsTemplate,
   loadCenterSmsSettings,
+  toBirthDateIso,
   type SmsTemplateVars,
 } from "@/lib/sms-settings";
 
@@ -99,6 +100,67 @@ export async function sendSavedTemplateSms(
     ...vars,
     message: fillSmsTemplate(template.body, vars),
   });
+}
+
+export async function syncBirthdaySms(input: {
+  clientId?: string;
+  birthDate?: string;
+  phone?: string;
+  firstName?: string;
+  lastName?: string;
+  enabled?: boolean;
+}): Promise<SendSmsResult> {
+  const { settings, centerName, centerId } = await loadCenterSmsSettings();
+  const enabled = input.enabled !== false && settings.birthdaySmsEnabled !== false;
+  const template = getSmsTemplate(
+    settings,
+    settings.birthdayTemplateId || "anniversaire",
+  );
+  const vars = {
+    phone: input.phone || "",
+    firstName: input.firstName || "vous",
+    lastName: input.lastName || "",
+    centerName,
+  };
+
+  const response = await fetch("/api/sms/schedule", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      action: enabled ? "schedule" : "cancel",
+      kind: "birthday",
+      clientId: input.clientId,
+      centerId,
+      birthDate: toBirthDateIso(input.birthDate),
+      phone: vars.phone,
+      message: template.body,
+      enabled,
+      vars,
+    }),
+  });
+
+  const result = (await response.json().catch(() => ({}))) as SendSmsResult & {
+    sendAt?: string;
+  };
+
+  if (!response.ok || !result.ok) {
+    return {
+      ok: false,
+      sent: result.sent ?? 0,
+      failed: 1,
+      remainingCredits: null,
+      error: result.error || "Impossible de programmer le SMS anniversaire",
+    } satisfies SendSmsResult;
+  }
+
+  return {
+    ok: true,
+    sent: result.sent ?? 0,
+    failed: 0,
+    remainingCredits: result.remainingCredits ?? null,
+    scheduled: result.scheduled,
+    sendAt: result.sendAt ?? null,
+  } satisfies SendSmsResult;
 }
 
 export async function scheduleAppointmentReminderSms(input: {

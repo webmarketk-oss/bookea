@@ -1,13 +1,18 @@
 const {
+  birthdayYear,
   createServiceClient,
   defaultSender,
+  getBirthdayTemplate,
+  isBirthdayToday,
   isCancelledStatus,
   mergeCenterSmsSettings,
+  nextBirthdaySendAt,
   normalizePhone,
   parseCenterSmsSettings,
   personalize,
   reminderSendAt,
   sendBrevoSms,
+  toIsoBirthDate,
 } = require("./brevo");
 
 function parsePayload(body) {
@@ -57,6 +62,240 @@ function relation(value) {
   return Array.isArray(value) ? value[0] : value;
 }
 
+function birthdayJobMatches(job, clientId, phone) {
+  if (job?.kind !== "birthday" || job?.status !== "pending") {
+    return false;
+  }
+
+  if (clientId && job.clientId === clientId) {
+    return true;
+  }
+
+  if (phone && normalizePhone(job.phone) === phone) {
+    return true;
+  }
+
+  return false;
+}
+
+async function handleBirthdayJob(res, payload, action) {
+  const supabase = createServiceClient();
+  const clientId = String(payload.clientId || "").trim();
+  const centerIdHint = String(payload.centerId || "").trim();
+  const enabled = payload.enabled !== false;
+  const birthDate = toIsoBirthDate(
+    payload.birthDate || payload.vars?.birthDate || client?.birthdate,
+  );
+  let client = null;
+
+  if (clientId) {
+    const { data, error } = await supabase
+      .from("clients")
+      .select("id,center_id,first_name,last_name,phone,birthdate")
+      .eq("id", clientId)
+      .maybeSingle();
+
+    if (error) {
+      throw new Error(error.message);
+    }
+
+    client = data;
+  }
+
+  const centerId = String(client?.center_id || centerIdHint || "").trim();
+
+  if (!centerId) {
+    return res.status(400).json({ ok: false, error: "missing_center" });
+  }
+
+  const { data: centerRow, error: centerError } = await supabase
+    .from("centers")
+    .select("id,name,settings")
+    .eq("id", centerId)
+    .maybeSingle();
+
+  if (centerError) {
+    throw new Error(centerError.message);
+  }
+
+  if (!centerRow) {
+    return res.status(404).json({ ok: false, error: "center_not_found" });
+  }
+
+  const sms = parseCenterSmsSettings(centerRow.settings);
+  const phone = normalizePhone(payload.vars?.phone || payload.phone || client?.phone);
+  const shouldCancel =
+    action === "cancel" || enabled === false || !birthDate || !sms.birthdaySmsEnabled;
+
+  if (shouldCancel) {
+    let cancelled = 0;
+    const jobs = sms.jobs.map((job) => {
+      if (!birthdayJobMatches(job, clientId, phone)) {
+        return job;
+      }
+
+      cancelled += 1;
+      return {
+        ...job,
+        status: "cancelled",
+        cancelledAt: new Date().toISOString(),
+        reason: enabled === false ? "opt_out" : "birthday_cleared",
+        year: birthdayYear(),
+      };
+    });
+
+    if (
+      enabled === false &&
+      (clientId || phone) &&
+      !jobs.some(
+        (job) =>
+          job?.kind === "birthday" &&
+          job?.year === birthdayYear() &&
+          ((clientId && job.clientId === clientId) ||
+            (phone && normalizePhone(job.phone) === phone)),
+      )
+    ) {
+      jobs.push({
+        id: crypto.randomUUID(),
+        clientId: clientId || client?.id || null,
+        centerId,
+        kind: "birthday",
+        status: "cancelled",
+        year: birthdayYear(),
+        cancelledAt: new Date().toISOString(),
+        reason: "opt_out",
+        phone,
+        createdAt: new Date().toISOString(),
+      });
+      cancelled += 1;
+    }
+
+    await supabase
+      .from("centers")
+      .update({ settings: mergeCenterSmsSettings(centerRow.settings, { jobs }) })
+      .eq("id", centerId);
+
+    return res.status(200).json({ ok: true, cancelled, scheduled: false });
+  }
+
+  if (!phone) {
+    return res.status(400).json({ ok: false, error: "missing_phone" });
+  }
+
+  const template = getBirthdayTemplate(sms);
+  const vars = {
+    firstName: String(payload.vars?.firstName || client?.first_name || "vous").trim(),
+    lastName: String(payload.vars?.lastName || client?.last_name || "").trim(),
+    centerName: String(payload.vars?.centerName || centerRow.name || "").trim(),
+    phone,
+    birthDate,
+  };
+  const message = String(payload.message || template?.body || "").trim();
+
+  if (!message) {
+    return res.status(400).json({ ok: false, error: "missing_message" });
+  }
+
+  const year = birthdayYear();
+  const sendAt = nextBirthdaySendAt(birthDate);
+  const otherJobs = sms.jobs.filter((job) => !birthdayJobMatches(job, clientId, phone));
+  const alreadySentThisYear = sms.jobs.some(
+    (job) =>
+      job?.kind === "birthday" &&
+      job?.year === year &&
+      job?.status === "sent" &&
+      ((clientId && job.clientId === clientId) || normalizePhone(job.phone) === phone),
+  );
+
+  if (!sendAt) {
+    return res.status(400).json({ ok: false, error: "invalid_birthdate" });
+  }
+
+  const sendNow =
+    isBirthdayToday(birthDate) && !alreadySentThisYear && Number(sendAt.slice(0, 4)) !== year;
+
+  if (sendNow) {
+    await sendBrevoSms({
+      sender: defaultSender(),
+      recipient: phone,
+      content: personalize(message, vars),
+      type: "transactional",
+    });
+
+    const jobs = [
+      ...otherJobs,
+      {
+        id: crypto.randomUUID(),
+        clientId: clientId || client?.id || null,
+        centerId,
+        kind: "birthday",
+        status: "sent",
+        year,
+        sendAt: new Date().toISOString(),
+        sentAt: new Date().toISOString(),
+        phone,
+        message,
+        vars,
+        createdAt: new Date().toISOString(),
+      },
+      {
+        id: crypto.randomUUID(),
+        clientId: clientId || client?.id || null,
+        centerId,
+        kind: "birthday",
+        status: "pending",
+        year: year + 1,
+        sendAt,
+        phone,
+        message,
+        vars,
+        createdAt: new Date().toISOString(),
+      },
+    ];
+
+    await supabase
+      .from("centers")
+      .update({ settings: mergeCenterSmsSettings(centerRow.settings, { jobs }) })
+      .eq("id", centerId);
+
+    return res.status(200).json({
+      ok: true,
+      sent: 1,
+      scheduled: true,
+      sendAt,
+    });
+  }
+
+  const jobs = [
+    ...otherJobs,
+    {
+      id: crypto.randomUUID(),
+      clientId: clientId || client?.id || null,
+      centerId,
+      kind: "birthday",
+      status: "pending",
+      year: Number(sendAt.slice(0, 4)),
+      sendAt,
+      phone,
+      message,
+      vars,
+      createdAt: new Date().toISOString(),
+    },
+  ];
+
+  await supabase
+    .from("centers")
+    .update({ settings: mergeCenterSmsSettings(centerRow.settings, { jobs }) })
+    .eq("id", centerId);
+
+  return res.status(200).json({
+    ok: true,
+    sent: 0,
+    scheduled: true,
+    sendAt,
+  });
+}
+
 module.exports = async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
@@ -74,7 +313,12 @@ module.exports = async function handler(req, res) {
   try {
     const payload = parsePayload(req.body);
     const action = String(payload.action || "schedule");
+    const kind = String(payload.kind || "reminder_48h");
     const appointmentId = String(payload.appointmentId || "").trim();
+
+    if (kind === "birthday") {
+      return handleBirthdayJob(res, payload, action);
+    }
 
     if (!appointmentId) {
       return res.status(400).json({ ok: false, error: "missing_appointment" });
@@ -187,11 +431,16 @@ module.exports = async function handler(req, res) {
 
     const client = relation(appointment.clients);
     const service = relation(appointment.services);
-    const { data: centerRow } = await supabase
+    const { data: centerRow, error: centerError } = await supabase
       .from("centers")
-      .select("name")
+      .select("id,name,settings")
       .eq("id", appointment.center_id)
       .maybeSingle();
+
+    if (centerError) {
+      throw new Error(centerError.message);
+    }
+
     const vars = {
       firstName: String(payload.vars?.firstName || client?.first_name || "vous").trim(),
       lastName: String(payload.vars?.lastName || client?.last_name || "").trim(),
@@ -231,14 +480,8 @@ module.exports = async function handler(req, res) {
       });
     }
 
-    const { data: centerRow, error: centerError } = await supabase
-      .from("centers")
-      .select("id,settings")
-      .eq("id", appointment.center_id)
-      .single();
-
-    if (centerError) {
-      throw new Error(centerError.message);
+    if (!centerRow) {
+      return res.status(404).json({ ok: false, error: "center_not_found" });
     }
 
     const sms = parseCenterSmsSettings(centerRow.settings);

@@ -116,6 +116,21 @@ export async function createCrmAppointment(appointment: Appointment) {
   return toAppointment(data as unknown as AppointmentRow);
 }
 
+export function isPersistedAppointmentId(id: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+    id,
+  );
+}
+
+export async function persistCrmAppointment(appointment: Appointment) {
+  if (isPersistedAppointmentId(appointment.id)) {
+    await updateCrmAppointment(appointment);
+    return appointment;
+  }
+
+  return createCrmAppointment(appointment);
+}
+
 export async function updateCrmAppointment(appointment: Appointment) {
   const supabase = createClient();
   const links = await ensureAppointmentLinks(supabase, appointment);
@@ -130,6 +145,10 @@ export async function updateCrmAppointment(appointment: Appointment) {
 }
 
 export async function deleteCrmAppointment(appointmentId: string) {
+  if (!isPersistedAppointmentId(appointmentId)) {
+    return;
+  }
+
   const supabase = createClient();
   const { error } = await supabase
     .from("appointments")
@@ -191,6 +210,7 @@ async function ensureAppointmentClient(
           last_name: lastNameParts.join(" ") || "Bookea",
           email: appointment.email?.trim() || null,
           phone: appointment.phone.trim() || null,
+          ...(appointment.birthDate ? { birthdate: appointment.birthDate } : {}),
           status: "in_care",
           updated_at: new Date().toISOString(),
         })
@@ -216,6 +236,7 @@ async function ensureAppointmentClient(
       last_name: lastNameParts.join(" ") || "Bookea",
       email: appointment.email?.trim() || null,
       phone: appointment.phone.trim() || null,
+      ...(appointment.birthDate ? { birthdate: appointment.birthDate } : {}),
       status: isBookableAppointment(appointment) ? "in_care" : "to_recall",
       private_note: isBookableAppointment(appointment)
         ? `Converti depuis un rendez-vous agenda le ${new Date().toLocaleDateString("fr-FR")}.`
@@ -516,6 +537,7 @@ function toAppointment(row: AppointmentRow): Appointment {
 
   return {
     id: row.id,
+    clientId: row.client_id || undefined,
     personName:
       [client?.first_name, client?.last_name].filter(Boolean).join(" ") ||
       "Cliente Bookea",

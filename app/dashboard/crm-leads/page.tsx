@@ -11,7 +11,13 @@ import ProspectsTable from "@/components/crm/prospects-table";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
-import { leadStatuses } from "@/lib/lead-statuses";
+import { inactiveLeadStatuses, leadStatuses } from "@/lib/lead-statuses";
+import {
+  addDaysIso,
+  matchesCrmQuickFilter,
+  todayIso,
+  type CrmQuickFilter,
+} from "@/lib/crm-stats";
 import { leads } from "@/lib/mock-data";
 import {
   addCrmLeadActivity,
@@ -20,9 +26,11 @@ import {
   loadCrmLeads,
   mergeCrmDuplicateLeads,
   updateCrmLeadAmount,
+  updateCrmLeadDetails,
   updateCrmLeadReminder,
   updateCrmLeadStatus,
 } from "@/lib/crm-supabase";
+import { syncBirthdaySms } from "@/lib/send-sms";
 import {
   APPOINTMENT_STATUS_UPDATED_EVENT,
   applyAppointmentStatusOverrides,
@@ -53,7 +61,7 @@ const emptyLeadForm = {
 };
 
 type CRMTab = "prospects" | "kpi";
-type QuickDateFilter = "Tous" | "Hier" | "7 derniers jours";
+type QuickDateFilter = CrmQuickFilter;
 
 const statusGroups: Partial<Record<LeadStatus, LeadStatus[]>> = {
   "À relancer": [
@@ -65,15 +73,7 @@ const statusGroups: Partial<Record<LeadStatus, LeadStatus[]>> = {
   ],
   "RDV pris": ["RDV pris", "RDV confirmé", "Acompte reçu"],
   "Client converti": ["Client converti", "Vendu"],
-  "Prospect perdu": [
-    "Pas intéressé",
-    "Prospect perdu",
-    "Intraitable",
-    "Numéro invalide",
-    "Doublon",
-    "Hors zone",
-    "No show",
-  ],
+  "Prospect perdu": inactiveLeadStatuses,
 };
 
 export default function CRMLeadsPage() {
@@ -246,7 +246,7 @@ export default function CRMLeadsPage() {
         : lead.status === filters.status);
     const matchesCampaign =
       filters.campaign === "Toutes" || lead.campaign === filters.campaign;
-    const matchesQuickDate = matchesQuickDateFilter(lead, quickDateFilter);
+    const matchesQuickDate = matchesCrmQuickFilter(lead, quickDateFilter);
     const matchesCreatedDate = isDateInRange(
       lead.createdDate,
       filters.createdFrom,
@@ -290,6 +290,7 @@ export default function CRMLeadsPage() {
               date: formatActivityDate(),
               text: `Statut changé : ${lead.status} → ${status}.`,
               type: "status",
+              occurredAt: new Date().toISOString(),
             },
             ...lead.activityLog,
           ],
@@ -325,6 +326,7 @@ export default function CRMLeadsPage() {
           ? {
               ...lead,
               updatedDate: todayIso(),
+              latestComment: text,
               activityLog: [
                 {
                   id: crypto.randomUUID(),
@@ -448,6 +450,121 @@ export default function CRMLeadsPage() {
           : lead
       )
     );
+  }
+
+  async function handleUpdateLead(
+    leadId: string,
+    patch: {
+      firstName: string;
+      lastName: string;
+      phone: string;
+      email: string;
+      birthDate: string;
+      gender: string;
+      address: string;
+      postalCode: string;
+      city: string;
+      source: Lead["source"];
+      campaign: string;
+      treatment: string;
+      commercial: string;
+      status: LeadStatus;
+      dealAmount: string;
+      reminderDate: string;
+      nextAction: string;
+    }
+  ) {
+    const leadBeforeUpdate = leadList.find((lead) => lead.id === leadId);
+
+    if (!leadBeforeUpdate) {
+      return;
+    }
+
+    const dealAmount = Number(patch.dealAmount || 0);
+    const nextStatus = patch.status;
+    const statusChanged = leadBeforeUpdate.status !== nextStatus;
+
+    setLeadList((currentLeads) =>
+      currentLeads.map((lead) => {
+        if (lead.id !== leadId) {
+          return lead;
+        }
+
+        return {
+          ...lead,
+          firstName: patch.firstName,
+          lastName: patch.lastName,
+          phone: patch.phone,
+          email: patch.email,
+          birthDate: patch.birthDate,
+          gender: patch.gender,
+          address: patch.address,
+          postalCode: patch.postalCode,
+          city: patch.city,
+          source: patch.source,
+          campaign: patch.campaign,
+          treatment: patch.treatment,
+          commercial: patch.commercial,
+          status: nextStatus,
+          dealAmount: Number.isFinite(dealAmount) ? dealAmount : lead.dealAmount,
+          reminderDate: patch.reminderDate || undefined,
+          nextAction: patch.nextAction,
+          updatedDate: todayIso(),
+          activityLog: statusChanged
+            ? [
+                {
+                  id: crypto.randomUUID(),
+                  author: "Samantha",
+                  date: formatActivityDate(),
+                  text: `Statut changé : ${lead.status} → ${nextStatus}.`,
+                  type: "status" as const,
+                  occurredAt: new Date().toISOString(),
+                },
+                ...lead.activityLog,
+              ]
+            : lead.activityLog,
+        };
+      })
+    );
+
+    try {
+      await updateCrmLeadDetails(leadBeforeUpdate, {
+        firstName: patch.firstName,
+        lastName: patch.lastName,
+        phone: patch.phone,
+        email: patch.email,
+        birthDate: patch.birthDate,
+        gender: patch.gender,
+        address: patch.address,
+        postalCode: patch.postalCode,
+        city: patch.city,
+        treatment: patch.treatment,
+        source: patch.source,
+        campaign: patch.campaign,
+        commercial: patch.commercial,
+        status: nextStatus,
+        dealAmount: Number.isFinite(dealAmount) ? dealAmount : leadBeforeUpdate.dealAmount,
+        nextAction: patch.nextAction,
+        reminderDate: patch.reminderDate,
+      });
+      if (patch.phone) {
+        void syncBirthdaySms({
+          birthDate: patch.birthDate,
+          phone: patch.phone,
+          firstName: patch.firstName,
+          lastName: patch.lastName,
+          enabled: Boolean(patch.birthDate),
+        }).catch(() => null);
+      }
+      setCrmNotice("Fiche prospect enregistrée.");
+    } catch (error) {
+      setCrmError(
+        error instanceof Error
+          ? error.message
+          : "La fiche n'a pas pu être enregistrée."
+      );
+      await refreshCrmLeads();
+    }
   }
 
   async function handleMergeDuplicate(group: Lead[]) {
@@ -716,7 +833,7 @@ export default function CRMLeadsPage() {
               id="crm-leads-results"
               className={
                 isLeadDetailsOpen
-                  ? "grid grid-cols-[minmax(0,1fr)_20rem] items-start gap-3"
+                  ? "grid grid-cols-[minmax(0,1fr)_24rem] items-start gap-3"
                   : ""
               }
             >
@@ -724,7 +841,13 @@ export default function CRMLeadsPage() {
                 <ProspectsTable
                   leads={filteredLeads}
                   selectedLead={selectedLead}
+                  isLeadDetailsOpen={isLeadDetailsOpen}
                   onSelectLead={(lead) => {
+                    if (isLeadDetailsOpen && selectedLeadId === lead.id) {
+                      setIsLeadDetailsOpen(false);
+                      return;
+                    }
+
                     setSelectedLeadId(lead.id);
                     setIsLeadDetailsOpen(true);
                   }}
@@ -738,11 +861,12 @@ export default function CRMLeadsPage() {
               </section>
 
               {isLeadDetailsOpen && (
-              <aside className="min-w-0 lg:sticky lg:top-3 lg:h-[calc(100vh-1.5rem)] lg:overflow-y-auto lg:overscroll-contain">
+              <aside className="min-w-0 lg:sticky lg:top-3 lg:max-h-[calc(100vh-1.5rem)] lg:overflow-y-auto">
                 <LeadDetails
                   lead={selectedLead}
                   onAddActivity={handleAddActivity}
                   onDeleteActivity={handleDeleteActivity}
+                  onUpdateLead={handleUpdateLead}
                   onClose={() => setIsLeadDetailsOpen(false)}
                 />
               </aside>
@@ -1019,7 +1143,16 @@ function isLeadStatusFilter(value: string): value is ProspectFilters["status"] {
 }
 
 function isQuickDateFilter(value: string): value is QuickDateFilter {
-  return value === "Tous" || value === "Hier" || value === "7 derniers jours";
+  return (
+    value === "Tous" ||
+    value === "Aujourd'hui" ||
+    value === "Hier" ||
+    value === "7 derniers jours" ||
+    value === "Ce mois" ||
+    value === "RDV aujourd'hui" ||
+    value === "RDV hier" ||
+    value === "RDV 7 jours"
+  );
 }
 
 function formatActivityDate() {
@@ -1027,42 +1160,6 @@ function formatActivityDate() {
     hour: "2-digit",
     minute: "2-digit",
   })}`;
-}
-
-function matchesQuickDateFilter(lead: Lead, filter: QuickDateFilter) {
-  if (filter === "Tous") {
-    return true;
-  }
-
-  const today = todayIso();
-  const yesterday = addDaysIso(today, -1);
-
-  if (filter === "Hier") {
-    return isLeadCreatedOn(lead, yesterday);
-  }
-
-  return isLeadCreatedBetween(lead, addDaysIso(today, -6), today);
-}
-
-function isLeadCreatedOn(lead: Lead, date: string) {
-  if (
-    date === addDaysIso(todayIso(), -1) &&
-    lead.createdAt.toLowerCase().includes("hier")
-  ) {
-    return true;
-  }
-
-  return lead.createdDate === date;
-}
-
-function isLeadCreatedBetween(lead: Lead, startDate: string, endDate: string) {
-  const label = lead.createdAt.toLowerCase();
-
-  if (label.includes("aujourd") || label.includes("hier")) {
-    return true;
-  }
-
-  return lead.createdDate >= startDate && lead.createdDate <= endDate;
 }
 
 function isDateInRange(date: string, startDate: string, endDate: string) {
@@ -1114,15 +1211,4 @@ function activityDateToIso(date: string) {
   const year = new Date().getFullYear();
 
   return `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
-}
-
-function todayIso() {
-  return new Date().toISOString().slice(0, 10);
-}
-
-function addDaysIso(date: string, days: number) {
-  const nextDate = new Date(`${date}T00:00:00`);
-  nextDate.setDate(nextDate.getDate() + days);
-
-  return nextDate.toISOString().slice(0, 10);
 }

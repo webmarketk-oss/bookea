@@ -1,6 +1,7 @@
 "use client";
 
 import { BookeaLogo } from "@/components/bookea-logo";
+import { parseAuthRedirect } from "@/lib/auth-recovery";
 import { createClient } from "@/lib/supabase";
 import { useRouter } from "next/navigation";
 import { FormEvent, useEffect, useState } from "react";
@@ -19,18 +20,36 @@ export default function ResetPasswordPage() {
   useEffect(() => {
     async function prepareReset() {
       const supabase = createClient();
-      const callbackUrl = new URL(window.location.href);
-      const code = callbackUrl.searchParams.get("code");
+      const auth = parseAuthRedirect();
 
-      if (code) {
-        const { error } = await supabase.auth.exchangeCodeForSession(code);
+      if (auth.code) {
+        const { error } = await supabase.auth.exchangeCodeForSession(auth.code);
         if (error) {
-          setFeedback({
-            type: "error",
-            message:
-              "Ce lien de réinitialisation est invalide ou a expiré. Demandez-en un nouveau.",
-          });
-          return;
+          const { data: existing } = await supabase.auth.getSession();
+          if (!existing.session) {
+            setFeedback({
+              type: "error",
+              message:
+                "Ce lien de réinitialisation est invalide ou a expiré. Demandez-en un nouveau.",
+            });
+            return;
+          }
+        }
+      } else if (auth.tokenHash) {
+        const { error } = await supabase.auth.verifyOtp({
+          type: "recovery",
+          token_hash: auth.tokenHash,
+        });
+        if (error) {
+          const { data: existing } = await supabase.auth.getSession();
+          if (!existing.session) {
+            setFeedback({
+              type: "error",
+              message:
+                "Ce lien de réinitialisation est invalide ou a expiré. Demandez-en un nouveau.",
+            });
+            return;
+          }
         }
       }
 
@@ -47,7 +66,19 @@ export default function ResetPasswordPage() {
       setReady(true);
     }
 
+    const supabase = createClient();
+    const { data } = supabase.auth.onAuthStateChange((event) => {
+      if (event === "PASSWORD_RECOVERY") {
+        setReady(true);
+        setFeedback(null);
+      }
+    });
+
     void prepareReset();
+
+    return () => {
+      data.subscription.unsubscribe();
+    };
   }, []);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {

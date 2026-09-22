@@ -124,6 +124,7 @@ export default function SmsPage() {
         setClients(clientData.clients);
         setAppointments(appointmentData);
         setSmsSettings(sms.settings);
+        setBirthdaySms(sms.settings.birthdaySmsEnabled !== false);
         setCampaigns(history.campaigns);
         setInbox(replies);
         if (typeof status?.remainingCredits === "number") {
@@ -258,6 +259,10 @@ export default function SmsPage() {
         smsSettings.leadWelcomeTemplateId === templateId
           ? templates[0].id
           : smsSettings.leadWelcomeTemplateId,
+      birthdayTemplateId:
+        smsSettings.birthdayTemplateId === templateId
+          ? templates[0].id
+          : smsSettings.birthdayTemplateId,
     });
   }
 
@@ -519,7 +524,7 @@ export default function SmsPage() {
               {savingTemplates ? "Enregistrement..." : "Enregistrer le modèle"}
             </button>
 
-            <div className="mt-5 grid gap-4 md:grid-cols-3">
+            <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
               <TemplateSelect
                 label="Confirmation RDV"
                 value={smsSettings.confirmationTemplateId}
@@ -550,6 +555,17 @@ export default function SmsPage() {
                   void persistSmsSettings({
                     ...smsSettings,
                     leadWelcomeTemplateId: value,
+                  })
+                }
+              />
+              <TemplateSelect
+                label="Anniversaire"
+                value={smsSettings.birthdayTemplateId}
+                templates={smsSettings.templates}
+                onChange={(value) =>
+                  void persistSmsSettings({
+                    ...smsSettings,
+                    birthdayTemplateId: value,
                   })
                 }
               />
@@ -664,7 +680,7 @@ export default function SmsPage() {
             <div>
               <h2 className="text-xl font-black">Automatiques</h2>
               <p className="mt-1 text-sm font-medium text-slate-500">
-                Les rappels RDV partiront ensuite tout seuls. Le bouton envoie déjà via Brevo.
+                Les rappels RDV et le SMS d&apos;anniversaire partiront ensuite tout seuls. Le bouton envoie déjà via Brevo.
               </p>
             </div>
           </div>
@@ -682,7 +698,14 @@ export default function SmsPage() {
             <Toggle
               active={birthdaySms}
               label="SMS anniversaire le jour J"
-              onClick={() => setBirthdaySms((value) => !value)}
+              onClick={() => {
+                const next = !birthdaySms;
+                setBirthdaySms(next);
+                void persistSmsSettings({
+                  ...smsSettings,
+                  birthdaySmsEnabled: next,
+                });
+              }}
             />
           </div>
           <div className="mt-5 rounded-2xl bg-slate-50 p-4">

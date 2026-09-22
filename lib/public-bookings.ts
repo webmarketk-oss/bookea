@@ -77,10 +77,35 @@ export function savePublicBooking(record: PublicBookingRecord) {
     ...existingBookings.filter((booking) => booking.id !== record.id),
   ];
 
+  writePublicBookings(nextBookings);
+}
+
+export function getPublicBookingIdFromAppointment(appointment: {
+  id: string;
+  notes?: string;
+}) {
+  if (appointment.id.startsWith("public-")) {
+    return appointment.id.slice("public-".length);
+  }
+
+  return appointment.notes?.match(/booking:([^\s.]+)/)?.[1];
+}
+
+export function removePublicBooking(bookingId: string) {
+  writePublicBookings(
+    readPublicBookings().filter((booking) => booking.id !== bookingId),
+  );
+}
+
+function writePublicBookings(bookings: PublicBookingRecord[]) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
   try {
     window.localStorage.setItem(
       PUBLIC_BOOKINGS_STORAGE_KEY,
-      JSON.stringify(nextBookings)
+      JSON.stringify(bookings)
     );
     window.dispatchEvent(new Event(PUBLIC_BOOKINGS_UPDATED_EVENT));
   } catch {
@@ -362,6 +387,7 @@ function bookingActivity(booking: PublicBookingRecord) {
       booking.date
     )} à ${booking.start}. Provenance : organique.`,
     type: "system" as const,
+    occurredAt: booking.createdAt,
   };
 }
 

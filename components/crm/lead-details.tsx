@@ -4,9 +4,16 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { leadStatusClasses } from "@/lib/lead-statuses";
+import {
+  leadStatusClassName,
+  leadStatusClasses,
+  leadStatusSelectOptions,
+} from "@/lib/lead-statuses";
+import { practitioners } from "@/lib/agenda-data";
 import {
   defaultCenterDepositLinks,
+  getCenterServices,
+  getSourceNames,
   readCenterSettings,
   type CenterDepositLinkSetting,
 } from "@/lib/center-settings";
@@ -18,10 +25,11 @@ import {
   type CenterSmsSettings,
 } from "@/lib/sms-settings";
 import { sendBookeaSms } from "@/lib/send-sms";
-import { Lead } from "@/types/lead";
+import { Lead, LeadStatus } from "@/types/lead";
 import {
   Calendar,
   FileText,
+  Gift,
   Mail,
   MessageCircle,
   MapPin,
@@ -35,22 +43,87 @@ import {
 
 type LeadDetailsTab = "information" | "history" | "comments" | "ai";
 
+type LeadInfoForm = {
+  firstName: string;
+  lastName: string;
+  phone: string;
+  email: string;
+  birthDate: string;
+  gender: string;
+  address: string;
+  postalCode: string;
+  city: string;
+  source: Lead["source"];
+  campaign: string;
+  treatment: string;
+  commercial: string;
+  status: LeadStatus;
+  dealAmount: string;
+  reminderDate: string;
+  nextAction: string;
+};
+
 interface LeadDetailsProps {
   lead: Lead;
   onAddActivity: (leadId: string, text: string) => void;
   onDeleteActivity: (leadId: string, activityId: string) => void;
+  onUpdateLead: (leadId: string, patch: LeadInfoForm) => void;
   onClose: () => void;
+}
+
+const leadSources: Lead["source"][] = [
+  "Facebook",
+  "Instagram",
+  "Google",
+  "Site Web",
+  "Organique",
+];
+
+const commercialOptions = Array.from(
+  new Set([
+    "Équipe",
+    ...practitioners.map((practitioner) => practitioner.name),
+    "Thomas",
+  ]),
+);
+
+const genderOptions = ["À compléter", "Femme", "Homme", "Non renseigné"];
+
+function leadToInfoForm(lead: Lead): LeadInfoForm {
+  return {
+    firstName: lead.firstName,
+    lastName: lead.lastName,
+    phone: lead.phone,
+    email: lead.email,
+    birthDate: lead.birthDate ?? "",
+    gender: lead.gender?.trim() || "À compléter",
+    address: lead.address ?? "",
+    postalCode: lead.postalCode ?? "",
+    city: lead.city ?? "",
+    source: lead.source,
+    campaign: lead.campaign,
+    treatment: lead.treatment,
+    commercial: lead.commercial,
+    status: lead.status,
+    dealAmount: lead.dealAmount ? String(lead.dealAmount) : "",
+    reminderDate: lead.reminderDate ?? "",
+    nextAction: lead.nextAction,
+  };
 }
 
 export default function LeadDetails({
   lead,
   onAddActivity,
   onDeleteActivity,
+  onUpdateLead,
   onClose,
 }: LeadDetailsProps) {
   const fullName = `${lead.firstName} ${lead.lastName}`;
   const [commentDraft, setCommentDraft] = useState("");
-  const [activeTab, setActiveTab] = useState<LeadDetailsTab>("comments");
+  const [infoForm, setInfoForm] = useState<LeadInfoForm>(() => leadToInfoForm(lead));
+  const infoFormRef = useRef(infoForm);
+  const [infoSaving, setInfoSaving] = useState(false);
+  const [activeTab, setActiveTab] = useState<LeadDetailsTab>("information");
   const [isMoreOpen, setIsMoreOpen] = useState(false);
   const [depositLinks, setDepositLinks] =
     useState<CenterDepositLinkSetting[]>(defaultCenterDepositLinks);
@@ -65,6 +138,39 @@ export default function LeadDetails({
   const [smsSending, setSmsSending] = useState(false);
   const [smsNotice, setSmsNotice] = useState("");
   const commentTextareaRef = useRef<HTMLTextAreaElement>(null);
+
+  infoFormRef.current = infoForm;
+
+  useEffect(() => {
+    const active = document.activeElement;
+    if (
+      active instanceof HTMLElement &&
+      active.closest("[data-lead-info-form='true']")
+    ) {
+      return;
+    }
+
+    setInfoForm(leadToInfoForm(lead));
+  }, [
+    lead.id,
+    lead.firstName,
+    lead.lastName,
+    lead.phone,
+    lead.email,
+    lead.birthDate,
+    lead.gender,
+    lead.address,
+    lead.postalCode,
+    lead.city,
+    lead.source,
+    lead.campaign,
+    lead.treatment,
+    lead.commercial,
+    lead.status,
+    lead.dealAmount,
+    lead.reminderDate,
+    lead.nextAction,
+  ]);
 
   useEffect(() => {
     const refreshDepositLinks = () => {
@@ -139,6 +245,36 @@ export default function LeadDetails({
     setCommentDraft("");
   }
 
+  function saveLeadInfo() {
+    const form = infoFormRef.current;
+    const firstName = form.firstName.trim();
+    const lastName = form.lastName.trim();
+
+    if (!firstName || !lastName) {
+      return;
+    }
+
+    const nextForm: LeadInfoForm = {
+      ...form,
+      firstName,
+      lastName,
+      phone: form.phone.trim(),
+      email: form.email.trim(),
+      campaign: form.campaign.trim() || lead.campaign,
+      treatment: form.treatment.trim() || lead.treatment,
+      nextAction: form.nextAction.trim() || "À contacter",
+    };
+
+    if (JSON.stringify(nextForm) === JSON.stringify(leadToInfoForm(lead))) {
+      return;
+    }
+
+    setInfoForm(nextForm);
+    setInfoSaving(true);
+    onUpdateLead(lead.id, nextForm);
+    window.setTimeout(() => setInfoSaving(false), 400);
+  }
+
   function openRdvInAgenda() {
     const params = new URLSearchParams({
       newRdv: "1",
@@ -198,29 +334,9 @@ export default function LeadDetails({
     }
   }
 
-  function collapseFromUnusedSpace(event: React.MouseEvent<HTMLElement>) {
-    const target = event.target;
-
-    if (!(target instanceof HTMLElement)) {
-      return;
-    }
-
-    if (
-      target.closest(
-        "a, button, input, select, textarea, label, [role='button'], [data-fiche-keep-open='true']",
-      )
-    ) {
-      return;
-    }
-
-    event.stopPropagation();
-    onClose();
-  }
-
   return (
     <Card
-      className="h-fit cursor-pointer overflow-hidden rounded-2xl border-slate-200 py-0 shadow-sm"
-      onClick={collapseFromUnusedSpace}
+      className="h-fit overflow-visible rounded-2xl border-slate-200 py-0 shadow-sm"
     >
       <CardContent className="space-y-5 p-5">
         <header className="flex items-start justify-between gap-3">
@@ -415,14 +531,24 @@ export default function LeadDetails({
           </div>
 
           {activeTab === "comments" && (
-            <div className="space-y-4">
+            <div className="max-h-[min(70vh,44rem)] space-y-4 overflow-y-auto overscroll-y-auto pr-1 [touch-action:pan-y]">
             <div className="rounded-xl border border-slate-200 bg-white p-3">
               <textarea
                 ref={commentTextareaRef}
                 placeholder="Ajouter un commentaire..."
                 value={commentDraft}
                 onChange={(event) => setCommentDraft(event.target.value)}
-                className="min-h-24 w-full resize-none bg-transparent text-sm outline-none placeholder:text-slate-400"
+                onWheel={(event) => {
+                  const field = event.currentTarget;
+                  if (field.scrollHeight > field.clientHeight + 1) {
+                    return;
+                  }
+
+                  field
+                    .closest("[class*='overflow-y-auto']")
+                    ?.scrollBy({ top: event.deltaY });
+                }}
+                className="min-h-24 w-full resize-none overflow-y-auto bg-transparent text-sm outline-none placeholder:text-slate-400"
               />
 
               <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
@@ -467,15 +593,221 @@ export default function LeadDetails({
           )}
 
           {activeTab === "information" && (
-            <div className="space-y-3">
-            <InfoLine icon={<Phone />} label="Téléphone" value={lead.phone} />
-            <InfoLine icon={<Mail />} label="Email" value={lead.email} />
-            <InfoLine icon={<MapPin />} label="Source" value={lead.source} />
-            <InfoLine icon={<Calendar />} label="Créé" value={lead.createdAt} />
-            <InfoLine label="Soin demandé" value={lead.treatment} />
-            <InfoLine label="Commercial" value={lead.commercial} />
-            <InfoLine label="Prochaine action" value={lead.nextAction} />
-            </div>
+            <form
+              data-lead-info-form="true"
+              className="space-y-2.5"
+              onSubmit={(event) => {
+                event.preventDefault();
+                saveLeadInfo();
+              }}
+              onBlur={(event) => {
+                const next = event.relatedTarget;
+                if (next instanceof Node && event.currentTarget.contains(next)) {
+                  return;
+                }
+                saveLeadInfo();
+              }}
+            >
+              <div className="grid grid-cols-2 gap-2">
+                <InfoField
+                  label="Prénom"
+                  value={infoForm.firstName}
+                  onChange={(value) =>
+                    setInfoForm((form) => ({ ...form, firstName: value }))
+                  }
+                />
+                <InfoField
+                  label="Nom"
+                  value={infoForm.lastName}
+                  onChange={(value) =>
+                    setInfoForm((form) => ({ ...form, lastName: value }))
+                  }
+                />
+              </div>
+              <InfoField
+                icon={<Phone />}
+                label="Téléphone"
+                value={infoForm.phone}
+                onChange={(value) =>
+                  setInfoForm((form) => ({ ...form, phone: value }))
+                }
+              />
+              <InfoField
+                icon={<Mail />}
+                label="Email"
+                value={infoForm.email}
+                onChange={(value) =>
+                  setInfoForm((form) => ({ ...form, email: value }))
+                }
+              />
+              <div>
+                <InfoField
+                  icon={<Gift />}
+                  label="Date d'anniversaire"
+                  type="date"
+                  value={infoForm.birthDate}
+                  onChange={(value) =>
+                    setInfoForm((form) => ({ ...form, birthDate: value }))
+                  }
+                />
+                {infoForm.birthDate ? (
+                  <p className="mt-1 px-1 text-xs font-semibold text-rose-600">
+                    {birthdayGiftHint(infoForm.birthDate)}
+                  </p>
+                ) : (
+                  <p className="mt-1 px-1 text-xs font-medium text-slate-500">
+                    Pour le cadeau d&apos;anniversaire et le SMS du jour J
+                  </p>
+                )}
+              </div>
+              <InfoSelect
+                label="Genre"
+                value={infoForm.gender}
+                options={genderOptions}
+                onChange={(value) =>
+                  setInfoForm((form) => ({ ...form, gender: value }))
+                }
+              />
+              <InfoField
+                label="Adresse"
+                value={infoForm.address}
+                onChange={(value) =>
+                  setInfoForm((form) => ({ ...form, address: value }))
+                }
+              />
+              <div className="grid grid-cols-[7.5rem_1fr] gap-2">
+                <InfoField
+                  label="Code postal"
+                  value={infoForm.postalCode}
+                  onChange={(value) =>
+                    setInfoForm((form) => ({ ...form, postalCode: value }))
+                  }
+                />
+                <InfoField
+                  label="Ville"
+                  value={infoForm.city}
+                  onChange={(value) =>
+                    setInfoForm((form) => ({ ...form, city: value }))
+                  }
+                />
+              </div>
+              <InfoSelect
+                icon={<MapPin />}
+                label="Source"
+                value={infoForm.source}
+                options={Array.from(
+                  new Set([
+                    ...leadSources,
+                    ...getSourceNames(readCenterSettings()),
+                    infoForm.source,
+                  ]),
+                )}
+                onChange={(value) =>
+                  setInfoForm((form) => ({
+                    ...form,
+                    source: value as Lead["source"],
+                  }))
+                }
+              />
+              <InfoField
+                label="Campagne"
+                value={infoForm.campaign}
+                onChange={(value) =>
+                  setInfoForm((form) => ({ ...form, campaign: value }))
+                }
+              />
+              <InfoField
+                label="Soin demandé"
+                value={infoForm.treatment}
+                list="lead-treatment-options"
+                onChange={(value) =>
+                  setInfoForm((form) => ({ ...form, treatment: value }))
+                }
+              />
+              <datalist id="lead-treatment-options">
+                {getCenterServices(readCenterSettings()).map((service) => (
+                  <option key={service.id} value={service.name} />
+                ))}
+              </datalist>
+              <InfoSelect
+                label="Commercial"
+                value={infoForm.commercial}
+                options={
+                  commercialOptions.includes(infoForm.commercial)
+                    ? commercialOptions
+                    : [infoForm.commercial, ...commercialOptions]
+                }
+                onChange={(value) =>
+                  setInfoForm((form) => ({ ...form, commercial: value }))
+                }
+              />
+              <label className="block rounded-xl bg-slate-50 px-3 py-2.5">
+                <span className="mb-1.5 block text-xs font-medium text-slate-500">
+                  Statut
+                </span>
+                <select
+                  value={infoForm.status}
+                  onChange={(event) =>
+                    setInfoForm((form) => ({
+                      ...form,
+                      status: event.target.value as LeadStatus,
+                    }))
+                  }
+                  className={`h-8 w-full rounded-full border-0 px-3 text-xs font-semibold outline-none ring-1 ${leadStatusClassName(infoForm.status)}`}
+                >
+                  {leadStatusSelectOptions(infoForm.status).map((status) => (
+                    <option key={status} value={status}>
+                      {status}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <div className="grid grid-cols-2 gap-2">
+                <InfoField
+                  label="Montant (€)"
+                  value={infoForm.dealAmount}
+                  type="number"
+                  onChange={(value) =>
+                    setInfoForm((form) => ({ ...form, dealAmount: value }))
+                  }
+                />
+                <InfoField
+                  icon={<Calendar />}
+                  label="Rappel"
+                  value={infoForm.reminderDate}
+                  type="date"
+                  onChange={(value) =>
+                    setInfoForm((form) => ({ ...form, reminderDate: value }))
+                  }
+                />
+              </div>
+              <InfoField
+                label="Prochaine action"
+                value={infoForm.nextAction}
+                onChange={(value) =>
+                  setInfoForm((form) => ({ ...form, nextAction: value }))
+                }
+              />
+              <div className="flex items-center justify-between gap-3 rounded-xl bg-slate-50 px-3 py-2.5">
+                <span className="flex items-center gap-2 text-xs font-medium text-slate-500">
+                  <span className="[&_svg]:h-4 [&_svg]:w-4">
+                    <Calendar />
+                  </span>
+                  Créé
+                </span>
+                <span className="text-right text-sm font-semibold text-slate-800">
+                  {lead.createdAt}
+                </span>
+              </div>
+              <Button
+                type="button"
+                className="w-full"
+                disabled={infoSaving}
+                onClick={saveLeadInfo}
+              >
+                {infoSaving ? "Enregistrement..." : "Enregistrer les infos"}
+              </Button>
+            </form>
           )}
 
           {activeTab === "history" && (
@@ -577,25 +909,108 @@ function LeadTabButton({
   );
 }
 
-function InfoLine({
+function birthdayGiftHint(isoDate: string) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(isoDate)) {
+    return "Pour le cadeau d'anniversaire";
+  }
+
+  const [, monthText, dayText] = isoDate.split("-");
+  const month = Number(monthText);
+  const day = Number(dayText);
+  const now = new Date();
+  const todayMonth = now.getMonth() + 1;
+  const todayDay = now.getDate();
+  const label = `${String(day).padStart(2, "0")}/${String(month).padStart(2, "0")}`;
+
+  if (month === todayMonth && day === todayDay) {
+    return `Cadeau d'anniversaire aujourd'hui — ${label}`;
+  }
+
+  const startToday = new Date(now.getFullYear(), todayMonth - 1, todayDay);
+  let nextBirthday = new Date(now.getFullYear(), month - 1, day);
+
+  if (nextBirthday < startToday) {
+    nextBirthday = new Date(now.getFullYear() + 1, month - 1, day);
+  }
+
+  const daysUntil = Math.round(
+    (nextBirthday.getTime() - startToday.getTime()) / 86_400_000,
+  );
+
+  if (daysUntil > 0 && daysUntil <= 7) {
+    return `Préparer le cadeau — dans ${daysUntil} jour${daysUntil > 1 ? "s" : ""}`;
+  }
+
+  if (month === todayMonth) {
+    return `Anniversaire ce mois-ci, le ${label}`;
+  }
+
+  return `Anniversaire le ${label} — pour le cadeau`;
+}
+
+function InfoField({
   icon,
   label,
   value,
+  type = "text",
+  list,
+  onChange,
 }: {
   icon?: React.ReactNode;
   label: string;
   value: string;
+  type?: string;
+  list?: string;
+  onChange: (value: string) => void;
 }) {
   return (
-    <div className="flex items-center justify-between gap-4 rounded-xl bg-slate-50 px-3 py-2.5">
-      <span className="flex items-center gap-2 text-xs font-medium text-slate-500">
-        {icon && <span className="[&_svg]:h-4 [&_svg]:w-4">{icon}</span>}
+    <label className="block rounded-xl bg-slate-50 px-3 py-2.5">
+      <span className="mb-1.5 flex items-center gap-2 text-xs font-medium text-slate-500">
+        {icon ? <span className="[&_svg]:h-4 [&_svg]:w-4">{icon}</span> : null}
         {label}
       </span>
-      <span className="text-right text-sm font-semibold text-slate-800">
-        {value}
+      <input
+        type={type}
+        list={list}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className="h-8 w-full rounded-lg border border-slate-200 bg-white px-2.5 text-sm font-semibold text-slate-800 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+      />
+    </label>
+  );
+}
+
+function InfoSelect({
+  icon,
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  icon?: React.ReactNode;
+  label: string;
+  value: string;
+  options: string[];
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label className="block rounded-xl bg-slate-50 px-3 py-2.5">
+      <span className="mb-1.5 flex items-center gap-2 text-xs font-medium text-slate-500">
+        {icon ? <span className="[&_svg]:h-4 [&_svg]:w-4">{icon}</span> : null}
+        {label}
       </span>
-    </div>
+      <select
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className="h-8 w-full rounded-lg border border-slate-200 bg-white px-2.5 text-sm font-semibold text-slate-800 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+      >
+        {options.map((option) => (
+          <option key={option} value={option}>
+            {option}
+          </option>
+        ))}
+      </select>
+    </label>
   );
 }
 

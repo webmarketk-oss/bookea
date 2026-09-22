@@ -3,9 +3,12 @@
 import { useEffect, useState } from "react";
 
 import Sidebar from "@/components/layout/sidebar";
+import { useSidebarSlide } from "@/components/layout/use-sidebar-slide";
 
 export function DashboardShell({ children }: { children: React.ReactNode }) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const { sidebarRef, width, isDragging, visuallyCollapsed, didDragRef } =
+    useSidebarSlide(sidebarCollapsed, setSidebarCollapsed);
 
   useEffect(() => {
     void fetch("/api/sms/dispatch").catch(() => null);
@@ -46,14 +49,23 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
   return (
     <>
       <Sidebar
-        collapsed={sidebarCollapsed}
+        collapsed={visuallyCollapsed}
+        isDragging={isDragging}
+        width={width}
+        sidebarRef={sidebarRef}
+        didDragRef={didDragRef}
         onCollapsedChange={setSidebarCollapsed}
+      />
+      <div
+        aria-hidden
+        className={`hidden shrink-0 lg:block ${
+          isDragging ? "" : "transition-[width] duration-200"
+        }`}
+        style={{ width }}
       />
 
       <main
-        className={`relative z-0 min-w-0 flex-1 p-0 lg:py-3 lg:pr-3 ${
-          sidebarCollapsed ? "lg:pl-[5.5rem]" : "lg:pl-[18.5rem]"
-        }`}
+        className="relative z-0 min-w-0 flex-1 p-0 lg:py-3 lg:pr-3 lg:pl-3"
         onClick={collapseSidebarFromContent}
       >
         {children}

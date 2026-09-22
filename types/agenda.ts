@@ -36,6 +36,7 @@ export interface Cabin {
 
 export interface Appointment {
   id: string;
+  clientId?: string;
   personName: string;
   phone: string;
   email?: string;
@@ -49,4 +50,5 @@ export interface Appointment {
   source: AppointmentSource;
   kind?: AppointmentKind;
   notes?: string;
+  birthDate?: string;
 }

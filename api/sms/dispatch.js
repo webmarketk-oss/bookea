@@ -1,8 +1,13 @@
 const {
+  birthdayYear,
   createServiceClient,
   defaultSender,
+  getBirthdayTemplate,
+  isBirthdayToday,
   isCancelledStatus,
   mergeCenterSmsSettings,
+  nextBirthdaySendAt,
+  normalizePhone,
   parseCenterSmsSettings,
   personalize,
   sendBrevoSms,
@@ -93,14 +98,65 @@ module.exports = async function handler(req, res) {
 
     for (const center of centers ?? []) {
       const sms = parseCenterSmsSettings(center.settings);
-      if (!sms.jobs.some((job) => job?.status === "pending")) {
+      const hasPending = sms.jobs.some((job) => job?.status === "pending");
+      const scanBirthdays = sms.birthdaySmsEnabled !== false;
+
+      if (!hasPending && !scanBirthdays) {
         continue;
       }
 
       const nextJobs = [];
 
       for (const job of sms.jobs) {
-        if (job?.status !== "pending" || job?.kind !== "reminder_48h" || !isDue(job.sendAt)) {
+        if (job?.status !== "pending" || !isDue(job.sendAt)) {
+          nextJobs.push(job);
+          continue;
+        }
+
+        if (job?.kind === "birthday") {
+          if (!scanBirthdays) {
+            nextJobs.push(job);
+            continue;
+          }
+
+          try {
+            await sendBrevoSms({
+              sender: defaultSender(),
+              recipient: job.phone,
+              content: personalize(job.message, job.vars || {}),
+              type: "transactional",
+            });
+            nextJobs.push({
+              ...job,
+              status: "sent",
+              sentAt: new Date().toISOString(),
+              year: job.year || birthdayYear(),
+            });
+            const nextSendAt = nextBirthdaySendAt(job.vars?.birthDate || job.birthDate);
+            if (nextSendAt) {
+              nextJobs.push({
+                ...job,
+                id: crypto.randomUUID(),
+                status: "pending",
+                year: Number(nextSendAt.slice(0, 4)),
+                sendAt: nextSendAt,
+                createdAt: new Date().toISOString(),
+              });
+            }
+            sent += 1;
+          } catch (sendError) {
+            nextJobs.push({
+              ...job,
+              status: "failed",
+              error: sendError instanceof Error ? sendError.message : "send_failed",
+              failedAt: new Date().toISOString(),
+            });
+            failed += 1;
+          }
+          continue;
+        }
+
+        if (job?.kind !== "reminder_48h") {
           nextJobs.push(job);
           continue;
         }
@@ -157,7 +213,127 @@ module.exports = async function handler(req, res) {
         }
       }
 
-      const prunedJobs = nextJobs
+      if (scanBirthdays) {
+        const { data: birthdayClients, error: birthdayError } = await supabase
+          .from("clients")
+          .select("id,first_name,last_name,phone,birthdate")
+          .eq("center_id", center.id)
+          .is("merged_into_client_id", null)
+          .not("birthdate", "is", null);
+
+        if (birthdayError) {
+          throw new Error(birthdayError.message);
+        }
+
+        const template = getBirthdayTemplate(sms);
+        const year = birthdayYear();
+
+        for (const client of birthdayClients ?? []) {
+          const phone = normalizePhone(client.phone);
+
+          if (!phone || !isBirthdayToday(client.birthdate)) {
+            continue;
+          }
+
+          const hasJobThisYear = nextJobs.some(
+            (job) =>
+              job?.kind === "birthday" &&
+              job?.year === year &&
+              ((job.clientId && job.clientId === client.id) ||
+                normalizePhone(job.phone) === phone),
+          );
+
+          if (hasJobThisYear) {
+            continue;
+          }
+
+          const vars = {
+            firstName: String(client.first_name || "vous").trim(),
+            lastName: String(client.last_name || "").trim(),
+            centerName: String(center.name || "").trim(),
+            phone,
+            birthDate: String(client.birthdate || "").slice(0, 10),
+          };
+          const sendAt = nextBirthdaySendAt(client.birthdate);
+          const sendNow = !sendAt || Number(sendAt.slice(0, 4)) !== year;
+
+          if (!sendNow) {
+            nextJobs.push({
+              id: crypto.randomUUID(),
+              clientId: client.id,
+              centerId: center.id,
+              kind: "birthday",
+              status: "pending",
+              year,
+              sendAt,
+              phone,
+              message: template.body,
+              vars,
+              createdAt: new Date().toISOString(),
+            });
+            continue;
+          }
+
+          try {
+            await sendBrevoSms({
+              sender: defaultSender(),
+              recipient: phone,
+              content: personalize(template.body, vars),
+              type: "transactional",
+            });
+            nextJobs.push({
+              id: crypto.randomUUID(),
+              clientId: client.id,
+              centerId: center.id,
+              kind: "birthday",
+              status: "sent",
+              year,
+              sendAt: new Date().toISOString(),
+              sentAt: new Date().toISOString(),
+              phone,
+              message: template.body,
+              vars,
+              createdAt: new Date().toISOString(),
+            });
+            if (sendAt) {
+              nextJobs.push({
+                id: crypto.randomUUID(),
+                clientId: client.id,
+                centerId: center.id,
+                kind: "birthday",
+                status: "pending",
+                year: Number(sendAt.slice(0, 4)),
+                sendAt,
+                phone,
+                message: template.body,
+                vars,
+                createdAt: new Date().toISOString(),
+              });
+            }
+            sent += 1;
+          } catch (sendError) {
+            nextJobs.push({
+              id: crypto.randomUUID(),
+              clientId: client.id,
+              centerId: center.id,
+              kind: "birthday",
+              status: "failed",
+              year,
+              error: sendError instanceof Error ? sendError.message : "send_failed",
+              failedAt: new Date().toISOString(),
+              phone,
+              message: template.body,
+              vars,
+              createdAt: new Date().toISOString(),
+            });
+            failed += 1;
+          }
+        }
+      }
+
+      const birthdayJobs = nextJobs.filter((job) => job?.kind === "birthday");
+      const otherJobs = nextJobs
+        .filter((job) => job?.kind !== "birthday")
         .filter((job) => {
           if (job.status === "pending") {
             return true;
@@ -171,11 +347,25 @@ module.exports = async function handler(req, res) {
           return Date.now() - new Date(stamp).getTime() < 14 * 24 * 60 * 60 * 1000;
         })
         .slice(-80);
+      const keptBirthdayJobs = birthdayJobs.filter((job) => {
+        if (job.status === "pending") {
+          return true;
+        }
+
+        const stamp = job.sentAt || job.cancelledAt || job.failedAt || job.createdAt;
+        if (!stamp) {
+          return false;
+        }
+
+        return Date.now() - new Date(stamp).getTime() < 400 * 24 * 60 * 60 * 1000;
+      });
 
       await supabase
         .from("centers")
         .update({
-          settings: mergeCenterSmsSettings(center.settings, { jobs: prunedJobs }),
+          settings: mergeCenterSmsSettings(center.settings, {
+            jobs: [...otherJobs, ...keptBirthdayJobs],
+          }),
         })
         .eq("id", center.id);
     }

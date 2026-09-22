@@ -350,9 +350,59 @@ export function mergeCenterSettings(nextSettings: StoredCenterSettings) {
 }
 
 export function getServiceNames(settings: StoredCenterSettings | null) {
-  return (settings?.services ?? defaultCenterServices)
-    .filter((service) => service.visible)
-    .map((service) => service.name);
+  return getCenterServices(settings).map((service) => service.name);
+}
+
+export function getCenterServices(settings?: StoredCenterSettings | null) {
+  const stored = settings === undefined ? readCenterSettings() : settings;
+
+  return (stored?.services ?? defaultCenterServices).filter(
+    (service) => service.visible !== false
+  );
+}
+
+export function addCenterService(input: {
+  duration?: number;
+  name: string;
+}) {
+  const name = input.name.trim();
+  const duration = input.duration && input.duration > 0 ? input.duration : 60;
+  const existing = readCenterSettings()?.services ?? defaultCenterServices;
+  const already = existing.find(
+    (service) => service.name.trim().toLowerCase() === name.toLowerCase()
+  );
+
+  if (already) {
+    if (already.visible === false) {
+      const nextServices = existing.map((service) =>
+        service.id === already.id ? { ...service, visible: true } : service
+      );
+      mergeCenterSettings({ services: nextServices });
+      return { ...already, visible: true };
+    }
+
+    return already;
+  }
+
+  const nextService: CenterServiceSetting = {
+    id: Date.now(),
+    name,
+    category: "Soin",
+    color: "#2563eb",
+    price: 0,
+    vatRate: 20,
+    duration,
+    depositEnabled: false,
+    depositAmount: 0,
+    visible: true,
+    topListed: false,
+    cabins: "Toutes",
+    practitioners: "Toutes",
+  };
+
+  mergeCenterSettings({ services: [nextService, ...existing] });
+
+  return nextService;
 }
 
 export function getSourceNames(settings: StoredCenterSettings | null) {

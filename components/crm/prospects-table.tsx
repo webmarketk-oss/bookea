@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import {
   Table,
   TableBody,
@@ -10,9 +10,8 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { Checkbox } from "@/components/ui/checkbox";
 import {
-  inactiveLeadStatuses,
+  isInactiveLeadStatus,
   leadStatusClassName,
   leadStatusSelectOptions,
 } from "@/lib/lead-statuses";
@@ -23,6 +22,7 @@ import { ChevronLeft, ChevronRight, Globe } from "lucide-react";
 interface ProspectsTableProps {
   leads: Lead[];
   selectedLead: Lead;
+  isLeadDetailsOpen?: boolean;
   onSelectLead: (lead: Lead) => void;
   onStatusChange: (leadId: string, status: LeadStatus) => void;
   onCommentAdd: (leadId: string, text: string) => void;
@@ -35,6 +35,7 @@ interface ProspectsTableProps {
 export default function ProspectsTable({
   leads,
   selectedLead,
+  isLeadDetailsOpen = false,
   onSelectLead,
   onStatusChange,
   onCommentAdd,
@@ -47,10 +48,8 @@ export default function ProspectsTable({
   const sortedLeads = leads
     .map((lead, index) => ({ lead, index }))
     .sort((current, next) => {
-      const currentInactive = inactiveLeadStatuses.includes(
-        current.lead.status
-      );
-      const nextInactive = inactiveLeadStatuses.includes(next.lead.status);
+      const currentInactive = isInactiveLeadStatus(current.lead.status);
+      const nextInactive = isInactiveLeadStatus(next.lead.status);
       const currentReminderDue = isReminderDue(current.lead.reminderDate);
       const nextReminderDue = isReminderDue(next.lead.reminderDate);
 
@@ -70,21 +69,24 @@ export default function ProspectsTable({
         return 1;
       }
 
+      const recencyDiff = leadRecency(next.lead).localeCompare(
+        leadRecency(current.lead)
+      );
+
+      if (recencyDiff !== 0) {
+        return recencyDiff;
+      }
+
       return current.index - next.index;
     })
     .map(({ lead }) => lead);
 
   return (
-    <div className="flex min-w-0 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-      <div className="min-w-0 flex-1 overflow-x-auto [&_[data-slot=table-container]]:overflow-visible">
-      <Table className="w-max min-w-full">
+    <div className="w-full max-w-full min-w-0 overflow-x-auto overflow-y-clip rounded-2xl border border-slate-200 bg-white shadow-sm">
+      <Table className="min-w-full">
         <TableHeader>
           <TableRow>
-            <TableHead className="w-12">
-              <Checkbox />
-            </TableHead>
-
-            <TableHead>Prospect</TableHead>
+            <TableHead className="min-w-[16rem]">Prospect</TableHead>
             <TableHead>Campagne</TableHead>
             <TableHead>Source</TableHead>
             <TableHead>Date</TableHead>
@@ -92,30 +94,80 @@ export default function ProspectsTable({
             <TableHead>Commercial</TableHead>
             <TableHead>Statut</TableHead>
             <TableHead>Montant</TableHead>
+            <TableHead
+              className={cn(
+                "sticky right-0 z-20 border-l border-slate-200 bg-white shadow-[-8px_0_12px_rgba(15,23,42,0.06)]",
+                commentsOpen ? "min-w-[19rem] w-[19rem]" : "w-10 min-w-10"
+              )}
+            >
+              <div className="flex items-center justify-between gap-1">
+                {commentsOpen ? (
+                  <span className="truncate text-sm font-medium text-slate-950">
+                    Commentaire
+                  </span>
+                ) : null}
+                <button
+                  type="button"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    setCommentsOpen((open) => !open);
+                  }}
+                  className="ml-auto flex h-8 w-8 items-center justify-center rounded-lg text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-950"
+                  aria-label={
+                    commentsOpen
+                      ? "Rabattre les commentaires"
+                      : "Ouvrir les commentaires"
+                  }
+                  title={
+                    commentsOpen
+                      ? "Rabattre les commentaires"
+                      : "Ouvrir les commentaires"
+                  }
+                >
+                  {commentsOpen ? (
+                    <ChevronRight className="h-4 w-4" />
+                  ) : (
+                    <ChevronLeft className="h-4 w-4" />
+                  )}
+                </button>
+              </div>
+            </TableHead>
           </TableRow>
         </TableHeader>
 
         <TableBody>
-          {sortedLeads.map((lead) => {
+          {sortedLeads.map((lead, index) => {
+            const isInactive = isInactiveLeadStatus(lead.status);
+            const showLostHeader =
+              isInactive &&
+              (index === 0 || !isInactiveLeadStatus(sortedLeads[index - 1].status));
+            const latestComment = getLatestLeadComment(lead);
+
             return (
+            <Fragment key={lead.id}>
+            {showLostHeader ? (
+              <TableRow className="hover:bg-transparent">
+                <TableCell
+                  colSpan={9}
+                  className="h-8 bg-slate-100 py-0 text-[11px] font-black uppercase tracking-wide text-slate-500"
+                >
+                  Classés en bas
+                </TableCell>
+              </TableRow>
+            ) : null}
             <TableRow
-              key={lead.id}
               onClick={() => onSelectLead(lead)}
               className={cn(
                 "h-20 cursor-pointer transition-all hover:bg-slate-50",
-                inactiveLeadStatuses.includes(lead.status) &&
-                  "bg-red-50/50 hover:bg-red-50",
+                isInactive && "bg-slate-50 hover:bg-slate-100",
                 isReminderDue(lead.reminderDate) &&
-                  !inactiveLeadStatuses.includes(lead.status) &&
+                  !isInactive &&
                   "bg-amber-50 hover:bg-amber-50",
-                selectedLead.id === lead.id &&
+                isLeadDetailsOpen &&
+                  selectedLead.id === lead.id &&
                   "border-l-4 border-l-blue-600 bg-blue-50 hover:bg-blue-50"
               )}
             >
-              <TableCell>
-                <Checkbox />
-              </TableCell>
-
               <TableCell>
                 <div className="flex items-center gap-4">
                   <Avatar className="h-11 w-11">
@@ -219,113 +271,53 @@ export default function ProspectsTable({
                   <span className="text-sm text-slate-400">€</span>
                 </div>
               </TableCell>
+
+              <TableCell
+                className={cn(
+                  "sticky right-0 z-10 whitespace-normal border-l border-slate-200 bg-white shadow-[-8px_0_12px_rgba(15,23,42,0.06)]",
+                  isInactive && "bg-slate-50",
+                  isReminderDue(lead.reminderDate) &&
+                    !isInactive &&
+                    "bg-amber-50",
+                  selectedLead.id === lead.id && "bg-blue-50",
+                  commentsOpen ? "min-w-[19rem] w-[19rem]" : "w-10 min-w-10"
+                )}
+              >
+                {commentsOpen ? (
+                  <textarea
+                    key={latestComment?.id ?? `${lead.id}-empty-comment`}
+                    defaultValue={latestComment?.text ?? ""}
+                    placeholder="Ajouter un commentaire..."
+                    rows={2}
+                    onClick={(event) => event.stopPropagation()}
+                    onBlur={(event) => {
+                      const value = event.currentTarget.value.trim();
+
+                      if (!value && latestComment) {
+                        onCommentDelete(lead.id, latestComment.id);
+                        return;
+                      }
+
+                      if (value && value !== latestComment?.text) {
+                        onCommentAdd(lead.id, value);
+                      }
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" && !event.shiftKey) {
+                        event.preventDefault();
+                        event.currentTarget.blur();
+                      }
+                    }}
+                    className="min-h-14 min-w-0 w-full max-h-32 resize-y overflow-y-auto rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold leading-5 text-slate-800 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                  />
+                ) : null}
+              </TableCell>
             </TableRow>
+            </Fragment>
             );
           })}
         </TableBody>
       </Table>
-      </div>
-
-      <div
-        className={cn(
-          "flex shrink-0 cursor-pointer flex-col border-l border-slate-200 bg-white",
-          commentsOpen ? "w-[19rem]" : "w-10"
-        )}
-        onClick={(event) => {
-          const target = event.target;
-
-          if (!(target instanceof HTMLElement)) {
-            return;
-          }
-
-          if (target.closest("textarea, button, input, select, label")) {
-            return;
-          }
-
-          event.stopPropagation();
-          setCommentsOpen((open) => !open);
-        }}
-      >
-        <div className="flex h-10 items-center justify-between gap-1 border-b px-1.5">
-          {commentsOpen ? (
-            <span className="truncate px-1.5 text-sm font-medium text-slate-950">
-              Commentaire
-            </span>
-          ) : null}
-          <button
-            type="button"
-            onClick={(event) => {
-              event.stopPropagation();
-              setCommentsOpen((open) => !open);
-            }}
-            className="ml-auto flex h-8 w-8 items-center justify-center rounded-lg text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-950"
-            aria-label={
-              commentsOpen
-                ? "Rabattre les commentaires"
-                : "Ouvrir les commentaires"
-            }
-            title={
-              commentsOpen
-                ? "Rabattre les commentaires"
-                : "Ouvrir les commentaires"
-            }
-          >
-            {commentsOpen ? (
-              <ChevronRight className="h-4 w-4" />
-            ) : (
-              <ChevronLeft className="h-4 w-4" />
-            )}
-          </button>
-        </div>
-        {commentsOpen
-          ? sortedLeads.map((lead) => {
-          const latestComment = lead.activityLog.find(
-            (activity) => activity.type === "comment"
-          );
-
-          return (
-            <div
-              key={`${lead.id}-comment`}
-              className={cn(
-                "flex h-20 items-center border-b border-slate-200 px-2",
-                inactiveLeadStatuses.includes(lead.status) && "bg-red-50/50",
-                isReminderDue(lead.reminderDate) &&
-                  !inactiveLeadStatuses.includes(lead.status) &&
-                  "bg-amber-50",
-                selectedLead.id === lead.id && "bg-blue-50"
-              )}
-            >
-              <textarea
-                key={latestComment?.id ?? `${lead.id}-empty-comment`}
-                defaultValue={latestComment?.text ?? ""}
-                placeholder="Ajouter un commentaire..."
-                rows={2}
-                onClick={(event) => event.stopPropagation()}
-                onBlur={(event) => {
-                  const value = event.currentTarget.value.trim();
-
-                  if (!value && latestComment) {
-                    onCommentDelete(lead.id, latestComment.id);
-                    return;
-                  }
-
-                  if (value && value !== latestComment?.text) {
-                    onCommentAdd(lead.id, value);
-                  }
-                }}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter" && !event.shiftKey) {
-                    event.preventDefault();
-                    event.currentTarget.blur();
-                  }
-                }}
-                className="line-clamp-2 min-h-14 w-full resize-none rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold leading-5 text-slate-800 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
-              />
-            </div>
-          );
-        })
-          : null}
-      </div>
     </div>
   );
 }
@@ -382,6 +374,38 @@ function SourceIcon({ source }: { source: Lead["source"] }) {
   }
 
   return <Globe className="h-4 w-4 text-slate-500" />;
+}
+
+function getLatestLeadComment(lead: Lead) {
+  const fromLog = lead.activityLog.find(
+    (activity) => activity.type === "comment" && activity.text.trim()
+  );
+
+  if (fromLog) {
+    return fromLog;
+  }
+
+  const latestComment = lead.latestComment?.trim();
+
+  if (!latestComment) {
+    return undefined;
+  }
+
+  return {
+    id: `${lead.id}-latest-comment`,
+    author: "Équipe",
+    date: lead.createdAt,
+    text: latestComment,
+    type: "comment" as const,
+  };
+}
+
+function leadRecency(lead: Lead) {
+  if (lead.status === "Nouveau") {
+    return lead.createdDate;
+  }
+
+  return lead.lastActivityAt || lead.updatedDate || lead.createdDate;
 }
 
 function isReminderDue(date?: string) {

@@ -60,7 +60,7 @@ export const leadStatusClasses: Record<LeadStatus, string> = {
   Nouveau: "bg-blue-100 text-blue-700 ring-blue-200",
   "Apl en abs": "bg-cyan-100 text-cyan-800 ring-cyan-200",
   "Pas intéressé": "bg-red-700 text-white ring-red-700",
-  "Reviendra vers nous": "bg-red-100 text-red-700 ring-red-200",
+  "Reviendra vers nous": "bg-indigo-100 text-indigo-700 ring-indigo-200",
   "En réflexion": "bg-yellow-100 text-yellow-800 ring-yellow-200",
   "À relancer": "bg-orange-100 text-orange-700 ring-orange-200",
   "RDV pris": "bg-green-100 text-green-700 ring-green-200",
@@ -116,6 +116,10 @@ export function normalizeLeadStatus(value?: string | null): LeadStatus {
   }
 
   return "Nouveau";
+}
+
+export function isInactiveLeadStatus(status: string) {
+  return inactiveLeadStatuses.includes(normalizeLeadStatus(status));
 }
 
 export function leadStatusClassName(status: string) {

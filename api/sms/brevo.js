@@ -58,7 +58,24 @@ function defaultSmsTemplates() {
       name: "Accueil prospect",
       body: "Bonjour {{prenom}}, merci pour votre demande {{soin}}. L'équipe de {{centre}} vous contacte rapidement.",
     },
+    {
+      id: "anniversaire",
+      name: "Anniversaire",
+      body: "Bonjour {{prenom}}, toute l'équipe de {{centre}} vous souhaite un très bel anniversaire 🎂. Une petite attention vous attend au centre. À très vite !",
+    },
   ];
+}
+
+function withDefaultTemplates(templates) {
+  const byId = new Map(templates.map((template) => [template.id, template]));
+
+  for (const fallback of defaultSmsTemplates()) {
+    if (!byId.has(fallback.id)) {
+      byId.set(fallback.id, fallback);
+    }
+  }
+
+  return [...byId.values()];
 }
 
 function parseCenterSmsSettings(settings) {
@@ -66,15 +83,17 @@ function parseCenterSmsSettings(settings) {
     settings && typeof settings === "object" && settings.sms && typeof settings.sms === "object"
       ? settings.sms
       : {};
-  const templates = Array.isArray(sms.templates) && sms.templates.length > 0
-    ? sms.templates
-        .map((template) => ({
-          id: String(template?.id || "").trim(),
-          name: String(template?.name || "").trim() || "Modèle SMS",
-          body: String(template?.body || "").trim(),
-        }))
-        .filter((template) => template.id && template.body)
-    : defaultSmsTemplates();
+  const templates = withDefaultTemplates(
+    Array.isArray(sms.templates) && sms.templates.length > 0
+      ? sms.templates
+          .map((template) => ({
+            id: String(template?.id || "").trim(),
+            name: String(template?.name || "").trim() || "Modèle SMS",
+            body: String(template?.body || "").trim(),
+          }))
+          .filter((template) => template.id && template.body)
+      : defaultSmsTemplates(),
+  );
 
   return {
     templates,
@@ -89,10 +108,109 @@ function parseCenterSmsSettings(settings) {
       String(sms.leadWelcomeTemplateId || "").trim() ||
       templates.find((template) => template.id === "accueil-prospect")?.id ||
       templates[0]?.id,
+    birthdayTemplateId:
+      String(sms.birthdayTemplateId || "").trim() ||
+      templates.find((template) => template.id === "anniversaire")?.id ||
+      templates[0]?.id,
+    birthdaySmsEnabled: sms.birthdaySmsEnabled !== false,
     jobs: Array.isArray(sms.jobs) ? sms.jobs : [],
     inbox: Array.isArray(sms.inbox) ? sms.inbox : [],
     history: sms.history && typeof sms.history === "object" ? sms.history : null,
   };
+}
+
+function getBirthdayTemplate(sms) {
+  return (
+    sms.templates.find((template) => template.id === sms.birthdayTemplateId) ||
+    sms.templates.find((template) => template.id === "anniversaire") ||
+    defaultSmsTemplates().find((template) => template.id === "anniversaire")
+  );
+}
+
+function isLeapYear(year) {
+  return (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0;
+}
+
+function toIsoBirthDate(value) {
+  const trimmed = String(value || "").trim();
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+    return trimmed;
+  }
+
+  const slash = trimmed.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+
+  if (!slash) {
+    return "";
+  }
+
+  return `${slash[3]}-${slash[2].padStart(2, "0")}-${slash[1].padStart(2, "0")}`;
+}
+
+function birthMonthDay(value) {
+  const iso = toIsoBirthDate(value);
+  return iso ? iso.slice(5) : "";
+}
+
+function parisYmd(date = new Date()) {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Europe/Paris",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(date);
+}
+
+function isBirthdayToday(birthDate) {
+  const monthDay = birthMonthDay(birthDate);
+
+  if (!monthDay) {
+    return false;
+  }
+
+  const today = parisYmd();
+  const todayMonthDay = today.slice(5);
+
+  if (monthDay === todayMonthDay) {
+    return true;
+  }
+
+  const year = Number(today.slice(0, 4));
+  return monthDay === "02-29" && todayMonthDay === "02-28" && !isLeapYear(year);
+}
+
+function birthdayYear(date = new Date()) {
+  return Number(parisYmd(date).slice(0, 4));
+}
+
+function nextBirthdaySendAt(birthDate) {
+  const monthDay = birthMonthDay(birthDate);
+
+  if (!monthDay) {
+    return null;
+  }
+
+  const month = Number(monthDay.slice(0, 2));
+  const day = Number(monthDay.slice(3, 5));
+  let year = birthdayYear();
+
+  function isoFor(targetYear) {
+    let targetDay = day;
+
+    if (month === 2 && day === 29 && !isLeapYear(targetYear)) {
+      targetDay = 28;
+    }
+
+    return `${targetYear}-${String(month).padStart(2, "0")}-${String(targetDay).padStart(2, "0")}T09:00:00Z`;
+  }
+
+  let sendAt = isoFor(year);
+
+  if (new Date(sendAt).getTime() <= Date.now()) {
+    sendAt = isoFor(year + 1);
+  }
+
+  return sendAt;
 }
 
 function mergeCenterSmsSettings(currentSettings, smsPatch) {
@@ -297,16 +415,21 @@ async function storeIncomingSms(supabase, incoming) {
 }
 
 module.exports = {
+  birthdayYear,
   createServiceClient,
   defaultSender,
   defaultSmsTemplates,
   findClientByPhone,
+  getBirthdayTemplate,
+  isBirthdayToday,
   isCancelledStatus,
   mergeCenterSmsSettings,
+  nextBirthdaySendAt,
   normalizePhone,
   parseCenterSmsSettings,
   personalize,
   reminderSendAt,
   sendBrevoSms,
   storeIncomingSms,
+  toIsoBirthDate,
 };

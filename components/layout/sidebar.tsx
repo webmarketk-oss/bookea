@@ -18,6 +18,7 @@ import {
   UserRound,
 } from "lucide-react";
 import { usePathname, useRouter } from "next/navigation";
+import type { MutableRefObject, Ref } from "react";
 import { BookeaLogo } from "@/components/bookea-logo";
 import { createClient } from "@/lib/supabase";
 import { CenterSwitcher } from "./center-switcher";
@@ -26,11 +27,19 @@ import NavGroup from "./nav-group";
 
 type SidebarProps = {
   collapsed: boolean;
+  isDragging?: boolean;
+  width?: number;
+  sidebarRef?: Ref<HTMLElement | null>;
+  didDragRef?: MutableRefObject<boolean>;
   onCollapsedChange: (collapsed: boolean) => void;
 };
 
 export default function Sidebar({
   collapsed,
+  isDragging = false,
+  width,
+  sidebarRef,
+  didDragRef,
   onCollapsedChange,
 }: SidebarProps) {
   const pathname = usePathname();
@@ -53,7 +62,7 @@ export default function Sidebar({
   }
 
   function openSidebarFromColumn(event: React.MouseEvent<HTMLElement>) {
-    if (!collapsed) {
+    if (!collapsed || didDragRef?.current) {
       return;
     }
 
@@ -72,10 +81,14 @@ export default function Sidebar({
 
   return (
     <aside
-      className={`fixed inset-y-0 left-0 z-40 hidden flex-col overflow-hidden border-r border-white/10 bg-[#11152e] text-white transition-all duration-200 lg:flex ${
-        collapsed ? "w-20 cursor-pointer p-2" : "w-72 p-4"
+      ref={sidebarRef}
+      className={`fixed inset-y-0 left-0 z-40 hidden flex-col overflow-hidden border-r border-white/10 bg-[#11152e] text-white overscroll-x-none lg:flex ${
+        isDragging ? "cursor-grabbing select-none" : "cursor-grab transition-[width,padding] duration-200"
+      } ${collapsed ? "p-2" : "p-4"} ${
+        typeof width === "number" ? "" : collapsed ? "w-20" : "w-72"
       }`}
-      title={collapsed ? "Ouvrir le menu" : undefined}
+      style={typeof width === "number" ? { width } : undefined}
+      title={collapsed ? "Glisser vers la droite pour ouvrir le menu" : "Glisser vers la gauche pour fermer le menu"}
       onClick={openSidebarFromColumn}
     >
       <div className={`mb-8 flex items-center ${collapsed ? "flex-col gap-3" : "justify-between gap-3"}`}>
