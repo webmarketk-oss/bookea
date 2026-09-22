@@ -12,6 +12,7 @@ export type SendSmsInput = SmsTemplateVars & {
   message: string;
   type?: "transactional" | "marketing";
   centerId?: string;
+  appointmentId?: string;
 };
 
 export type SendSmsResult = {
@@ -57,6 +58,7 @@ export async function sendBookeaSms(input: SendSmsInput): Promise<SendSmsResult>
       type: input.type || "transactional",
       centerId,
       centerName: input.centerName || "",
+      appointmentId: input.appointmentId || "",
       recipients: [
         {
           phone,

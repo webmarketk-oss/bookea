@@ -15,6 +15,7 @@ const {
   readSmsQuota,
   sendBrevoSms,
   toIsoBirthDate,
+  withConfirmationLink,
 } = require("./brevo");
 
 function parsePayload(body) {
@@ -502,10 +503,11 @@ module.exports = async function handler(req, res) {
         });
       }
 
+      const smsVars = await withConfirmationLink(vars, appointmentId);
       await sendBrevoSms({
         sender: defaultSender(),
         recipient: vars.phone,
-        content: personalize(message, vars),
+        content: personalize(message, smsVars),
         type: "transactional",
       });
       const nextQuota = await consumeCenterSmsQuota(
@@ -545,7 +547,10 @@ module.exports = async function handler(req, res) {
         sendAt,
         phone: vars.phone,
         message,
-        vars,
+        vars: {
+          ...vars,
+          appointmentId,
+        },
         createdAt: new Date().toISOString(),
       },
     ];

@@ -13,6 +13,7 @@ const {
   readSmsQuota,
   sendBrevoSms,
   storeIncomingSms,
+  withConfirmationLink,
 } = require("./brevo");
 
 function isAuthorized(req) {
@@ -204,10 +205,14 @@ module.exports = async function handler(req, res) {
         }
 
         try {
+          const reminderVars = await withConfirmationLink(
+            job.vars || {},
+            job.appointmentId,
+          );
           await sendBrevoSms({
             sender: defaultSender(),
             recipient: job.phone,
-            content: personalize(job.message, job.vars || {}),
+            content: personalize(job.message, reminderVars),
             type: "transactional",
           });
           nextJobs.push({

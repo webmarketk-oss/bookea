@@ -369,6 +369,9 @@ export function fillSmsTemplate(template: string, vars: SmsTemplateVars) {
   let output = template;
 
   for (const [key, value] of Object.entries(replacements)) {
+    if (!value && (key === "lien_confirmation" || key === "lien")) {
+      continue;
+    }
     output = output.replaceAll(`{{${key}}}`, value);
   }
 

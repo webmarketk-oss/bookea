@@ -36,6 +36,9 @@ function personalize(message, vars = {}) {
   let output = String(message || "");
 
   for (const [key, value] of Object.entries(replacements)) {
+    if (!value && (key === "lien_confirmation" || key === "lien")) {
+      continue;
+    }
     output = output.replaceAll(`{{${key}}}`, value);
   }
 
@@ -48,6 +51,36 @@ function personalize(message, vars = {}) {
   }
 
   return toDeliverableSmsContent(output);
+}
+
+async function withConfirmationLink(vars = {}, appointmentId) {
+  const current = String(
+    vars.confirmationLink || vars.lien_confirmation || vars.lien || "",
+  ).trim();
+
+  if (current) {
+    return {
+      ...vars,
+      confirmationLink: current.replace(/^https?:\/\//i, ""),
+    };
+  }
+
+  const id = String(appointmentId || vars.appointmentId || "").trim();
+
+  if (!id) {
+    return vars;
+  }
+
+  try {
+    const { issueAppointmentConfirmationUrl } = require("../appointments/issue");
+    const url = await issueAppointmentConfirmationUrl(id);
+    return {
+      ...vars,
+      confirmationLink: String(url || "").replace(/^https?:\/\//i, ""),
+    };
+  } catch {
+    return vars;
+  }
 }
 
 function toDeliverableSmsContent(content) {
@@ -685,4 +718,5 @@ module.exports = {
   sendBrevoSms,
   storeIncomingSms,
   toIsoBirthDate,
+  withConfirmationLink,
 };

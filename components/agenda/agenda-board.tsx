@@ -720,6 +720,7 @@ export default function AgendaBoard() {
         time: savedAppointment.start,
         treatment: savedAppointment.treatment,
         confirmationLink: "",
+        appointmentId: savedAppointment.id,
       };
       const notices = ["RDV enregistré."];
 

@@ -9,6 +9,7 @@ const {
   personalize,
   readSmsQuota,
   sendBrevoSms,
+  withConfirmationLink,
 } = require("./brevo");
 
 function firstValue(value) {
@@ -86,6 +87,7 @@ module.exports = async function handler(req, res) {
   try {
     const payload = parsePayload(req.body);
     const sender = defaultSender();
+    const appointmentId = String(firstValue(payload.appointmentId) || "").trim();
     const message = String(firstValue(payload.message) || firstValue(payload.content) || "").trim();
     const type = String(firstValue(payload.type) || "transactional");
     const centerName = String(firstValue(payload.centerName) || firstValue(payload.centre) || "");
@@ -138,6 +140,7 @@ module.exports = async function handler(req, res) {
           confirmationLink: String(
             item?.confirmationLink || item?.lien_confirmation || item?.lien || "",
           ).trim(),
+          appointmentId: String(item?.appointmentId || appointmentId).trim(),
         };
       })
       .filter((item) => item.phone);
@@ -189,10 +192,11 @@ module.exports = async function handler(req, res) {
 
     for (const recipient of allowedRecipients) {
       try {
+        const vars = await withConfirmationLink(recipient, appointmentId);
         const sent = await sendBrevoSms({
           sender,
           recipient: recipient.phone,
-          content: personalize(message, recipient),
+          content: personalize(message, vars),
           type,
         });
         results.push({
