@@ -320,17 +320,19 @@ export default function CRMLeadsPage() {
       return;
     }
 
+    const panel: HTMLElement = node;
+
     function lockListScroll(event: WheelEvent) {
-      const canScroll = node.scrollHeight > node.clientHeight + 1;
+      const canScroll = panel.scrollHeight > panel.clientHeight + 1;
 
       if (!canScroll) {
         event.preventDefault();
         return;
       }
 
-      const atTop = node.scrollTop <= 0 && event.deltaY < 0;
+      const atTop = panel.scrollTop <= 0 && event.deltaY < 0;
       const atBottom =
-        node.scrollTop + node.clientHeight >= node.scrollHeight - 1 &&
+        panel.scrollTop + panel.clientHeight >= panel.scrollHeight - 1 &&
         event.deltaY > 0;
 
       if (atTop || atBottom) {
@@ -338,10 +340,10 @@ export default function CRMLeadsPage() {
       }
     }
 
-    node.addEventListener("wheel", lockListScroll, { passive: false });
+    panel.addEventListener("wheel", lockListScroll, { passive: false });
 
     return () => {
-      node.removeEventListener("wheel", lockListScroll);
+      panel.removeEventListener("wheel", lockListScroll);
     };
   }, [ficheMaxHeight, ficheOffset, isLeadDetailsOpen, selectedLeadId]);
 
