@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import CRMHeader from "@/components/crm/crm-header";
 import DashboardCards from "@/components/crm/dashboard-cards";
@@ -89,10 +89,7 @@ export default function CRMLeadsPage() {
   const [quickDateFilter, setQuickDateFilter] =
     useState<QuickDateFilter>("Tous");
   const centerNameRef = useRef("");
-  const resultsRef = useRef<HTMLDivElement>(null);
   const ficheRef = useRef<HTMLElement>(null);
-  const [ficheOffset, setFicheOffset] = useState(0);
-  const [ficheMaxHeight, setFicheMaxHeight] = useState(480);
   const [filters, setFilters] = useState<ProspectFilters>({
     search: "",
     source: "Tous",
@@ -278,41 +275,6 @@ export default function CRMLeadsPage() {
     );
   });
 
-  useLayoutEffect(() => {
-    if (!isLeadDetailsOpen || !selectedLeadId) {
-      setFicheOffset(0);
-      return;
-    }
-
-    function alignFicheToProspect() {
-      const container = resultsRef.current;
-      const row = container?.querySelector(
-        `[data-lead-id="${selectedLeadId}"]`,
-      );
-
-      if (!container || !(row instanceof HTMLElement)) {
-        setFicheOffset(0);
-        setFicheMaxHeight(Math.max(320, window.innerHeight - 24));
-        return;
-      }
-
-      const containerRect = container.getBoundingClientRect();
-      const rowRect = row.getBoundingClientRect();
-
-      setFicheOffset(Math.max(0, rowRect.top - containerRect.top));
-      setFicheMaxHeight(
-        Math.max(280, window.innerHeight - rowRect.top - 16),
-      );
-    }
-
-    alignFicheToProspect();
-    window.addEventListener("resize", alignFicheToProspect);
-
-    return () => {
-      window.removeEventListener("resize", alignFicheToProspect);
-    };
-  }, [filteredLeads.length, isLeadDetailsOpen, selectedLeadId]);
-
   useEffect(() => {
     const node = ficheRef.current;
 
@@ -345,7 +307,7 @@ export default function CRMLeadsPage() {
     return () => {
       panel.removeEventListener("wheel", lockListScroll);
     };
-  }, [ficheMaxHeight, ficheOffset, isLeadDetailsOpen, selectedLeadId]);
+  }, [isLeadDetailsOpen, selectedLeadId]);
 
   async function handleStatusChange(leadId: string, status: LeadStatus) {
     const leadBeforeUpdate = leadList.find((lead) => lead.id === leadId);
@@ -908,7 +870,6 @@ export default function CRMLeadsPage() {
 
             <div
               id="crm-leads-results"
-              ref={resultsRef}
               className={
                 isLeadDetailsOpen
                   ? "grid grid-cols-[minmax(0,1fr)_24rem] items-start gap-3"
@@ -941,8 +902,7 @@ export default function CRMLeadsPage() {
               {isLeadDetailsOpen && (
               <aside
                 ref={ficheRef}
-                style={{ marginTop: ficheOffset, maxHeight: ficheMaxHeight }}
-                className="min-w-0 overflow-y-auto overscroll-contain"
+                className="sticky top-0 h-dvh min-w-0 self-start overflow-y-auto overscroll-contain"
               >
                 <LeadDetails
                   lead={selectedLead}

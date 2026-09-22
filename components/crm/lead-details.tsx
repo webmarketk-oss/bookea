@@ -336,7 +336,7 @@ export default function LeadDetails({
 
   return (
     <Card
-      className="h-fit overflow-visible rounded-2xl border-slate-200 py-0 shadow-sm"
+      className="min-h-full overflow-visible rounded-2xl border-slate-200 py-0 shadow-sm"
     >
       <CardContent className="space-y-5 p-5">
         <header className="flex items-start justify-between gap-3">
