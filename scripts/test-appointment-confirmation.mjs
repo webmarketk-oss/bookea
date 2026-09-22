@@ -5,7 +5,7 @@ const require = createRequire(import.meta.url);
 const utils = require("../api/appointments/token-utils.js");
 
 const token = utils.createConfirmationToken();
-assert.match(token, /^[A-Za-z0-9_-]{16,24}$/);
+assert.match(token, /^[A-Za-z0-9_-]{40,}$/);
 assert.equal(utils.hashConfirmationToken(token).length, 64);
 assert.notEqual(
   utils.hashConfirmationToken(token),
@@ -52,8 +52,8 @@ assert.equal(
 );
 assert.equal(utils.readConfirmationState(null), "invalid");
 assert.match(utils.confirmationUrlForToken(token), /\/r\//);
-assert.match(utils.confirmationSmsLinkForToken(token), /^www\.bookeai\.fr\/r\//);
-assert.doesNotMatch(utils.confirmationSmsLinkForToken(token), /^https?:\/\//);
+assert.match(utils.confirmationSmsLinkForToken(token), /\/r\/[A-Za-z0-9_-]{40,}/);
+assert.match(utils.confirmationSmsLinkForToken(token), /^https:\/\//);
 assert.equal(utils.formatPublicAppointmentDate("2026-09-30").includes("30"), true);
 
 console.log("appointment confirmation token utils ok");

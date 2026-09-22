@@ -30,12 +30,12 @@ export const defaultSmsTemplates: SmsTemplate[] = [
   {
     id: "confirmation-rdv",
     name: "Confirmation RDV",
-    body: "BOOKEA - Rappel : votre RDV chez {{centre}} est prévu le {{date}} à {{heure}}. Confirmez ou annulez : {{lien_confirmation}}",
+    body: "BOOKEA - Rappel : votre RDV chez {{centre}} est prévu le {{date}} à {{heure}}.\n\nConfirmez ou annulez ici : {{lien_confirmation}}",
   },
   {
     id: "rappel-48h",
     name: "Rappel 48h avant RDV",
-    body: "Bonjour {{prenom}}, rappel RDV {{soin}} le {{date}} à {{heure}} chez {{centre}}. Confirmez ou annulez : {{lien_confirmation}}",
+    body: "Bonjour {{prenom}}, rappel : votre rendez-vous {{soin}} est dans 48h, le {{date}} à {{heure}} chez {{centre}}.\nConfirmez ou annulez ici : {{lien_confirmation}}",
   },
   {
     id: "accueil-prospect",
@@ -380,12 +380,11 @@ export function fillSmsTemplate(template: string, vars: SmsTemplateVars) {
     !output.includes(confirmationLink) &&
     !/\{\{lien(?:_confirmation)?\}\}/.test(template)
   ) {
-    output = `${output}\nConfirmez ou annulez : ${confirmationLink}`;
+    output = `${output}\n\nConfirmez ou annulez ici : ${confirmationLink}`;
   }
 
   return output
     .replace(/[–—−]/g, "-")
-    .replace(/https?:\/\//gi, "")
     .replace(/\n{2,}/g, "\n")
     .replace(/[ \t]{2,}/g, " ")
     .replace(/ +\n/g, "\n")

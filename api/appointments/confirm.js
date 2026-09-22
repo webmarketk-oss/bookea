@@ -5,6 +5,7 @@ const {
   appendStatusHistory,
   formatPublicAppointmentDate,
   hashConfirmationToken,
+  parisDateOf,
   readConfirmationState,
   stateMessage,
 } = require("./token-utils");
@@ -31,11 +32,82 @@ function publicAppointmentView(row) {
 
 function jsonState(state, row) {
   return {
-    ok: state === "pending" || state === "confirmed" || state === "cancelled",
+    ok: state === "pending" || state === "confirmed" || state === "cancelled" || state === "need_phone",
     state,
     message: stateMessage(state),
     appointment: row && state !== "invalid" ? publicAppointmentView(row) : null,
   };
+}
+
+function last9Phone(value) {
+  const digits = String(value || "").replace(/[^\d]/g, "");
+  return digits.slice(-9);
+}
+
+async function loadByPhone(supabase, phone) {
+  const last9 = last9Phone(phone);
+
+  if (last9.length < 9) {
+    return null;
+  }
+
+  const { data: clients, error: clientError } = await supabase
+    .from("clients")
+    .select("id,phone")
+    .or(`phone.eq.33${last9},phone.eq.0${last9},phone.ilike.%${last9}%`)
+    .limit(12);
+
+  if (clientError) {
+    throw new Error(clientError.message);
+  }
+
+  const clientIds = (clients ?? [])
+    .filter((row) => last9Phone(row.phone) === last9)
+    .map((row) => row.id);
+
+  if (clientIds.length === 0) {
+    return null;
+  }
+
+  const today = parisDateOf(new Date());
+  const { data, error } = await supabase
+    .from("appointments")
+    .select(
+      `${APPOINTMENT_SELECT},
+      centers(name),
+      services(name)`,
+    )
+    .in("client_id", clientIds)
+    .gte("appointment_date", today)
+    .order("appointment_date", { ascending: true })
+    .order("starts_at", { ascending: true })
+    .limit(12);
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return (
+    (data ?? []).find((row) => readConfirmationState(row) !== "cancelled") ?? null
+  );
+}
+
+async function applyAppointmentUpdate(supabase, row, fields, extra) {
+  let query = supabase
+    .from("appointments")
+    .update(fields)
+    .eq("id", row.id)
+    .is("cancelled_at", null);
+
+  if (extra?.requireUnconfirmed) {
+    query = query.is("confirmed_at", null);
+  }
+
+  if (row.confirmation_token_hash) {
+    query = query.eq("confirmation_token_hash", row.confirmation_token_hash);
+  }
+
+  return query.select("id").maybeSingle();
 }
 
 async function loadByToken(supabase, token) {
@@ -122,21 +194,18 @@ async function applyAction(supabase, row, action) {
       to: "confirmed",
     });
 
-    const { data, error } = await supabase
-      .from("appointments")
-      .update({
+    const { data, error } = await applyAppointmentUpdate(
+      supabase,
+      row,
+      {
         status: "confirmed",
         confirmed_at: now,
         client_response: CLIENT_CONFIRMED,
         status_history: nextHistory,
         updated_at: now,
-      })
-      .eq("id", row.id)
-      .eq("confirmation_token_hash", row.confirmation_token_hash)
-      .is("cancelled_at", null)
-      .is("confirmed_at", null)
-      .select("id")
-      .maybeSingle();
+      },
+      { requireUnconfirmed: true },
+    );
 
     if (error) {
       throw new Error(error.message);
@@ -174,20 +243,13 @@ async function applyAction(supabase, row, action) {
       to: "cancelled",
     });
 
-    const { data, error } = await supabase
-      .from("appointments")
-      .update({
-        status: "cancelled",
-        cancelled_at: now,
-        client_response: CLIENT_CANCELLED,
-        status_history: nextHistory,
-        updated_at: now,
-      })
-      .eq("id", row.id)
-      .eq("confirmation_token_hash", row.confirmation_token_hash)
-      .is("cancelled_at", null)
-      .select("id")
-      .maybeSingle();
+    const { data, error } = await applyAppointmentUpdate(supabase, row, {
+      status: "cancelled",
+      cancelled_at: now,
+      client_response: CLIENT_CANCELLED,
+      status_history: nextHistory,
+      updated_at: now,
+    });
 
     if (error) {
       throw new Error(error.message);
@@ -227,8 +289,9 @@ module.exports = async function handler(req, res) {
   try {
     const payload = req.method === "POST" ? parsePayload(req.body) : req.query;
     const token = String(firstValue(payload?.token) || "").trim();
+    const phone = String(firstValue(payload?.phone) || "").trim();
     const action = String(firstValue(payload?.action) || "").trim();
-    const limitKey = `${req.socket?.remoteAddress || "ip"}:${hashConfirmationToken(token).slice(0, 12)}`;
+    const limitKey = `${req.socket?.remoteAddress || "ip"}:${hashConfirmationToken(token || phone).slice(0, 12)}`;
 
     if (!rateLimit(limitKey)) {
       return res.status(429).json({
@@ -239,15 +302,22 @@ module.exports = async function handler(req, res) {
       });
     }
 
-    if (!token) {
-      return res.status(400).json(jsonState("invalid"));
+    if (!token && !phone) {
+      return res.status(200).json(jsonState("need_phone"));
     }
 
     const supabase = createServiceClient();
-    const row = await loadByToken(supabase, token);
+    const row = token ? await loadByToken(supabase, token) : await loadByPhone(supabase, phone);
 
     if (!row) {
-      return res.status(404).json(jsonState("invalid"));
+      return res.status(404).json({
+        ok: false,
+        state: "invalid",
+        message: phone
+          ? "Aucun rendez-vous à venir pour ce numéro."
+          : stateMessage("invalid"),
+        appointment: null,
+      });
     }
 
     if (req.method === "GET") {

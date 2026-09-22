@@ -47,7 +47,7 @@ function personalize(message, vars = {}) {
     !output.includes(confirmationLink) &&
     !/\{\{lien(?:_confirmation)?\}\}/.test(String(message || ""))
   ) {
-    output = `${output}\nConfirmez ou annulez : ${confirmationLink}`;
+    output = `${output}\n\nConfirmez ou annulez ici : ${confirmationLink}`;
   }
 
   return toDeliverableSmsContent(output);
@@ -58,11 +58,8 @@ async function withConfirmationLink(vars = {}, appointmentId) {
     vars.confirmationLink || vars.lien_confirmation || vars.lien || "",
   ).trim();
 
-  if (current) {
-    return {
-      ...vars,
-      confirmationLink: current.replace(/^https?:\/\//i, ""),
-    };
+  if (current && /\/r\/[^/]+/.test(current)) {
+    return { ...vars, confirmationLink: current };
   }
 
   const id = String(appointmentId || vars.appointmentId || "").trim();
@@ -76,7 +73,7 @@ async function withConfirmationLink(vars = {}, appointmentId) {
     const url = await issueAppointmentConfirmationUrl(id);
     return {
       ...vars,
-      confirmationLink: String(url || "").replace(/^https?:\/\//i, ""),
+      confirmationLink: url,
     };
   } catch {
     return vars;
@@ -91,7 +88,6 @@ function toDeliverableSmsContent(content) {
     .replace(/\u00a0/g, " ")
     .replace(/\r\n?/g, "\n")
     .replace(/\n{2,}/g, "\n")
-    .replace(/https?:\/\//gi, "")
     .replace(/[ \t]{2,}/g, " ")
     .replace(/ +\n/g, "\n")
     .trim();
@@ -108,12 +104,12 @@ function defaultSmsTemplates() {
     {
       id: "confirmation-rdv",
       name: "Confirmation RDV",
-      body: "BOOKEA - Rappel : votre RDV chez {{centre}} est prévu le {{date}} à {{heure}}. Confirmez ou annulez : {{lien_confirmation}}",
+      body: "BOOKEA - Rappel : votre RDV chez {{centre}} est prévu le {{date}} à {{heure}}.\n\nConfirmez ou annulez ici : {{lien_confirmation}}",
     },
     {
       id: "rappel-48h",
       name: "Rappel 48h avant RDV",
-      body: "Bonjour {{prenom}}, rappel RDV {{soin}} le {{date}} à {{heure}} chez {{centre}}. Confirmez ou annulez : {{lien_confirmation}}",
+      body: "Bonjour {{prenom}}, rappel : votre rendez-vous {{soin}} est dans 48h, le {{date}} à {{heure}} chez {{centre}}.\nConfirmez ou annulez ici : {{lien_confirmation}}",
     },
     {
       id: "accueil-prospect",
