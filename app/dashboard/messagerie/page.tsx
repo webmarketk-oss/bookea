@@ -46,80 +46,7 @@ type Conversation = {
   messages: Message[];
 };
 
-const initialConversations: Conversation[] = [
-  {
-    id: 1,
-    name: "Marie Dubois",
-    phone: "06 12 34 56 78",
-    email: "marie@email.com",
-    status: "Client",
-    channel: "In-app",
-    lastSeen: "Il y a 4 min",
-    nextAppointment: "Demain 09:00",
-    service: "Épilation Laser",
-    unread: 2,
-    messages: [
-      {
-        id: 1,
-        author: "client",
-        text: "Bonjour, je voulais confirmer mon rendez-vous de demain matin.",
-        time: "17:42",
-      },
-      {
-        id: 2,
-        author: "seya",
-        text: "Seya recommande de confirmer le créneau et de rappeler l'acompte déjà réglé.",
-        time: "17:43",
-      },
-    ],
-  },
-  {
-    id: 2,
-    name: "Julie Martin",
-    phone: "06 22 33 44 55",
-    email: "julie@email.com",
-    status: "À confirmer",
-    channel: "Bookea public",
-    lastSeen: "Aujourd'hui",
-    nextAppointment: "Lundi 10:30",
-    service: "Cryolipolyse",
-    unread: 1,
-    messages: [
-      {
-        id: 1,
-        author: "client",
-        text: "Est-ce que je peux déplacer le rendez-vous un peu plus tard ?",
-        time: "15:18",
-      },
-    ],
-  },
-  {
-    id: 3,
-    name: "Sarah Bernard",
-    phone: "06 98 76 54 32",
-    email: "sarah@email.com",
-    status: "Prospect",
-    channel: "In-app",
-    lastSeen: "Hier",
-    nextAppointment: "Aucun RDV",
-    service: "Hydrafacial",
-    unread: 0,
-    messages: [
-      {
-        id: 1,
-        author: "centre",
-        text: "Bonjour Sarah, nous avons un créneau disponible samedi à 14h30.",
-        time: "Hier 16:00",
-      },
-      {
-        id: 2,
-        author: "client",
-        text: "Merci, je regarde et je vous confirme.",
-        time: "Hier 16:12",
-      },
-    ],
-  },
-];
+const initialConversations: Conversation[] = [];
 
 const statusStyles: Record<Conversation["status"], string> = {
   Client: "bg-emerald-100 text-emerald-700",
@@ -135,8 +62,8 @@ const quickReplies = [
 ];
 
 export default function MessagingPage() {
-  const [conversations, setConversations] = useState(initialConversations);
-  const [selectedId, setSelectedId] = useState(initialConversations[0].id);
+  const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [selectedId, setSelectedId] = useState<number | null>(null);
   const [search, setSearch] = useState("");
   const [draft, setDraft] = useState("");
   const [emailNotifications, setEmailNotifications] = useState<EmailNotification[]>([]);
@@ -162,9 +89,9 @@ export default function MessagingPage() {
     );
   }, [conversations, search]);
 
-  const selectedConversation =
-    conversations.find((conversation) => conversation.id === selectedId) ??
-    conversations[0];
+  const selectedConversation = conversations.find(
+    (conversation) => conversation.id === selectedId,
+  );
 
   const unreadCount = conversations.reduce(
     (total, conversation) => total + conversation.unread,
@@ -183,7 +110,7 @@ export default function MessagingPage() {
   function sendMessage() {
     const text = draft.trim();
 
-    if (!text) {
+    if (!text || !selectedConversation) {
       return;
     }
 
@@ -227,6 +154,10 @@ export default function MessagingPage() {
   }
 
   function useQuickReply(reply: string) {
+    if (!selectedConversation) {
+      return;
+    }
+
     setDraft(reply.replace("{{prenom}}", selectedConversation.name.split(" ")[0]));
   }
 
@@ -261,7 +192,7 @@ export default function MessagingPage() {
         <StatCard title="Conversations" value={conversations.length} icon={<MessageCircle />} color="text-blue-600" />
         <StatCard title="Non lus" value={unreadCount} icon={<BellRing />} color="text-orange-600" />
         <StatCard title="RDV à confirmer" value={conversations.filter((conversation) => conversation.status === "À confirmer").length} icon={<CalendarCheck />} color="text-violet-600" />
-        <StatCard title="Temps réponse" value="4 min" icon={<Clock />} color="text-emerald-600" />
+        <StatCard title="Temps réponse" value="—" icon={<Clock />} color="text-emerald-600" />
       </section>
 
       <section className="grid min-h-[680px] gap-4 xl:grid-cols-[360px_1fr_330px]">
@@ -277,13 +208,18 @@ export default function MessagingPage() {
           </label>
 
           <div className="space-y-2">
+            {filteredConversations.length === 0 ? (
+              <p className="rounded-2xl border border-slate-100 p-4 text-sm font-semibold text-slate-500">
+                Aucune conversation pour ce centre.
+              </p>
+            ) : null}
             {filteredConversations.map((conversation) => (
               <button
                 key={conversation.id}
                 type="button"
                 onClick={() => selectConversation(conversation.id)}
                 className={`w-full rounded-2xl border p-4 text-left transition ${
-                  selectedConversation.id === conversation.id
+                  selectedConversation?.id === conversation.id
                     ? "border-blue-200 bg-blue-50"
                     : "border-transparent bg-white hover:bg-slate-50"
                 }`}
@@ -317,6 +253,12 @@ export default function MessagingPage() {
         </aside>
 
         <section className="flex min-h-0 flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
+          {!selectedConversation ? (
+            <div className="grid flex-1 place-items-center p-8 text-center text-sm font-semibold text-slate-500">
+              Aucun échange à afficher pour ce centre.
+            </div>
+          ) : (
+            <>
           <div className="border-b border-slate-200 p-5">
             <div className="flex items-start justify-between gap-4">
               <div>
@@ -404,9 +346,17 @@ export default function MessagingPage() {
               </button>
             </div>
           </div>
+            </>
+          )}
         </section>
 
         <aside className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+          {!selectedConversation ? (
+            <p className="text-sm font-semibold text-slate-500">
+              Sélectionnez une conversation du centre pour voir la fiche.
+            </p>
+          ) : (
+            <>
           <div className="flex items-center gap-3">
             <div className="grid h-12 w-12 place-items-center rounded-2xl bg-blue-50 text-blue-600">
               <UserRound className="h-6 w-6" />
@@ -481,6 +431,8 @@ export default function MessagingPage() {
               Marquer comme traité
             </button>
           </div>
+            </>
+          )}
         </aside>
       </section>
     </main>

@@ -4,10 +4,12 @@ import {
   ChangeEvent,
   DragEvent,
   ReactNode,
+  useEffect,
   useMemo,
   useRef,
   useState,
 } from "react";
+import { loadCrmClients } from "@/lib/crm-supabase";
 import {
   CheckCircle2,
   Download,
@@ -52,58 +54,19 @@ const initialFolders: DocumentFolder[] = [
     id: "consentements",
     name: "Consentements",
     color: "from-blue-500 to-cyan-400",
-    documents: [
-      {
-        id: "doc-consentement-laser",
-        name: "Consentement laser - Marie Dubois.pdf",
-        type: "PDF",
-        status: "Signé",
-        client: "Marie Dubois",
-        addedAt: "25/07/2026",
-        size: "218 Ko",
-      },
-      {
-        id: "doc-consentement-cryo",
-        name: "Consentement cryolipolyse - Claire Moreau.docx",
-        type: "Word",
-        status: "À signer",
-        client: "Claire Moreau",
-        addedAt: "28/07/2026",
-        size: "94 Ko",
-      },
-    ],
+    documents: [],
   },
   {
     id: "fiches-a-signer",
     name: "Fiches à signer",
     color: "from-violet-500 to-fuchsia-500",
-    documents: [
-      {
-        id: "doc-fiche-hifu",
-        name: "Fiche HIFU visage à signer.pptx",
-        type: "PowerPoint",
-        status: "À compléter",
-        client: "Modèle centre",
-        addedAt: "27/07/2026",
-        size: "1,2 Mo",
-      },
-    ],
+    documents: [],
   },
   {
     id: "devis-factures",
     name: "Devis & factures",
     color: "from-amber-500 to-orange-500",
-    documents: [
-      {
-        id: "doc-devis-cure",
-        name: "Devis cure laser - Julie Martin.pdf",
-        type: "PDF",
-        status: "Archivé",
-        client: "Julie Martin",
-        addedAt: "22/07/2026",
-        size: "176 Ko",
-      },
-    ],
+    documents: [],
   },
   {
     id: "autres-fichiers",
@@ -112,6 +75,21 @@ const initialFolders: DocumentFolder[] = [
     documents: [],
   },
 ];
+
+function folderIdForDocumentType(type: string) {
+  if (type === "Consentement") return "consentements";
+  if (type === "Devis" || type === "Facture") return "devis-factures";
+  if (type === "Fiche cure") return "fiches-a-signer";
+  return "autres-fichiers";
+}
+
+function documentStatusFromClient(
+  status: "À signer" | "Signé" | "À envoyer" | "Validé",
+): DocumentStatus {
+  if (status === "À signer") return "À signer";
+  if (status === "Signé" || status === "Validé") return "Signé";
+  return "À compléter";
+}
 
 const statusStyles: Record<DocumentStatus, string> = {
   "À signer": "border-orange-200 bg-orange-50 text-orange-700",
@@ -132,6 +110,50 @@ export default function DocumentsPage() {
   const [newDocumentName, setNewDocumentName] = useState("");
   const [dragOverFolderId, setDragOverFolderId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function load() {
+      try {
+        const { clients } = await loadCrmClients();
+        if (cancelled) {
+          return;
+        }
+
+        setFolders((current) =>
+          current.map((folder) => ({
+            ...folder,
+            documents: clients.flatMap((client) =>
+              client.documents
+                .filter(
+                  (document) =>
+                    folderIdForDocumentType(document.type) === folder.id,
+                )
+                .map((document) => ({
+                  id: document.id,
+                  name: document.label,
+                  type: document.type,
+                  status: documentStatusFromClient(document.status),
+                  client: `${client.firstName} ${client.lastName}`.trim(),
+                  addedAt: document.date,
+                  size: "—",
+                })),
+            ),
+          })),
+        );
+      } catch {
+        if (!cancelled) {
+          setFolders(initialFolders);
+        }
+      }
+    }
+
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const activeFolder =
     folders.find((folder) => folder.id === activeFolderId) ?? folders[0];

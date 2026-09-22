@@ -70,6 +70,18 @@ export function readPublicBookings(): PublicBookingRecord[] {
   }
 }
 
+export function readPublicBookingsForCenter(centerName?: string | null) {
+  const normalizedCenter = (centerName ?? "").trim().toLowerCase();
+
+  if (!normalizedCenter) {
+    return [];
+  }
+
+  return readPublicBookings().filter(
+    (booking) => booking.centerName.trim().toLowerCase() === normalizedCenter,
+  );
+}
+
 export function savePublicBooking(record: PublicBookingRecord) {
   const existingBookings = readPublicBookings();
   const nextBookings = [

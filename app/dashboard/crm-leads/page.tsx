@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import CRMHeader from "@/components/crm/crm-header";
 import DashboardCards from "@/components/crm/dashboard-cards";
@@ -18,7 +18,6 @@ import {
   todayIso,
   type CrmQuickFilter,
 } from "@/lib/crm-stats";
-import { leads } from "@/lib/mock-data";
 import {
   addCrmLeadActivity,
   createCrmLead,
@@ -41,7 +40,7 @@ import {
   mergeDuplicateLeads,
   mergePublicBookingsIntoLeads,
   PUBLIC_BOOKINGS_UPDATED_EVENT,
-  readPublicBookings,
+  readPublicBookingsForCenter,
 } from "@/lib/public-bookings";
 import { Lead, LeadStatus } from "@/types/lead";
 
@@ -77,8 +76,8 @@ const statusGroups: Partial<Record<LeadStatus, LeadStatus[]>> = {
 };
 
 export default function CRMLeadsPage() {
-  const [leadList, setLeadList] = useState(leads);
-  const [selectedLeadId, setSelectedLeadId] = useState(leads[0].id);
+  const [leadList, setLeadList] = useState<Lead[]>([]);
+  const [selectedLeadId, setSelectedLeadId] = useState("");
   const [isLoadingCrm, setIsLoadingCrm] = useState(true);
   const [crmError, setCrmError] = useState<string | null>(null);
   const [crmNotice, setCrmNotice] = useState<string | null>(null);
@@ -89,6 +88,11 @@ export default function CRMLeadsPage() {
   const [activeTab, setActiveTab] = useState<CRMTab>("prospects");
   const [quickDateFilter, setQuickDateFilter] =
     useState<QuickDateFilter>("Tous");
+  const centerNameRef = useRef("");
+  const resultsRef = useRef<HTMLDivElement>(null);
+  const ficheRef = useRef<HTMLElement>(null);
+  const [ficheOffset, setFicheOffset] = useState(0);
+  const [ficheMaxHeight, setFicheMaxHeight] = useState(480);
   const [filters, setFilters] = useState<ProspectFilters>({
     search: "",
     source: "Tous",
@@ -109,12 +113,16 @@ export default function CRMLeadsPage() {
     setCrmError(null);
 
     try {
-      const { leads: loadedLeads } = await loadCrmLeads();
+      const { leads: loadedLeads, center } = await loadCrmLeads();
+      centerNameRef.current = center.centerName;
 
       const nextLeads =
         loadedLeads.length > 0
           ? applyAppointmentStatusOverrides(
-              mergePublicBookingsIntoLeads(loadedLeads, readPublicBookings()),
+              mergePublicBookingsIntoLeads(
+                loadedLeads,
+                readPublicBookingsForCenter(center.centerName),
+              ),
               readAppointmentStatusOverrides()
             )
           : [];
@@ -156,7 +164,7 @@ export default function CRMLeadsPage() {
       setLeadList((currentLeads) => {
         const nextLeads = mergePublicBookingsIntoLeads(
           currentLeads,
-          readPublicBookings()
+          readPublicBookingsForCenter(centerNameRef.current),
         );
 
         return applyAppointmentStatusOverrides(
@@ -269,6 +277,73 @@ export default function CRMLeadsPage() {
       matchesUpdatedDate
     );
   });
+
+  useLayoutEffect(() => {
+    if (!isLeadDetailsOpen || !selectedLeadId) {
+      setFicheOffset(0);
+      return;
+    }
+
+    function alignFicheToProspect() {
+      const container = resultsRef.current;
+      const row = container?.querySelector(
+        `[data-lead-id="${selectedLeadId}"]`,
+      );
+
+      if (!container || !(row instanceof HTMLElement)) {
+        setFicheOffset(0);
+        setFicheMaxHeight(Math.max(320, window.innerHeight - 24));
+        return;
+      }
+
+      const containerRect = container.getBoundingClientRect();
+      const rowRect = row.getBoundingClientRect();
+
+      setFicheOffset(Math.max(0, rowRect.top - containerRect.top));
+      setFicheMaxHeight(
+        Math.max(280, window.innerHeight - rowRect.top - 16),
+      );
+    }
+
+    alignFicheToProspect();
+    window.addEventListener("resize", alignFicheToProspect);
+
+    return () => {
+      window.removeEventListener("resize", alignFicheToProspect);
+    };
+  }, [filteredLeads.length, isLeadDetailsOpen, selectedLeadId]);
+
+  useEffect(() => {
+    const node = ficheRef.current;
+
+    if (!node || !isLeadDetailsOpen) {
+      return;
+    }
+
+    function lockListScroll(event: WheelEvent) {
+      const canScroll = node.scrollHeight > node.clientHeight + 1;
+
+      if (!canScroll) {
+        event.preventDefault();
+        return;
+      }
+
+      const atTop = node.scrollTop <= 0 && event.deltaY < 0;
+      const atBottom =
+        node.scrollTop + node.clientHeight >= node.scrollHeight - 1 &&
+        event.deltaY > 0;
+
+      if (atTop || atBottom) {
+        event.preventDefault();
+      }
+    }
+
+    node.addEventListener("wheel", lockListScroll, { passive: false });
+
+    return () => {
+      node.removeEventListener("wheel", lockListScroll);
+    };
+  }, [ficheMaxHeight, ficheOffset, isLeadDetailsOpen, selectedLeadId]);
 
   async function handleStatusChange(leadId: string, status: LeadStatus) {
     const leadBeforeUpdate = leadList.find((lead) => lead.id === leadId);
@@ -831,6 +906,7 @@ export default function CRMLeadsPage() {
 
             <div
               id="crm-leads-results"
+              ref={resultsRef}
               className={
                 isLeadDetailsOpen
                   ? "grid grid-cols-[minmax(0,1fr)_24rem] items-start gap-3"
@@ -861,7 +937,11 @@ export default function CRMLeadsPage() {
               </section>
 
               {isLeadDetailsOpen && (
-              <aside className="min-w-0 lg:sticky lg:top-3 lg:max-h-[calc(100vh-1.5rem)] lg:overflow-y-auto">
+              <aside
+                ref={ficheRef}
+                style={{ marginTop: ficheOffset, maxHeight: ficheMaxHeight }}
+                className="min-w-0 overflow-y-auto overscroll-contain"
+              >
                 <LeadDetails
                   lead={selectedLead}
                   onAddActivity={handleAddActivity}

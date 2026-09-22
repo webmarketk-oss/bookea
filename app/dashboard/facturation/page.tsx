@@ -36,6 +36,7 @@ import {
   updateBillingInvoice,
   type BillingInvoice,
 } from "@/lib/billing-supabase";
+import { loadCrmClients } from "@/lib/crm-supabase";
 
 type InvoiceType = "Devis" | "Acompte" | "Facture finale" | "Avoir";
 type InvoiceStatus = "Payée" | "En attente de paiement" | "Envoyée" | "Annulée";
@@ -100,97 +101,6 @@ type Invoice = {
   discountValue?: number;
   paymentMethod: "Stripe" | "CB centre" | "Espèces" | "Virement";
 };
-
-const initialInvoices: Invoice[] = [
-  {
-    id: "fac-2026-0007",
-    number: "FAC-2026-0007",
-    date: "28/07/2026",
-    client: "Marie Dubois",
-    email: "marie@email.com",
-    care: "Épilation Laser",
-    type: "Acompte",
-    status: "Payée",
-    total: 30,
-    paid: 30,
-    lines: [
-      { id: "line-1", label: "Acompte Épilation Laser", quantity: 1, unitPrice: 30, vatRate: 20 },
-    ],
-    discountType: "Aucune",
-    discountValue: 0,
-    paymentMethod: "Stripe",
-  },
-  {
-    id: "fac-2026-0006",
-    number: "FAC-2026-0006",
-    date: "25/07/2026",
-    client: "Claire Moreau",
-    email: "claire@email.com",
-    care: "Cure cryolipolyse",
-    type: "Facture finale",
-    status: "Payée",
-    total: 980,
-    paid: 980,
-    lines: [
-      { id: "line-2", label: "Cure cryolipolyse", quantity: 1, unitPrice: 980, vatRate: 20 },
-    ],
-    discountType: "Aucune",
-    discountValue: 0,
-    paymentMethod: "CB centre",
-  },
-  {
-    id: "fac-2026-0005",
-    number: "FAC-2026-0005",
-    date: "25/07/2026",
-    client: "Marie Dubois",
-    email: "marie@email.com",
-    care: "Cure laser aisselles",
-    type: "Facture finale",
-    status: "En attente de paiement",
-    total: 600,
-    paid: 420,
-    lines: [
-      { id: "line-3", label: "Cure laser aisselles", quantity: 1, unitPrice: 600, vatRate: 20 },
-    ],
-    discountType: "Aucune",
-    discountValue: 0,
-    paymentMethod: "CB centre",
-  },
-  {
-    id: "avr-2026-0001",
-    number: "AVR-2026-0001",
-    date: "22/07/2026",
-    client: "Julie Martin",
-    email: "julie@email.com",
-    care: "Cryolipolyse",
-    type: "Avoir",
-    status: "Envoyée",
-    total: -25,
-    paid: -25,
-    lines: [
-      { id: "line-4", label: "Avoir Cryolipolyse", quantity: 1, unitPrice: -25, vatRate: 20 },
-    ],
-    discountType: "Aucune",
-    discountValue: 0,
-    paymentMethod: "Stripe",
-  },
-];
-
-const invoiceClients = [
-  "Marie Dubois",
-  "Claire Moreau",
-  "Laura Petit",
-  "Julie Martin",
-  "Sarah Bernard",
-];
-
-const invoiceCares = [
-  "Épilation Laser",
-  "Hydrafacial",
-  "Cryolipolyse",
-  "Bilan Laser",
-  "Cure laser aisselles",
-];
 
 const initialBillingServices: BillingService[] = [
   {
@@ -269,9 +179,27 @@ const typeStyles: Record<InvoiceType, string> = {
   Avoir: "border-rose-200 bg-rose-50 text-rose-700",
 };
 
+const emptyInvoice: Invoice = {
+  id: "",
+  number: "",
+  date: "",
+  client: "",
+  email: "",
+  care: "",
+  type: "Devis",
+  status: "Envoyée",
+  total: 0,
+  paid: 0,
+  lines: [],
+  discountType: "Aucune",
+  discountValue: 0,
+  paymentMethod: "CB centre",
+};
+
 export default function BillingPage() {
-  const [invoices, setInvoices] = useState(initialInvoices);
-  const [selectedInvoiceId, setSelectedInvoiceId] = useState(invoices[0].id);
+  const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [billingClients, setBillingClients] = useState<string[]>([]);
+  const [selectedInvoiceId, setSelectedInvoiceId] = useState("");
   const [previewInvoiceId, setPreviewInvoiceId] = useState<string | null>(null);
   const [isLoadingBilling, setIsLoadingBilling] = useState(true);
   const [billingError, setBillingError] = useState("");
@@ -294,9 +222,9 @@ export default function BillingPage() {
   const [typeFilter, setTypeFilter] = useState<"Toutes" | InvoiceType>("Toutes");
   const [paymentAmount, setPaymentAmount] = useState(0);
   const [draft, setDraft] = useState({
-    client: "Marie Dubois",
-    email: "marie@email.com",
-    care: "Épilation Laser",
+    client: "",
+    email: "",
+    care: "",
     type: "Acompte" as InvoiceType,
     lines: [
       {
@@ -320,10 +248,17 @@ export default function BillingPage() {
     setBillingError("");
 
     try {
-      const loadedInvoices = await loadBillingInvoices();
-      const nextInvoices =
-        loadedInvoices.length > 0 ? (loadedInvoices as Invoice[]) : initialInvoices;
+      const [loadedInvoices, clientData] = await Promise.all([
+        loadBillingInvoices(),
+        loadCrmClients(),
+      ]);
+      const nextInvoices = loadedInvoices as Invoice[];
 
+      setBillingClients(
+        clientData.clients
+          .map((client) => `${client.firstName} ${client.lastName}`.trim())
+          .filter(Boolean),
+      );
       setInvoices(nextInvoices);
       setSelectedInvoiceId((currentId) =>
         nextInvoices.some((invoice) => invoice.id === currentId)
@@ -336,8 +271,8 @@ export default function BillingPage() {
           ? error.message
           : "Impossible de charger les factures.",
       );
-      setInvoices(initialInvoices);
-      setSelectedInvoiceId(initialInvoices[0]?.id ?? "");
+      setInvoices([]);
+      setSelectedInvoiceId("");
     } finally {
       setIsLoadingBilling(false);
     }
@@ -451,8 +386,26 @@ export default function BillingPage() {
     return matchesSearch && matchesType;
   });
 
+  const invoiceClientOptions = useMemo(() => {
+    const names = new Set(billingClients);
+    invoices.forEach((invoice) => {
+      if (invoice.client.trim()) {
+        names.add(invoice.client.trim());
+      }
+    });
+    return [...names].sort((left, right) => left.localeCompare(right));
+  }, [billingClients, invoices]);
+  const invoiceCareOptions = useMemo(() => {
+    const names = new Set(billingServices.map((service) => service.name));
+    invoices.forEach((invoice) => {
+      if (invoice.care.trim()) {
+        names.add(invoice.care.trim());
+      }
+    });
+    return [...names].sort((left, right) => left.localeCompare(right));
+  }, [billingServices, invoices]);
   const selectedInvoice =
-    invoices.find((invoice) => invoice.id === selectedInvoiceId) ?? invoices[0];
+    invoices.find((invoice) => invoice.id === selectedInvoiceId) ?? emptyInvoice;
   const selectedAmounts = calculateInvoiceAmounts(selectedInvoice);
   const selectedRemaining = Math.max(
     selectedInvoice.total - selectedInvoice.paid,
@@ -1308,6 +1261,13 @@ export default function BillingPage() {
                 <span>Statut</span>
                 <span className="text-right">Actions</span>
               </div>
+              {filteredInvoices.length === 0 ? (
+                <p className="border-t border-slate-100 px-5 py-6 text-sm font-semibold text-slate-500">
+                  {isLoadingBilling
+                    ? "Chargement des factures du centre…"
+                    : "Aucune facture pour ce centre."}
+                </p>
+              ) : null}
               {filteredInvoices.map((invoice) => (
                 <div
                   key={invoice.id}
@@ -1623,12 +1583,11 @@ export default function BillingPage() {
                 <FormSelect
                   label="Cliente"
                   value={draft.client}
-                  options={invoiceClients}
+                  options={invoiceClientOptions}
                   onChange={(client) =>
                     setDraft((current) => ({
                       ...current,
                       client,
-                      email: `${client.split(" ")[0].toLowerCase()}@email.com`,
                     }))
                   }
                 />
@@ -1681,7 +1640,7 @@ export default function BillingPage() {
                           {billingServices.map((care) => (
                             <option key={care.id}>{care.name}</option>
                           ))}
-                          {invoiceCares
+                          {invoiceCareOptions
                             .filter(
                               (care) =>
                                 !billingServices.some(

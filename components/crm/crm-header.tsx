@@ -35,8 +35,8 @@ export default function CRMHeader({ onNewLead }: CRMHeaderProps) {
             aria-expanded={notificationsOpen}
           >
             <Bell className="h-5 w-5" />
-            <span className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-black text-white">
-              3
+            <span className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-slate-200 px-1 text-[10px] font-black text-slate-600">
+              0
             </span>
           </Button>
 
@@ -44,45 +44,15 @@ export default function CRMHeader({ onNewLead }: CRMHeaderProps) {
             <div className="absolute right-0 top-12 z-50 w-80 rounded-2xl border border-slate-200 bg-white p-3 shadow-xl">
               <div className="mb-3 flex items-center justify-between">
                 <p className="font-black text-slate-950">Notifications</p>
-                <span className="rounded-full bg-red-50 px-2 py-1 text-xs font-black text-red-600">
-                  3
+                <span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-black text-slate-600">
+                  0
                 </span>
               </div>
 
               <div className="space-y-2">
-                {[
-                  {
-                    title: "Julie Martin à rappeler",
-                    text: "Relance prévue aujourd'hui.",
-                    color: "bg-orange-50 text-orange-700",
-                  },
-                  {
-                    title: "RDV à confirmer",
-                    text: "Julie Martin · 10:30 · Cabine 2.",
-                    color: "bg-violet-50 text-violet-700",
-                  },
-                  {
-                    title: "Acompte en attente",
-                    text: "Marie Dubois · 180,00 € à valider.",
-                    color: "bg-emerald-50 text-emerald-700",
-                  },
-                ].map((notification) => (
-                  <button
-                    key={notification.title}
-                    type="button"
-                    onClick={() => setNotificationsOpen(false)}
-                    className="w-full rounded-xl border border-slate-100 p-3 text-left transition-colors hover:bg-slate-50"
-                  >
-                    <span
-                      className={`mb-2 inline-flex rounded-full px-2 py-1 text-xs font-black ${notification.color}`}
-                    >
-                      {notification.title}
-                    </span>
-                    <p className="text-sm font-semibold text-slate-500">
-                      {notification.text}
-                    </p>
-                  </button>
-                ))}
+                <p className="rounded-xl border border-slate-100 p-3 text-sm font-semibold text-slate-500">
+                  Aucune notification pour ce centre.
+                </p>
               </div>
             </div>
           )}

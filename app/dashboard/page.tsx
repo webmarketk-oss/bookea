@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useEffect, useMemo, useState } from "react";
 import {
   CalendarCheck2,
   CheckCircle2,
@@ -13,57 +14,201 @@ import {
 } from "lucide-react";
 
 import { Card, CardContent } from "@/components/ui/card";
-import { appointments } from "@/lib/agenda-data";
-import { leads } from "@/lib/mock-data";
+import { loadCrmAppointments } from "@/lib/agenda-supabase";
+import {
+  addDaysIso,
+  isLeadCreatedOn,
+  monthStartIso,
+  todayIso,
+} from "@/lib/crm-stats";
+import { loadCrmClients, loadCrmLeads, type CrmClient } from "@/lib/crm-supabase";
+import { inactiveLeadStatuses } from "@/lib/lead-statuses";
+import {
+  mergePublicBookingsIntoAppointments,
+  readPublicBookingsForCenter,
+} from "@/lib/public-bookings";
 import { cn } from "@/lib/utils";
+import type { Appointment } from "@/types/agenda";
+import type { Lead } from "@/types/lead";
 
-const dailyTasks = [
-  {
-    label: "Rappeler les prospects prévus aujourd'hui",
-    value: "1 relance",
-    href: "/dashboard/crm-leads?status=%C3%80%20rappeler",
-    tone: "orange",
-  },
-  {
-    label: "Confirmer les rendez-vous non validés",
-    value: "1 RDV",
-    href: "/dashboard/agenda",
-    tone: "violet",
-  },
-  {
-    label: "Vérifier les montants de cure à encaisser",
-    value: "Clients",
-    href: "/dashboard/crm-clients",
-    tone: "emerald",
-  },
-];
+const followUpStatuses = new Set([
+  "Nouveau",
+  "À relancer",
+  "Apl en abs",
+  "SMS envoyé",
+  "Mail envoyé",
+  "Message WhatsApp envoyé",
+  "Message vocal envoyé",
+  "Mail/SMS Injoignable",
+  "Message vocal",
+  "Reviendra vers nous",
+  "En réflexion",
+]);
 
-const recommendations = [
-  "Prioriser Julie Martin : relance prévue aujourd'hui, proposer un créneau court.",
-  "Cabine 4 reste disponible cet après-midi : placer un bilan ou une consultation.",
-  "Demander un acompte sur les prospects RDV pris pour sécuriser le planning.",
-];
+const soldStatuses = new Set([
+  "Vendu",
+  "Client converti",
+  "Acompte reçu",
+  "Acompte envoyé",
+]);
 
 export default function DashboardPage() {
+  const [leads, setLeads] = useState<Lead[]>([]);
+  const [appointments, setAppointments] = useState<Appointment[]>([]);
+  const [clients, setClients] = useState<CrmClient[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function load() {
+      setLoadError(null);
+
+      try {
+        const [leadData, appointmentData, clientData] = await Promise.all([
+          loadCrmLeads(),
+          loadCrmAppointments(),
+          loadCrmClients(),
+        ]);
+
+        if (cancelled) {
+          return;
+        }
+
+        setLeads(leadData.leads);
+        setAppointments(
+          mergePublicBookingsIntoAppointments(
+            appointmentData,
+            readPublicBookingsForCenter(leadData.center.centerName),
+          ),
+        );
+        setClients(clientData.clients);
+      } catch (error) {
+        if (!cancelled) {
+          setLeads([]);
+          setAppointments([]);
+          setClients([]);
+          setLoadError(
+            error instanceof Error
+              ? error.message
+              : "Impossible de charger les indicateurs du centre.",
+          );
+        }
+      } finally {
+        if (!cancelled) {
+          setIsLoading(false);
+        }
+      }
+    }
+
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const today = todayIso();
-  const todayLeads = leads.filter((lead) => isTodayLabel(lead.createdAt));
-  const yesterdayLeads = leads.filter((lead) => isYesterdayLabel(lead.createdAt));
-  const todayAppointments = appointments.filter(
-    (appointment) => appointment.date === today
-  );
+  const yesterday = addDaysIso(today, -1);
+  const monthStart = monthStartIso(today);
+
+  const todayLeads = leads.filter((lead) => isLeadCreatedOn(lead, today));
+  const yesterdayLeads = leads.filter((lead) => isLeadCreatedOn(lead, yesterday));
+  const todayAppointments = appointments
+    .filter(isCountableAppointment)
+    .filter((appointment) => appointment.date === today)
+    .sort((left, right) => left.start.localeCompare(right.start));
   const confirmedAppointments = todayAppointments.filter(
-    (appointment) => appointment.status === "Confirmé"
+    (appointment) =>
+      appointment.status === "Confirmé" ||
+      appointment.status === "Présent" ||
+      appointment.status === "En cours",
+  );
+  const unconfirmedAppointments = todayAppointments.filter(
+    (appointment) => appointment.status === "À confirmer",
   );
   const monthRevenue = leads
-    .filter((lead) => isCurrentMonth(lead.createdDate))
-    .reduce((total, lead) => total + lead.dealAmount, 0);
-  const fillRate = Math.round(
-    (todayAppointments.reduce(
-      (total, appointment) => total + appointment.duration,
-      0
-    ) /
-      (12 * 60 * 5)) *
-      100
+    .filter(
+      (lead) =>
+        soldStatuses.has(lead.status) &&
+        lead.createdDate >= monthStart &&
+        lead.createdDate <= today,
+    )
+    .reduce((total, lead) => total + (Number(lead.dealAmount) || 0), 0);
+  const recordedRevenue = monthRevenue;
+  const fillRate = planningFillRate(todayAppointments, appointments);
+  const reminderLeads = leads.filter(
+    (lead) => lead.reminderDate === today && !inactiveLeadStatuses.includes(lead.status),
+  );
+  const contactsToHandle = leads
+    .filter((lead) => {
+      if (inactiveLeadStatuses.includes(lead.status)) {
+        return false;
+      }
+
+      return followUpStatuses.has(lead.status) || lead.reminderDate === today;
+    })
+    .sort((left, right) => {
+      const leftReminder = left.reminderDate === today ? 0 : 1;
+      const rightReminder = right.reminderDate === today ? 0 : 1;
+
+      if (leftReminder !== rightReminder) {
+        return leftReminder - rightReminder;
+      }
+
+      if (left.status === "Nouveau" && right.status !== "Nouveau") {
+        return -1;
+      }
+
+      if (right.status === "Nouveau" && left.status !== "Nouveau") {
+        return 1;
+      }
+
+      return `${left.firstName} ${left.lastName}`.localeCompare(
+        `${right.firstName} ${right.lastName}`,
+      );
+    })
+    .slice(0, 6);
+  const clientsWithBalance = clients.filter((client) => client.balanceDue > 0);
+  const dailyTasks = [
+    {
+      label: "Rappeler les prospects prévus aujourd'hui",
+      value:
+        reminderLeads.length === 0
+          ? "0 relance"
+          : `${reminderLeads.length} relance${reminderLeads.length > 1 ? "s" : ""}`,
+      href: "/dashboard/crm-leads?status=%C3%80%20relancer",
+      tone: "orange",
+    },
+    {
+      label: "Confirmer les rendez-vous non validés",
+      value:
+        unconfirmedAppointments.length === 0
+          ? "0 RDV"
+          : `${unconfirmedAppointments.length} RDV`,
+      href: "/dashboard/agenda",
+      tone: "violet",
+    },
+    {
+      label: "Vérifier les montants de cure à encaisser",
+      value:
+        clientsWithBalance.length === 0
+          ? "0 client"
+          : `${clientsWithBalance.length} client${clientsWithBalance.length > 1 ? "s" : ""}`,
+      href: "/dashboard/crm-clients",
+      tone: "emerald",
+    },
+  ];
+  const recommendations = useMemo(
+    () =>
+      buildRecommendations({
+        reminderLeads,
+        unconfirmedAppointments,
+        todayAppointments,
+        fillRate,
+        rdvTakenLeads: leads.filter((lead) => lead.status === "RDV pris"),
+      }),
+    [fillRate, leads, reminderLeads, todayAppointments, unconfirmedAppointments],
   );
 
   return (
@@ -99,18 +244,24 @@ export default function DashboardPage() {
           </div>
         </header>
 
+        {loadError ? (
+          <p className="rounded-2xl border border-red-100 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">
+            {loadError}
+          </p>
+        ) : null}
+
         <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
           <DashboardStat
             label="Leads aujourd'hui"
-            value={todayLeads.length}
-            subtitle="À traiter"
+            value={isLoading ? "…" : todayLeads.length}
+            subtitle="Reçus aujourd'hui"
             icon={<Users />}
             color="text-blue-600"
-            href="/dashboard/crm-leads?status=Nouveau"
+            href="/dashboard/crm-leads?quick=Aujourd%27hui"
           />
           <DashboardStat
             label="Leads hier"
-            value={yesterdayLeads.length}
+            value={isLoading ? "…" : yesterdayLeads.length}
             subtitle="Reçus la veille"
             icon={<TrendingUp />}
             color="text-slate-600"
@@ -118,7 +269,7 @@ export default function DashboardPage() {
           />
           <DashboardStat
             label="RDV aujourd'hui"
-            value={todayAppointments.length}
+            value={isLoading ? "…" : todayAppointments.length}
             subtitle={`${confirmedAppointments.length} confirmés`}
             icon={<CalendarCheck2 />}
             color="text-violet-600"
@@ -126,7 +277,7 @@ export default function DashboardPage() {
           />
           <DashboardStat
             label="CA enregistré"
-            value={formatCurrency(monthRevenue)}
+            value={isLoading ? "…" : formatCurrency(recordedRevenue)}
             subtitle="Ce mois-ci"
             icon={<Euro />}
             color="text-emerald-600"
@@ -134,7 +285,7 @@ export default function DashboardPage() {
           />
           <DashboardStat
             label="Remplissage"
-            value={`${fillRate}%`}
+            value={isLoading ? "…" : `${fillRate}%`}
             subtitle="Planning du jour"
             icon={<CheckCircle2 />}
             color="text-cyan-600"
@@ -220,32 +371,43 @@ export default function DashboardPage() {
                 Rendez-vous du jour
               </h2>
               <div className="mt-4 divide-y divide-slate-100">
-                {todayAppointments.map((appointment) => (
-                  <div
-                    key={appointment.id}
-                    className="grid grid-cols-[64px_minmax(0,1fr)] items-center gap-3 py-4 sm:grid-cols-[88px_minmax(0,1fr)_120px] sm:gap-4"
-                  >
-                    <span className="font-black text-[#247af2]">
-                      {appointment.start}
-                    </span>
-                    <div className="min-w-0">
-                      <p className="truncate font-black text-[#11152e]">
-                        {appointment.personName}
-                      </p>
-                      <p className="truncate text-sm font-semibold text-slate-500">
-                        {appointment.treatment} · {appointment.duration} min
-                      </p>
-                    </div>
-                    <span
-                      className={cn(
-                        "col-span-2 w-fit rounded-full border px-3 py-1 text-center text-xs font-black sm:col-span-1 sm:w-auto",
-                        appointmentStatusClass(appointment.status)
-                      )}
+                {isLoading ? (
+                  <p className="py-6 text-sm font-semibold text-slate-500">
+                    Chargement des rendez-vous du centre…
+                  </p>
+                ) : todayAppointments.length === 0 ? (
+                  <p className="py-6 text-sm font-semibold text-slate-500">
+                    Aucun rendez-vous aujourd&apos;hui sur ce centre.
+                  </p>
+                ) : (
+                  todayAppointments.map((appointment) => (
+                    <Link
+                      key={appointment.id}
+                      href="/dashboard/agenda"
+                      className="grid grid-cols-[64px_minmax(0,1fr)] items-center gap-3 py-4 sm:grid-cols-[88px_minmax(0,1fr)_120px] sm:gap-4"
                     >
-                      {appointment.status}
-                    </span>
-                  </div>
-                ))}
+                      <span className="font-black text-[#247af2]">
+                        {appointment.start}
+                      </span>
+                      <div className="min-w-0">
+                        <p className="truncate font-black text-[#11152e]">
+                          {appointment.personName}
+                        </p>
+                        <p className="truncate text-sm font-semibold text-slate-500">
+                          {appointment.treatment} · {appointment.duration} min
+                        </p>
+                      </div>
+                      <span
+                        className={cn(
+                          "col-span-2 w-fit rounded-full border px-3 py-1 text-center text-xs font-black sm:col-span-1 sm:w-auto",
+                          appointmentStatusClass(appointment.status)
+                        )}
+                      >
+                        {appointment.status}
+                      </span>
+                    </Link>
+                  ))
+                )}
               </div>
             </CardContent>
           </Card>
@@ -267,25 +429,35 @@ export default function DashboardPage() {
               </div>
 
               <div className="space-y-3">
-                {leads.slice(0, 3).map((lead) => (
-                  <Link
-                    key={lead.id}
-                    href="/dashboard/crm-leads"
-                    className="flex items-center justify-between gap-4 rounded-xl border border-[#dfe5f2] bg-white p-4 transition-colors hover:bg-[#fff7ed]"
-                  >
-                    <div className="min-w-0">
-                      <p className="truncate font-black text-[#11152e]">
-                        {lead.firstName} {lead.lastName}
-                      </p>
-                      <p className="truncate text-sm font-semibold text-slate-500">
-                        {lead.nextAction}
-                      </p>
-                    </div>
-                    <span className="shrink-0 rounded-full bg-orange-50 px-3 py-1 text-xs font-black text-orange-700">
-                      {lead.status}
-                    </span>
-                  </Link>
-                ))}
+                {isLoading ? (
+                  <p className="py-4 text-sm font-semibold text-slate-500">
+                    Chargement des contacts du centre…
+                  </p>
+                ) : contactsToHandle.length === 0 ? (
+                  <p className="py-4 text-sm font-semibold text-slate-500">
+                    Aucun contact à traiter pour le moment.
+                  </p>
+                ) : (
+                  contactsToHandle.map((lead) => (
+                    <Link
+                      key={lead.id}
+                      href="/dashboard/crm-leads"
+                      className="flex items-center justify-between gap-4 rounded-xl border border-[#dfe5f2] bg-white p-4 transition-colors hover:bg-[#fff7ed]"
+                    >
+                      <div className="min-w-0">
+                        <p className="truncate font-black text-[#11152e]">
+                          {lead.firstName} {lead.lastName}
+                        </p>
+                        <p className="truncate text-sm font-semibold text-slate-500">
+                          {lead.nextAction || lead.treatment}
+                        </p>
+                      </div>
+                      <span className="shrink-0 rounded-full bg-orange-50 px-3 py-1 text-xs font-black text-orange-700">
+                        {lead.status}
+                      </span>
+                    </Link>
+                  ))
+                )}
               </div>
             </CardContent>
           </Card>
@@ -330,20 +502,92 @@ function DashboardStat({
   );
 }
 
-function isTodayLabel(value: string) {
-  return value.toLowerCase().includes("aujourd");
+function isCountableAppointment(appointment: Appointment) {
+  if (appointment.kind && appointment.kind !== "Rendez-vous") {
+    return false;
+  }
+
+  return appointment.status !== "Annulation";
 }
 
-function isYesterdayLabel(value: string) {
-  return value.toLowerCase().includes("hier");
+function planningFillRate(
+  todayAppointments: Appointment[],
+  allAppointments: Appointment[],
+) {
+  const bookedMinutes = todayAppointments.reduce(
+    (total, appointment) => total + appointment.duration,
+    0,
+  );
+  const cabinCount = Math.max(
+    new Set(
+      allAppointments
+        .map((appointment) => appointment.cabinId)
+        .filter(Boolean),
+    ).size,
+    new Set(todayAppointments.map((appointment) => appointment.cabinId)).size,
+    1,
+  );
+  const openingMinutes = Math.max(1, timeToMinutes("19:00") - timeToMinutes("08:00"));
+  const capacity = cabinCount * openingMinutes;
+
+  return Math.min(100, Math.round((bookedMinutes / capacity) * 100));
 }
 
-function todayIso() {
-  return new Date().toISOString().slice(0, 10);
+function timeToMinutes(time: string) {
+  const [hours, minutes] = time.split(":").map(Number);
+  return hours * 60 + minutes;
+}
+
+function buildRecommendations({
+  reminderLeads,
+  unconfirmedAppointments,
+  todayAppointments,
+  fillRate,
+  rdvTakenLeads,
+}: {
+  reminderLeads: Lead[];
+  unconfirmedAppointments: Appointment[];
+  todayAppointments: Appointment[];
+  fillRate: number;
+  rdvTakenLeads: Lead[];
+}) {
+  const items: string[] = [];
+  const firstReminder = reminderLeads[0];
+
+  if (firstReminder) {
+    items.push(
+      `Prioriser ${firstReminder.firstName} ${firstReminder.lastName} : relance prévue aujourd'hui.`,
+    );
+  }
+
+  if (unconfirmedAppointments.length > 0) {
+    const first = unconfirmedAppointments[0];
+    items.push(
+      `Confirmer ${first.personName} à ${first.start} pour sécuriser le planning.`,
+    );
+  }
+
+  if (fillRate < 50) {
+    items.push(
+      `Le planning n'est rempli qu'à ${fillRate}% : placer un bilan ou une consultation sur un créneau libre.`,
+    );
+  } else if (rdvTakenLeads.length > 0) {
+    items.push(
+      `Demander un acompte sur ${rdvTakenLeads.length} prospect${rdvTakenLeads.length > 1 ? "s" : ""} en RDV pris.`,
+    );
+  } else if (todayAppointments.length === 0) {
+    items.push("Aucun rendez-vous aujourd'hui : relancer les nouveaux leads pour remplir la journée.");
+  }
+
+  if (items.length === 0) {
+    items.push("Aucun point prioritaire : le centre est à jour pour aujourd'hui.");
+  }
+
+  return items.slice(0, 3);
 }
 
 function appointmentStatusClass(status: string) {
-  if (status === "Confirmé") {
+  if (status === "Confirmé" || status === "Présent") {
     return "border-emerald-200 bg-emerald-50 text-emerald-700";
   }
 
@@ -368,10 +612,6 @@ function taskToneClass(tone: string) {
   }
 
   return "border-slate-200 bg-slate-100 text-slate-600";
-}
-
-function isCurrentMonth(date: string) {
-  return date.slice(0, 7) === todayIso().slice(0, 7);
 }
 
 function formatCurrency(value: number) {

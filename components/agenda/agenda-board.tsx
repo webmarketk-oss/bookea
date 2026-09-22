@@ -41,9 +41,10 @@ import {
   getPublicBookingIdFromAppointment,
   mergePublicBookingsIntoAppointments,
   PUBLIC_BOOKINGS_UPDATED_EVENT,
-  readPublicBookings,
+  readPublicBookingsForCenter,
   removePublicBooking,
 } from "@/lib/public-bookings";
+import { getActiveCenterContext } from "@/lib/center-access";
 import {
   Appointment,
   AppointmentKind,
@@ -342,17 +343,22 @@ export default function AgendaBoard() {
   const [portalTarget, setPortalTarget] = useState<HTMLElement | null>(null);
   const [isSavingAppointment, setIsSavingAppointment] = useState(false);
   const savingAppointmentRef = useRef(false);
+  const centerNameRef = useRef("");
 
   async function refreshAgenda() {
     setAgendaError("");
 
     try {
-      const loadedAppointments = await loadCrmAppointments();
+      const [loadedAppointments, center] = await Promise.all([
+        loadCrmAppointments(),
+        getActiveCenterContext(),
+      ]);
+      centerNameRef.current = center.centerName;
 
       setAppointmentList(
         mergePublicBookingsIntoAppointments(
           loadedAppointments,
-          readPublicBookings(),
+          readPublicBookingsForCenter(center.centerName),
         ),
       );
     } catch (error) {
@@ -361,9 +367,7 @@ export default function AgendaBoard() {
           ? error.message
           : "Impossible de charger l'agenda.",
       );
-      setAppointmentList(
-        mergePublicBookingsIntoAppointments([], readPublicBookings()),
-      );
+      setAppointmentList([]);
     } finally {
       setIsLoadingAgenda(false);
     }
@@ -396,7 +400,7 @@ export default function AgendaBoard() {
       setAppointmentList((currentAppointments) =>
         mergePublicBookingsIntoAppointments(
           currentAppointments,
-          readPublicBookings()
+          readPublicBookingsForCenter(centerNameRef.current),
         )
       );
     }
@@ -1395,7 +1399,7 @@ export default function AgendaBoard() {
               </p>
             </div>
             <div className="grid gap-3 md:grid-cols-3">
-              <Suggestion text="Julie Martin peut être placée mardi à 10:30 en Cabine 2." />
+              <Suggestion text="Relancer les nouveaux leads pour placer un créneau libre cette semaine." />
               <Suggestion text="Cabine 4 libre à 14:30 pour un bilan court." />
               <Suggestion text="Samantha a 2 créneaux disponibles avant 16:00." />
             </div>

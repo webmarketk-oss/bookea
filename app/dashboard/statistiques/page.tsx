@@ -1,6 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
   BarChart3,
@@ -18,97 +19,163 @@ import {
   XCircle,
 } from "lucide-react";
 
-import { appointments, cabins } from "@/lib/agenda-data";
-import { leads } from "@/lib/mock-data";
+import { loadCrmAppointments } from "@/lib/agenda-supabase";
+import { todayIso } from "@/lib/crm-stats";
+import { loadCrmLeads } from "@/lib/crm-supabase";
+import { findDuplicateLeadGroups } from "@/lib/public-bookings";
 import { Lead } from "@/types/lead";
+import type { Appointment } from "@/types/agenda";
 
 const bookedStatuses = ["RDV programmé", "RDV pris", "RDV fixé", "RDV confirmé"];
 const soldStatuses = ["Vendu", "Client", "Client converti"];
-const missedStatuses = ["No show", "Perdu", "Prospect perdu"];
 const redStatuses = ["Perdu", "Prospect perdu", "Numéro invalide", "Doublon", "Hors zone", "No show"];
 
-const servicePerformance = [
-  {
-    name: "Épilation Laser",
-    reservations: 42,
-    honored: 34,
-    missed: 5,
-    revenue: 4180,
-    trend: "+18%",
-  },
-  {
-    name: "Hydrafacial",
-    reservations: 36,
-    honored: 31,
-    missed: 2,
-    revenue: 2848,
-    trend: "+11%",
-  },
-  {
-    name: "Cryolipolyse",
-    reservations: 29,
-    honored: 20,
-    missed: 7,
-    revenue: 3600,
-    trend: "-6%",
-  },
-  {
-    name: "Beauté du regard",
-    reservations: 18,
-    honored: 16,
-    missed: 1,
-    revenue: 880,
-    trend: "+7%",
-  },
-];
-
-const requestedSlots = [
-  { slot: "Samedi 14h-17h", demand: 92, bookings: 31, missed: 2 },
-  { slot: "Mercredi 17h-19h", demand: 78, bookings: 24, missed: 3 },
-  { slot: "Lundi 10h-12h", demand: 64, bookings: 18, missed: 1 },
-  { slot: "Vendredi 12h-14h", demand: 51, bookings: 12, missed: 4 },
-];
-
-const seyaActivity = [
-  { label: "Relances proposées", value: 38, detail: "12 haute priorité", color: "text-violet-600" },
-  { label: "Messages prêts", value: 44, detail: "WhatsApp, SMS, email", color: "text-emerald-600" },
-  { label: "Créneaux optimisés", value: 17, detail: "5 remplissages cabine", color: "text-blue-600" },
-  { label: "Doublons détectés", value: 6, detail: "2 fiches à fusionner", color: "text-orange-600" },
-  { label: "RDV proposés", value: 23, detail: "via demandes naturelles", color: "text-cyan-600" },
-  { label: "CA assisté", value: "1 240 €", detail: "ventes ou acomptes aidés", color: "text-emerald-700" },
-];
-
 export default function StatisticsPage() {
+  const [leads, setLeads] = useState<Lead[]>([]);
+  const [appointments, setAppointments] = useState<Appointment[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function load() {
+      try {
+        const [leadData, appointmentData] = await Promise.all([
+          loadCrmLeads(),
+          loadCrmAppointments(),
+        ]);
+
+        if (cancelled) {
+          return;
+        }
+
+        setLeads(leadData.leads);
+        setAppointments(appointmentData);
+      } catch {
+        if (!cancelled) {
+          setLeads([]);
+          setAppointments([]);
+        }
+      }
+    }
+
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const today = todayIso();
+  const todayAppointments = appointments.filter(
+    (appointment) =>
+      appointment.date === today &&
+      (!appointment.kind || appointment.kind === "Rendez-vous") &&
+      appointment.status !== "Annulation",
+  );
   const leadCount = leads.length;
   const rdvLeads = leads.filter((lead) => bookedStatuses.includes(lead.status)).length;
   const soldLeads = leads.filter((lead) => soldStatuses.includes(lead.status)).length;
   const redLeads = leads.filter((lead) => redStatuses.includes(lead.status)).length;
   const revenue = leads.reduce((total, lead) => total + lead.dealAmount, 0);
-  const totalAppointmentMinutes = appointments.reduce(
+  const totalAppointmentMinutes = todayAppointments.reduce(
     (total, appointment) => total + appointment.duration,
     0,
   );
-  const capacityMinutes = cabins.length * 12 * 60;
+  const cabinCount = Math.max(
+    new Set(
+      appointments
+        .map((appointment) => appointment.cabinId)
+        .filter(Boolean),
+    ).size,
+    1,
+  );
+  const capacityMinutes = cabinCount * 11 * 60;
   const fillRate = Math.round((totalAppointmentMinutes / capacityMinutes) * 100);
   const attendanceRate = ratio(
-    appointments.filter((appointment) => appointment.status === "Confirmé").length,
-    appointments.length,
+    appointments.filter(
+      (appointment) =>
+        appointment.status === "Confirmé" ||
+        appointment.status === "Présent" ||
+        appointment.status === "Terminé",
+    ).length,
+    appointments.filter(
+      (appointment) => !appointment.kind || appointment.kind === "Rendez-vous",
+    ).length,
   );
   const conversionRate = ratio(soldLeads, leadCount);
   const noShowRate = ratio(redLeads, leadCount);
   const sourceRows = groupByLeadField(leads, "source");
   const campaignRows = groupByLeadField(leads, "campaign");
   const organicAppointments = appointments.filter(
-    (appointment) => appointment.source !== "Prospect",
+    (appointment) => appointment.source === "Organique" || appointment.source === "Seya",
   );
   const organicBookings = organicAppointments.length;
   const organicShare = ratio(organicBookings, appointments.length);
+  const servicePerformance = useMemo(
+    () => buildServicePerformance(appointments, leads),
+    [appointments, leads],
+  );
+  const requestedSlots = useMemo(
+    () => buildRequestedSlots(appointments),
+    [appointments],
+  );
+  const duplicateCount = findDuplicateLeadGroups(leads).length;
+  const reminderCount = leads.filter((lead) => lead.reminderDate === today).length;
+  const unconfirmedCount = todayAppointments.filter(
+    (appointment) => appointment.status === "À confirmer",
+  ).length;
+  const seyaActivity = [
+    {
+      label: "Relances du jour",
+      value: reminderCount,
+      detail: "Prospects à rappeler aujourd'hui",
+      color: "text-violet-600",
+    },
+    {
+      label: "RDV à confirmer",
+      value: unconfirmedCount,
+      detail: "Planning du jour",
+      color: "text-emerald-600",
+    },
+    {
+      label: "Remplissage jour",
+      value: `${Math.max(0, fillRate)}%`,
+      detail: "Cabines du centre",
+      color: "text-blue-600",
+    },
+    {
+      label: "Doublons détectés",
+      value: duplicateCount,
+      detail: "Groupes de fiches proches",
+      color: "text-orange-600",
+    },
+    {
+      label: "RDV organiques",
+      value: organicBookings,
+      detail: "Seya ou réservation publique",
+      color: "text-cyan-600",
+    },
+    {
+      label: "CA leads",
+      value: formatCurrency(revenue),
+      detail: "Montants enregistrés CRM",
+      color: "text-emerald-700",
+    },
+  ];
   const organicRevenue = organicAppointments.reduce((total, appointment) => {
     const service = servicePerformance.find((item) =>
       appointment.treatment.toLowerCase().includes(item.name.toLowerCase().split(" ")[0]),
     );
-    return total + Math.round((service?.revenue ?? 240) / 12);
+    return total + Math.round((service?.revenue ?? 0) / Math.max(service?.reservations ?? 1, 1));
   }, 0);
+  const emptyService = {
+    name: "Aucune prestation",
+    reservations: 0,
+    honored: 0,
+    missed: 0,
+    revenue: 0,
+    trend: "0%",
+  };
+  const organicTop = servicePerformance[0];
   const organicRows = [
     {
       label: "Réservations organiques",
@@ -118,35 +185,33 @@ export default function StatisticsPage() {
       progressLabel: `${organicShare}% du planning`,
     },
     {
-      label: "Recherche publique",
-      value: "Aubière",
-      sub: "Ville la plus demandée sur Bookea",
-      percent: 72,
-      progressLabel: "forte demande locale",
-    },
-    {
       label: "Prestation organique #1",
-      value: "Hydrafacial",
+      value: organicTop?.name || "Aucune",
       sub: "Soin le plus réservé sans relance commerciale",
-      percent: 64,
-      progressLabel: "demande naturelle",
+      percent: organicTop
+        ? ratio(organicTop.reservations, Math.max(appointments.length, 1))
+        : 0,
+      progressLabel: organicTop
+        ? `${organicTop.reservations} réservation${organicTop.reservations > 1 ? "s" : ""}`
+        : "pas encore de data",
     },
     {
       label: "CA organique estimé",
       value: formatCurrency(organicRevenue),
       sub: "Hors campagnes, hors relances CRM",
-      percent: 48,
+      percent: ratio(organicRevenue, Math.max(revenue, 1)),
       progressLabel: "à suivre",
     },
   ];
-  const topService = servicePerformance.reduce((best, item) =>
-    item.reservations > best.reservations ? item : best,
+  const topService = servicePerformance.reduce(
+    (best, item) => (item.reservations > best.reservations ? item : best),
+    emptyService,
   );
-  const weakestService = servicePerformance.reduce((worst, item) =>
-    item.missed / item.reservations > worst.missed / worst.reservations
-      ? item
-      : worst,
-  );
+  const weakestService = servicePerformance.reduce((worst, item) => {
+    const worstRate = worst.reservations ? worst.missed / worst.reservations : 0;
+    const itemRate = item.reservations ? item.missed / item.reservations : 0;
+    return itemRate > worstRate ? item : worst;
+  }, emptyService);
 
   return (
     <main className="min-h-screen bg-[#f4f7fb] text-slate-950">
@@ -212,7 +277,7 @@ export default function StatisticsPage() {
             icon={<BarChart3 />}
             tone={rateTone(fillRate)}
           />
-          <MetricCard title="Activité Seya" value={128} detail="Actions IA suivies" icon={<Sparkles />} color="text-violet-600" />
+          <MetricCard title="Activité Seya" value={reminderCount + unconfirmedCount + duplicateCount} detail="Relances, confirmations, doublons" icon={<Sparkles />} color="text-violet-600" />
         </section>
 
         <section className="grid gap-6 xl:grid-cols-[1.2fr_0.8fr]">
@@ -222,6 +287,11 @@ export default function StatisticsPage() {
             icon={<Flame className="h-6 w-6 text-orange-500" />}
           >
             <div className="grid gap-3">
+              {servicePerformance.length === 0 ? (
+                <p className="rounded-3xl border border-slate-200 bg-slate-50 p-4 text-sm font-semibold text-slate-500">
+                  Aucune prestation enregistrée sur ce centre.
+                </p>
+              ) : null}
               {servicePerformance.map((service) => {
                 const honoredRate = ratio(service.honored, service.reservations);
                 const missedRate = ratio(service.missed, service.reservations);
@@ -279,14 +349,26 @@ export default function StatisticsPage() {
               />
               <InsightCard
                 title="Créneau le plus demandé"
-                value={requestedSlots[0].slot}
-                detail={`${requestedSlots[0].demand}% de demande, prévoir plus de praticiennes`}
+                value={requestedSlots[0]?.slot || "Aucun créneau"}
+                detail={
+                  requestedSlots[0]
+                    ? `${requestedSlots[0].bookings} réservations · ${requestedSlots[0].missed} absences`
+                    : "Pas encore assez de rendez-vous pour lire la demande."
+                }
                 tone="violet"
               />
               <InsightCard
                 title="Action recommandée"
-                value="Acompte sur Cryolipolyse"
-                detail="La prestation génère du CA mais trop de rendez-vous non honorés."
+                value={
+                  weakestService.missed > 0
+                    ? `Sécuriser ${weakestService.name}`
+                    : "Continuer le suivi"
+                }
+                detail={
+                  weakestService.missed > 0
+                    ? `${weakestService.missed} rendez-vous non honorés à relancer.`
+                    : "Aucun no-show enregistré pour le moment."
+                }
                 tone="orange"
               />
             </div>
@@ -385,13 +467,25 @@ export default function StatisticsPage() {
             icon={<TrendingDown className="h-6 w-6 text-rose-500" />}
           >
             <div className="grid gap-3">
-              {[
-                "Augmenter les rappels automatiques sur les créneaux du samedi après-midi.",
-                "Mettre en avant Hydrafacial et Épilation Laser sur la page publique.",
-                "Ajouter un acompte obligatoire sur les prestations avec plus de 15% de no-show.",
-                "Créer une campagne de remplissage pour vendredi 12h-14h.",
-                "Surveiller les doublons avant les campagnes mailing et SMS.",
-              ].map((text, index) => (
+              {(
+                [
+                  fillRate < 50
+                    ? `Le planning du jour n'est rempli qu'à ${Math.max(0, fillRate)}% : relancer les nouveaux leads.`
+                    : `Le planning du jour est rempli à ${fillRate}%.`,
+                  topService.reservations > 0
+                    ? `Mettre en avant ${topService.name} : ${topService.reservations} réservations.`
+                    : "Aucune prestation réservée pour l'instant.",
+                  weakestService.missed > 0
+                    ? `Sécuriser ${weakestService.name} avec un acompte : ${weakestService.missed} absences.`
+                    : "Pas de no-show à surveiller pour le moment.",
+                  reminderCount > 0
+                    ? `${reminderCount} relance${reminderCount > 1 ? "s" : ""} prévue${reminderCount > 1 ? "s" : ""} aujourd'hui.`
+                    : "Aucune relance planifiée aujourd'hui.",
+                  duplicateCount > 0
+                    ? `${duplicateCount} groupe${duplicateCount > 1 ? "s" : ""} de doublons à fusionner avant un envoi SMS.`
+                    : "Aucun doublon détecté.",
+                ] as string[]
+              ).map((text, index) => (
                 <div key={text} className="flex gap-3 rounded-3xl border border-slate-200 bg-white p-4">
                   <span className="grid h-9 w-9 shrink-0 place-items-center rounded-2xl bg-slate-950 text-sm font-black text-white">
                     {index + 1}
@@ -508,6 +602,11 @@ function RankList({
 }) {
   return (
     <div className="grid gap-4">
+      {rows.length === 0 ? (
+        <p className="text-sm font-semibold text-slate-500">
+          Aucune donnée pour ce centre.
+        </p>
+      ) : null}
       {rows.map((row) => (
         <div key={row.label}>
           <div className="mb-2 flex items-start justify-between gap-3">
@@ -564,6 +663,89 @@ function Progress({ value, color }: { value: number; color: string }) {
       />
     </div>
   );
+}
+
+function buildServicePerformance(appointments: Appointment[], leads: Lead[]) {
+  const bookable = appointments.filter(
+    (appointment) => !appointment.kind || appointment.kind === "Rendez-vous",
+  );
+  const grouped = new Map<string, Appointment[]>();
+
+  for (const appointment of bookable) {
+    const name = appointment.treatment.trim() || "Soin à préciser";
+    grouped.set(name, [...(grouped.get(name) ?? []), appointment]);
+  }
+
+  return [...grouped.entries()]
+    .map(([name, rows]) => {
+      const honored = rows.filter((appointment) =>
+        ["Confirmé", "Présent", "Terminé", "Vendu"].includes(appointment.status),
+      ).length;
+      const missed = rows.filter((appointment) =>
+        ["No show", "Annulation", "Pas venu pas prévenu"].includes(
+          appointment.status,
+        ),
+      ).length;
+      const revenue = leads
+        .filter((lead) => lead.treatment === name)
+        .reduce((total, lead) => total + (Number(lead.dealAmount) || 0), 0);
+
+      return {
+        name,
+        reservations: rows.length,
+        honored,
+        missed,
+        revenue,
+        trend: missed > honored ? `-${missed}` : `+${honored}`,
+      };
+    })
+    .sort((left, right) => right.reservations - left.reservations);
+}
+
+function buildRequestedSlots(appointments: Appointment[]) {
+  const bookable = appointments.filter(
+    (appointment) =>
+      (!appointment.kind || appointment.kind === "Rendez-vous") &&
+      appointment.status !== "Annulation",
+  );
+  const grouped = new Map<
+    string,
+    { bookings: number; missed: number }
+  >();
+
+  for (const appointment of bookable) {
+    const hour = Number(appointment.start.slice(0, 2));
+    const weekday = new Date(`${appointment.date}T12:00:00`).toLocaleDateString(
+      "fr-FR",
+      { weekday: "long" },
+    );
+    const slotHour = `${String(hour).padStart(2, "0")}h-${String(hour + 2).padStart(2, "0")}h`;
+    const label = `${weekday.charAt(0).toUpperCase()}${weekday.slice(1)} ${slotHour}`;
+    const current = grouped.get(label) ?? { bookings: 0, missed: 0 };
+    current.bookings += 1;
+    if (
+      appointment.status === "No show" ||
+      appointment.status === "Pas venu pas prévenu"
+    ) {
+      current.missed += 1;
+    }
+    grouped.set(label, current);
+  }
+
+  const maxBookings = Math.max(
+    1,
+    ...[...grouped.values()].map((item) => item.bookings),
+  );
+
+  return [...grouped.entries()]
+    .map(([slot, item]) => ({
+      slot,
+      demand: Math.round((item.bookings / maxBookings) * 100),
+      bookings: item.bookings,
+      missed: item.missed,
+    }))
+    .sort((left, right) => right.bookings - left.bookings)
+    .slice(0, 4);
 }
 
 function groupByLeadField(leadsList: Lead[], field: "source" | "campaign") {

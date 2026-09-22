@@ -25,7 +25,9 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { appointments, cabins, practitioners } from "@/lib/agenda-data";
+import { cabins, practitioners } from "@/lib/agenda-data";
+import { loadCrmAppointments } from "@/lib/agenda-supabase";
+import type { Appointment } from "@/types/agenda";
 import {
   getSourceNames,
   publicCenterCategories,
@@ -96,6 +98,7 @@ const emptyDocumentForm: Omit<ClientDocument, "id"> = {
 
 export default function CRMClientsPage() {
   const [clientList, setClientList] = useState<Client[]>([]);
+  const [appointmentList, setAppointmentList] = useState<Appointment[]>([]);
   const [selectedClientId, setSelectedClientId] = useState<string | undefined>();
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<"Tous" | ClientStatus>(
@@ -121,9 +124,13 @@ export default function CRMClientsPage() {
 
     try {
       const { clientId } = getClientFicheParams();
-      const { clients } = await loadCrmClients({ includeClientId: clientId });
+      const [{ clients }, loadedAppointments] = await Promise.all([
+        loadCrmClients({ includeClientId: clientId }),
+        loadCrmAppointments(),
+      ]);
 
       setClientList(clients);
+      setAppointmentList(loadedAppointments);
       setSelectedClientId((currentId) => {
         const fromUrl = findClientFromFicheParams(clients);
 
@@ -144,6 +151,7 @@ export default function CRMClientsPage() {
           : "Impossible de charger les clients.",
       );
       setClientList([]);
+      setAppointmentList([]);
       setSelectedClientId(undefined);
     } finally {
       setIsLoadingClients(false);
@@ -595,6 +603,7 @@ export default function CRMClientsPage() {
           {selectedClient && (
             <ClientPanel
               client={selectedClient}
+              appointments={appointmentList}
               noteDraft={noteDraft}
               noteVisibility={noteVisibility}
               onNoteDraftChange={setNoteDraft}
@@ -625,6 +634,7 @@ export default function CRMClientsPage() {
       {selectedClient && isFullClientOpen && (
         <FullClientModal
           client={selectedClient}
+          appointments={appointmentList}
           onClose={() => setIsFullClientOpen(false)}
           onSave={saveFullClient}
           sourceOptions={provenanceOptions}
@@ -636,6 +646,7 @@ export default function CRMClientsPage() {
 
 function ClientPanel({
   client,
+  appointments,
   noteDraft,
   noteVisibility,
   onAddNote,
@@ -647,6 +658,7 @@ function ClientPanel({
   onBirthDateChange,
 }: {
   client: Client;
+  appointments: Appointment[];
   noteDraft: string;
   noteVisibility: "private" | "shared";
   onAddDocument: (document: Omit<ClientDocument, "id">) => void;
@@ -661,7 +673,7 @@ function ClientPanel({
     "cures" | "appointments" | "documents"
   >("cures");
   const [isMoreOpen, setIsMoreOpen] = useState(false);
-  const appointmentHistory = getClientAppointmentHistory(client);
+  const appointmentHistory = getClientAppointmentHistory(client, appointments);
   const birthdayGift = getBirthdayGift(client.birthDate);
 
   return (
@@ -1084,11 +1096,13 @@ function ClientFormModal({
 
 function FullClientModal({
   client,
+  appointments,
   onClose,
   onSave,
   sourceOptions,
 }: {
   client: Client;
+  appointments: Appointment[];
   onClose: () => void;
   onSave: (client: Client) => void;
   sourceOptions: string[];
@@ -1198,7 +1212,7 @@ function FullClientModal({
 
             <section className="rounded-2xl border border-slate-200 bg-white p-4">
               <ClientAppointments
-                appointments={getClientAppointmentHistory(form)}
+                appointments={getClientAppointmentHistory(form, appointments)}
                 onOpenRdv={() => {}}
               />
             </section>
@@ -1801,14 +1815,15 @@ function todayFrenchDate() {
   });
 }
 
-function getClientAppointmentHistory(client: Client) {
+function getClientAppointmentHistory(client: Client, appointments: Appointment[]) {
   const clientName = normalize(`${client.firstName} ${client.lastName}`);
   const clientPhone = normalize(client.phone);
   const matchingAppointments = appointments
     .filter(
       (appointment) =>
+        appointment.clientId === client.id ||
         normalize(appointment.personName) === clientName ||
-        normalize(appointment.phone) === clientPhone
+        (Boolean(clientPhone) && normalize(appointment.phone) === clientPhone)
     )
     .map((appointment) => ({
       id: appointment.id,

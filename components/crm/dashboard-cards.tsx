@@ -34,7 +34,7 @@ type DashboardCardsProps = {
 type StatCard = {
   title: string;
   value: number;
-  subtitle: string;
+  subtitle?: string;
   icon: typeof Users;
   color: string;
   status?: LeadStatus | null;
@@ -94,7 +94,6 @@ export default function DashboardCards({
     {
       title: "RDV pris aujourd'hui",
       value: leads.filter((lead) => isLeadRdvTakenOn(lead, today)).length,
-      subtitle: "Même convertis, no-show ou annulés",
       icon: CalendarCheck2,
       color: "text-violet-600",
       quickFilter: "RDV aujourd'hui",
@@ -102,7 +101,6 @@ export default function DashboardCards({
     {
       title: "RDV pris hier",
       value: leads.filter((lead) => isLeadRdvTakenOn(lead, yesterday)).length,
-      subtitle: "Même convertis, no-show ou annulés",
       icon: CalendarCheck2,
       color: "text-fuchsia-600",
       quickFilter: "RDV hier",
@@ -112,7 +110,6 @@ export default function DashboardCards({
       value: leads.filter((lead) =>
         isLeadRdvTakenBetween(lead, sevenDaysAgo, today),
       ).length,
-      subtitle: "Même convertis, no-show ou annulés",
       icon: CalendarCheck2,
       color: "text-purple-600",
       quickFilter: "RDV 7 jours",
@@ -255,7 +252,9 @@ function renderStatCard(
               <h2 className={`mt-3 text-4xl font-bold ${stat.color}`}>
                 {stat.value}
               </h2>
-              <p className="mt-3 text-sm text-muted-foreground">{stat.subtitle}</p>
+              {stat.subtitle ? (
+                <p className="mt-3 text-sm text-muted-foreground">{stat.subtitle}</p>
+              ) : null}
             </div>
             <div className="rounded-xl bg-slate-100 p-3">
               <Icon className={`h-6 w-6 ${stat.color}`} />

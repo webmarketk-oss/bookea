@@ -531,7 +531,7 @@ export default function LeadDetails({
           </div>
 
           {activeTab === "comments" && (
-            <div className="max-h-[min(70vh,44rem)] space-y-4 overflow-y-auto overscroll-y-auto pr-1 [touch-action:pan-y]">
+            <div className="space-y-4 pr-1">
             <div className="rounded-xl border border-slate-200 bg-white p-3">
               <textarea
                 ref={commentTextareaRef}

@@ -12,11 +12,15 @@ import {
 } from "lucide-react";
 import type { ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
+import { loadCrmAppointments } from "@/lib/agenda-supabase";
 import {
   defaultCenterDepositLinks,
   readCenterSettings,
   type CenterDepositLinkSetting,
 } from "@/lib/center-settings";
+import { todayIso } from "@/lib/crm-stats";
+import { loadCrmClients, loadCrmLeads } from "@/lib/crm-supabase";
+import { inactiveLeadStatuses } from "@/lib/lead-statuses";
 
 type TaskStatus = "À valider" | "Prêt" | "Envoyé";
 type Priority = "Haute" | "Moyenne" | "Basse";
@@ -32,52 +36,101 @@ type SeyaTask = {
   suggestion: string;
 };
 
-const initialTasks: SeyaTask[] = [
-  {
-    id: 1,
-    title: "Relancer acompte en attente",
-    client: "Julie Martin",
-    phone: "0671229091",
-    channel: "WhatsApp",
-    priority: "Haute",
-    status: "À valider",
-    suggestion:
-      "Bonjour Julie, votre créneau est bien préparé. Pour le bloquer définitivement, vous pouvez régler l'acompte ici.",
-  },
-  {
-    id: 2,
-    title: "Confirmer le rendez-vous de demain",
-    client: "Marie Dubois",
-    phone: "0612345678",
-    channel: "SMS",
-    priority: "Moyenne",
-    status: "Prêt",
-    suggestion:
-      "Rappel Bookea : votre rendez-vous est prévu demain à 09:00 chez JFG Clinique Clermont-Ferrand.",
-  },
-  {
-    id: 3,
-    title: "Proposer un créneau libre",
-    client: "Sarah Bernard",
-    phone: "0698765432",
-    channel: "Agenda",
-    priority: "Moyenne",
-    status: "À valider",
-    suggestion:
-      "Seya propose cabine 3 mercredi à 14:30 avec Camille pour Hydrafacial.",
-  },
-  {
-    id: 4,
-    title: "Anniversaire cliente",
-    client: "Claire Moreau",
-    phone: "0695861369",
-    channel: "Email",
-    priority: "Basse",
-    status: "Prêt",
-    suggestion:
-      "Joyeux anniversaire Claire. Votre centre vous offre une attention sur votre prochain soin.",
-  },
-];
+function isBirthdayToday(value?: string | null) {
+  if (!value) {
+    return false;
+  }
+
+  const isoMatch = value.match(/(\d{4})-(\d{2})-(\d{2})/);
+  const frMatch = value.match(/(\d{2})\/(\d{2})(?:\/\d{4})?/);
+  const monthDay = isoMatch
+    ? `${isoMatch[2]}-${isoMatch[3]}`
+    : frMatch
+      ? `${frMatch[2]}-${frMatch[1]}`
+      : "";
+
+  return Boolean(monthDay) && todayIso().slice(5) === monthDay;
+}
+
+function buildSeyaTasks({
+  leads,
+  appointments,
+  clients,
+}: {
+  leads: Awaited<ReturnType<typeof loadCrmLeads>>["leads"];
+  appointments: Awaited<ReturnType<typeof loadCrmAppointments>>;
+  clients: Awaited<ReturnType<typeof loadCrmClients>>["clients"];
+}): SeyaTask[] {
+  const today = todayIso();
+  const tasks: SeyaTask[] = [];
+  let nextId = 1;
+
+  for (const client of clients.filter((item) => item.balanceDue > 0).slice(0, 4)) {
+    tasks.push({
+      id: nextId++,
+      title: "Relancer acompte en attente",
+      client: `${client.firstName} ${client.lastName}`.trim(),
+      phone: client.phone,
+      channel: "SMS",
+      priority: "Haute",
+      status: "À valider",
+      suggestion: `Bonjour ${client.firstName}, un reste dû de ${client.balanceDue.toLocaleString("fr-FR", { style: "currency", currency: "EUR" })} est encore ouvert. Vous pouvez régler l'acompte pour sécuriser votre soin.`,
+    });
+  }
+
+  for (const appointment of appointments
+    .filter(
+      (item) =>
+        item.date === today &&
+        item.status === "À confirmer" &&
+        (!item.kind || item.kind === "Rendez-vous"),
+    )
+    .slice(0, 4)) {
+    tasks.push({
+      id: nextId++,
+      title: "Confirmer le rendez-vous du jour",
+      client: appointment.personName,
+      phone: appointment.phone,
+      channel: "SMS",
+      priority: "Moyenne",
+      status: "Prêt",
+      suggestion: `Rappel Bookea : votre rendez-vous est prévu aujourd'hui à ${appointment.start} pour ${appointment.treatment}.`,
+    });
+  }
+
+  for (const lead of leads
+    .filter(
+      (item) =>
+        item.reminderDate === today && !inactiveLeadStatuses.includes(item.status),
+    )
+    .slice(0, 4)) {
+    tasks.push({
+      id: nextId++,
+      title: "Relancer le prospect prévu aujourd'hui",
+      client: `${lead.firstName} ${lead.lastName}`.trim(),
+      phone: lead.phone,
+      channel: "WhatsApp",
+      priority: "Haute",
+      status: "À valider",
+      suggestion: `Bonjour ${lead.firstName}, je reviens vers vous concernant ${lead.treatment || "votre projet"}. Souhaitez-vous que je vous propose un créneau ?`,
+    });
+  }
+
+  for (const client of clients.filter((item) => isBirthdayToday(item.birthDate)).slice(0, 2)) {
+    tasks.push({
+      id: nextId++,
+      title: "Anniversaire cliente",
+      client: `${client.firstName} ${client.lastName}`.trim(),
+      phone: client.phone,
+      channel: "Email",
+      priority: "Basse",
+      status: "Prêt",
+      suggestion: `Joyeux anniversaire ${client.firstName}. Votre centre vous offre une attention sur votre prochain soin.`,
+    });
+  }
+
+  return tasks;
+}
 
 const priorityStyles: Record<Priority, string> = {
   Haute: "bg-rose-100 text-rose-700 border-rose-200",
@@ -93,12 +146,12 @@ const channelStyles: Record<SeyaTask["channel"], string> = {
 };
 
 export default function SeyaCrmPage() {
-  const [tasks, setTasks] = useState(initialTasks);
+  const [tasks, setTasks] = useState<SeyaTask[]>([]);
   const [prompt, setPrompt] = useState(
     "Prépare les relances prioritaires du jour et évite les doublons.",
   );
   const [summary, setSummary] = useState(
-    "4 actions détectées. 1 acompte prioritaire, 1 rappel SMS, 1 proposition agenda et 1 anniversaire.",
+    "Analyse du centre en cours…",
   );
   const [depositLinks, setDepositLinks] =
     useState<CenterDepositLinkSetting[]>(defaultCenterDepositLinks);
@@ -137,6 +190,46 @@ export default function SeyaCrmPage() {
         "bookea-center-settings-updated",
         refreshDepositLinks,
       );
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function load() {
+      try {
+        const [leadData, appointments, clientData] = await Promise.all([
+          loadCrmLeads(),
+          loadCrmAppointments(),
+          loadCrmClients(),
+        ]);
+
+        if (cancelled) {
+          return;
+        }
+
+        const nextTasks = buildSeyaTasks({
+          leads: leadData.leads,
+          appointments,
+          clients: clientData.clients,
+        });
+        setTasks(nextTasks);
+        setSummary(
+          nextTasks.length === 0
+            ? "Aucune action prioritaire détectée sur ce centre pour aujourd'hui."
+            : `${nextTasks.length} action${nextTasks.length > 1 ? "s" : ""} détectée${nextTasks.length > 1 ? "s" : ""} à partir des leads, rendez-vous et soldes du centre.`,
+        );
+      } catch {
+        if (!cancelled) {
+          setTasks([]);
+          setSummary("Impossible de charger les actions Seya de ce centre.");
+        }
+      }
+    }
+
+    void load();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const selectedDepositLink =
@@ -234,6 +327,11 @@ export default function SeyaCrmPage() {
       </section>
 
       <section className="grid gap-4">
+        {tasks.length === 0 ? (
+          <p className="rounded-3xl border border-slate-200 bg-white p-5 text-sm font-semibold text-slate-500 shadow-sm">
+            Aucune tâche Seya pour ce centre aujourd&apos;hui.
+          </p>
+        ) : null}
         {tasks.map((task) => (
           <article
             key={task.id}
