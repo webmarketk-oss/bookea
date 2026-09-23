@@ -50,7 +50,10 @@ import {
   type SeyaAgentSettings,
   type SeyaConversation,
 } from "@/lib/seya-settings";
-import { formatSharedWhatsAppNumber } from "@/lib/seya-whatsapp";
+import {
+  BOOKEA_SHARED_WHATSAPP_NUMBER,
+  formatSharedWhatsAppNumber,
+} from "@/lib/seya-whatsapp";
 import type { Appointment } from "@/types/agenda";
 import type { Lead } from "@/types/lead";
 
@@ -236,7 +239,9 @@ export default function SeyaCrmPage() {
   const [reply, setReply] = useState("");
   const [savingAgent, setSavingAgent] = useState(false);
   const [agentFeedback, setAgentFeedback] = useState("");
-  const [sharedNumber, setSharedNumber] = useState("Numéro Bookea unique");
+  const [sharedNumber, setSharedNumber] = useState(
+    formatSharedWhatsAppNumber(BOOKEA_SHARED_WHATSAPP_NUMBER),
+  );
   const [whatsappConnected, setWhatsappConnected] = useState(false);
 
   const stats = useMemo(
