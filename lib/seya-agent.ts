@@ -5,6 +5,7 @@ import {
   type SeyaAgentMessage,
   type SeyaAgentSettings,
   type SeyaConversation,
+  type SeyaConversationStatus,
   type SeyaProposedSlot,
   type SeyaQualification,
 } from "@/lib/seya-settings";
@@ -170,7 +171,7 @@ export function applyLeadReply(
   reply: string,
   settings: SeyaAgentSettings,
   slots: SeyaProposedSlot[],
-) {
+): { conversation: SeyaConversation; shouldBook: SeyaProposedSlot | null } {
   const text = reply.trim();
   const qualification = mergeQualification(conversation.qualification, text);
   const chosenSlot =
@@ -236,7 +237,7 @@ export function applyLeadReply(
     conversation: {
       ...conversation,
       qualification,
-      status: qualification.need ? "Qualifié" : "En cours",
+      status: (qualification.need ? "Qualifié" : "En cours") as SeyaConversationStatus,
       messages: [
         ...conversation.messages,
         createSeyaMessage("lead", text),
