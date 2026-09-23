@@ -4329,7 +4329,7 @@ function isAgendaClientReady(
 
   return (
     Boolean(form.personName?.trim()) &&
-    form.phone?.replace(/\D/g, "").length >= 9
+    (form.phone?.replace(/\D/g, "") ?? "").length >= 9
   );
 }
 

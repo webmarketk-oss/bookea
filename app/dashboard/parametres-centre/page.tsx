@@ -417,7 +417,7 @@ export default function CenterSettingsPage() {
 
     void loadPublicCenterProfile().then((loaded) => {
       if (loaded.settings) {
-        applyStoredSettings(loaded.settings);
+        applyStoredSettings(loaded.settings as Partial<StoredCenterSettings>);
       }
     });
 

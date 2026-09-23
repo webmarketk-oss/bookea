@@ -28,7 +28,19 @@ const nonVisitTreatments = new Set([
   "Fermeture",
 ]);
 
-export function withPastAppointmentPresence(appointment: Appointment) {
+type PresenceAppointment = {
+  date: string;
+  start: string;
+  duration: number;
+  status: AppointmentStatus;
+  kind?: Appointment["kind"];
+  source?: Appointment["source"];
+  treatment?: string;
+};
+
+export function withPastAppointmentPresence<T extends PresenceAppointment>(
+  appointment: T,
+): T {
   if ((appointment.kind ?? "Rendez-vous") !== "Rendez-vous") {
     return appointment;
   }
@@ -37,7 +49,7 @@ export function withPastAppointmentPresence(appointment: Appointment) {
     return appointment;
   }
 
-  if (nonVisitTreatments.has(appointment.treatment)) {
+  if (appointment.treatment && nonVisitTreatments.has(appointment.treatment)) {
     return appointment;
   }
 
@@ -55,6 +67,8 @@ export function withPastAppointmentPresence(appointment: Appointment) {
   };
 }
 
-export function markPastAppointmentsPresent(appointments: Appointment[]) {
+export function markPastAppointmentsPresent<T extends PresenceAppointment>(
+  appointments: T[],
+): T[] {
   return appointments.map(withPastAppointmentPresence);
 }

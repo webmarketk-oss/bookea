@@ -754,7 +754,7 @@ function mergeLocalAndRemote(
           ...remote.center?.socialLinks,
           ...local.center?.socialLinks,
         },
-      },
+      } as StoredCenterSettings["center"],
     };
   }
 

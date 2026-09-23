@@ -3126,7 +3126,7 @@ function toStoredBillingService(
   existing?: CenterServiceSetting,
 ): CenterServiceSetting {
   return {
-    id: existing?.id ?? Number(service.id.replace(/\D/g, "")) || Date.now() + index,
+    id: existing?.id ?? (Number(service.id.replace(/\D/g, "")) || Date.now() + index),
     name: service.name,
     category: service.category,
     color: service.color || existing?.color || billingServiceColorFallback(index),
@@ -3148,7 +3148,7 @@ function toStoredBillingProduct(
   existing?: CenterProductSetting,
 ): CenterProductSetting {
   return {
-    id: existing?.id ?? Number(product.id.replace(/\D/g, "")) || Date.now(),
+    id: existing?.id ?? (Number(product.id.replace(/\D/g, "")) || Date.now()),
     name: product.name,
     category: product.category,
     price: product.price,
