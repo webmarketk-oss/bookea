@@ -1,8 +1,10 @@
 import { getActiveCenterContext } from "@/lib/center-access";
 import {
+  APPOINTMENT_REMINDER_HOURS,
   getSmsTemplate,
   loadCenterSmsSettings,
   toBirthDateIso,
+  type AppointmentReminderKind,
   type SmsTemplateVars,
 } from "@/lib/sms-settings";
 
@@ -180,15 +182,48 @@ export async function syncBirthdaySms(input: {
   } satisfies SendSmsResult;
 }
 
+const REMINDER_LABELS: Record<AppointmentReminderKind, string> = {
+  reminder_j7: "J-7 laser",
+  reminder_j5: "J-5",
+  reminder_48h: "48h",
+  reminder_24h: "24h",
+};
+
+function reminderTemplateId(
+  settings: Awaited<ReturnType<typeof loadCenterSmsSettings>>["settings"],
+  kind: AppointmentReminderKind,
+  templateId?: string,
+) {
+  if (templateId) {
+    return templateId;
+  }
+
+  if (kind === "reminder_j7") {
+    return settings.reminderJ7TemplateId;
+  }
+
+  if (kind === "reminder_j5") {
+    return settings.reminderJ5TemplateId;
+  }
+
+  if (kind === "reminder_24h") {
+    return settings.reminder24hTemplateId;
+  }
+
+  return settings.reminder48hTemplateId;
+}
+
 export async function scheduleAppointmentReminderSms(input: {
   appointmentId: string;
   templateId?: string;
+  kind?: AppointmentReminderKind;
   vars: SmsTemplateVars & { phone: string };
 }) {
+  const kind = input.kind || "reminder_48h";
   const { settings, centerName } = await loadCenterSmsSettings();
   const template = getSmsTemplate(
     settings,
-    input.templateId || settings.reminder48hTemplateId,
+    reminderTemplateId(settings, kind, input.templateId),
   );
   const vars = {
     ...input.vars,
@@ -201,7 +236,8 @@ export async function scheduleAppointmentReminderSms(input: {
     body: JSON.stringify({
       action: "schedule",
       appointmentId: input.appointmentId,
-      kind: "reminder_48h",
+      kind,
+      hoursBefore: APPOINTMENT_REMINDER_HOURS[kind],
       message: template.body,
       vars,
     }),
@@ -210,6 +246,7 @@ export async function scheduleAppointmentReminderSms(input: {
   const result = (await response.json().catch(() => ({}))) as SendSmsResult & {
     sendAt?: string;
   };
+  const label = REMINDER_LABELS[kind];
 
   if (!response.ok || !result.ok) {
     return {
@@ -217,7 +254,7 @@ export async function scheduleAppointmentReminderSms(input: {
       sent: result.sent ?? 0,
       failed: 1,
       remainingCredits: null,
-      error: result.error || "Impossible de programmer le SMS 48h",
+      error: result.error || `Impossible de programmer le SMS ${label}`,
     } satisfies SendSmsResult;
   }
 

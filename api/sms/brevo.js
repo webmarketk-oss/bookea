@@ -119,9 +119,24 @@ function defaultSmsTemplates() {
       body: "BOOKEA - Rappel : votre RDV chez {{centre}} est prévu le {{date}} à {{heure}}.\n\nConfirmez ou annulez ici : {{lien_confirmation}}",
     },
     {
+      id: "contre-indications-laser-j7",
+      name: "Contre-indications laser J-7",
+      body: "Bonjour {{prenom}}, votre séance laser {{soin}} est le {{date}} à {{heure}} chez {{centre}}.\nContre-indications : pas de soleil/UV ni autobronzant, pas de cire ni pince (raser seulement). Prévenez-nous si grossesse, médicaments photosensibilisants ou Roaccutane.",
+    },
+    {
+      id: "rappel-j5",
+      name: "Rappel J-5",
+      body: "Bonjour {{prenom}}, rappel : votre rendez-vous {{soin}} est dans 5 jours, le {{date}} à {{heure}} chez {{centre}}.\nConfirmez ou annulez ici : {{lien_confirmation}}",
+    },
+    {
       id: "rappel-48h",
       name: "Rappel 48h avant RDV",
       body: "Bonjour {{prenom}}, rappel : votre rendez-vous {{soin}} est dans 48h, le {{date}} à {{heure}} chez {{centre}}.\nConfirmez ou annulez ici : {{lien_confirmation}}",
+    },
+    {
+      id: "rappel-24h",
+      name: "Rappel 24h avant RDV",
+      body: "Bonjour {{prenom}}, rappel : votre rendez-vous {{soin}} est demain, le {{date}} à {{heure}} chez {{centre}}.\nConfirmez ou annulez ici : {{lien_confirmation}}",
     },
     {
       id: "accueil-prospect",
@@ -169,11 +184,29 @@ function parseCenterSmsSettings(settings) {
     templates,
     confirmationTemplateId:
       String(sms.confirmationTemplateId || "").trim() || templates[0]?.id || "confirmation-rdv",
+    reminderJ7TemplateId:
+      String(sms.reminderJ7TemplateId || "").trim() ||
+      templates.find((template) => template.id === "contre-indications-laser-j7")?.id ||
+      templates[0]?.id,
+    reminderJ5TemplateId:
+      String(sms.reminderJ5TemplateId || "").trim() ||
+      templates.find((template) => template.id === "rappel-j5")?.id ||
+      templates[0]?.id,
     reminder48hTemplateId:
       String(sms.reminder48hTemplateId || "").trim() ||
       templates.find((template) => template.id === "rappel-48h")?.id ||
       templates[1]?.id ||
       templates[0]?.id,
+    reminder24hTemplateId:
+      String(sms.reminder24hTemplateId || "").trim() ||
+      templates.find((template) => template.id === "rappel-24h")?.id ||
+      templates[0]?.id,
+    confirmationEnabled: sms.confirmationEnabled !== false,
+    reminderJ7Enabled: sms.reminderJ7Enabled !== false,
+    reminderJ5Enabled: sms.reminderJ5Enabled === true,
+    reminder48hEnabled: sms.reminder48hEnabled === true,
+    reminder24hEnabled: sms.reminder24hEnabled === true,
+    leadWelcomeEnabled: sms.leadWelcomeEnabled !== false,
     leadWelcomeTemplateId:
       String(sms.leadWelcomeTemplateId || "").trim() ||
       templates.find((template) => template.id === "accueil-prospect")?.id ||
@@ -571,14 +604,39 @@ async function sendBrevoSms({ sender, recipient, content: rawContent, type }) {
   return result;
 }
 
-function reminderSendAt(date, time) {
+const APPOINTMENT_REMINDER_HOURS = {
+  reminder_j7: 7 * 24,
+  reminder_j5: 5 * 24,
+  reminder_48h: 48,
+  reminder_24h: 24,
+};
+
+function isAppointmentReminderKind(kind) {
+  return Object.prototype.hasOwnProperty.call(APPOINTMENT_REMINDER_HOURS, kind);
+}
+
+function reminderHoursForKind(kind, hoursBefore) {
+  const requested = Number(hoursBefore);
+
+  if (Number.isFinite(requested) && requested > 0) {
+    return requested;
+  }
+
+  return APPOINTMENT_REMINDER_HOURS[kind] || 48;
+}
+
+function reminderSendAt(date, time, hoursBefore = 48) {
   const starts = new Date(`${date}T${String(time || "09:00").slice(0, 5)}:00Z`);
 
   if (Number.isNaN(starts.getTime())) {
     throw new Error("invalid_appointment_datetime");
   }
 
-  return new Date(starts.getTime() - 48 * 60 * 60 * 1000).toISOString();
+  const hours = Number(hoursBefore);
+
+  return new Date(
+    starts.getTime() - (Number.isFinite(hours) && hours > 0 ? hours : 48) * 60 * 60 * 1000,
+  ).toISOString();
 }
 
 function isCancelledStatus(status) {
@@ -715,6 +773,7 @@ module.exports = {
   findClientByPhone,
   getBirthdayTemplate,
   isBirthdayToday,
+  isAppointmentReminderKind,
   isCancelledStatus,
   mergeCenterSmsSettings,
   nextBirthdaySendAt,
@@ -722,6 +781,7 @@ module.exports = {
   parseCenterSmsSettings,
   personalize,
   readSmsQuota,
+  reminderHoursForKind,
   reminderSendAt,
   sendBrevoSms,
   storeIncomingSms,

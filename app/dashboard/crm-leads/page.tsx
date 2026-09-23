@@ -438,6 +438,42 @@ export default function CRMLeadsPage() {
     };
   }, [ficheBox, isLeadDetailsOpen, selectedLeadId]);
 
+  useEffect(() => {
+    if (!isLeadDetailsOpen) {
+      return;
+    }
+
+    function closeFicheOnEmptySpace(event: PointerEvent) {
+      const target = event.target;
+
+      if (!(target instanceof HTMLElement)) {
+        return;
+      }
+
+      if (
+        target.closest("[data-lead-fiche]") ||
+        target.closest("[data-lead-row]") ||
+        target.closest("[data-lead-form]") ||
+        target.closest("button") ||
+        target.closest("a") ||
+        target.closest("input") ||
+        target.closest("select") ||
+        target.closest("textarea") ||
+        target.closest("label") ||
+        target.closest("[role='button']")
+      ) {
+        return;
+      }
+
+      setIsLeadDetailsOpen(false);
+    }
+
+    document.addEventListener("pointerdown", closeFicheOnEmptySpace);
+    return () => {
+      document.removeEventListener("pointerdown", closeFicheOnEmptySpace);
+    };
+  }, [isLeadDetailsOpen]);
+
   async function handleStatusChange(leadId: string, status: LeadStatus) {
     const leadBeforeUpdate = leadList.find((lead) => lead.id === leadId);
 
@@ -1032,6 +1068,7 @@ export default function CRMLeadsPage() {
               <div ref={ficheColumnRef} className="relative min-h-[50vh] min-w-0">
                 <aside
                   ref={ficheRef}
+                  data-lead-fiche="true"
                   className="z-30 overflow-y-auto overscroll-contain"
                   style={
                     ficheBox
@@ -1065,7 +1102,10 @@ export default function CRMLeadsPage() {
       </div>
 
       {isNewLeadOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-6 backdrop-blur-sm">
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-6 backdrop-blur-sm"
+          data-lead-form="true"
+        >
           <form
             onSubmit={handleNewLeadSubmit}
             className="w-full max-w-2xl rounded-2xl bg-white p-6 shadow-2xl"

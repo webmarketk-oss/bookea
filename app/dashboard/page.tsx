@@ -13,6 +13,7 @@ import {
   Users,
 } from "lucide-react";
 
+import { NotificationsBell } from "@/components/layout/notifications-bell";
 import { Card, CardContent } from "@/components/ui/card";
 import { loadCrmAppointments } from "@/lib/agenda-supabase";
 import {
@@ -228,7 +229,8 @@ export default function DashboardPage() {
             </p>
           </div>
 
-          <div className="grid gap-2 sm:flex sm:flex-wrap">
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <NotificationsBell />
             <Link
               href="/dashboard/crm-leads"
               className="inline-flex h-11 items-center justify-center rounded-xl border border-[#dfe5f2] bg-white px-4 text-sm font-bold text-[#11152e] transition-colors hover:bg-[#e9eeff]"

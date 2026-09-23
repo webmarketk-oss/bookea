@@ -166,7 +166,12 @@ module.exports = async function handler(req, res) {
           continue;
         }
 
-        if (job?.kind !== "reminder_48h") {
+        if (
+          job?.kind !== "reminder_48h" &&
+          job?.kind !== "reminder_j7" &&
+          job?.kind !== "reminder_j5" &&
+          job?.kind !== "reminder_24h"
+        ) {
           nextJobs.push(job);
           continue;
         }

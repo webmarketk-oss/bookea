@@ -167,6 +167,7 @@ export default function ProspectsTable({
             ) : null}
             <TableRow
               data-lead-id={lead.id}
+              data-lead-row="true"
               onClick={() => onSelectLead(lead)}
               className={cn(
                 "h-20 cursor-pointer transition-all hover:bg-slate-50",

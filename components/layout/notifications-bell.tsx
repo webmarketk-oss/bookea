@@ -138,7 +138,7 @@ export function NotificationsBell({
             ? `relative text-white/80 hover:bg-white/10 hover:text-white ${
                 collapsed ? "h-11 w-full" : ""
               }`
-            : "relative"
+            : "relative h-11 w-11 rounded-xl border border-[#dfe5f2] bg-white"
         }
       >
         <Bell className="h-5 w-5" />
@@ -222,7 +222,7 @@ export function NotificationsBell({
                 >
                   <div className="flex items-start justify-between gap-2">
                     <p
-                      className={`text-sm font-black ${
+                      className={`min-w-0 flex-1 text-sm font-black leading-5 ${
                         isDark ? "text-white" : "text-slate-950"
                       }`}
                     >

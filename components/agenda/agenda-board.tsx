@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
@@ -44,8 +44,11 @@ import {
 } from "@/lib/center-settings";
 import {
   formatSmsDate,
+  isLaserTreatment,
   loadCenterSmsSettings,
+  reminderFlagsFromSettings,
   splitPersonName,
+  type AppointmentReminderKind,
   type CenterSmsSettings,
 } from "@/lib/sms-settings";
 import {
@@ -353,7 +356,10 @@ export default function AgendaBoard() {
     }),
   );
   const [sendSmsNow, setSendSmsNow] = useState(true);
+  const [sendSmsJ7, setSendSmsJ7] = useState(false);
+  const [sendSmsJ5, setSendSmsJ5] = useState(false);
   const [sendSms48h, setSendSms48h] = useState(false);
+  const [sendSms24h, setSendSms24h] = useState(false);
   const [sendDepositLink, setSendDepositLink] = useState(false);
   const [depositLinks, setDepositLinks] = useState<CenterDepositLinkSetting[]>(
     defaultCenterDepositLinks.filter((link) => link.active),
@@ -499,6 +505,26 @@ export default function AgendaBoard() {
       document.removeEventListener("visibilitychange", refreshIfVisible);
     };
   }, []);
+
+  const laserAppointment = useMemo(
+    () =>
+      isLaserRdv(
+        appointmentForm.treatment,
+        appointmentForm.cabinId,
+        cabinList,
+      ),
+    [appointmentForm.cabinId, appointmentForm.treatment, cabinList],
+  );
+
+  useEffect(() => {
+    if (!isModalOpen) {
+      return;
+    }
+
+    setSendSmsJ7(
+      laserAppointment && reminderFlagsFromSettings(smsSettings).sendSmsJ7,
+    );
+  }, [isModalOpen, laserAppointment, smsSettings]);
 
   useEffect(() => {
     void loadCenterSmsSettings()
@@ -747,6 +773,14 @@ export default function AgendaBoard() {
     );
   }
 
+  function applyReminderDefaults(settings = smsSettings) {
+    const flags = reminderFlagsFromSettings(settings);
+    setSendSmsNow(flags.sendSmsNow);
+    setSendSmsJ5(flags.sendSmsJ5);
+    setSendSms48h(flags.sendSms48h);
+    setSendSms24h(flags.sendSms24h);
+  }
+
   function openAppointmentModal() {
     setAppointmentForm(
       applyClientPositionStatus({ ...emptyAppointment, date: selectedDate }),
@@ -754,8 +788,7 @@ export default function AgendaBoard() {
     setContactSearch("");
     setPickedContact(null);
     setEditingClient(false);
-    setSendSmsNow(true);
-    setSendSms48h(false);
+    applyReminderDefaults();
     setSendDepositLink(false);
     setSelectedDepositLinkId((current) =>
       pickDepositLinkId(depositLinks, "", current),
@@ -838,7 +871,52 @@ export default function AgendaBoard() {
         appointment.kind !== "Indisponible" &&
         savedAppointment.phone
       ) {
-        if (sendSmsNow || sendSms48h) {
+        const reminderJobs: Array<{
+          kind: AppointmentReminderKind;
+          templateId?: string;
+          label: string;
+        }> = [];
+
+        if (
+          sendSmsJ7 &&
+          isLaserRdv(
+            savedAppointment.treatment,
+            savedAppointment.cabinId,
+            cabinList,
+          )
+        ) {
+          reminderJobs.push({
+            kind: "reminder_j7",
+            templateId: smsSettings?.reminderJ7TemplateId,
+            label: "J-7 laser",
+          });
+        }
+
+        if (sendSmsJ5) {
+          reminderJobs.push({
+            kind: "reminder_j5",
+            templateId: smsSettings?.reminderJ5TemplateId,
+            label: "J-5",
+          });
+        }
+
+        if (sendSms48h) {
+          reminderJobs.push({
+            kind: "reminder_48h",
+            templateId: smsSettings?.reminder48hTemplateId,
+            label: "48h",
+          });
+        }
+
+        if (sendSms24h) {
+          reminderJobs.push({
+            kind: "reminder_24h",
+            templateId: smsSettings?.reminder24hTemplateId,
+            label: "24h",
+          });
+        }
+
+        if (sendSmsNow || reminderJobs.length > 0) {
           try {
             smsVars.confirmationLink = await issueAppointmentConfirmationUrl(
               savedAppointment.id,
@@ -860,18 +938,19 @@ export default function AgendaBoard() {
           );
         }
 
-        if (sendSms48h) {
+        for (const job of reminderJobs) {
           const reminder = await scheduleAppointmentReminderSms({
             appointmentId: savedAppointment.id,
-            templateId: smsSettings?.reminder48hTemplateId,
+            templateId: job.templateId,
+            kind: job.kind,
             vars: smsVars,
           });
           notices.push(
             reminder.ok
               ? reminder.scheduled
-                ? "SMS 48h programmé."
-                : "SMS 48h envoyé."
-              : "Le SMS 48h n'a pas pu être programmé.",
+                ? `SMS ${job.label} programmé.`
+                : `SMS ${job.label} envoyé.`
+              : `Le SMS ${job.label} n'a pas pu être programmé.`,
           );
         }
 
@@ -930,8 +1009,7 @@ export default function AgendaBoard() {
       ]);
       setSelectedDate(savedAppointment.date);
       setAgendaNotice(notices.join(" "));
-      setSendSmsNow(true);
-      setSendSms48h(false);
+      applyReminderDefaults();
       setSendDepositLink(false);
       setSendBirthdaySms(true);
       setIsModalOpen(false);
@@ -1036,7 +1114,7 @@ export default function AgendaBoard() {
       unlinkPublicBooking(appointmentToDelete);
       await cancelAppointmentSmsJobs(appointmentId);
       await deleteCrmAppointment(appointmentId);
-      setAgendaNotice("RDV supprimé. Les SMS 48h prévus pour ce rendez-vous sont annulés.");
+      setAgendaNotice("RDV supprimé. Les rappels SMS prévus pour ce rendez-vous sont annulés.");
       return true;
     } catch (error) {
       setAppointmentList(previousAppointments);
@@ -1066,7 +1144,7 @@ export default function AgendaBoard() {
       unlinkPublicBooking(updatedAppointment);
       if (savedAppointment.status === "Annulation") {
         await cancelAppointmentSmsJobs(savedAppointment.id);
-        setAgendaNotice("RDV mis à jour. Les SMS 48h prévus sont annulés.");
+        setAgendaNotice("RDV mis à jour. Les rappels SMS prévus sont annulés.");
       } else {
         await rescheduleAppointmentSmsJobs(savedAppointment.id);
         setAgendaNotice("RDV mis à jour.");
@@ -1595,7 +1673,7 @@ export default function AgendaBoard() {
           </div>
         )}
 
-        <Card className="relative z-20 border-slate-200 py-0 shadow-sm">
+        <Card className="relative z-40 border-slate-200 py-0 shadow-sm">
           <CardContent className="flex flex-wrap items-center justify-between gap-3 px-3 py-2">
             <div className="flex flex-wrap items-center gap-3">
               <p className="mr-2 text-xs font-medium text-slate-500">
@@ -1841,8 +1919,7 @@ export default function AgendaBoard() {
                                 setContactSearch("");
                                 setPickedContact(null);
                                 setEditingClient(false);
-                                setSendSmsNow(true);
-                                setSendSms48h(false);
+                                applyReminderDefaults();
                                 setSendDepositLink(false);
                                 setSelectedDepositLinkId((current) =>
                                   pickDepositLinkId(
@@ -2411,9 +2488,41 @@ export default function AgendaBoard() {
                   className="mt-1 h-4 w-4"
                 />
                 <span>
-                  Envoyer un SMS de confirmation maintenant
+                  Envoyer le SMS dès que le RDV est posé
                   <span className="mt-1 block text-xs font-semibold text-slate-500">
-                    Utilise le modèle enregistré pour ce centre. Décoche pour ne rien envoyer.
+                    Uniquement ce SMS. Les autres cases ci-dessous partent seulement si tu les coches aussi.
+                  </span>
+                </span>
+              </label>
+              {laserAppointment ? (
+                <label className="flex items-start gap-3 text-sm font-bold text-slate-800">
+                  <input
+                    type="checkbox"
+                    checked={sendSmsJ7}
+                    disabled={!appointmentForm.phone.trim()}
+                    onChange={(event) => setSendSmsJ7(event.target.checked)}
+                    className="mt-1 h-4 w-4"
+                  />
+                  <span>
+                    Envoyer les contre-indications laser à J-7
+                    <span className="mt-1 block text-xs font-semibold text-slate-500">
+                      Uniquement pour un RDV laser. Programmé 7 jours avant.
+                    </span>
+                  </span>
+                </label>
+              ) : null}
+              <label className="flex items-start gap-3 text-sm font-bold text-slate-800">
+                <input
+                  type="checkbox"
+                  checked={sendSmsJ5}
+                  disabled={!appointmentForm.phone.trim()}
+                  onChange={(event) => setSendSmsJ5(event.target.checked)}
+                  className="mt-1 h-4 w-4"
+                />
+                <span>
+                  Envoyer un SMS de rappel J-5
+                  <span className="mt-1 block text-xs font-semibold text-slate-500">
+                    5 jours avant le RDV. Pré-coché si tu l’actives dans Envoi SMS.
                   </span>
                 </span>
               </label>
@@ -2426,9 +2535,24 @@ export default function AgendaBoard() {
                   className="mt-1 h-4 w-4"
                 />
                 <span>
-                  Envoyer un SMS de confirmation 48h avant
+                  Envoyer un SMS de rappel 48h avant
                   <span className="mt-1 block text-xs font-semibold text-slate-500">
                     Programmé seulement si tu coches. Si le RDV est supprimé avant, le SMS ne part pas.
+                  </span>
+                </span>
+              </label>
+              <label className="flex items-start gap-3 text-sm font-bold text-slate-800">
+                <input
+                  type="checkbox"
+                  checked={sendSms24h}
+                  disabled={!appointmentForm.phone.trim()}
+                  onChange={(event) => setSendSms24h(event.target.checked)}
+                  className="mt-1 h-4 w-4"
+                />
+                <span>
+                  Envoyer un SMS de rappel 24h avant / la veille
+                  <span className="mt-1 block text-xs font-semibold text-slate-500">
+                    La veille du RDV. Pré-coché si tu l’actives dans Envoi SMS.
                   </span>
                 </span>
               </label>
@@ -2551,7 +2675,10 @@ function AgendaDateNav({
   const [visibleMonth, setVisibleMonth] = useState(() =>
     parseIsoDate(selectedDate)
   );
+  const [portalTarget, setPortalTarget] = useState<HTMLElement | null>(null);
+  const [panelStyle, setPanelStyle] = useState<CSSProperties>({});
   const containerRef = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
   const today = todayIso();
   const calendarDays = getCalendarGrid(
     visibleMonth.getFullYear(),
@@ -2559,14 +2686,47 @@ function AgendaDateNav({
   );
 
   useEffect(() => {
+    setPortalTarget(document.body);
+  }, []);
+
+  useEffect(() => {
     if (!isOpen) {
       return;
     }
 
-    function handlePointerDown(event: MouseEvent) {
-      if (!containerRef.current?.contains(event.target as Node)) {
-        setIsOpen(false);
+    function placePanel() {
+      const rect = containerRef.current?.getBoundingClientRect();
+      if (!rect) {
+        return;
       }
+
+      const width = 288;
+      const left = Math.min(
+        Math.max(12, rect.right - width),
+        window.innerWidth - width - 12,
+      );
+
+      setPanelStyle({
+        position: "fixed",
+        top: rect.bottom + 8,
+        left,
+        zIndex: 80,
+      });
+    }
+
+    placePanel();
+    window.addEventListener("resize", placePanel);
+    window.addEventListener("scroll", placePanel, true);
+
+    function handlePointerDown(event: MouseEvent) {
+      const target = event.target as Node;
+      if (
+        containerRef.current?.contains(target) ||
+        panelRef.current?.contains(target)
+      ) {
+        return;
+      }
+      setIsOpen(false);
     }
 
     function handleKeyDown(event: KeyboardEvent) {
@@ -2579,6 +2739,8 @@ function AgendaDateNav({
     document.addEventListener("keydown", handleKeyDown);
 
     return () => {
+      window.removeEventListener("resize", placePanel);
+      window.removeEventListener("scroll", placePanel, true);
       document.removeEventListener("mousedown", handlePointerDown);
       document.removeEventListener("keydown", handleKeyDown);
     };
@@ -2643,11 +2805,14 @@ function AgendaDateNav({
         Aujourd&apos;hui
       </button>
 
-      {isOpen ? (
+      {isOpen && portalTarget
+        ? createPortal(
         <div
+          ref={panelRef}
           role="dialog"
           aria-label="Choisir une date"
-          className="absolute right-0 top-[calc(100%+8px)] z-50 w-72 rounded-2xl border border-slate-200 bg-white p-3 shadow-xl"
+          style={panelStyle}
+          className="w-72 rounded-2xl border border-slate-200 bg-white p-3 shadow-xl"
         >
           <div className="mb-3 flex items-center justify-between">
             <button
@@ -2712,7 +2877,8 @@ function AgendaDateNav({
               );
             })}
           </div>
-        </div>
+        </div>,
+        portalTarget,
       ) : null}
     </div>
   );
@@ -3268,6 +3434,15 @@ function getRdvPrefill(searchParams: Pick<URLSearchParams, "get">) {
     date: searchParams.get("date") ?? todayIso(),
     source: isAppointmentSource(source) ? source : "Prospect",
   };
+}
+
+function isLaserRdv(treatment: string, cabinId: string, cabinList: Cabin[]) {
+  const cabin = cabinList.find((cabin) => cabin.id === cabinId);
+  const service = getCenterServices().find(
+    (item) => item.name.trim().toLowerCase() === treatment.trim().toLowerCase(),
+  );
+
+  return isLaserTreatment(treatment, cabin?.equipment, service?.category);
 }
 
 function getCabinTreatment(cabinList: Cabin[], cabinId: string) {

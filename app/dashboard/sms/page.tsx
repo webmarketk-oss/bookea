@@ -20,13 +20,11 @@ import {
   defaultSmsSettings,
   loadCenterSmsSettings,
   loadSmsHistory,
-  loadSmsInbox,
   loadSmsQuota,
   MONTHLY_SMS_LIMIT,
   saveCenterSmsSettings,
   saveSmsHistory,
   type CenterSmsSettings,
-  type SmsInboxItem,
   type SmsTemplate,
   type StoredSmsCampaign,
 } from "@/lib/sms-settings";
@@ -50,12 +48,6 @@ const recallStatuses = new Set([
   "Apl en abs",
 ]);
 
-const statusStyles: Record<SmsCampaign["status"], string> = {
-  Envoyé: "bg-emerald-100 text-emerald-700",
-  Planifié: "bg-blue-100 text-blue-700",
-  Brouillon: "bg-slate-100 text-slate-600",
-};
-
 export default function SmsPage() {
   const [credits, setCredits] = useState(MONTHLY_SMS_LIMIT);
   const [smsUsed, setSmsUsed] = useState(0);
@@ -70,9 +62,6 @@ export default function SmsPage() {
   const [scheduledDate, setScheduledDate] = useState("2026-07-30");
   const [scheduledTime, setScheduledTime] = useState("10:00");
   const [testPhone, setTestPhone] = useState("");
-  const [reminder48h, setReminder48h] = useState(true);
-  const [reminderDayBefore, setReminderDayBefore] = useState(true);
-  const [birthdaySms, setBirthdaySms] = useState(true);
   const [confirmation, setConfirmation] = useState("");
   const [isError, setIsError] = useState(false);
   const [sending, setSending] = useState(false);
@@ -85,16 +74,13 @@ export default function SmsPage() {
   const [templateBody, setTemplateBody] = useState("");
   const [editingTemplateId, setEditingTemplateId] = useState<string | null>(null);
   const [savingTemplates, setSavingTemplates] = useState(false);
-  const [inbox, setInbox] = useState<SmsInboxItem[]>([]);
-  const [replyDraft, setReplyDraft] = useState("");
-  const [replyingId, setReplyingId] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
 
     async function load() {
       try {
-        const [center, leadData, clientData, appointmentData, sms, history, replies, quota] =
+        const [center, leadData, clientData, appointmentData, sms, history, quota] =
           await Promise.all([
             getActiveCenterContext(),
             loadCrmLeads().catch(() => ({ leads: [] as Lead[] })),
@@ -108,7 +94,6 @@ export default function SmsPage() {
               campaigns: [] as SmsCampaign[],
               remainingCredits: undefined as number | undefined,
             })),
-            loadSmsInbox().catch(() => [] as SmsInboxItem[]),
             loadSmsQuota().catch(() => ({
               remaining: MONTHLY_SMS_LIMIT,
               used: 0,
@@ -117,12 +102,7 @@ export default function SmsPage() {
             })),
           ]);
 
-        void fetch("/api/sms/dispatch")
-          .then(() => loadSmsInbox())
-          .then((nextInbox) => {
-            if (!cancelled) setInbox(nextInbox);
-          })
-          .catch(() => null);
+        void fetch("/api/sms/dispatch").catch(() => null);
         void fetch("/api/sms/inbound").catch(() => null);
 
         if (cancelled) {
@@ -135,9 +115,7 @@ export default function SmsPage() {
         setClients(clientData.clients);
         setAppointments(appointmentData);
         setSmsSettings(sms.settings);
-        setBirthdaySms(sms.settings.birthdaySmsEnabled !== false);
         setCampaigns(history.campaigns);
-        setInbox(replies);
         setCredits(quota.remaining);
         setSmsUsed(quota.used);
         setSmsLimit(quota.limit);
@@ -267,10 +245,22 @@ export default function SmsPage() {
         smsSettings.confirmationTemplateId === templateId
           ? templates[0].id
           : smsSettings.confirmationTemplateId,
+      reminderJ7TemplateId:
+        smsSettings.reminderJ7TemplateId === templateId
+          ? templates[0].id
+          : smsSettings.reminderJ7TemplateId,
+      reminderJ5TemplateId:
+        smsSettings.reminderJ5TemplateId === templateId
+          ? templates[0].id
+          : smsSettings.reminderJ5TemplateId,
       reminder48hTemplateId:
         smsSettings.reminder48hTemplateId === templateId
           ? templates[0].id
           : smsSettings.reminder48hTemplateId,
+      reminder24hTemplateId:
+        smsSettings.reminder24hTemplateId === templateId
+          ? templates[0].id
+          : smsSettings.reminder24hTemplateId,
       leadWelcomeTemplateId:
         smsSettings.leadWelcomeTemplateId === templateId
           ? templates[0].id
@@ -280,44 +270,6 @@ export default function SmsPage() {
           ? templates[0].id
           : smsSettings.birthdayTemplateId,
     });
-  }
-
-  async function replyToInbox(item: SmsInboxItem) {
-    const message = replyDraft.trim();
-
-    if (!message) {
-      setIsError(true);
-      setConfirmation("Écris une réponse SMS.");
-      return;
-    }
-
-    setReplyingId(item.id);
-    setIsError(false);
-
-    try {
-      const result = await sendBookeaSms({
-        phone: item.phone,
-        firstName: item.clientName?.split(" ")[0] || "vous",
-        message,
-      });
-
-      if (!result.ok) {
-        throw new Error(result.error || "Réponse SMS refusée");
-      }
-
-      setReplyDraft("");
-      if (typeof result.remainingCredits === "number") {
-        applyQuota(result.remainingCredits, smsUsed + 1);
-      }
-      setConfirmation(`Réponse envoyée à ${item.clientName || item.phone}.`);
-    } catch (error) {
-      setIsError(true);
-      setConfirmation(
-        error instanceof Error ? error.message : "Impossible de répondre au SMS.",
-      );
-    } finally {
-      setReplyingId(null);
-    }
   }
 
   async function sendNow() {
@@ -476,7 +428,7 @@ export default function SmsPage() {
           <div>
             <h2 className="text-base font-semibold">Modèles SMS de {centerName}</h2>
             <p className="mt-1 max-w-2xl text-sm font-medium text-slate-500">
-              Crée tes textes, enregistre-les, puis choisis lequel part à la confirmation RDV, 48h avant, ou depuis le CRM. Variables : {"{{prenom}} {{nom}} {{date}} {{heure}} {{soin}} {{centre}} {{lien_confirmation}}"}.
+              Ici tu écris seulement les textes. Un nouveau modèle apparaît tout de suite dans la suite d’automatisation, en bas. Variables : {"{{prenom}} {{nom}} {{date}} {{heure}} {{soin}} {{centre}} {{lien_confirmation}}"}.
             </p>
           </div>
           <button
@@ -552,54 +504,158 @@ export default function SmsPage() {
             >
               {savingTemplates ? "Enregistrement..." : "Enregistrer le modèle"}
             </button>
-
-            <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-              <TemplateSelect
-                label="Confirmation RDV"
-                value={smsSettings.confirmationTemplateId}
-                templates={smsSettings.templates}
-                onChange={(value) =>
-                  void persistSmsSettings({
-                    ...smsSettings,
-                    confirmationTemplateId: value,
-                  })
-                }
-              />
-              <TemplateSelect
-                label="Rappel 48h"
-                value={smsSettings.reminder48hTemplateId}
-                templates={smsSettings.templates}
-                onChange={(value) =>
-                  void persistSmsSettings({
-                    ...smsSettings,
-                    reminder48hTemplateId: value,
-                  })
-                }
-              />
-              <TemplateSelect
-                label="Accueil prospect"
-                value={smsSettings.leadWelcomeTemplateId}
-                templates={smsSettings.templates}
-                onChange={(value) =>
-                  void persistSmsSettings({
-                    ...smsSettings,
-                    leadWelcomeTemplateId: value,
-                  })
-                }
-              />
-              <TemplateSelect
-                label="Anniversaire"
-                value={smsSettings.birthdayTemplateId}
-                templates={smsSettings.templates}
-                onChange={(value) =>
-                  void persistSmsSettings({
-                    ...smsSettings,
-                    birthdayTemplateId: value,
-                  })
-                }
-              />
-            </div>
           </div>
+        </div>
+      </section>
+
+      <section className="mb-6 rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="flex items-start gap-4">
+          <div className="grid h-12 w-12 place-items-center rounded-2xl bg-rose-50 text-rose-600">
+            <Gift className="h-6 w-6" />
+          </div>
+          <div>
+            <h2 className="text-base font-semibold">Suite d&apos;automatisation</h2>
+            <p className="mt-1 max-w-3xl text-sm font-medium text-slate-500">
+              Chaque ligne est un envoi différent. Oui = pré-coché au prochain RDV.
+              Non = pas envoyé, sauf si tu le coches à la main sur ce RDV.
+              Cocher seulement « Dès que le RDV est posé » n’envoie pas les rappels, l’accueil ni l’anniversaire.
+            </p>
+          </div>
+        </div>
+        <div className="mt-5 grid gap-3">
+          <AutomationRow
+            title="1. Dès que le RDV est posé"
+            hint="Part tout de suite quand tu enregistres le rendez-vous. Ça n’entraîne aucun autre SMS."
+            templateId={smsSettings.confirmationTemplateId}
+            templates={smsSettings.templates}
+            enabled={smsSettings.confirmationEnabled}
+            onTemplateChange={(value) =>
+              void persistSmsSettings({
+                ...smsSettings,
+                confirmationTemplateId: value,
+              })
+            }
+            onToggle={() =>
+              void persistSmsSettings({
+                ...smsSettings,
+                confirmationEnabled: !smsSettings.confirmationEnabled,
+              })
+            }
+          />
+          <AutomationRow
+            title="2. Contre-indications laser J-7"
+            hint="7 jours avant, seulement si le RDV est un laser."
+            templateId={smsSettings.reminderJ7TemplateId}
+            templates={smsSettings.templates}
+            enabled={smsSettings.reminderJ7Enabled}
+            onTemplateChange={(value) =>
+              void persistSmsSettings({
+                ...smsSettings,
+                reminderJ7TemplateId: value,
+              })
+            }
+            onToggle={() =>
+              void persistSmsSettings({
+                ...smsSettings,
+                reminderJ7Enabled: !smsSettings.reminderJ7Enabled,
+              })
+            }
+          />
+          <AutomationRow
+            title="3. Rappel J-5"
+            hint="5 jours avant le RDV."
+            templateId={smsSettings.reminderJ5TemplateId}
+            templates={smsSettings.templates}
+            enabled={smsSettings.reminderJ5Enabled}
+            onTemplateChange={(value) =>
+              void persistSmsSettings({
+                ...smsSettings,
+                reminderJ5TemplateId: value,
+              })
+            }
+            onToggle={() =>
+              void persistSmsSettings({
+                ...smsSettings,
+                reminderJ5Enabled: !smsSettings.reminderJ5Enabled,
+              })
+            }
+          />
+          <AutomationRow
+            title="4. Rappel 48h"
+            hint="48 heures avant le RDV."
+            templateId={smsSettings.reminder48hTemplateId}
+            templates={smsSettings.templates}
+            enabled={smsSettings.reminder48hEnabled}
+            onTemplateChange={(value) =>
+              void persistSmsSettings({
+                ...smsSettings,
+                reminder48hTemplateId: value,
+              })
+            }
+            onToggle={() =>
+              void persistSmsSettings({
+                ...smsSettings,
+                reminder48hEnabled: !smsSettings.reminder48hEnabled,
+              })
+            }
+          />
+          <AutomationRow
+            title="5. Rappel 24h / la veille"
+            hint="24 heures avant le RDV."
+            templateId={smsSettings.reminder24hTemplateId}
+            templates={smsSettings.templates}
+            enabled={smsSettings.reminder24hEnabled}
+            onTemplateChange={(value) =>
+              void persistSmsSettings({
+                ...smsSettings,
+                reminder24hTemplateId: value,
+              })
+            }
+            onToggle={() =>
+              void persistSmsSettings({
+                ...smsSettings,
+                reminder24hEnabled: !smsSettings.reminder24hEnabled,
+              })
+            }
+          />
+          <AutomationRow
+            title="6. Accueil prospect"
+            hint="Ne part pas avec le RDV. Tu l’envoies depuis la fiche prospect."
+            templateId={smsSettings.leadWelcomeTemplateId}
+            templates={smsSettings.templates}
+            enabled={smsSettings.leadWelcomeEnabled}
+            onTemplateChange={(value) =>
+              void persistSmsSettings({
+                ...smsSettings,
+                leadWelcomeTemplateId: value,
+              })
+            }
+            onToggle={() =>
+              void persistSmsSettings({
+                ...smsSettings,
+                leadWelcomeEnabled: !smsSettings.leadWelcomeEnabled,
+              })
+            }
+          />
+          <AutomationRow
+            title="7. Anniversaire"
+            hint="Le jour J, si la date de naissance est enregistrée. Indépendant du RDV."
+            templateId={smsSettings.birthdayTemplateId}
+            templates={smsSettings.templates}
+            enabled={smsSettings.birthdaySmsEnabled}
+            onTemplateChange={(value) =>
+              void persistSmsSettings({
+                ...smsSettings,
+                birthdayTemplateId: value,
+              })
+            }
+            onToggle={() =>
+              void persistSmsSettings({
+                ...smsSettings,
+                birthdaySmsEnabled: !smsSettings.birthdaySmsEnabled,
+              })
+            }
+          />
         </div>
       </section>
 
@@ -624,8 +680,7 @@ export default function SmsPage() {
         </div>
       </section>
 
-      <section className="grid gap-4 xl:grid-cols-[1fr_0.85fr]">
-        <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+      <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
           <div className="flex items-start gap-4">
             <div className="grid h-12 w-12 place-items-center rounded-2xl bg-emerald-50 text-emerald-600">
               <MessageCircle className="h-6 w-6" />
@@ -692,48 +747,8 @@ export default function SmsPage() {
               {sending ? "Envoi..." : "Envoyer maintenant"}
             </button>
           </div>
-        </div>
-
-        <aside className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-          <div className="flex items-start gap-4">
-            <div className="grid h-12 w-12 place-items-center rounded-2xl bg-rose-50 text-rose-600">
-              <Gift className="h-6 w-6" />
-            </div>
-            <div>
-              <h2 className="text-base font-semibold">Automatiques</h2>
-              <p className="mt-1 text-sm font-medium text-slate-500">
-                Les rappels RDV et le SMS d&apos;anniversaire partiront ensuite tout seuls. Le bouton envoie déjà via Brevo.
-              </p>
-            </div>
-          </div>
-          <div className="mt-6 grid gap-3">
-            <Toggle
-              active={reminder48h}
-              label="Rappel SMS 48h avant le RDV"
-              onClick={() => setReminder48h((value) => !value)}
-            />
-            <Toggle
-              active={reminderDayBefore}
-              label="Rappel SMS la veille du RDV"
-              onClick={() => setReminderDayBefore((value) => !value)}
-            />
-            <Toggle
-              active={birthdaySms}
-              label="SMS anniversaire le jour J"
-              onClick={() => {
-                const next = !birthdaySms;
-                setBirthdaySms(next);
-                void persistSmsSettings({
-                  ...smsSettings,
-                  birthdaySmsEnabled: next,
-                });
-              }}
-            />
-          </div>
           <div className="mt-5 rounded-2xl bg-slate-50 p-4">
-            <p className="text-xs font-medium text-slate-500">
-              Aperçu
-            </p>
+            <p className="text-xs font-medium text-slate-500">Aperçu</p>
             <p className="mt-3 text-base font-bold leading-7 text-slate-700">
               {message.replace("{{prenom}}", "Marie")}
             </p>
@@ -741,89 +756,6 @@ export default function SmsPage() {
               {testPhone.trim() ? 1 : audienceRecipients.length} destinataire(s)
             </p>
           </div>
-        </aside>
-      </section>
-
-      <section className="mt-6 rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-        <h2 className="text-base font-semibold">Réponses SMS</h2>
-        <p className="mt-1 text-sm font-medium text-slate-500">
-          Les réponses des clientes arrivent ici et dans la fiche CRM. Active aussi “Réponses SMS” dans Brevo (SMS transactionnel → Configuration).
-        </p>
-        <div className="mt-5 grid gap-3">
-          {inbox.length === 0 ? (
-            <p className="font-semibold text-slate-500">
-              Aucune réponse reçue pour l’instant.
-            </p>
-          ) : (
-            inbox.map((item) => (
-              <article
-                key={item.id}
-                className="grid gap-3 rounded-2xl border border-violet-100 bg-violet-50 p-4"
-              >
-                <div>
-                  <p className="text-sm font-medium">
-                    {item.clientName || "Cliente"} · {item.phone}
-                  </p>
-                  <p className="font-bold text-slate-500">{item.at}</p>
-                  <p className="mt-2 font-semibold text-slate-800">{item.text}</p>
-                </div>
-                <div className="flex flex-col gap-2 sm:flex-row">
-                  <input
-                    value={replyingId === item.id ? replyDraft : ""}
-                    onChange={(event) => {
-                      setReplyingId(item.id);
-                      setReplyDraft(event.target.value);
-                    }}
-                    placeholder="Répondre par SMS..."
-                    className="h-11 flex-1 rounded-2xl border border-slate-200 bg-white px-4 text-sm font-bold outline-none focus:border-blue-500"
-                  />
-                  <button
-                    type="button"
-                    disabled={replyingId === item.id && !replyDraft.trim()}
-                    onClick={() => void replyToInbox(item)}
-                    className="rounded-2xl bg-slate-950 px-4 py-3 text-sm font-medium text-white disabled:opacity-60"
-                  >
-                    {replyingId === item.id ? "Envoyer" : "Répondre"}
-                  </button>
-                </div>
-              </article>
-            ))
-          )}
-        </div>
-      </section>
-
-      <section className="mt-6 rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-        <h2 className="text-base font-semibold">Historique SMS</h2>
-        <div className="mt-5 grid gap-3">
-          {campaigns.length === 0 ? (
-            <p className="font-semibold text-slate-500">
-              Aucun SMS envoyé pour l’instant.
-            </p>
-          ) : (
-            campaigns.map((campaign) => (
-              <article
-                key={campaign.id}
-                className="grid gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4 lg:grid-cols-[1fr_auto_auto]"
-              >
-                <div>
-                  <p className="text-sm font-medium">{campaign.name}</p>
-                  <p className="font-bold text-slate-500">
-                    {campaign.audience} · {campaign.plannedAt}
-                  </p>
-                  <p className="mt-2 font-semibold text-slate-600">
-                    {campaign.message}
-                  </p>
-                </div>
-                <p className="self-center font-semibold text-slate-700">
-                  {campaign.recipients} SMS
-                </p>
-                <span className={`self-center rounded-full px-4 py-2 text-center font-semibold ${statusStyles[campaign.status]}`}>
-                  {campaign.status}
-                </span>
-              </article>
-            ))
-          )}
-        </div>
       </section>
     </main>
   );
@@ -950,23 +882,32 @@ function Input({
   );
 }
 
-function TemplateSelect({
-  label,
-  value,
+function AutomationRow({
+  title,
+  hint,
+  templateId,
   templates,
-  onChange,
+  enabled,
+  onTemplateChange,
+  onToggle,
 }: {
-  label: string;
-  value: string;
+  title: string;
+  hint: string;
+  templateId: string;
   templates: SmsTemplate[];
-  onChange: (value: string) => void;
+  enabled: boolean;
+  onTemplateChange: (value: string) => void;
+  onToggle: () => void;
 }) {
   return (
-    <label className="space-y-2">
-      <span className="text-xs font-medium text-slate-500">{label}</span>
+    <div className="grid gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4 md:grid-cols-[1.3fr_1fr_auto] md:items-center">
+      <div>
+        <p className="font-semibold">{title}</p>
+        <p className="mt-1 text-xs font-medium leading-4 text-slate-500">{hint}</p>
+      </div>
       <select
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
+        value={templateId}
+        onChange={(event) => onTemplateChange(event.target.value)}
         className="h-12 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm font-bold outline-none focus:border-blue-500"
       >
         {templates.map((template) => (
@@ -975,34 +916,18 @@ function TemplateSelect({
           </option>
         ))}
       </select>
-    </label>
-  );
-}
-
-function Toggle({
-  active,
-  label,
-  onClick,
-}: {
-  active: boolean;
-  label: string;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`flex items-center justify-between gap-4 rounded-2xl border px-4 py-4 text-left font-semibold ${
-        active
-          ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-          : "border-slate-200 bg-slate-50 text-slate-500"
-      }`}
-    >
-      <span>{label}</span>
-      <span className="rounded-full bg-white px-3 py-1 text-sm">
-        {active ? "Actif" : "Inactif"}
-      </span>
-    </button>
+      <button
+        type="button"
+        onClick={onToggle}
+        className={`h-12 rounded-2xl px-5 text-sm font-semibold ${
+          enabled
+            ? "bg-emerald-100 text-emerald-700"
+            : "bg-white text-slate-500"
+        }`}
+      >
+        {enabled ? "Oui" : "Non"}
+      </button>
+    </div>
   );
 }
 

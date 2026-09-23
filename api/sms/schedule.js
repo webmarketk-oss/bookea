@@ -10,6 +10,8 @@ const {
   normalizePhone,
   parseCenterSmsSettings,
   personalize,
+  isAppointmentReminderKind,
+  reminderHoursForKind,
   reminderSendAt,
   consumeCenterSmsQuota,
   readSmsQuota,
@@ -420,15 +422,25 @@ module.exports = async function handler(req, res) {
         return res.status(200).json({ ok: true, cancelled: true });
       }
 
-      const sendAt = reminderSendAt(appointment.appointment_date, appointment.starts_at);
       let updated = 0;
       const jobs = sms.jobs.map((job) => {
         if (job?.appointmentId !== appointmentId || job?.status !== "pending") {
           return job;
         }
 
+        if (!isAppointmentReminderKind(job.kind)) {
+          return job;
+        }
+
         updated += 1;
-        return { ...job, sendAt };
+        return {
+          ...job,
+          sendAt: reminderSendAt(
+            appointment.appointment_date,
+            appointment.starts_at,
+            reminderHoursForKind(job.kind, job.hoursBefore),
+          ),
+        };
       });
 
       await supabase
@@ -436,7 +448,7 @@ module.exports = async function handler(req, res) {
         .update({ settings: mergeCenterSmsSettings(center?.settings, { jobs }) })
         .eq("id", appointment.center_id);
 
-      return res.status(200).json({ ok: true, updated, sendAt });
+      return res.status(200).json({ ok: true, updated });
     }
 
     const appointment = await loadAppointment(supabase, appointmentId);
@@ -485,7 +497,13 @@ module.exports = async function handler(req, res) {
       return res.status(400).json({ ok: false, error: "missing_message" });
     }
 
-    const sendAt = reminderSendAt(appointment.appointment_date, appointment.starts_at);
+    const reminderKind = isAppointmentReminderKind(kind) ? kind : "reminder_48h";
+    const hoursBefore = reminderHoursForKind(kind, payload.hoursBefore);
+    const sendAt = reminderSendAt(
+      appointment.appointment_date,
+      appointment.starts_at,
+      hoursBefore,
+    );
     const dueNow = new Date(sendAt).getTime() <= Date.now();
 
     if (dueNow) {
@@ -534,7 +552,7 @@ module.exports = async function handler(req, res) {
         (job) =>
           !(
             job?.appointmentId === appointmentId &&
-            job?.kind === "reminder_48h" &&
+            job?.kind === reminderKind &&
             job?.status === "pending"
           ),
       ),
@@ -542,7 +560,8 @@ module.exports = async function handler(req, res) {
         id: crypto.randomUUID(),
         appointmentId,
         centerId: appointment.center_id,
-        kind: "reminder_48h",
+        kind: reminderKind,
+        hoursBefore,
         status: "pending",
         sendAt,
         phone: vars.phone,

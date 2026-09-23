@@ -337,6 +337,7 @@ export default function LeadDetails({
 
   return (
     <Card
+      data-lead-fiche="true"
       className="min-h-full overflow-visible rounded-2xl border-slate-200 py-0 shadow-sm"
     >
       <CardContent className="space-y-5 p-5">

@@ -7,10 +7,33 @@ export type SmsTemplate = {
   body: string;
 };
 
+export type AppointmentReminderKind =
+  | "reminder_j7"
+  | "reminder_j5"
+  | "reminder_48h"
+  | "reminder_24h";
+
+export const APPOINTMENT_REMINDER_HOURS: Record<AppointmentReminderKind, number> =
+  {
+    reminder_j7: 7 * 24,
+    reminder_j5: 5 * 24,
+    reminder_48h: 48,
+    reminder_24h: 24,
+  };
+
 export type CenterSmsSettings = {
   templates: SmsTemplate[];
   confirmationTemplateId: string;
+  reminderJ7TemplateId: string;
+  reminderJ5TemplateId: string;
   reminder48hTemplateId: string;
+  reminder24hTemplateId: string;
+  confirmationEnabled: boolean;
+  reminderJ7Enabled: boolean;
+  reminderJ5Enabled: boolean;
+  reminder48hEnabled: boolean;
+  reminder24hEnabled: boolean;
+  leadWelcomeEnabled: boolean;
   leadWelcomeTemplateId: string;
   birthdayTemplateId: string;
   birthdaySmsEnabled: boolean;
@@ -33,9 +56,24 @@ export const defaultSmsTemplates: SmsTemplate[] = [
     body: "BOOKEA - Rappel : votre RDV chez {{centre}} est prévu le {{date}} à {{heure}}.\n\nConfirmez ou annulez ici : {{lien_confirmation}}",
   },
   {
+    id: "contre-indications-laser-j7",
+    name: "Contre-indications laser J-7",
+    body: "Bonjour {{prenom}}, votre séance laser {{soin}} est le {{date}} à {{heure}} chez {{centre}}.\nContre-indications : pas de soleil/UV ni autobronzant, pas de cire ni pince (raser seulement). Prévenez-nous si grossesse, médicaments photosensibilisants ou Roaccutane.",
+  },
+  {
+    id: "rappel-j5",
+    name: "Rappel J-5",
+    body: "Bonjour {{prenom}}, rappel : votre rendez-vous {{soin}} est dans 5 jours, le {{date}} à {{heure}} chez {{centre}}.\nConfirmez ou annulez ici : {{lien_confirmation}}",
+  },
+  {
     id: "rappel-48h",
     name: "Rappel 48h avant RDV",
     body: "Bonjour {{prenom}}, rappel : votre rendez-vous {{soin}} est dans 48h, le {{date}} à {{heure}} chez {{centre}}.\nConfirmez ou annulez ici : {{lien_confirmation}}",
+  },
+  {
+    id: "rappel-24h",
+    name: "Rappel 24h avant RDV",
+    body: "Bonjour {{prenom}}, rappel : votre rendez-vous {{soin}} est demain, le {{date}} à {{heure}} chez {{centre}}.\nConfirmez ou annulez ici : {{lien_confirmation}}",
   },
   {
     id: "accueil-prospect",
@@ -49,14 +87,69 @@ export const defaultSmsTemplates: SmsTemplate[] = [
   },
 ];
 
+export function reminderFlagsFromSettings(
+  settings?: Pick<
+    CenterSmsSettings,
+    | "confirmationEnabled"
+    | "reminderJ7Enabled"
+    | "reminderJ5Enabled"
+    | "reminder48hEnabled"
+    | "reminder24hEnabled"
+  > | null,
+) {
+  return {
+    sendSmsNow: settings?.confirmationEnabled !== false,
+    sendSmsJ7: settings?.reminderJ7Enabled !== false,
+    sendSmsJ5: settings?.reminderJ5Enabled === true,
+    sendSms48h: settings?.reminder48hEnabled === true,
+    sendSms24h: settings?.reminder24hEnabled === true,
+  };
+}
+
+export function isLaserTreatment(...values: Array<string | undefined | null>) {
+  return values.some((value) =>
+    String(value || "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase()
+      .includes("laser"),
+  );
+}
+
 export const defaultSmsSettings: CenterSmsSettings = {
   templates: defaultSmsTemplates,
   confirmationTemplateId: "confirmation-rdv",
+  reminderJ7TemplateId: "contre-indications-laser-j7",
+  reminderJ5TemplateId: "rappel-j5",
   reminder48hTemplateId: "rappel-48h",
+  reminder24hTemplateId: "rappel-24h",
+  confirmationEnabled: true,
+  reminderJ7Enabled: true,
+  reminderJ5Enabled: false,
+  reminder48hEnabled: false,
+  reminder24hEnabled: false,
+  leadWelcomeEnabled: true,
   leadWelcomeTemplateId: "accueil-prospect",
   birthdayTemplateId: "anniversaire",
   birthdaySmsEnabled: true,
 };
+
+function resolveAssignedTemplateId(
+  templateIds: Set<string>,
+  value: string | undefined,
+  preferredId: string,
+  fallbackId: string,
+) {
+  if (value && templateIds.has(value)) {
+    return value;
+  }
+
+  if (templateIds.has(preferredId)) {
+    return preferredId;
+  }
+
+  return fallbackId;
+}
 
 export const MONTHLY_SMS_LIMIT = 500;
 
@@ -295,26 +388,54 @@ export function normalizeSmsSettings(
 
   return {
     templates,
-    confirmationTemplateId: templateIds.has(value?.confirmationTemplateId || "")
-      ? value!.confirmationTemplateId!
-      : templateIds.has("confirmation-rdv")
-        ? "confirmation-rdv"
-        : fallbackId,
-    reminder48hTemplateId: templateIds.has(value?.reminder48hTemplateId || "")
-      ? value!.reminder48hTemplateId!
-      : templateIds.has("rappel-48h")
-        ? "rappel-48h"
-        : fallbackId,
-    leadWelcomeTemplateId: templateIds.has(value?.leadWelcomeTemplateId || "")
-      ? value!.leadWelcomeTemplateId!
-      : templateIds.has("accueil-prospect")
-        ? "accueil-prospect"
-        : fallbackId,
-    birthdayTemplateId: templateIds.has(value?.birthdayTemplateId || "")
-      ? value!.birthdayTemplateId!
-      : templateIds.has("anniversaire")
-        ? "anniversaire"
-        : fallbackId,
+    confirmationTemplateId: resolveAssignedTemplateId(
+      templateIds,
+      value?.confirmationTemplateId,
+      "confirmation-rdv",
+      fallbackId,
+    ),
+    reminderJ7TemplateId: resolveAssignedTemplateId(
+      templateIds,
+      value?.reminderJ7TemplateId,
+      "contre-indications-laser-j7",
+      fallbackId,
+    ),
+    reminderJ5TemplateId: resolveAssignedTemplateId(
+      templateIds,
+      value?.reminderJ5TemplateId,
+      "rappel-j5",
+      fallbackId,
+    ),
+    reminder48hTemplateId: resolveAssignedTemplateId(
+      templateIds,
+      value?.reminder48hTemplateId,
+      "rappel-48h",
+      fallbackId,
+    ),
+    reminder24hTemplateId: resolveAssignedTemplateId(
+      templateIds,
+      value?.reminder24hTemplateId,
+      "rappel-24h",
+      fallbackId,
+    ),
+    confirmationEnabled: value?.confirmationEnabled !== false,
+    reminderJ7Enabled: value?.reminderJ7Enabled !== false,
+    reminderJ5Enabled: value?.reminderJ5Enabled === true,
+    reminder48hEnabled: value?.reminder48hEnabled === true,
+    reminder24hEnabled: value?.reminder24hEnabled === true,
+    leadWelcomeEnabled: value?.leadWelcomeEnabled !== false,
+    leadWelcomeTemplateId: resolveAssignedTemplateId(
+      templateIds,
+      value?.leadWelcomeTemplateId,
+      "accueil-prospect",
+      fallbackId,
+    ),
+    birthdayTemplateId: resolveAssignedTemplateId(
+      templateIds,
+      value?.birthdayTemplateId,
+      "anniversaire",
+      fallbackId,
+    ),
     birthdaySmsEnabled: value?.birthdaySmsEnabled !== false,
   };
 }
@@ -499,8 +620,33 @@ export async function loadCenterSmsSettings() {
     confirmationTemplateId:
       remoteSettings.confirmationTemplateId ||
       localSettings?.confirmationTemplateId,
+    reminderJ7TemplateId:
+      remoteSettings.reminderJ7TemplateId || localSettings?.reminderJ7TemplateId,
+    reminderJ5TemplateId:
+      remoteSettings.reminderJ5TemplateId || localSettings?.reminderJ5TemplateId,
     reminder48hTemplateId:
       remoteSettings.reminder48hTemplateId || localSettings?.reminder48hTemplateId,
+    reminder24hTemplateId:
+      remoteSettings.reminder24hTemplateId ||
+      localSettings?.reminder24hTemplateId,
+    confirmationEnabled: hasRemote
+      ? remoteSettings.confirmationEnabled
+      : (localSettings?.confirmationEnabled ?? true),
+    reminderJ7Enabled: hasRemote
+      ? remoteSettings.reminderJ7Enabled
+      : (localSettings?.reminderJ7Enabled ?? true),
+    reminderJ5Enabled: hasRemote
+      ? remoteSettings.reminderJ5Enabled
+      : Boolean(localSettings?.reminderJ5Enabled),
+    reminder48hEnabled: hasRemote
+      ? remoteSettings.reminder48hEnabled
+      : Boolean(localSettings?.reminder48hEnabled),
+    reminder24hEnabled: hasRemote
+      ? remoteSettings.reminder24hEnabled
+      : Boolean(localSettings?.reminder24hEnabled),
+    leadWelcomeEnabled: hasRemote
+      ? remoteSettings.leadWelcomeEnabled
+      : (localSettings?.leadWelcomeEnabled ?? true),
     leadWelcomeTemplateId:
       remoteSettings.leadWelcomeTemplateId || localSettings?.leadWelcomeTemplateId,
     birthdayTemplateId:

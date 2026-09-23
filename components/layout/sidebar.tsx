@@ -22,7 +22,6 @@ import type { MutableRefObject, Ref } from "react";
 import { BookeaLogo } from "@/components/bookea-logo";
 import { createClient } from "@/lib/supabase";
 import { CenterSwitcher } from "./center-switcher";
-import { NotificationsBell } from "./notifications-bell";
 import NavItem from "./nav-item";
 import NavGroup from "./nav-group";
 
@@ -114,10 +113,6 @@ export default function Sidebar({
       </div>
 
       <CenterSwitcher collapsed={collapsed} />
-
-      <div className={`mb-4 ${collapsed ? "" : "flex justify-end"}`}>
-        <NotificationsBell variant="dark" collapsed={collapsed} />
-      </div>
 
       <nav className="min-h-0 flex-1 space-y-2 overflow-y-auto">
         <NavItem
