@@ -1,4 +1,5 @@
 import { cabins, practitioners } from "@/lib/agenda-data";
+import { markPastAppointmentsPresent } from "@/lib/appointment-presence";
 import { getActiveCenterContext } from "@/lib/center-access";
 import { normalizeLeadStatus } from "@/lib/lead-statuses";
 import { createClient } from "@/lib/supabase";
@@ -77,7 +78,35 @@ export async function loadCrmAppointments() {
     throw new Error(error.message);
   }
 
-  return ((data ?? []) as unknown as AppointmentRow[]).map(toAppointment);
+  const appointments = ((data ?? []) as unknown as AppointmentRow[]).map(
+    toAppointment,
+  );
+  const markedAppointments = markPastAppointmentsPresent(appointments);
+
+  void persistPastAppointmentPresence(appointments, markedAppointments);
+
+  return markedAppointments;
+}
+
+async function persistPastAppointmentPresence(
+  originalAppointments: Appointment[],
+  markedAppointments: Appointment[],
+) {
+  const updates = markedAppointments.filter((appointment, index) => {
+    const original = originalAppointments[index];
+
+    return (
+      original &&
+      original.status !== appointment.status &&
+      isPersistedAppointmentId(appointment.id)
+    );
+  });
+
+  await Promise.all(
+    updates.map((appointment) =>
+      updateCrmAppointment(appointment).catch(() => null),
+    ),
+  );
 }
 
 export async function createCrmAppointment(appointment: Appointment) {
@@ -131,12 +160,66 @@ export async function persistCrmAppointment(appointment: Appointment) {
   return createCrmAppointment(appointment);
 }
 
+async function appointmentMoveHistoryFields(
+  supabase: SupabaseClient,
+  appointment: Appointment,
+) {
+  if (!isPersistedAppointmentId(appointment.id)) {
+    return {};
+  }
+
+  const { data } = await supabase
+    .from("appointments")
+    .select("appointment_date,starts_at,origin,notes,status_history,confirmation_token_slot")
+    .eq("id", appointment.id)
+    .maybeSingle();
+
+  if (!data) {
+    return {};
+  }
+
+  const previousDate = String(data.appointment_date || "").slice(0, 10);
+  const previousStart = String(data.starts_at || "").slice(0, 5);
+
+  if (previousDate === appointment.date && previousStart === appointment.start) {
+    return {};
+  }
+
+  const notes = String(data.notes || appointment.notes || "");
+  const origin = String(data.origin || "");
+  const isOnline =
+    origin === "public_bookea" || /booking:|réservation publique/i.test(notes);
+  const source = data.confirmation_token_slot
+    ? "sms_link"
+    : isOnline
+      ? "public"
+      : "staff_agenda";
+  const history = Array.isArray(data.status_history) ? data.status_history : [];
+
+  return {
+    status_history: [
+      ...history,
+      {
+        at: new Date().toISOString(),
+        source,
+        action: "move",
+        from: `${previousDate}|${previousStart}`,
+        to: `${appointment.date}|${appointment.start}`,
+      },
+    ].slice(-30),
+  };
+}
+
 export async function updateCrmAppointment(appointment: Appointment) {
   const supabase = createClient();
   const links = await ensureAppointmentLinks(supabase, appointment);
+  const moveHistory = await appointmentMoveHistoryFields(supabase, appointment);
   const { error } = await supabase
     .from("appointments")
-    .update(toAppointmentFields(appointment, links))
+    .update({
+      ...toAppointmentFields(appointment, links),
+      ...moveHistory,
+    })
     .eq("id", appointment.id);
 
   if (error) {
@@ -158,6 +241,51 @@ export async function deleteCrmAppointment(appointmentId: string) {
   if (error) {
     throw new Error(error.message);
   }
+}
+
+export async function loadCenterAssignmentOptions() {
+  try {
+    const supabase = createClient();
+    const centerId = await getAgendaCenterId(supabase);
+    const [{ data: rooms }, { data: staff }] = await Promise.all([
+      supabase.from("rooms").select("name").eq("center_id", centerId).order("name"),
+      supabase
+        .from("practitioners")
+        .select("first_name,last_name")
+        .eq("center_id", centerId)
+        .order("first_name"),
+    ]);
+
+    return {
+      cabins: uniqueNonEmpty(
+        (rooms ?? []).map((row) => String(row.name ?? "")),
+      ),
+      practitioners: uniqueNonEmpty(
+        (staff ?? []).map((row) =>
+          [row.first_name, row.last_name].filter(Boolean).join(" "),
+        ),
+      ),
+    };
+  } catch {
+    return { cabins: [] as string[], practitioners: [] as string[] };
+  }
+}
+
+function uniqueNonEmpty(values: string[]) {
+  const seen = new Set<string>();
+  const result: string[] = [];
+
+  for (const raw of values) {
+    const value = raw.trim();
+    const key = value.toLowerCase();
+    if (!value || seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    result.push(value);
+  }
+
+  return result;
 }
 
 async function getAgendaCenterId(supabase: SupabaseClient) {

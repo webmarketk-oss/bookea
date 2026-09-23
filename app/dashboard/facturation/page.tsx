@@ -25,8 +25,15 @@ import {
 import {
   defaultCenterProducts,
   defaultCenterServices,
+  loadPublicCenterProfile,
   mergeCenterSettings,
+  mergeProductCategories,
+  mergeServiceCategories,
   readCenterSettings,
+  savePublicCenterProfile,
+  sortServicesByCategory,
+  type CenterProductSetting,
+  type CenterServiceSetting,
 } from "@/lib/center-settings";
 import {
   createBillingInvoice,
@@ -243,6 +250,7 @@ export default function BillingPage() {
     paymentMethod: "CB centre" as Invoice["paymentMethod"],
   });
   const [settingsLoaded, setSettingsLoaded] = useState(false);
+  const persistCatalogTimer = useRef(0);
 
   async function refreshInvoices() {
     setBillingError("");
@@ -284,44 +292,62 @@ export default function BillingPage() {
   }, []);
 
   useEffect(() => {
-    const settings = readCenterSettings();
-    const centerServices = settings?.services ?? defaultCenterServices;
-    const centerProducts = settings?.products ?? defaultCenterProducts;
+    function applyCatalog(settings: ReturnType<typeof readCenterSettings>) {
+      const centerServices = settings?.services ?? defaultCenterServices;
+      const centerProducts = settings?.products ?? defaultCenterProducts;
+      const serviceCategories = mergeServiceCategories(
+        settings?.serviceCategories,
+        centerServices,
+      );
+      const productCategories = mergeProductCategories(
+        settings?.productCategories,
+        centerProducts,
+      );
 
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setBillingServices(
-      centerServices.map((service, index) => ({
-        id: String(service.id),
-        name: service.name,
-        category: service.category,
-        color: service.color ?? billingServiceColorFallback(index),
-        duration: `${service.duration} min`,
-        price: service.price,
-        vatRate: service.vatRate ?? 20,
-        deposit: service.depositEnabled ? service.depositAmount : 0,
-      })),
-    );
-    setBillingProducts(
-      centerProducts.map((product) => ({
-        id: String(product.id),
-        name: product.name,
-        category: product.category,
-        reference: product.sku,
-        stock: product.stock,
-        price: product.price,
-        vatRate: product.vatRate ?? 20,
-      })),
-    );
-    setBillingCategories((current) =>
-      Array.from(
-        new Set([
-          ...current,
-          ...centerServices.map((service) => service.category),
-          ...centerProducts.map((product) => product.category),
-        ]),
-      ),
-    );
-    setSettingsLoaded(true);
+      setBillingServices(
+        sortServicesByCategory(centerServices, serviceCategories).map(
+          (service, index) => ({
+            id: String(service.id),
+            name: service.name,
+            category: service.category,
+            color: service.color ?? billingServiceColorFallback(index),
+            duration: `${service.duration} min`,
+            price: service.price,
+            vatRate: service.vatRate ?? 20,
+            deposit: service.depositEnabled ? service.depositAmount : 0,
+          }),
+        ),
+      );
+      setBillingProducts(
+        sortServicesByCategory(centerProducts, productCategories).map(
+          (product) => ({
+            id: String(product.id),
+            name: product.name,
+            category: product.category,
+            reference: product.sku,
+            stock: product.stock,
+            price: product.price,
+            vatRate: product.vatRate ?? 20,
+          }),
+        ),
+      );
+      setBillingCategories(
+        Array.from(new Set([...serviceCategories, ...productCategories])),
+      );
+    }
+
+    applyCatalog(readCenterSettings());
+
+    void loadPublicCenterProfile().then((loaded) => {
+      applyCatalog(loaded.settings ?? readCenterSettings());
+      setSettingsLoaded(true);
+    });
+
+    const refresh = () => applyCatalog(readCenterSettings());
+    window.addEventListener("bookea-center-settings-updated", refresh);
+    return () => {
+      window.removeEventListener("bookea-center-settings-updated", refresh);
+    };
   }, []);
 
   useEffect(() => {
@@ -329,34 +355,57 @@ export default function BillingPage() {
       return;
     }
 
-    mergeCenterSettings({
-      services: billingServices.map((service, index) => ({
-        id: Number(service.id.replace(/\D/g, "")) || Date.now(),
-        name: service.name,
-        category: service.category,
-        color: service.color ?? billingServiceColorFallback(index),
-        price: service.price,
-        vatRate: service.vatRate,
-        duration: parseDurationMinutes(service.duration),
-        depositEnabled: service.deposit > 0,
-        depositAmount: service.deposit,
-        visible: true,
-        topListed: true,
-        cabins: "Toutes",
-        practitioners: "Toutes",
-      })),
-      products: billingProducts.map((product) => ({
-        id: Number(product.id.replace(/\D/g, "")) || Date.now(),
-        name: product.name,
-        category: product.category,
-        price: product.price,
-        vatRate: product.vatRate,
-        stock: product.stock,
-        sku: product.reference,
-        visible: true,
-      })),
-    });
-  }, [billingProducts, billingServices, settingsLoaded]);
+    const current = readCenterSettings();
+    const nextServices = billingServices.map((service, index) =>
+      toStoredBillingService(
+        service,
+        index,
+        current?.services?.find(
+          (item) =>
+            String(item.id) === service.id ||
+            item.name.trim().toLowerCase() === service.name.trim().toLowerCase(),
+        ),
+      ),
+    );
+    const nextProducts = billingProducts.map((product) =>
+      toStoredBillingProduct(
+        product,
+        current?.products?.find(
+          (item) =>
+            String(item.id) === product.id ||
+            item.name.trim().toLowerCase() === product.name.trim().toLowerCase(),
+        ),
+      ),
+    );
+    const nextSettings = {
+      services: nextServices,
+      products: nextProducts,
+      serviceCategories: mergeServiceCategories(
+        [...(current?.serviceCategories ?? []), ...billingCategories],
+        nextServices,
+      ),
+      productCategories: mergeProductCategories(
+        [...(current?.productCategories ?? []), ...billingCategories],
+        nextProducts,
+      ),
+    };
+
+    mergeCenterSettings(nextSettings, { emit: false });
+
+    window.clearTimeout(persistCatalogTimer.current);
+    persistCatalogTimer.current = window.setTimeout(() => {
+      const latest = readCenterSettings();
+      if (!latest?.center) {
+        return;
+      }
+      void savePublicCenterProfile({
+        ...latest,
+        ...nextSettings,
+      }).catch(() => undefined);
+    }, 1200);
+
+    return () => window.clearTimeout(persistCatalogTimer.current);
+  }, [billingCategories, billingProducts, billingServices, settingsLoaded]);
 
   const draftSubtotal = calculateSubtotal(draft.lines);
   const draftDiscount = calculateDiscount(
@@ -1895,8 +1944,8 @@ export default function BillingPage() {
         ) : (
           <BillingSettings
             categories={billingCategories}
-            services={billingServices}
-            products={billingProducts}
+            services={sortServicesByCategory(billingServices, billingCategories)}
+            products={sortServicesByCategory(billingProducts, billingCategories)}
             onAddCategory={addBillingCategory}
             onRemoveCategory={removeBillingCategory}
             onAddService={addBillingService}
@@ -3069,6 +3118,45 @@ function calculateInvoiceAmounts(invoice: Invoice) {
   const ht = invoice.total - vat;
 
   return { lines, subtotal, lineDiscount, discount, vat, ht };
+}
+
+function toStoredBillingService(
+  service: BillingService,
+  index: number,
+  existing?: CenterServiceSetting,
+): CenterServiceSetting {
+  return {
+    id: existing?.id ?? Number(service.id.replace(/\D/g, "")) || Date.now() + index,
+    name: service.name,
+    category: service.category,
+    color: service.color || existing?.color || billingServiceColorFallback(index),
+    price: service.price,
+    onQuote: existing?.onQuote === true,
+    vatRate: service.vatRate,
+    duration: parseDurationMinutes(service.duration),
+    depositEnabled: service.deposit > 0 || existing?.depositEnabled === true,
+    depositAmount: service.deposit,
+    visible: existing?.visible ?? true,
+    topListed: existing?.topListed ?? false,
+    cabins: existing?.cabins || "Toutes",
+    practitioners: existing?.practitioners || "Toutes",
+  };
+}
+
+function toStoredBillingProduct(
+  product: BillingProduct,
+  existing?: CenterProductSetting,
+): CenterProductSetting {
+  return {
+    id: existing?.id ?? Number(product.id.replace(/\D/g, "")) || Date.now(),
+    name: product.name,
+    category: product.category,
+    price: product.price,
+    vatRate: product.vatRate,
+    stock: product.stock,
+    sku: product.reference,
+    visible: existing?.visible ?? true,
+  };
 }
 
 function parseDurationMinutes(value: string) {

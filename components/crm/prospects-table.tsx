@@ -9,7 +9,6 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
   isInactiveLeadStatus,
   leadStatusClassName,
@@ -61,6 +60,17 @@ export default function ProspectsTable({
         return -1;
       }
 
+      const currentNew = current.lead.status === "Nouveau";
+      const nextNew = next.lead.status === "Nouveau";
+
+      if (currentNew && !nextNew) {
+        return -1;
+      }
+
+      if (!currentNew && nextNew) {
+        return 1;
+      }
+
       if (currentReminderDue && !nextReminderDue) {
         return -1;
       }
@@ -86,13 +96,13 @@ export default function ProspectsTable({
       <Table className="min-w-full">
         <TableHeader>
           <TableRow>
-            <TableHead className="min-w-[16rem]">Prospect</TableHead>
+            <TableHead className="min-w-[12rem]">Prospect</TableHead>
             <TableHead>Campagne</TableHead>
             <TableHead>Source</TableHead>
             <TableHead>Date</TableHead>
             <TableHead>Rappel</TableHead>
             <TableHead>Commercial</TableHead>
-            <TableHead>Statut</TableHead>
+            <TableHead className="min-w-[12rem]">Statut</TableHead>
             <TableHead>Montant</TableHead>
             <TableHead
               className={cn(
@@ -170,21 +180,11 @@ export default function ProspectsTable({
               )}
             >
               <TableCell>
-                <div className="flex items-center gap-4">
-                  <Avatar className="h-11 w-11">
-                    <AvatarFallback className="bg-blue-100 font-semibold text-blue-700">
-                      {lead.firstName[0]}
-                      {lead.lastName[0]}
-                    </AvatarFallback>
-                  </Avatar>
-
-                  <div>
-                    <p className="font-semibold">
-                      {lead.firstName} {lead.lastName}
-                    </p>
-
-                    <p className="text-sm text-slate-500">{lead.phone}</p>
-                  </div>
+                <div>
+                  <p className="font-semibold">
+                    {lead.firstName} {lead.lastName}
+                  </p>
+                  <p className="text-sm text-slate-500">{lead.phone}</p>
                 </div>
               </TableCell>
 
@@ -243,7 +243,7 @@ export default function ProspectsTable({
                     onStatusChange(lead.id, event.target.value as LeadStatus)
                   }
                   className={cn(
-                    "h-7 rounded-full border-0 px-3 text-xs font-semibold outline-none ring-1 transition-colors",
+                    "h-7 min-w-[11rem] rounded-full border-0 px-3 text-xs font-semibold outline-none ring-1 transition-colors",
                     "focus:ring-2 focus:ring-blue-400",
                     leadStatusClassName(lead.status)
                   )}
@@ -324,7 +324,7 @@ export default function ProspectsTable({
 }
 
 function SourceBadge({ source }: { source: Lead["source"] }) {
-  const styles: Record<Lead["source"], string> = {
+  const styles: Record<string, string> = {
     Facebook: "border-blue-100 bg-blue-50 text-blue-700",
     Instagram: "border-pink-100 bg-pink-50 text-pink-700",
     Google: "border-slate-200 bg-white text-slate-700",
@@ -336,7 +336,7 @@ function SourceBadge({ source }: { source: Lead["source"] }) {
     <span
       className={cn(
         "inline-flex h-7 items-center gap-2 rounded-full border px-2.5 text-xs font-semibold",
-        styles[source]
+        styles[source] ?? "border-slate-200 bg-slate-50 text-slate-700",
       )}
     >
       <SourceIcon source={source} />

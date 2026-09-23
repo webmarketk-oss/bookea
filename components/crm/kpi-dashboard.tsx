@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { Card, CardContent } from "@/components/ui/card";
+import { getLeadRdvTakenDates } from "@/lib/crm-stats";
 import { inactiveLeadStatuses } from "@/lib/lead-statuses";
 import { Lead } from "@/types/lead";
 import {
@@ -96,7 +97,20 @@ export default function KPIDashboard({ leads }: KPIDashboardProps) {
   const remainingRate = ratio(remainingCount, totalProspects);
 
   const campaignRows = getCampaignRows(periodLeads);
+  const campaignStats = getCampaignDiagramRows(periodLeads);
   const sourceRows = getSourceRows(periodLeads);
+  const campaignChartMax = Math.max(
+    1,
+    ...campaignStats.map((row) => Math.max(row.leads, row.rdv)),
+  );
+  const campaignLeadTotal = campaignStats.reduce(
+    (total, row) => total + row.leads,
+    0,
+  );
+  const campaignRdvTotal = campaignStats.reduce(
+    (total, row) => total + row.rdv,
+    0,
+  );
 
   const cards = [
     {
@@ -399,6 +413,101 @@ export default function KPIDashboard({ leads }: KPIDashboardProps) {
           </CardContent>
         </Card>
       </div>
+
+      <Card className="border-slate-200 py-0 shadow-sm">
+        <CardContent className="p-5">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+            <div>
+              <h3 className="text-sm font-black uppercase text-slate-700">
+                Stats par campagne
+              </h3>
+              <p className="mt-1 text-sm font-medium text-slate-500">
+                Nombre de leads et de RDV pris pour chaque campagne
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-3">
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                <p className="text-[11px] font-black uppercase text-slate-500">
+                  NB total leads
+                </p>
+                <p className="mt-1 text-2xl font-black text-violet-600">
+                  {campaignLeadTotal}
+                </p>
+              </div>
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                <p className="text-[11px] font-black uppercase text-slate-500">
+                  NB total RDV pris
+                </p>
+                <p className="mt-1 text-2xl font-black text-blue-600">
+                  {campaignRdvTotal}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {campaignStats.length === 0 ? (
+            <p className="mt-6 text-sm font-medium text-slate-500">
+              Aucune campagne sur cette période.
+            </p>
+          ) : (
+            <div className="mt-6 overflow-x-auto">
+              <div
+                className="flex h-72 min-w-full items-end gap-4 px-1"
+                style={{
+                  minWidth: `${Math.max(campaignStats.length * 88, 320)}px`,
+                }}
+              >
+                {campaignStats.map((row) => (
+                  <div
+                    key={row.name}
+                    className="flex min-w-[72px] flex-1 flex-col items-center gap-2"
+                  >
+                    <div className="flex h-48 w-full items-end justify-center gap-1.5">
+                      <div
+                        className="w-4 rounded-t bg-violet-500"
+                        style={{
+                          height: `${Math.max(
+                            (row.leads / campaignChartMax) * 100,
+                            row.leads > 0 ? 6 : 0,
+                          )}%`,
+                        }}
+                        title={`${row.leads} leads`}
+                      />
+                      <div
+                        className="w-4 rounded-t bg-blue-500"
+                        style={{
+                          height: `${Math.max(
+                            (row.rdv / campaignChartMax) * 100,
+                            row.rdv > 0 ? 6 : 0,
+                          )}%`,
+                        }}
+                        title={`${row.rdv} RDV pris`}
+                      />
+                    </div>
+                    <p className="w-full truncate text-center text-xs font-semibold text-slate-700">
+                      {row.name}
+                    </p>
+                    <p className="text-[11px] font-medium text-slate-500">
+                      {row.leads} leads · {row.rdv} RDV
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div className="mt-4 flex gap-5 text-xs font-semibold text-slate-500">
+            <span className="flex items-center gap-2">
+              <i className="h-2 w-2 rounded-full bg-violet-500" />
+              Leads
+            </span>
+            <span className="flex items-center gap-2">
+              <i className="h-2 w-2 rounded-full bg-blue-500" />
+              RDV pris
+            </span>
+          </div>
+        </CardContent>
+      </Card>
     </div>
   );
 }
@@ -447,6 +556,30 @@ function formatCurrency(value: number) {
     currency: "EUR",
     style: "currency",
   });
+}
+
+function leadHasTakenRdv(lead: Lead) {
+  return (
+    rdvStatuses.includes(lead.status) || getLeadRdvTakenDates(lead).length > 0
+  );
+}
+
+function getCampaignDiagramRows(leads: Lead[]) {
+  const groups = new Map<string, { leads: number; rdv: number }>();
+
+  leads.forEach((lead) => {
+    const name = lead.campaign.trim() || "Sans campagne";
+    const current = groups.get(name) ?? { leads: 0, rdv: 0 };
+    current.leads += 1;
+    if (leadHasTakenRdv(lead)) {
+      current.rdv += 1;
+    }
+    groups.set(name, current);
+  });
+
+  return [...groups.entries()]
+    .map(([name, stats]) => ({ name, ...stats }))
+    .sort((left, right) => right.leads - left.leads);
 }
 
 function getCampaignRows(leads: Lead[]) {

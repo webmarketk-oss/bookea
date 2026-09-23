@@ -42,6 +42,10 @@ import {
   PUBLIC_BOOKINGS_UPDATED_EVENT,
   readPublicBookingsForCenter,
 } from "@/lib/public-bookings";
+import {
+  getSourceNames,
+  readCenterSettings,
+} from "@/lib/center-settings";
 import { Lead, LeadStatus } from "@/types/lead";
 
 const emptyLeadForm = {
@@ -289,6 +293,34 @@ export default function CRMLeadsPage() {
 
   const selectedLead =
     leadList.find((lead) => lead.id === selectedLeadId) ?? leadList[0];
+  const newLeadSourceOptions = useMemo(
+    () =>
+      Array.from(
+        new Set([
+          ...getSourceNames(readCenterSettings()),
+          "Facebook",
+          "Instagram",
+          "Google",
+          "Site Web",
+          "Organique",
+          newLeadForm.source,
+        ]),
+      ).filter(Boolean),
+    [newLeadForm.source],
+  );
+  const newLeadCampaignOptions = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          leadList
+            .map((lead) => lead.campaign.trim())
+            .filter(
+              (campaign) => campaign && campaign.toLowerCase() !== "crm manuel",
+            ),
+        ),
+      ),
+    [leadList],
+  );
 
   const filteredLeads = leadList.filter((lead) => {
     const search = filters.search.trim().toLowerCase();
@@ -760,8 +792,8 @@ export default function CRMLeadsPage() {
       phone: newLeadForm.phone.trim(),
       email: newLeadForm.email.trim(),
       treatment: newLeadForm.treatment.trim(),
-      source: newLeadForm.source,
-      campaign: newLeadForm.campaign,
+      source: newLeadForm.source.trim(),
+      campaign: newLeadForm.campaign.trim(),
       commercial: newLeadForm.commercial,
       status: newLeadForm.status,
       dealAmount: newLeadForm.dealAmount,
@@ -795,8 +827,8 @@ export default function CRMLeadsPage() {
         phone: newLeadForm.phone,
         email: newLeadForm.email,
         treatment: newLeadForm.treatment,
-        source: newLeadForm.source,
-        campaign: newLeadForm.campaign,
+        source: newLeadForm.source.trim(),
+        campaign: newLeadForm.campaign.trim(),
         commercial: newLeadForm.commercial,
         status: newLeadForm.status,
         dealAmount: newLeadForm.dealAmount,
@@ -1145,16 +1177,10 @@ export default function CRMLeadsPage() {
                   onChange={(value) =>
                     setNewLeadForm((form) => ({
                       ...form,
-                      source: value as Lead["source"],
+                      source: value,
                     }))
                   }
-                  options={[
-                    "Facebook",
-                    "Instagram",
-                    "Google",
-                    "Site Web",
-                    "Organique",
-                  ]}
+                  options={newLeadSourceOptions}
                 />
               </FormField>
 
@@ -1162,6 +1188,7 @@ export default function CRMLeadsPage() {
                 <Input
                   value={newLeadForm.campaign}
                   placeholder="Nom de la campagne"
+                  list="new-lead-campaigns"
                   onChange={(event) =>
                     setNewLeadForm((form) => ({
                       ...form,
@@ -1169,6 +1196,11 @@ export default function CRMLeadsPage() {
                     }))
                   }
                 />
+                <datalist id="new-lead-campaigns">
+                  {newLeadCampaignOptions.map((campaign) => (
+                    <option key={campaign} value={campaign} />
+                  ))}
+                </datalist>
               </FormField>
 
               <FormField label="Commercial">

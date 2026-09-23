@@ -3,7 +3,12 @@
 import { useEffect, useState } from "react";
 
 import Sidebar from "@/components/layout/sidebar";
-import { useSidebarSlide } from "@/components/layout/use-sidebar-slide";
+import { SidebarControlProvider } from "@/components/layout/sidebar-control";
+import {
+  COLLAPSE_SIDEBAR_EVENT,
+  useSidebarSlide,
+} from "@/components/layout/use-sidebar-slide";
+import { loadPublicCenterProfile } from "@/lib/center-settings";
 
 export function DashboardShell({ children }: { children: React.ReactNode }) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -12,6 +17,18 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     void fetch("/api/sms/dispatch").catch(() => null);
+    void loadPublicCenterProfile().catch(() => null);
+  }, []);
+
+  useEffect(() => {
+    function collapseSidebar() {
+      setSidebarCollapsed(true);
+    }
+
+    window.addEventListener(COLLAPSE_SIDEBAR_EVENT, collapseSidebar);
+    return () => {
+      window.removeEventListener(COLLAPSE_SIDEBAR_EVENT, collapseSidebar);
+    };
   }, []);
 
   function collapseSidebarFromContent(event: React.MouseEvent<HTMLElement>) {
@@ -47,7 +64,9 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <>
+    <SidebarControlProvider
+      collapseSidebar={() => setSidebarCollapsed(true)}
+    >
       <Sidebar
         collapsed={visuallyCollapsed}
         isDragging={isDragging}
@@ -70,6 +89,6 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
       >
         {children}
       </main>
-    </>
+    </SidebarControlProvider>
   );
 }

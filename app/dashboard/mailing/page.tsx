@@ -1,344 +1,882 @@
 "use client";
 
 import {
-  CalendarClock,
   CheckCircle2,
-  Gift,
+  ImagePlus,
   Mail,
+  Save,
+  Search,
   Send,
-  Sparkles,
+  Trash2,
   Users,
+  X,
 } from "lucide-react";
-import type { ReactNode } from "react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 
-type Campaign = {
-  id: number;
-  name: string;
-  audience: string;
-  subject: string;
-  sentAt: string;
-  recipients: number;
-  status: "Envoyée" | "Programmée" | "Brouillon";
-};
+import { leadStatuses } from "@/lib/lead-statuses";
+import {
+  builtinMailingTemplates,
+  loadMailingWorkspace,
+  persistMailingWorkspace,
+  type MailContact,
+  type MailingCampaign,
+  type MailingTemplate,
+} from "@/lib/mailing-settings";
+import { loadMailingProvider, sendBookeaMailing } from "@/lib/send-mailing";
+import type { CrmClientStatus } from "@/lib/crm-supabase";
 
-const initialCampaigns: Campaign[] = [
-  {
-    id: 1,
-    name: "Anniversaires du jour",
-    audience: "Clientes anniversaire",
-    subject: "Votre surprise anniversaire chez JFG Clinique",
-    sentAt: "Aujourd'hui 09:00",
-    recipients: 2,
-    status: "Programmée",
-  },
-  {
-    id: 2,
-    name: "Relance clientes inactives",
-    audience: "Clientes sans RDV depuis 60 jours",
-    subject: "Un créneau vous attend cette semaine",
-    sentAt: "Hier 16:30",
-    recipients: 18,
-    status: "Envoyée",
-  },
+type ContactKindFilter = "tous" | "lead" | "client";
+
+const clientStatuses: CrmClientStatus[] = [
+  "Actif",
+  "Cure en cours",
+  "À relancer",
+  "Inactif",
 ];
 
-const statusStyles: Record<Campaign["status"], string> = {
-  Envoyée: "bg-emerald-100 text-emerald-700",
-  Programmée: "bg-blue-100 text-blue-700",
+const statusStyles: Record<MailingCampaign["status"], string> = {
+  Envoyée: "bg-emerald-50 text-emerald-700",
   Brouillon: "bg-slate-100 text-slate-600",
 };
 
 export default function MailingPage() {
-  const [campaigns, setCampaigns] = useState(initialCampaigns);
+  const [centerId, setCenterId] = useState("");
+  const [contacts, setContacts] = useState<MailContact[]>([]);
+  const [templates, setTemplates] = useState<MailingTemplate[]>(
+    builtinMailingTemplates,
+  );
+  const [campaigns, setCampaigns] = useState<MailingCampaign[]>([]);
   const [name, setName] = useState("Campagne fidélité");
-  const [audience, setAudience] = useState("Tous les clients");
-  const [subject, setSubject] = useState("Votre prochaine réservation Bookea");
-  const [scheduledDate, setScheduledDate] = useState("2026-07-30");
-  const [scheduledTime, setScheduledTime] = useState("09:00");
+  const [subject, setSubject] = useState("Votre prochaine visite");
   const [message, setMessage] = useState(
-    "Bonjour {{prenom}}, votre centre vous propose une attention personnalisée sur votre prochain rendez-vous.",
+    "Bonjour {{prenom}},\n\nVotre centre vous propose un créneau pour votre prochain soin.\n\nÀ bientôt,",
   );
-  const [birthdayAutomation, setBirthdayAutomation] = useState(true);
-  const [confirmation, setConfirmation] = useState("");
+  const [imageDataUrl, setImageDataUrl] = useState("");
+  const [templateName, setTemplateName] = useState("");
+  const [kindFilter, setKindFilter] = useState<ContactKindFilter>("tous");
+  const [statusFilters, setStatusFilters] = useState<string[]>([]);
+  const [contactSearch, setContactSearch] = useState("");
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [notice, setNotice] = useState("");
+  const [isError, setIsError] = useState(false);
+  const [isLoadingContacts, setIsLoadingContacts] = useState(false);
+  const [activeTemplateId, setActiveTemplateId] = useState("");
+  const [sending, setSending] = useState(false);
+  const [providerReady, setProviderReady] = useState(false);
+  const [senderEmail, setSenderEmail] = useState("");
 
-  const stats = useMemo(
-    () => ({
-      sent: campaigns.filter((campaign) => campaign.status === "Envoyée").length,
-      scheduled: campaigns.filter(
-        (campaign) => campaign.status === "Programmée",
-      ).length,
-      recipients: campaigns.reduce(
-        (total, campaign) => total + campaign.recipients,
-        0,
-      ),
-    }),
-    [campaigns],
-  );
+  useEffect(() => {
+    let cancelled = false;
+    setIsLoadingContacts(true);
 
-  function sendCampaign(status: Campaign["status"]) {
-    const nextCampaign: Campaign = {
-      id: Date.now(),
-      name,
-      audience,
-      subject,
-      sentAt:
-        status === "Programmée"
-          ? `Programmée le ${new Intl.DateTimeFormat("fr-FR").format(
-              new Date(`${scheduledDate}T${scheduledTime}`),
-            )} à ${scheduledTime}`
-          : new Intl.DateTimeFormat("fr-FR", {
-              day: "2-digit",
-              month: "2-digit",
-              hour: "2-digit",
-              minute: "2-digit",
-            }).format(new Date()),
-      recipients:
-        audience === "Tous les clients"
-          ? 148
-          : audience === "Clientes anniversaire"
-            ? 2
-            : 24,
-      status,
+    void (async () => {
+      try {
+        const loaded = await loadMailingWorkspace();
+
+        if (cancelled) {
+          return;
+        }
+
+        setCenterId(loaded.centerId);
+        setTemplates(loaded.templates);
+        setCampaigns(loaded.campaigns);
+        setContacts(loaded.contacts);
+
+        const provider = await loadMailingProvider(loaded.centerId);
+        if (!cancelled) {
+          setProviderReady(provider.configured);
+          setSenderEmail(provider.senderEmail);
+        }
+      } catch {
+        if (!cancelled) {
+          setContacts([]);
+        }
+      } finally {
+        if (!cancelled) {
+          setIsLoadingContacts(false);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
     };
-    setCampaigns((current) => [nextCampaign, ...current]);
-    setConfirmation(
-      status === "Envoyée"
-        ? "Campagne envoyée en maquette. L'envoi réel passera par le fournisseur email."
-        : "Campagne programmée.",
+  }, []);
+
+  const availableStatuses = useMemo(() => {
+    const present = new Set(
+      contacts
+        .filter((contact) => kindFilter === "tous" || contact.kind === kindFilter)
+        .map((contact) => contact.status),
+    );
+    const catalog: string[] =
+      kindFilter === "lead"
+        ? [...leadStatuses]
+        : kindFilter === "client"
+          ? [...clientStatuses]
+          : [...leadStatuses, ...clientStatuses];
+
+    return [
+      ...catalog.filter((status) => present.has(status)),
+      ...Array.from(present).filter((status) => !catalog.includes(status)),
+    ];
+  }, [contacts, kindFilter]);
+
+  const visibleContacts = useMemo(() => {
+    const query = normalize(contactSearch);
+
+    return contacts.filter((contact) => {
+      const matchesKind = kindFilter === "tous" || contact.kind === kindFilter;
+      const matchesStatus =
+        statusFilters.length === 0 || statusFilters.includes(contact.status);
+      const matchesSearch =
+        query.length === 0 ||
+        normalize(`${contact.firstName} ${contact.lastName}`).includes(query) ||
+        normalize(contact.email).includes(query) ||
+        normalize(contact.status).includes(query);
+
+      return matchesKind && matchesStatus && matchesSearch;
+    });
+  }, [contactSearch, contacts, kindFilter, statusFilters]);
+
+  const selectedContacts = useMemo(
+    () =>
+      contacts.filter(
+        (contact) => selectedIds.includes(contact.id) && Boolean(contact.email),
+      ),
+    [contacts, selectedIds],
+  );
+
+  function persistTemplates(nextTemplates: MailingTemplate[]) {
+    setTemplates(nextTemplates);
+    if (centerId) {
+      void persistMailingWorkspace(centerId, { templates: nextTemplates });
+    }
+  }
+
+  function persistCampaigns(nextCampaigns: MailingCampaign[]) {
+    setCampaigns(nextCampaigns);
+    if (centerId) {
+      void persistMailingWorkspace(centerId, { campaigns: nextCampaigns });
+    }
+  }
+
+  function applyTemplate(template: MailingTemplate) {
+    setActiveTemplateId(template.id);
+    setName(template.name);
+    setSubject(template.subject);
+    setMessage(template.message);
+    setImageDataUrl(template.imageDataUrl ?? "");
+    setTemplateName(template.builtin ? "" : template.name);
+    setNotice(`Exemple « ${template.name} » chargé.`);
+    setIsError(false);
+  }
+
+  function saveCurrentAsTemplate() {
+    const nextName = templateName.trim() || name.trim() || "Exemple mailing";
+
+    if (!subject.trim() || !message.trim()) {
+      setIsError(true);
+      setNotice("Ajoutez un objet et un message avant d’enregistrer l’exemple.");
+      return;
+    }
+
+    const existing = templates.find(
+      (template) => !template.builtin && template.name === nextName,
+    );
+    const nextTemplate: MailingTemplate = {
+      id: existing?.id ?? crypto.randomUUID(),
+      name: nextName,
+      subject: subject.trim(),
+      message: message.trim(),
+      imageDataUrl: imageDataUrl || undefined,
+    };
+
+    persistTemplates(
+      existing
+        ? templates.map((template) =>
+            template.id === existing.id ? nextTemplate : template,
+          )
+        : [nextTemplate, ...templates],
+    );
+    setTemplateName(nextName);
+    setActiveTemplateId(nextTemplate.id);
+    setIsError(false);
+    setNotice(`Exemple « ${nextName} » enregistré.`);
+  }
+
+  function deleteTemplate(templateId: string) {
+    persistTemplates(
+      templates.filter((template) => template.id !== templateId),
     );
   }
 
+  async function onPickImage(file?: File) {
+    if (!file) {
+      return;
+    }
+
+    try {
+      setImageDataUrl(await readImageAsDataUrl(file));
+    } catch {
+      setIsError(true);
+      setNotice("La photo n’a pas pu être ajoutée.");
+    }
+  }
+
+  function setKind(nextKind: ContactKindFilter) {
+    setKindFilter(nextKind);
+    setStatusFilters([]);
+  }
+
+  function toggleStatus(status: string) {
+    setStatusFilters((current) =>
+      current.includes(status)
+        ? current.filter((item) => item !== status)
+        : [...current, status],
+    );
+  }
+
+  function toggleContact(contactId: string) {
+    setSelectedIds((current) =>
+      current.includes(contactId)
+        ? current.filter((id) => id !== contactId)
+        : [...current, contactId],
+    );
+  }
+
+  function selectVisibleContacts() {
+    const ids = visibleContacts
+      .filter((contact) => contact.email)
+      .map((contact) => contact.id);
+    setSelectedIds((current) => Array.from(new Set([...current, ...ids])));
+  }
+
+  function clearVisibleContacts() {
+    const visibleIds = new Set(visibleContacts.map((contact) => contact.id));
+    setSelectedIds((current) => current.filter((id) => !visibleIds.has(id)));
+  }
+
+  async function sendCampaign(status: MailingCampaign["status"]) {
+    if (selectedContacts.length === 0) {
+      setIsError(true);
+      setNotice("Sélectionnez au moins un contact avec un email.");
+      return;
+    }
+
+    if (!subject.trim() || !message.trim()) {
+      setIsError(true);
+      setNotice("Ajoutez un objet et un message avant d’envoyer.");
+      return;
+    }
+
+    const audience =
+      statusFilters.length > 0
+        ? `${kindLabel(kindFilter)} · ${statusFilters.join(", ")}`
+        : kindLabel(kindFilter);
+
+    if (status === "Brouillon") {
+      const nextCampaign: MailingCampaign = {
+        id: crypto.randomUUID(),
+        name: name.trim() || subject.trim(),
+        subject: subject.trim(),
+        audience: `${audience} · ${selectedContacts.length} choisi(s)`,
+        sentAt: formatCampaignDate(),
+        recipients: selectedContacts.length,
+        status,
+      };
+      persistCampaigns([nextCampaign, ...campaigns]);
+      setIsError(false);
+      setNotice(`Brouillon enregistré pour ${selectedContacts.length} contact(s).`);
+      return;
+    }
+
+    setSending(true);
+    setIsError(false);
+    setNotice("Envoi du mailing via Brevo…");
+
+    try {
+      const result = await sendBookeaMailing({
+        centerId,
+        subject: subject.trim(),
+        message: message.trim(),
+        imageDataUrl,
+        recipients: selectedContacts,
+      });
+
+      if (!result.ok) {
+        throw new Error(result.error || "Impossible d’envoyer le mailing.");
+      }
+
+      const nextCampaign: MailingCampaign = {
+        id: crypto.randomUUID(),
+        name: name.trim() || subject.trim(),
+        subject: subject.trim(),
+        audience: `${audience} · ${result.sent} envoyé(s)`,
+        sentAt: formatCampaignDate(),
+        recipients: result.sent,
+        status: "Envoyée",
+      };
+      persistCampaigns([nextCampaign, ...campaigns]);
+      setNotice(
+        result.failed
+          ? `${result.sent} email(s) envoyés, ${result.failed} échec(s).`
+          : `${result.sent} email(s) envoyés via Brevo.`,
+      );
+    } catch (error) {
+      setIsError(true);
+      setNotice(
+        error instanceof Error ? error.message : "Impossible d’envoyer le mailing.",
+      );
+    } finally {
+      setSending(false);
+    }
+  }
+
+  const previewName =
+    selectedContacts[0]?.firstName ||
+    visibleContacts[0]?.firstName ||
+    "Marie";
+
   return (
-    <main className="min-h-screen bg-[#eef3f9] px-6 py-6 text-slate-950">
+    <main className="min-h-screen bg-slate-100 px-6 py-6 text-slate-950">
       <section className="mb-6 flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
         <div>
           <p className="text-sm font-medium text-violet-600">Bookea CRM</p>
-          <h1 className="mt-1 text-xl font-semibold tracking-tight">Mailing</h1>
-          <p className="mt-2 max-w-3xl text-sm text-slate-500">
-            Envoyez des emails aux clientes, programmez les anniversaires et
-            préparez les campagnes de fidélisation du centre.
+          <h1 className="mt-1 text-2xl font-semibold tracking-tight">Mailing</h1>
+          <p className="mt-2 max-w-2xl text-sm text-slate-500">
+            Composez un email, ajoutez une photo, enregistrez un exemple, puis
+            choisissez les leads et clients un par un ou par statut.
+          </p>
+          <p className="mt-2 text-xs text-slate-400">
+            {providerReady
+              ? `Envoi réel via Brevo${senderEmail ? ` · ${senderEmail}` : ""}.`
+              : "Brevo n’est pas encore prêt : ajoutez BREVO_API_KEY et BREVO_EMAIL_SENDER."}
           </p>
         </div>
-        <button
-          type="button"
-          onClick={() => sendCampaign("Envoyée")}
-          className="inline-flex items-center justify-center gap-2 rounded-2xl bg-slate-950 px-4 py-3 text-sm font-medium text-white shadow-sm"
-        >
-          <Send className="h-6 w-6" />
-          Envoyer
-        </button>
-      </section>
-
-      <section className="mb-6 grid gap-4 md:grid-cols-4">
-        <StatCard title="Campagnes envoyées" value={stats.sent} color="text-emerald-600" icon={<CheckCircle2 />} />
-        <StatCard title="Programmées" value={stats.scheduled} color="text-blue-600" icon={<CalendarClock />} />
-        <StatCard title="Destinataires" value={stats.recipients} color="text-violet-600" icon={<Users />} />
-        <StatCard title="Anniversaire auto" value={birthdayAutomation ? "ON" : "OFF"} color={birthdayAutomation ? "text-rose-600" : "text-slate-500"} icon={<Gift />} />
-      </section>
-
-      {confirmation && (
-        <div className="mb-6 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-700">
-          {confirmation}
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            disabled={sending}
+            onClick={() => void sendCampaign("Brouillon")}
+            className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700 disabled:opacity-60"
+          >
+            <Save className="h-4 w-4" />
+            Brouillon
+          </button>
+          <button
+            type="button"
+            disabled={sending}
+            onClick={() => void sendCampaign("Envoyée")}
+            className="inline-flex h-10 items-center gap-2 rounded-xl bg-slate-950 px-4 text-sm font-medium text-white disabled:opacity-60"
+          >
+            <Send className="h-4 w-4" />
+            {sending ? "Envoi…" : "Envoyer"}
+          </button>
         </div>
-      )}
+      </section>
 
-      <section className="grid gap-4 xl:grid-cols-[1fr_0.85fr]">
-        <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-          <div className="flex items-start gap-4">
-            <div className="grid h-12 w-12 place-items-center rounded-2xl bg-violet-50 text-violet-600">
-              <Mail className="h-6 w-6" />
-            </div>
+      <section className="mb-6 grid gap-4 md:grid-cols-3">
+        <StatCard
+          title="Contacts sélectionnés"
+          value={selectedContacts.length}
+          icon={<Users className="h-5 w-5" />}
+        />
+        <StatCard
+          title="Exemples enregistrés"
+          value={templates.filter((template) => !template.builtin).length}
+          icon={<Save className="h-5 w-5" />}
+        />
+        <StatCard
+          title="Campagnes envoyées"
+          value={campaigns.filter((campaign) => campaign.status === "Envoyée").length}
+          icon={<CheckCircle2 className="h-5 w-5" />}
+        />
+      </section>
+
+      {notice ? (
+        <div
+          className={`mb-6 rounded-xl border px-4 py-3 text-sm font-medium ${
+            isError
+              ? "border-red-200 bg-red-50 text-red-700"
+              : "border-emerald-200 bg-emerald-50 text-emerald-700"
+          }`}
+        >
+          {notice}
+        </div>
+      ) : null}
+
+      <section className="grid gap-5 xl:grid-cols-[1.1fr_0.9fr]">
+        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="mb-5 flex items-center gap-3">
+            <span className="grid h-9 w-9 place-items-center rounded-xl bg-violet-50 text-violet-600">
+              <Mail className="h-4 w-4" />
+            </span>
             <div>
-              <h2 className="text-base font-semibold">Créer un mailing</h2>
-              <p className="mt-1 text-sm font-medium text-slate-500">
-                Message simple, audience claire et historique conservé.
+              <h2 className="text-base font-semibold">Composer</h2>
+              <p className="text-sm text-slate-500">
+                Variables : {"{{prenom}}"} {"{{nom}}"}
               </p>
             </div>
           </div>
 
-          <div className="mt-6 grid gap-4 md:grid-cols-2">
-            <Input label="Nom campagne" value={name} onChange={setName} />
-            <label className="space-y-2">
-              <span className="text-xs font-medium text-slate-500">
-                Audience
-              </span>
-              <select
-                value={audience}
-                onChange={(event) => setAudience(event.target.value)}
-                className="h-12 w-full rounded-2xl border border-slate-200 px-4 text-base font-bold outline-none focus:border-blue-500"
-              >
-                <option>Tous les clients</option>
-                <option>Clientes anniversaire</option>
-                <option>Clientes sans RDV depuis 60 jours</option>
-                <option>Clients avec cure en cours</option>
-                <option>Prospects avec RDV confirmé</option>
-              </select>
-            </label>
+          <div className="grid gap-4 md:grid-cols-2">
+            <Field label="Nom interne" value={name} onChange={setName} />
+            <Field
+              label="Nom de l’exemple"
+              value={templateName}
+              onChange={setTemplateName}
+              placeholder="Fidélité septembre…"
+            />
             <div className="md:col-span-2">
-              <Input label="Objet email" value={subject} onChange={setSubject} />
+              <Field label="Objet" value={subject} onChange={setSubject} />
             </div>
-            <Input
-              label="Date d'envoi"
-              type="date"
-              value={scheduledDate}
-              onChange={setScheduledDate}
-            />
-            <Input
-              label="Heure d'envoi"
-              type="time"
-              value={scheduledTime}
-              onChange={setScheduledTime}
-            />
-            <label className="space-y-2 md:col-span-2">
-              <span className="text-xs font-medium text-slate-500">
-                Message
-              </span>
+            <label className="space-y-1.5 md:col-span-2">
+              <span className="text-xs font-medium text-slate-500">Message</span>
               <textarea
                 value={message}
                 onChange={(event) => setMessage(event.target.value)}
-                className="min-h-44 w-full rounded-2xl border border-slate-200 p-4 text-base font-bold leading-7 outline-none focus:border-blue-500"
+                rows={8}
+                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm leading-6 outline-none focus:border-blue-500"
               />
             </label>
+            <div className="md:col-span-2">
+              <p className="mb-1.5 text-xs font-medium text-slate-500">Photo</p>
+              {imageDataUrl ? (
+                <div className="overflow-hidden rounded-xl border border-slate-200">
+                  <img
+                    src={imageDataUrl}
+                    alt="Visuel du mailing"
+                    className="h-40 w-full object-cover"
+                  />
+                  <div className="flex items-center justify-between gap-3 px-3 py-2">
+                    <label className="cursor-pointer text-sm font-medium text-slate-600">
+                      Remplacer
+                      <input
+                        type="file"
+                        accept="image/*"
+                        className="sr-only"
+                        onChange={(event) =>
+                          void onPickImage(event.target.files?.[0])
+                        }
+                      />
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => setImageDataUrl("")}
+                      className="inline-flex items-center gap-1 text-sm font-medium text-slate-500"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                      Retirer
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <label className="flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-dashed border-slate-300 px-4 py-8 text-sm font-medium text-slate-500 hover:border-blue-300 hover:bg-blue-50/50 hover:text-blue-700">
+                  <ImagePlus className="h-4 w-4" />
+                  Ajouter une photo
+                  <input
+                    type="file"
+                    accept="image/*"
+                    className="sr-only"
+                    onChange={(event) => void onPickImage(event.target.files?.[0])}
+                  />
+                </label>
+              )}
+            </div>
           </div>
 
-          <div className="mt-5 flex flex-wrap gap-3">
+          <div className="mt-4 flex flex-wrap gap-2">
             <button
               type="button"
-              onClick={() => setBirthdayAutomation((value) => !value)}
-              className={`rounded-2xl px-5 py-3 font-semibold ${
-                birthdayAutomation
-                  ? "bg-rose-100 text-rose-700"
-                  : "bg-slate-100 text-slate-600"
-              }`}
+              onClick={saveCurrentAsTemplate}
+              className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-4 text-sm font-medium text-slate-700"
             >
-              Email anniversaire automatique {birthdayAutomation ? "actif" : "inactif"}
-            </button>
-            <button
-              type="button"
-              onClick={() => sendCampaign("Programmée")}
-              className="rounded-2xl border border-slate-200 bg-white px-5 py-3 font-semibold text-slate-700"
-            >
-              Planifier l'envoi
-            </button>
-            <button
-              type="button"
-              onClick={() => sendCampaign("Envoyée")}
-              className="rounded-2xl bg-blue-600 px-5 py-3 font-semibold text-white"
-            >
-              Envoyer maintenant
+              <Save className="h-4 w-4" />
+              Enregistrer en exemple
             </button>
           </div>
         </div>
 
-        <aside className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-          <div className="flex items-start gap-4">
-            <div className="grid h-12 w-12 place-items-center rounded-2xl bg-blue-50 text-blue-600">
-              <Sparkles className="h-6 w-6" />
-            </div>
-            <div>
-              <h2 className="text-base font-semibold">Aperçu</h2>
-              <p className="mt-1 text-sm font-medium text-slate-500">
-                Email vu par la cliente.
-              </p>
+        <aside className="space-y-5">
+          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <h2 className="text-base font-semibold">Aperçu</h2>
+            <p className="mt-1 text-sm text-slate-500">
+              Tel que vu par {previewName}.
+            </p>
+            <div className="mt-4 overflow-hidden rounded-xl border border-slate-200 bg-slate-50">
+              {imageDataUrl ? (
+                <img
+                  src={imageDataUrl}
+                  alt=""
+                  className="h-36 w-full object-cover"
+                />
+              ) : null}
+              <div className="p-4">
+                <p className="text-xs font-medium text-slate-400">
+                  {selectedContacts.length} destinataire
+                  {selectedContacts.length > 1 ? "s" : ""}
+                </p>
+                <h3 className="mt-2 text-sm font-semibold">{subject}</h3>
+                <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-slate-600">
+                  {fillPreview(message, previewName)}
+                </p>
+              </div>
             </div>
           </div>
-          <div className="mt-6 rounded-[26px] border border-slate-200 bg-slate-50 p-5">
-            <p className="text-xs font-medium text-slate-500">
-              {audience}
+
+          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <h2 className="text-base font-semibold">Exemples</h2>
+            <p className="mt-1 text-sm text-slate-500">
+              Cliquez pour préremplir le mailing.
             </p>
-            <h3 className="mt-3 text-sm font-medium">{subject}</h3>
-            <p className="mt-3 whitespace-pre-wrap text-sm font-semibold leading-7 text-slate-600">
-              {message.replace("{{prenom}}", "Marie")}
-            </p>
-            <button
-              type="button"
-              className="mt-5 rounded-2xl bg-slate-950 px-5 py-3 font-semibold text-white"
-            >
-              Réserver mon soin
-            </button>
+            <div className="mt-4 grid gap-2">
+              {templates.map((template) => (
+                <ExampleCard
+                  key={template.id}
+                  active={activeTemplateId === template.id}
+                  template={template}
+                  onApply={applyTemplate}
+                  onDelete={deleteTemplate}
+                />
+              ))}
+            </div>
           </div>
         </aside>
       </section>
 
-      <section className="mt-6 rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-        <h2 className="text-base font-semibold">Historique mailing</h2>
-        <div className="mt-5 grid gap-3">
-          {campaigns.map((campaign) => (
-            <article
-              key={campaign.id}
-              className="grid gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4 lg:grid-cols-[1fr_1fr_auto_auto]"
+      <section className="mt-5 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+          <div>
+            <h2 className="text-base font-semibold">Destinataires</h2>
+            <p className="mt-1 text-sm text-slate-500">
+              Leads et clients, au choix ou par statut. {selectedContacts.length}{" "}
+              sélectionné{selectedContacts.length > 1 ? "s" : ""}.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <FilterChip
+              active={kindFilter === "tous"}
+              onClick={() => setKind("tous")}
             >
-              <div>
-                <p className="text-sm font-medium">{campaign.name}</p>
-                <p className="font-bold text-slate-500">{campaign.subject}</p>
-              </div>
-              <p className="self-center font-bold text-slate-600">
-                {campaign.audience}
-              </p>
-              <p className="self-center font-semibold text-slate-700">
-                {campaign.recipients} contacts
-              </p>
-              <span className={`self-center rounded-full px-4 py-2 text-center font-semibold ${statusStyles[campaign.status]}`}>
-                {campaign.status}
-              </span>
-              <p className="self-center font-bold text-slate-500 lg:col-span-4">
-                {campaign.sentAt}
-              </p>
-            </article>
-          ))}
+              Tous
+            </FilterChip>
+            <FilterChip
+              active={kindFilter === "lead"}
+              onClick={() => setKind("lead")}
+            >
+              Leads
+            </FilterChip>
+            <FilterChip
+              active={kindFilter === "client"}
+              onClick={() => setKind("client")}
+            >
+              Clients
+            </FilterChip>
+          </div>
+        </div>
+
+        <div className="mt-4 flex flex-col gap-3 lg:flex-row">
+          <div className="relative flex-1">
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+            <input
+              value={contactSearch}
+              onChange={(event) => setContactSearch(event.target.value)}
+              placeholder="Rechercher un nom, un email, un statut…"
+              className="h-10 w-full rounded-xl border border-slate-200 bg-white pl-10 pr-3 text-sm outline-none focus:border-blue-500"
+            />
+          </div>
+          <button
+            type="button"
+            onClick={selectVisibleContacts}
+            className="h-10 rounded-xl border border-slate-200 px-3 text-sm font-medium text-slate-700"
+          >
+            Sélectionner les filtrés
+          </button>
+          <button
+            type="button"
+            onClick={clearVisibleContacts}
+            className="h-10 rounded-xl border border-slate-200 px-3 text-sm font-medium text-slate-500"
+          >
+            Retirer les filtrés
+          </button>
+        </div>
+
+        {availableStatuses.length > 0 ? (
+          <div className="mt-3 flex flex-wrap gap-1.5">
+            {availableStatuses.map((status) => (
+              <button
+                key={status}
+                type="button"
+                onClick={() => toggleStatus(status)}
+                className={`rounded-full px-2.5 py-1 text-xs font-medium ${
+                  statusFilters.includes(status)
+                    ? "bg-slate-950 text-white"
+                    : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                }`}
+              >
+                {status}
+              </button>
+            ))}
+          </div>
+        ) : null}
+
+        <div className="mt-4 max-h-80 overflow-y-auto rounded-xl border border-slate-200">
+          {isLoadingContacts ? (
+            <p className="px-4 py-8 text-center text-sm text-slate-500">
+              Chargement des leads et clients…
+            </p>
+          ) : visibleContacts.length === 0 ? (
+            <p className="px-4 py-8 text-center text-sm text-slate-500">
+              {contacts.length === 0
+                ? "Aucun lead ou client à afficher pour ce centre."
+                : "Aucun contact pour ce filtre."}
+            </p>
+          ) : (
+            visibleContacts.map((contact) => {
+              const checked = selectedIds.includes(contact.id);
+              const noEmail = !contact.email;
+
+              return (
+                <label
+                  key={contact.id}
+                  className={`flex items-center gap-3 border-b border-slate-100 px-4 py-2.5 last:border-b-0 ${
+                    noEmail ? "opacity-50" : "hover:bg-slate-50"
+                  }`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    disabled={noEmail}
+                    onChange={() => toggleContact(contact.id)}
+                    className="h-4 w-4"
+                  />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-sm font-medium">
+                      {contact.firstName} {contact.lastName}
+                    </span>
+                    <span className="block truncate text-xs text-slate-500">
+                      {contact.email || "Pas d’email"} · {contact.status}
+                    </span>
+                  </span>
+                  <span className="shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-600">
+                    {contact.kind === "lead" ? "Lead" : "Client"}
+                  </span>
+                </label>
+              );
+            })
+          )}
         </div>
       </section>
+
+      {campaigns.length > 0 ? (
+        <section className="mt-5 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <h2 className="text-base font-semibold">Historique</h2>
+          <div className="mt-4 grid gap-2">
+            {campaigns.map((campaign) => (
+              <article
+                key={campaign.id}
+                className="grid gap-2 rounded-xl border border-slate-200 px-4 py-3 md:grid-cols-[1fr_1fr_auto_auto]"
+              >
+                <div>
+                  <p className="text-sm font-medium">{campaign.name}</p>
+                  <p className="text-xs text-slate-500">{campaign.subject}</p>
+                </div>
+                <p className="self-center text-sm text-slate-600">
+                  {campaign.audience}
+                </p>
+                <p className="self-center text-sm text-slate-600">
+                  {campaign.recipients} contacts
+                </p>
+                <span
+                  className={`self-center rounded-full px-2.5 py-1 text-center text-xs font-medium ${statusStyles[campaign.status]}`}
+                >
+                  {campaign.status}
+                </span>
+              </article>
+            ))}
+          </div>
+        </section>
+      ) : null}
     </main>
   );
 }
 
-function Input({
-  label,
-  type = "text",
-  value,
-  onChange,
+function ExampleCard({
+  active,
+  onApply,
+  onDelete,
+  template,
 }: {
-  label: string;
-  type?: string;
-  value: string;
-  onChange: (value: string) => void;
+  active: boolean;
+  onApply: (template: MailingTemplate) => void;
+  onDelete: (templateId: string) => void;
+  template: MailingTemplate;
 }) {
   return (
-    <label className="space-y-2">
+    <div
+      className={`flex items-start justify-between gap-3 rounded-xl border px-3 py-2.5 ${
+        active
+          ? "border-violet-300 bg-violet-50"
+          : "border-slate-200 bg-white"
+      }`}
+    >
+      <button
+        type="button"
+        onPointerDown={() => onApply(template)}
+        onClick={() => onApply(template)}
+        className="min-w-0 flex-1 text-left"
+      >
+        <p className="text-sm font-medium">{template.name}</p>
+        <p className="truncate text-xs text-slate-500">{template.subject}</p>
+      </button>
+      {template.builtin ? (
+        <span className="shrink-0 pt-0.5 text-[11px] font-medium text-slate-400">
+          Exemple
+        </span>
+      ) : (
+        <button
+          type="button"
+          onClick={() => onDelete(template.id)}
+          className="rounded-lg p-1 text-slate-400 hover:bg-red-50 hover:text-red-600"
+          aria-label={`Supprimer ${template.name}`}
+        >
+          <Trash2 className="h-3.5 w-3.5" />
+        </button>
+      )}
+    </div>
+  );
+}
+
+function Field({
+  label,
+  onChange,
+  placeholder,
+  value,
+}: {
+  label: string;
+  onChange: (value: string) => void;
+  placeholder?: string;
+  value: string;
+}) {
+  return (
+    <label className="space-y-1.5">
       <span className="text-xs font-medium text-slate-500">{label}</span>
       <input
-        type={type}
         value={value}
+        placeholder={placeholder}
         onChange={(event) => onChange(event.target.value)}
-        className="h-12 w-full rounded-2xl border border-slate-200 px-4 text-base font-bold outline-none focus:border-blue-500"
+        className="h-10 w-full rounded-xl border border-slate-200 px-3 text-sm outline-none focus:border-blue-500"
       />
     </label>
   );
 }
 
-function StatCard({
-  title,
-  value,
-  color,
-  icon,
+function FilterChip({
+  active,
+  children,
+  onClick,
 }: {
-  title: string;
-  value: number | string;
-  color: string;
-  icon: ReactNode;
+  active: boolean;
+  children: string;
+  onClick: () => void;
 }) {
   return (
-    <div className="rounded-[24px] border border-slate-200 bg-white p-5 shadow-sm">
-      <div className="flex items-start justify-between gap-4">
+    <button
+      type="button"
+      onClick={onClick}
+      className={`h-9 rounded-xl px-3 text-sm font-medium ${
+        active
+          ? "bg-slate-950 text-white"
+          : "border border-slate-200 bg-white text-slate-600"
+      }`}
+    >
+      {children}
+    </button>
+  );
+}
+
+function StatCard({
+  icon,
+  title,
+  value,
+}: {
+  icon: ReactNode;
+  title: string;
+  value: number;
+}) {
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+      <div className="flex items-center justify-between gap-3">
         <div>
-          <p className="text-sm font-medium text-slate-500">{title}</p>
-          <p className={`mt-3 text-xl font-semibold `}>{value}</p>
+          <p className="text-sm text-slate-500">{title}</p>
+          <p className="mt-1 text-2xl font-semibold">{value}</p>
         </div>
-        <div className="grid h-12 w-12 place-items-center rounded-2xl bg-slate-50 text-blue-600">
+        <div className="grid h-10 w-10 place-items-center rounded-xl bg-slate-50 text-slate-500">
           {icon}
         </div>
       </div>
     </div>
   );
+}
+
+function formatCampaignDate() {
+  return new Intl.DateTimeFormat("fr-FR", {
+    day: "2-digit",
+    month: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date());
+}
+
+function kindLabel(kind: ContactKindFilter) {
+  if (kind === "lead") return "Leads";
+  if (kind === "client") return "Clients";
+  return "Leads et clients";
+}
+
+function fillPreview(message: string, firstName: string) {
+  return message
+    .replaceAll("{{prenom}}", firstName)
+    .replaceAll("{{nom}}", firstName);
+}
+
+function normalize(value: string) {
+  return value
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+}
+
+function readImageAsDataUrl(file: File) {
+  return new Promise<string>((resolve, reject) => {
+    const image = new Image();
+    const objectUrl = URL.createObjectURL(file);
+
+    image.onload = () => {
+      const maxWidth = 1200;
+      const scale = Math.min(1, maxWidth / image.width);
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.max(1, Math.round(image.width * scale));
+      canvas.height = Math.max(1, Math.round(image.height * scale));
+      const context = canvas.getContext("2d");
+
+      if (!context) {
+        URL.revokeObjectURL(objectUrl);
+        reject(new Error("canvas"));
+        return;
+      }
+
+      context.drawImage(image, 0, 0, canvas.width, canvas.height);
+      URL.revokeObjectURL(objectUrl);
+      resolve(canvas.toDataURL("image/jpeg", 0.82));
+    };
+
+    image.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      reject(new Error("image"));
+    };
+
+    image.src = objectUrl;
+  });
 }

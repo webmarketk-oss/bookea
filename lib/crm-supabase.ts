@@ -105,6 +105,7 @@ export type CrmClient = {
   commercial: string;
   nextAppointment: string;
   lastVisit: string;
+  createdDate: string;
   totalSpent: number;
   balanceDue: number;
   notes: CrmClientNote[];
@@ -319,7 +320,11 @@ export async function createCrmLead(input: NewCrmLeadInput) {
     throw new Error("Le prospect a été créé, mais la fiche n'a pas pu être relue.");
   }
 
-  return createdLead;
+  return {
+    ...createdLead,
+    source: input.source.trim() || createdLead.source,
+    campaign: input.campaign.trim() || createdLead.campaign,
+  };
 }
 
 export async function updateCrmLeadStatus(
@@ -1152,7 +1157,8 @@ async function ensureLeadSource(
   centerId: string,
   name: string,
 ) {
-  const slug = slugify(name);
+  const sourceName = name.trim() || sourceFallback;
+  const slug = slugify(sourceName);
   const { data: existing, error: existingError } = await supabase
     .from("lead_sources")
     .select("id")
@@ -1172,7 +1178,7 @@ async function ensureLeadSource(
     .from("lead_sources")
     .insert({
       center_id: centerId,
-      name,
+      name: sourceName,
       slug,
       is_organic: slug === "organique",
     })
@@ -1191,12 +1197,18 @@ async function ensureCampaign(
   centerId: string,
   name: string,
 ) {
-  const normalizedName = name.trim() || "CRM manuel";
+  const normalizedName = name.trim();
+
+  if (!normalizedName) {
+    return null;
+  }
+
   const { data: existing, error: existingError } = await supabase
     .from("campaigns")
     .select("id")
     .eq("center_id", centerId)
-    .eq("name", normalizedName)
+    .ilike("name", normalizedName)
+    .limit(1)
     .maybeSingle();
 
   if (existingError) {
@@ -1271,7 +1283,7 @@ function toLead(row: LeadRow): Lead {
   const campaign = relationObject(row.campaigns);
   const service = relationObject(row.services);
   const assignee = relationObject(row.profiles);
-  const source = normalizeSource(leadSource?.name);
+  const source = readLeadSource(leadSource?.name);
   const events = row.lead_events ?? [];
   const activityLog: LeadActivity[] = events
     .slice()
@@ -1334,7 +1346,7 @@ function toLead(row: LeadRow): Lead {
     city: client?.city || "",
     treatment: service?.name || "Soin à préciser",
     source,
-    campaign: campaign?.name || "CRM manuel",
+    campaign: campaign?.name?.trim() || "",
     status: normalizeLeadStatus(row.status),
     dealAmount: Number(row.amount_cure_ttc ?? 0),
     commercial: assignee?.full_name || "Équipe",
@@ -1428,6 +1440,7 @@ function toCrmClient(row: ClientRow): CrmClient {
       ? `${formatDisplayDateForCrm(nextAppointment.appointment_date)} ${nextAppointment.starts_at.slice(0, 5)}`
       : "Aucun RDV",
     lastVisit: formatDisplayDateForCrm(row.updated_at.slice(0, 10)),
+    createdDate: row.created_at.slice(0, 10),
     totalSpent: paidTotal || leadAmount,
     balanceDue,
     notes: [
@@ -1658,7 +1671,17 @@ function formatActivityDateForStorage() {
 
 
 function normalizeSource(value?: string | null): LeadSource {
-  const source = (value || "").toLowerCase();
+  return readLeadSource(value);
+}
+
+function readLeadSource(value?: string | null): string {
+  const name = (value || "").trim();
+
+  if (!name) {
+    return sourceFallback;
+  }
+
+  const source = name.toLowerCase();
 
   if (source.includes("facebook")) return "Facebook";
   if (source.includes("instagram")) return "Instagram";
@@ -1666,7 +1689,7 @@ function normalizeSource(value?: string | null): LeadSource {
   if (source.includes("site")) return "Site Web";
   if (source.includes("organique")) return "Organique";
 
-  return sourceFallback;
+  return name;
 }
 
 function normalizeEventType(value: string): LeadActivity["type"] {

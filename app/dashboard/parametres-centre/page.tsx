@@ -2,14 +2,16 @@
 
 import Link from "next/link";
 import type { ChangeEvent } from "react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowDown,
   ArrowUp,
   BadgeEuro,
   Building2,
   CalendarClock,
+  Check,
   CheckCircle2,
+  ChevronDown,
   CreditCard,
   Eye,
   EyeOff,
@@ -28,14 +30,24 @@ import {
   defaultCenterDepositLinks,
   defaultCenterOffers,
   defaultExternalReviews,
+  defaultProductCategories,
   defaultReviewAutomation,
-  mergeCenterSettings,
+  defaultServiceCategories,
+  formatCenterServicePrice,
+  loadPublicCenterProfile,
+  mergeProductCategories,
+  mergeServiceCategories,
   publicCenterCategories,
+  savePublicCenterProfile,
+  sortServicesByCategory,
   type CenterDepositLinkSetting,
   type CenterExternalReview,
   type CenterPublicOffer,
   type CenterReviewAutomation,
 } from "@/lib/center-settings";
+import { cabins as agendaCabins, practitioners as agendaPractitioners } from "@/lib/agenda-data";
+import { loadCenterAssignmentOptions } from "@/lib/agenda-supabase";
+import { PlaceSuggestField } from "@/components/forms/place-suggest-field";
 
 type Service = {
   id: number;
@@ -43,6 +55,7 @@ type Service = {
   category: string;
   color: string;
   price: number;
+  onQuote: boolean;
   vatRate: number;
   duration: number;
   depositEnabled: boolean;
@@ -58,6 +71,7 @@ type CenterProfile = {
   slug: string;
   city: string;
   address: string;
+  postalCode: string;
   phone: string;
   email: string;
   description: string;
@@ -95,8 +109,10 @@ type Product = {
 type StoredCenterSettings = {
   center: CenterProfile;
   services: Service[];
+  serviceCategories: string[];
   sources: LeadSource[];
   products: Product[];
+  productCategories: string[];
   depositLinks: CenterDepositLinkSetting[];
   stripeConnected: boolean;
   coverPreview: string;
@@ -116,6 +132,7 @@ const initialServices: Service[] = [
     category: "Soin du visage",
     color: "#06b6d4",
     price: 89,
+    onQuote: false,
     vatRate: 20,
     duration: 60,
     depositEnabled: true,
@@ -131,6 +148,7 @@ const initialServices: Service[] = [
     category: "Laser",
     color: "#2563eb",
     price: 120,
+    onQuote: false,
     vatRate: 20,
     duration: 45,
     depositEnabled: true,
@@ -146,6 +164,7 @@ const initialServices: Service[] = [
     category: "Minceur",
     color: "#8b5cf6",
     price: 180,
+    onQuote: true,
     vatRate: 20,
     duration: 75,
     depositEnabled: false,
@@ -239,12 +258,29 @@ const serviceColorFallback = (index: number) =>
 export default function CenterSettingsPage() {
   const [activeTab, setActiveTab] = useState("profil");
   const [services, setServices] = useState(initialServices);
+  const [serviceCategories, setServiceCategories] = useState(
+    defaultServiceCategories,
+  );
+  const [categoryDraft, setCategoryDraft] = useState("");
+  const [productCategories, setProductCategories] = useState(
+    defaultProductCategories,
+  );
+  const [productCategoryDraft, setProductCategoryDraft] = useState("");
+  const [centerCabins, setCenterCabins] = useState(
+    agendaCabins.map((cabin) => cabin.name),
+  );
+  const [centerPractitioners, setCenterPractitioners] = useState(
+    agendaPractitioners.map((practitioner) => practitioner.name),
+  );
   const [sources, setSources] = useState(initialSources);
   const [products, setProducts] = useState(initialProducts);
   const [depositLinks, setDepositLinks] =
     useState<CenterDepositLinkSetting[]>(defaultCenterDepositLinks);
   const [stripeConnected, setStripeConnected] = useState(false);
   const [savedMessage, setSavedMessage] = useState("");
+  const [saveError, setSaveError] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const noticeTimer = useRef(0);
   const [coverPreview, setCoverPreview] = useState("");
   const [logoPreview, setLogoPreview] = useState("");
   const [photoPreviews, setPhotoPreviews] = useState<string[]>([]);
@@ -266,6 +302,7 @@ export default function CenterSettingsPage() {
     slug: "jfg-clinique-clermont",
     city: "Clermont-Ferrand",
     address: "12 avenue des Volcans, 63000 Clermont-Ferrand",
+    postalCode: "63000",
     phone: "04 73 00 00 00",
     email: "contact@jfg-clinique.fr",
     description:
@@ -287,6 +324,78 @@ export default function CenterSettingsPage() {
     },
   });
 
+  const applyStoredSettings = (parsed: Partial<StoredCenterSettings>) => {
+    if (parsed.center) {
+      setCenter((current) => ({
+        ...current,
+        ...parsed.center,
+        postalCode: parsed.center?.postalCode ?? current.postalCode,
+        profileColor: parsed.center?.profileColor ?? current.profileColor,
+        categories:
+          parsed.center?.categories && parsed.center.categories.length > 0
+            ? parsed.center.categories
+            : current.categories,
+        socialLinks: {
+          ...current.socialLinks,
+          ...parsed.center?.socialLinks,
+        },
+      }));
+    }
+    if (parsed.services) {
+      setServices(
+        parsed.services.map((service, index) => ({
+          ...service,
+          color: service.color ?? serviceColorFallback(index),
+          vatRate: service.vatRate ?? 20,
+          onQuote: service.onQuote === true,
+        })),
+      );
+    }
+    if (parsed.serviceCategories || parsed.services) {
+      setServiceCategories((current) =>
+        mergeServiceCategories(
+          parsed.serviceCategories ?? current,
+          parsed.services,
+        ),
+      );
+    }
+    if (parsed.sources) setSources(parsed.sources);
+    if (parsed.products) setProducts(parsed.products);
+    if (parsed.productCategories || parsed.products) {
+      setProductCategories((current) =>
+        mergeProductCategories(
+          parsed.productCategories ?? current,
+          parsed.products,
+        ),
+      );
+    }
+    if (parsed.depositLinks) setDepositLinks(parsed.depositLinks);
+    if (typeof parsed.stripeConnected === "boolean") {
+      setStripeConnected(parsed.stripeConnected);
+    }
+    if (parsed.coverPreview) setCoverPreview(parsed.coverPreview);
+    if (parsed.logoPreview) setLogoPreview(parsed.logoPreview);
+    if (parsed.photoPreviews) setPhotoPreviews(parsed.photoPreviews);
+    if (parsed.externalReviews) setExternalReviews(parsed.externalReviews);
+    if (parsed.offers) setOffers(parsed.offers);
+    if (parsed.reviewAutomation) {
+      setReviewAutomation({
+        ...defaultReviewAutomation,
+        ...parsed.reviewAutomation,
+      });
+    }
+  };
+
+  const showNotice = (message: string, isError = false) => {
+    window.clearTimeout(noticeTimer.current);
+    setSaveError(isError);
+    setSavedMessage(message);
+    noticeTimer.current = window.setTimeout(
+      () => setSavedMessage(""),
+      isError ? 5200 : 2400,
+    );
+  };
+
   const visibleServices = useMemo(
     () => services.filter((service) => service.visible),
     [services],
@@ -299,53 +408,27 @@ export default function CenterSettingsPage() {
   useEffect(() => {
     try {
       const stored = window.localStorage.getItem(centerSettingsStorageKey);
-      if (!stored) return;
-
-      const parsed = JSON.parse(stored) as Partial<StoredCenterSettings>;
-      if (parsed.center) {
-        setCenter((current) => ({
-          ...current,
-          ...parsed.center,
-          profileColor: parsed.center?.profileColor ?? current.profileColor,
-          categories:
-            parsed.center?.categories && parsed.center.categories.length > 0
-              ? parsed.center.categories
-              : current.categories,
-          socialLinks: {
-            ...current.socialLinks,
-            ...parsed.center?.socialLinks,
-          },
-        }));
-      }
-      if (parsed.services) {
-        setServices(
-          parsed.services.map((service, index) => ({
-            ...service,
-            color: service.color ?? serviceColorFallback(index),
-            vatRate: service.vatRate ?? 20,
-          })),
-        );
-      }
-      if (parsed.sources) setSources(parsed.sources);
-      if (parsed.products) setProducts(parsed.products);
-      if (parsed.depositLinks) setDepositLinks(parsed.depositLinks);
-      if (typeof parsed.stripeConnected === "boolean") {
-        setStripeConnected(parsed.stripeConnected);
-      }
-      if (parsed.coverPreview) setCoverPreview(parsed.coverPreview);
-      if (parsed.logoPreview) setLogoPreview(parsed.logoPreview);
-      if (parsed.photoPreviews) setPhotoPreviews(parsed.photoPreviews);
-      if (parsed.externalReviews) setExternalReviews(parsed.externalReviews);
-      if (parsed.offers) setOffers(parsed.offers);
-      if (parsed.reviewAutomation) {
-        setReviewAutomation({
-          ...defaultReviewAutomation,
-          ...parsed.reviewAutomation,
-        });
+      if (stored) {
+        applyStoredSettings(JSON.parse(stored) as Partial<StoredCenterSettings>);
       }
     } catch {
       window.localStorage.removeItem(centerSettingsStorageKey);
     }
+
+    void loadPublicCenterProfile().then((loaded) => {
+      if (loaded.settings) {
+        applyStoredSettings(loaded.settings);
+      }
+    });
+
+    void loadCenterAssignmentOptions().then((loaded) => {
+      if (loaded.cabins.length > 0) {
+        setCenterCabins(loaded.cabins);
+      }
+      if (loaded.practitioners.length > 0) {
+        setCenterPractitioners(loaded.practitioners);
+      }
+    });
   }, []);
 
   const updateService = <K extends keyof Service>(
@@ -362,12 +445,19 @@ export default function CenterSettingsPage() {
 
   const moveService = (id: number, direction: -1 | 1) => {
     setServices((current) => {
-      const index = current.findIndex((service) => service.id === id);
+      const sorted = sortServicesByCategory(current, categoryOptions);
+      const index = sorted.findIndex((service) => service.id === id);
       const nextIndex = index + direction;
-      if (index < 0 || nextIndex < 0 || nextIndex >= current.length) {
+      if (index < 0 || nextIndex < 0 || nextIndex >= sorted.length) {
         return current;
       }
-      const copy = [...current];
+      if (
+        sorted[index].category.toLowerCase() !==
+        sorted[nextIndex].category.toLowerCase()
+      ) {
+        return current;
+      }
+      const copy = [...sorted];
       const [item] = copy.splice(index, 1);
       copy.splice(nextIndex, 0, item);
       return copy;
@@ -379,9 +469,10 @@ export default function CenterSettingsPage() {
       {
         id: Date.now(),
         name: "Nouveau soin",
-        category: "Catégorie",
+        category: serviceCategories[0] ?? "Soin visage",
         color: serviceColorFallback(current.length),
         price: 0,
+        onQuote: false,
         vatRate: 20,
         duration: 60,
         depositEnabled: false,
@@ -393,8 +484,91 @@ export default function CenterSettingsPage() {
       },
       ...current,
     ]);
-    setSavedMessage("Nouvelle prestation ajoutée en haut de la liste.");
+    setSavedMessage("Nouvelle prestation ajoutée dans sa catégorie.");
     window.setTimeout(() => setSavedMessage(""), 2400);
+  };
+
+  const categoryOptions = useMemo(
+    () => mergeServiceCategories(serviceCategories, services),
+    [serviceCategories, services],
+  );
+  const cabinOptions = useMemo(
+    () =>
+      mergeAssignmentOptions(
+        centerCabins,
+        services.map((service) => service.cabins),
+      ),
+    [centerCabins, services],
+  );
+  const practitionerOptions = useMemo(
+    () =>
+      mergeAssignmentOptions(
+        centerPractitioners,
+        services.map((service) => service.practitioners),
+      ),
+    [centerPractitioners, services],
+  );
+  const displayedServices = useMemo(
+    () => sortServicesByCategory(services, categoryOptions),
+    [categoryOptions, services],
+  );
+  const productCategoryOptions = useMemo(
+    () => mergeProductCategories(productCategories, products),
+    [productCategories, products],
+  );
+  const displayedProducts = useMemo(
+    () => sortServicesByCategory(products, productCategoryOptions),
+    [productCategoryOptions, products],
+  );
+
+  const createServiceCategory = (rawName: string, serviceId?: number) => {
+    const name = rawName.trim();
+
+    if (!name) {
+      return false;
+    }
+
+    setServiceCategories((current) =>
+      mergeServiceCategories([...current, name], services),
+    );
+
+    if (serviceId) {
+      updateService(serviceId, "category", name);
+    }
+
+    setCategoryDraft("");
+    return true;
+  };
+
+  const removeServiceCategory = (name: string) => {
+    setServiceCategories((current) =>
+      current.filter((item) => item.toLowerCase() !== name.toLowerCase()),
+    );
+  };
+
+  const createProductCategory = (rawName: string, productId?: number) => {
+    const name = rawName.trim();
+
+    if (!name) {
+      return false;
+    }
+
+    setProductCategories((current) =>
+      mergeProductCategories([...current, name], products),
+    );
+
+    if (productId) {
+      updateProduct(productId, "category", name);
+    }
+
+    setProductCategoryDraft("");
+    return true;
+  };
+
+  const removeProductCategory = (name: string) => {
+    setProductCategories((current) =>
+      current.filter((item) => item.toLowerCase() !== name.toLowerCase()),
+    );
   };
 
   const removeService = (id: number) => {
@@ -456,7 +630,7 @@ export default function CenterSettingsPage() {
       {
         id: Date.now(),
         name: "Nouveau produit",
-        category: "Catégorie",
+        category: productCategories[0] ?? "Produits visage",
         price: 0,
         vatRate: 20,
         stock: 0,
@@ -515,23 +689,36 @@ export default function CenterSettingsPage() {
     setDepositLinks((current) => current.filter((item) => item.id !== id));
   };
 
-  const saveSettings = () => {
-    mergeCenterSettings({
-      center,
-      services,
-      sources,
-      products,
-      depositLinks,
-      stripeConnected,
-      coverPreview,
-      logoPreview,
-      photoPreviews,
-      externalReviews,
-      offers,
-      reviewAutomation,
-    });
-    setSavedMessage("Paramètres du centre enregistrés.");
-    window.setTimeout(() => setSavedMessage(""), 2400);
+  const saveSettings = async () => {
+    if (saving) {
+      return;
+    }
+
+    setSaving(true);
+
+    try {
+      await savePublicCenterProfile({
+        center,
+        services: sortServicesByCategory(services, categoryOptions),
+        serviceCategories,
+        sources,
+        products: sortServicesByCategory(products, productCategoryOptions),
+        productCategories,
+        depositLinks,
+        stripeConnected,
+        coverPreview,
+        logoPreview,
+        photoPreviews,
+        externalReviews,
+        offers,
+        reviewAutomation,
+      });
+      showNotice("Fiche publique enregistrée.");
+    } catch (error) {
+      showNotice(publicSaveErrorMessage(error), true);
+    } finally {
+      setSaving(false);
+    }
   };
 
   const toggleCenterCategory = (category: string) => {
@@ -755,17 +942,24 @@ export default function CenterSettingsPage() {
           </Link>
           <button
             type="button"
-            onClick={saveSettings}
-            className="inline-flex items-center gap-2 rounded-xl bg-slate-950 px-4 py-2 text-sm font-medium text-white shadow-sm"
+            onClick={() => void saveSettings()}
+            disabled={saving}
+            className="inline-flex items-center gap-2 rounded-xl bg-slate-950 px-4 py-2 text-sm font-medium text-white shadow-sm disabled:opacity-60"
           >
             <Save className="h-4 w-4" />
-            Enregistrer
+            {saving ? "Enregistrement…" : "Enregistrer"}
           </button>
         </div>
       </header>
 
       {savedMessage && (
-        <div className="mb-5 rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-3 text-sm font-medium text-emerald-700">
+        <div
+          className={`mb-5 rounded-2xl border px-5 py-3 text-sm font-medium ${
+            saveError
+              ? "border-rose-200 bg-rose-50 text-rose-700"
+              : "border-emerald-200 bg-emerald-50 text-emerald-700"
+          }`}
+        >
           {savedMessage}
         </div>
       )}
@@ -845,10 +1039,20 @@ export default function CenterSettingsPage() {
                 value={center.slug}
                 onChange={(value) => setCenter({ ...center, slug: value })}
               />
-              <Field
+              <PlaceSuggestField
                 label="Ville"
+                kind="city"
                 value={center.city}
+                placeholder="Gap, Clermont-Ferrand…"
                 onChange={(value) => setCenter({ ...center, city: value })}
+                onSelect={(place) =>
+                  setCenter((current) => ({
+                    ...current,
+                    city: place.city,
+                    postalCode: place.postcode || current.postalCode,
+                    address: current.address,
+                  }))
+                }
               />
               <Field
                 label="Téléphone"
@@ -886,18 +1090,23 @@ export default function CenterSettingsPage() {
                   {center.published ? "Visible en public" : "Masqué"}
                 </button>
               </label>
-              <label className="space-y-2 md:col-span-2">
-                <span className="text-xs font-medium text-slate-500">
-                  Adresse complète
-                </span>
-                <input
-                  className="h-11 w-full rounded-xl border border-slate-200 px-3 text-sm font-medium text-slate-800 outline-none focus:border-blue-500"
+              <div className="md:col-span-2">
+                <PlaceSuggestField
+                  label="Adresse complète"
+                  kind="address"
                   value={center.address}
-                  onChange={(event) =>
-                    setCenter({ ...center, address: event.target.value })
+                  placeholder="12 rue… Gap"
+                  onChange={(value) => setCenter({ ...center, address: value })}
+                  onSelect={(place) =>
+                    setCenter((current) => ({
+                      ...current,
+                      address: place.street,
+                      city: place.city || current.city,
+                      postalCode: place.postcode || current.postalCode,
+                    }))
                   }
                 />
-              </label>
+              </div>
               <div className="space-y-3 md:col-span-2">
                 <div>
                   <span className="text-xs font-medium text-slate-500">
@@ -1486,11 +1695,12 @@ export default function CenterSettingsPage() {
 
               <button
                 type="button"
-                onClick={saveSettings}
-                className="inline-flex items-center justify-center gap-2 rounded-xl bg-slate-950 px-4 py-2 text-sm font-medium text-white shadow-sm md:col-span-2"
+                onClick={() => void saveSettings()}
+                disabled={saving}
+                className="inline-flex items-center justify-center gap-2 rounded-xl bg-slate-950 px-4 py-2 text-sm font-medium text-white shadow-sm disabled:opacity-60 md:col-span-2"
               >
                 <Save className="h-5 w-5" />
-                Enregistrer la fiche publique
+                {saving ? "Enregistrement…" : "Enregistrer la fiche publique"}
               </button>
             </div>
           </section>
@@ -1498,6 +1708,7 @@ export default function CenterSettingsPage() {
           <PublicPreview
             center={center}
             services={services}
+            serviceCategories={categoryOptions}
             coverPreview={coverPreview}
             logoPreview={logoPreview}
             photoPreviews={photoPreviews}
@@ -1526,60 +1737,118 @@ export default function CenterSettingsPage() {
             </button>
           </div>
 
-          <div className="mt-6 space-y-4">
-            {services.map((service, index) => (
+          <div className="mt-6 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+            <p className="text-xs font-medium text-slate-500">
+              Catégories des prestations
+            </p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {categoryOptions.map((category) => (
+                <span
+                  key={category}
+                  className="inline-flex items-center gap-1.5 rounded-full bg-white px-3 py-1.5 text-sm font-medium text-slate-700 shadow-sm"
+                >
+                  {category}
+                  <button
+                    type="button"
+                    onClick={() => removeServiceCategory(category)}
+                    className="text-slate-400 hover:text-rose-500"
+                    aria-label={`Supprimer la catégorie ${category}`}
+                  >
+                    ×
+                  </button>
+                </span>
+              ))}
+            </div>
+            <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+              <input
+                value={categoryDraft}
+                onChange={(event) => setCategoryDraft(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    createServiceCategory(categoryDraft);
+                  }
+                }}
+                placeholder="Nouvelle catégorie : Bilan, Soins minceur…"
+                className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-medium text-slate-800 outline-none focus:border-blue-500 sm:max-w-sm"
+              />
+              <button
+                type="button"
+                onClick={() => createServiceCategory(categoryDraft)}
+                className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-slate-950 px-4 text-sm font-medium text-white"
+              >
+                <Plus className="h-4 w-4" />
+                Créer
+              </button>
+            </div>
+          </div>
+
+          <div className="mt-4 space-y-2">
+            {displayedServices.map((service, index) => {
+              const previous = displayedServices[index - 1];
+              const next = displayedServices[index + 1];
+              const showCategory =
+                !previous ||
+                previous.category.toLowerCase() !== service.category.toLowerCase();
+
+              return (
+              <div key={service.id} className="space-y-2">
+              {showCategory ? (
+                <p
+                  className={`px-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400 ${
+                    index === 0 ? "" : "pt-2"
+                  }`}
+                >
+                  {service.category || "Sans catégorie"}
+                </p>
+              ) : null}
               <article
-                key={service.id}
-                className="rounded-[24px] border p-4 shadow-sm transition"
+                className="rounded-2xl border p-2.5 shadow-sm transition"
                 style={{
                   backgroundColor: `${service.color ?? serviceColorFallback(index)}12`,
                   borderColor: `${service.color ?? serviceColorFallback(index)}45`,
                 }}
               >
-                <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-                  <div className="inline-flex items-center gap-3 rounded-2xl bg-white/80 px-4 py-3 shadow-sm">
-                    <span
-                      className="h-4 w-4 rounded-full"
-                      style={{
-                        backgroundColor:
-                          service.color ?? serviceColorFallback(index),
-                      }}
-                    />
-                    <span className="text-xs font-medium text-slate-500">
-                      Couleur prestation
-                    </span>
-                    <input
-                      type="color"
-                      value={service.color ?? serviceColorFallback(index)}
-                      onChange={(event) =>
-                        updateService(service.id, "color", event.target.value)
-                      }
-                      className="h-9 w-12 cursor-pointer rounded-xl border border-slate-200 bg-white p-1"
-                      aria-label={`Couleur de ${service.name}`}
-                    />
-                  </div>
-                </div>
-
-                <div className="grid gap-3 xl:grid-cols-[1.4fr_0.9fr_0.7fr_0.6fr_0.7fr_0.9fr_1fr_1fr_auto]">
+                <div className="grid gap-2 xl:grid-cols-[1.4fr_0.9fr_0.7fr_0.6fr_0.7fr_0.9fr_1fr_1fr_auto]">
                   <Field
+                    compact
                     label="Nom"
                     value={service.name}
                     onChange={(value) => updateService(service.id, "name", value)}
                   />
-                  <Field
-                    label="Catégorie"
+                  <ServiceCategoryField
+                    compact
                     value={service.category}
+                    options={categoryOptions}
                     onChange={(value) =>
                       updateService(service.id, "category", value)
                     }
+                    onCreate={(value) =>
+                      createServiceCategory(value, service.id)
+                    }
                   />
+                  {service.onQuote ? (
+                    <label className="space-y-0.5">
+                      <span className="text-[11px] font-medium text-slate-500">
+                        Prix
+                      </span>
+                      <div className="flex h-8 items-center rounded-lg border border-violet-200 bg-violet-50 px-2 text-sm font-medium text-violet-700">
+                        Sur devis
+                      </div>
+                    </label>
+                  ) : (
+                    <NumberField
+                      compact
+                      label="Prix"
+                      value={service.price}
+                      suffix="€"
+                      onChange={(value) =>
+                        updateService(service.id, "price", value)
+                      }
+                    />
+                  )}
                   <NumberField
-                    label="Prix"
-                    value={service.price}
-                    suffix="€"
-                    onChange={(value) => updateService(service.id, "price", value)}
-                  />
-                  <NumberField
+                    compact
                     label="TVA"
                     value={service.vatRate}
                     suffix="%"
@@ -1588,6 +1857,7 @@ export default function CenterSettingsPage() {
                     }
                   />
                   <NumberField
+                    compact
                     label="Durée"
                     value={service.duration}
                     suffix="min"
@@ -1596,6 +1866,7 @@ export default function CenterSettingsPage() {
                     }
                   />
                   <NumberField
+                    compact
                     label="Acompte"
                     value={service.depositAmount}
                     suffix="€"
@@ -1604,46 +1875,76 @@ export default function CenterSettingsPage() {
                       updateService(service.id, "depositAmount", value)
                     }
                   />
-                  <Field
+                  <AssignmentSelect
+                    compact
                     label="Cabines"
+                    allLabel="Toutes"
+                    options={cabinOptions}
                     value={service.cabins}
                     onChange={(value) =>
                       updateService(service.id, "cabins", value)
                     }
                   />
-                  <Field
+                  <AssignmentSelect
+                    compact
                     label="Praticiennes"
+                    allLabel="Toutes"
+                    options={practitionerOptions}
                     value={service.practitioners}
                     onChange={(value) =>
                       updateService(service.id, "practitioners", value)
                     }
                   />
-                  <div className="flex items-end gap-2">
+                  <div className="flex items-end gap-1">
                     <IconButton
+                      compact
                       label="Monter"
-                      disabled={index === 0}
+                      disabled={
+                        !previous ||
+                        previous.category.toLowerCase() !==
+                          service.category.toLowerCase()
+                      }
                       onClick={() => moveService(service.id, -1)}
                     >
-                      <ArrowUp className="h-5 w-5" />
+                      <ArrowUp className="h-4 w-4" />
                     </IconButton>
                     <IconButton
+                      compact
                       label="Descendre"
-                      disabled={index === services.length - 1}
+                      disabled={
+                        !next ||
+                        next.category.toLowerCase() !==
+                          service.category.toLowerCase()
+                      }
                       onClick={() => moveService(service.id, 1)}
                     >
-                      <ArrowDown className="h-5 w-5" />
+                      <ArrowDown className="h-4 w-4" />
                     </IconButton>
                     <IconButton
+                      compact
                       label="Supprimer"
                       onClick={() => removeService(service.id)}
                     >
-                      <Trash2 className="h-5 w-5" />
+                      <Trash2 className="h-4 w-4" />
                     </IconButton>
                   </div>
                 </div>
 
-                <div className="mt-4 flex flex-wrap gap-3">
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <label className="inline-flex items-center gap-1.5 rounded-full bg-white px-2 py-1 text-xs font-medium text-slate-600">
+                    <input
+                      type="color"
+                      value={service.color ?? serviceColorFallback(index)}
+                      onChange={(event) =>
+                        updateService(service.id, "color", event.target.value)
+                      }
+                      className="h-6 w-6 cursor-pointer rounded-full border border-slate-200 bg-white p-0"
+                      aria-label={`Couleur de ${service.name}`}
+                    />
+                    Couleur
+                  </label>
                   <Toggle
+                    compact
                     checked={service.visible}
                     label={service.visible ? "Visible public" : "Masqué public"}
                     onClick={() =>
@@ -1651,6 +1952,7 @@ export default function CenterSettingsPage() {
                     }
                   />
                   <Toggle
+                    compact
                     checked={service.topListed}
                     label={
                       service.topListed
@@ -1662,6 +1964,15 @@ export default function CenterSettingsPage() {
                     }
                   />
                   <Toggle
+                    compact
+                    checked={service.onQuote}
+                    label={service.onQuote ? "Sur devis" : "Prix affiché"}
+                    onClick={() =>
+                      updateService(service.id, "onQuote", !service.onQuote)
+                    }
+                  />
+                  <Toggle
+                    compact
                     checked={service.depositEnabled}
                     label={
                       service.depositEnabled
@@ -1678,8 +1989,20 @@ export default function CenterSettingsPage() {
                   />
                 </div>
               </article>
-            ))}
+              </div>
+              );
+            })}
           </div>
+
+          <button
+            type="button"
+            onClick={() => void saveSettings()}
+            disabled={saving}
+            className="mt-6 inline-flex items-center justify-center gap-2 rounded-xl bg-slate-950 px-4 py-2 text-sm font-medium text-white shadow-sm disabled:opacity-60"
+          >
+            <Save className="h-5 w-5" />
+            {saving ? "Enregistrement…" : "Enregistrer les prestations"}
+          </button>
         </section>
       )}
 
@@ -1761,11 +2084,12 @@ export default function CenterSettingsPage() {
 
           <button
             type="button"
-            onClick={saveSettings}
-            className="mt-6 inline-flex items-center justify-center gap-2 rounded-xl bg-slate-950 px-4 py-2 text-sm font-medium text-white shadow-sm"
+            onClick={() => void saveSettings()}
+            disabled={saving}
+            className="mt-6 inline-flex items-center justify-center gap-2 rounded-xl bg-slate-950 px-4 py-2 text-sm font-medium text-white shadow-sm disabled:opacity-60"
           >
             <Save className="h-5 w-5" />
-            Enregistrer les sources
+            {saving ? "Enregistrement…" : "Enregistrer les sources"}
           </button>
         </section>
       )}
@@ -1788,10 +2112,71 @@ export default function CenterSettingsPage() {
             </button>
           </div>
 
-          <div className="mt-6 space-y-4">
-            {products.map((product) => (
+          <div className="mt-6 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+            <p className="text-xs font-medium text-slate-500">
+              Catégories des produits
+            </p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {productCategoryOptions.map((category) => (
+                <span
+                  key={category}
+                  className="inline-flex items-center gap-1.5 rounded-full bg-white px-3 py-1.5 text-sm font-medium text-slate-700 shadow-sm"
+                >
+                  {category}
+                  <button
+                    type="button"
+                    onClick={() => removeProductCategory(category)}
+                    className="text-slate-400 hover:text-rose-500"
+                    aria-label={`Supprimer la catégorie ${category}`}
+                  >
+                    ×
+                  </button>
+                </span>
+              ))}
+            </div>
+            <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+              <input
+                value={productCategoryDraft}
+                onChange={(event) => setProductCategoryDraft(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    createProductCategory(productCategoryDraft);
+                  }
+                }}
+                placeholder="Nouvelle catégorie : Visage, Compléments…"
+                className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-medium text-slate-800 outline-none focus:border-blue-500 sm:max-w-sm"
+              />
+              <button
+                type="button"
+                onClick={() => createProductCategory(productCategoryDraft)}
+                className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-slate-950 px-4 text-sm font-medium text-white"
+              >
+                <Plus className="h-4 w-4" />
+                Créer
+              </button>
+            </div>
+          </div>
+
+          <div className="mt-4 space-y-4">
+            {displayedProducts.map((product, index) => {
+              const previous = displayedProducts[index - 1];
+              const showCategory =
+                !previous ||
+                previous.category.toLowerCase() !== product.category.toLowerCase();
+
+              return (
+              <div key={product.id} className="space-y-2">
+              {showCategory ? (
+                <p
+                  className={`px-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400 ${
+                    index === 0 ? "" : "pt-1"
+                  }`}
+                >
+                  {product.category || "Sans catégorie"}
+                </p>
+              ) : null}
               <article
-                key={product.id}
                 className="rounded-[24px] border border-slate-200 bg-slate-50 p-4"
               >
                 <div className="grid gap-3 xl:grid-cols-[1.3fr_1fr_0.8fr_0.7fr_0.8fr_1fr_auto]">
@@ -1802,12 +2187,16 @@ export default function CenterSettingsPage() {
                       updateProduct(product.id, "name", value)
                     }
                   />
-                  <Field
-                    label="Catégorie"
+                  <ServiceCategoryField
                     value={product.category}
+                    options={productCategoryOptions}
                     onChange={(value) =>
                       updateProduct(product.id, "category", value)
                     }
+                    onCreate={(value) =>
+                      createProductCategory(value, product.id)
+                    }
+                    createPlaceholder="Visage, Compléments…"
                   />
                   <NumberField
                     label="Prix vente"
@@ -1861,16 +2250,19 @@ export default function CenterSettingsPage() {
                   </span>
                 </div>
               </article>
-            ))}
+              </div>
+              );
+            })}
           </div>
 
           <button
             type="button"
-            onClick={saveSettings}
-            className="mt-6 inline-flex items-center justify-center gap-2 rounded-xl bg-slate-950 px-4 py-2 text-sm font-medium text-white shadow-sm"
+            onClick={() => void saveSettings()}
+            disabled={saving}
+            className="mt-6 inline-flex items-center justify-center gap-2 rounded-xl bg-slate-950 px-4 py-2 text-sm font-medium text-white shadow-sm disabled:opacity-60"
           >
             <Save className="h-5 w-5" />
-            Enregistrer les produits
+            {saving ? "Enregistrement…" : "Enregistrer les produits"}
           </button>
         </section>
       )}
@@ -2016,11 +2408,12 @@ export default function CenterSettingsPage() {
 
           <button
             type="button"
-            onClick={saveSettings}
-            className="mt-6 inline-flex items-center justify-center gap-2 rounded-xl bg-slate-950 px-4 py-2 text-sm font-medium text-white shadow-sm"
+            onClick={() => void saveSettings()}
+            disabled={saving}
+            className="mt-6 inline-flex items-center justify-center gap-2 rounded-xl bg-slate-950 px-4 py-2 text-sm font-medium text-white shadow-sm disabled:opacity-60"
           >
             <Save className="h-5 w-5" />
-            Enregistrer les liens d'acompte
+            {saving ? "Enregistrement…" : "Enregistrer les liens d'acompte"}
           </button>
         </section>
       )}
@@ -2153,21 +2546,31 @@ function SectionTitle({
 }
 
 function Field({
+  compact = false,
   label,
   value,
   onChange,
 }: {
+  compact?: boolean;
   label: string;
   value: string;
   onChange: (value: string) => void;
 }) {
   return (
-    <label className="space-y-1.5">
-      <span className="text-xs font-medium text-slate-500">
+    <label className={compact ? "space-y-0.5" : "space-y-1.5"}>
+      <span
+        className={`font-medium text-slate-500 ${
+          compact ? "text-[11px]" : "text-xs"
+        }`}
+      >
         {label}
       </span>
       <input
-        className="h-11 w-full rounded-xl border border-slate-200 px-3 text-sm font-medium text-slate-800 outline-none focus:border-blue-500"
+        className={`w-full border border-slate-200 font-medium text-slate-800 outline-none focus:border-blue-500 ${
+          compact
+            ? "h-8 rounded-lg px-2 text-sm"
+            : "h-11 rounded-xl px-3 text-sm"
+        }`}
         value={value}
         onChange={(event) => onChange(event.target.value)}
       />
@@ -2175,13 +2578,298 @@ function Field({
   );
 }
 
+function ServiceCategoryField({
+  compact = false,
+  createPlaceholder = "Bilan, Soins minceur…",
+  onChange,
+  onCreate,
+  options,
+  value,
+}: {
+  compact?: boolean;
+  createPlaceholder?: string;
+  onChange: (value: string) => void;
+  onCreate: (value: string) => boolean;
+  options: string[];
+  value: string;
+}) {
+  const [creating, setCreating] = useState(false);
+  const [draft, setDraft] = useState("");
+  const controlClass = compact
+    ? "h-8 rounded-lg px-2 text-sm"
+    : "h-11 rounded-xl px-3 text-sm";
+
+  if (creating) {
+    return (
+      <label className={compact ? "space-y-0.5" : "space-y-1.5"}>
+        <span
+          className={`font-medium text-slate-500 ${
+            compact ? "text-[11px]" : "text-xs"
+          }`}
+        >
+          Catégorie
+        </span>
+        <div className={`flex items-center gap-2 ${compact ? "h-8" : "h-11"}`}>
+          <input
+            autoFocus
+            value={draft}
+            placeholder={createPlaceholder}
+            className={`w-full border border-slate-200 font-medium text-slate-800 outline-none focus:border-blue-500 ${controlClass}`}
+            onChange={(event) => setDraft(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                if (onCreate(draft)) {
+                  setCreating(false);
+                  setDraft("");
+                }
+              }
+              if (event.key === "Escape") {
+                setCreating(false);
+                setDraft("");
+              }
+            }}
+          />
+          <button
+            type="button"
+            onClick={() => {
+              if (onCreate(draft)) {
+                setCreating(false);
+                setDraft("");
+              }
+            }}
+            className={`shrink-0 bg-slate-950 font-medium text-white ${
+              compact
+                ? "h-8 rounded-lg px-2 text-xs"
+                : "h-11 rounded-xl px-3 text-sm"
+            }`}
+          >
+            OK
+          </button>
+        </div>
+      </label>
+    );
+  }
+
+  const currentValue = options.includes(value) ? value : value || options[0] || "";
+
+  return (
+    <label className={compact ? "space-y-0.5" : "space-y-1.5"}>
+      <span
+        className={`font-medium text-slate-500 ${
+          compact ? "text-[11px]" : "text-xs"
+        }`}
+      >
+        Catégorie
+      </span>
+      <select
+        value={currentValue}
+        className={`w-full border border-slate-200 bg-white font-medium text-slate-800 outline-none focus:border-blue-500 ${controlClass}`}
+        onChange={(event) => {
+          if (event.target.value === "__create__") {
+            setCreating(true);
+            return;
+          }
+          onChange(event.target.value);
+        }}
+      >
+        {value && !options.includes(value) ? (
+          <option value={value}>{value}</option>
+        ) : null}
+        {options.map((option) => (
+          <option key={option} value={option}>
+            {option}
+          </option>
+        ))}
+        <option value="__create__">+ Créer une catégorie…</option>
+      </select>
+    </label>
+  );
+}
+
+const assignmentAllPattern = /^(toutes?|tous)$/i;
+
+function parseAssignmentNames(value: string) {
+  return value
+    .split(",")
+    .map((item) => item.trim())
+    .filter((item) => item && !assignmentAllPattern.test(item));
+}
+
+function mergeAssignmentOptions(base: string[], stored: string[]) {
+  const seen = new Set<string>();
+  const result: string[] = [];
+
+  for (const raw of [...base, ...stored.flatMap(parseAssignmentNames)]) {
+    const name = raw.trim();
+    const key = name.toLowerCase();
+    if (!name || assignmentAllPattern.test(name) || seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    result.push(name);
+  }
+
+  return result;
+}
+
+function AssignmentSelect({
+  allLabel,
+  compact = false,
+  label,
+  onChange,
+  options,
+  value,
+}: {
+  allLabel: string;
+  compact?: boolean;
+  label: string;
+  onChange: (value: string) => void;
+  options: string[];
+  value: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const selected = parseAssignmentNames(value);
+  const isAll = selected.length === 0;
+  const display = isAll
+    ? allLabel
+    : selected.length <= 2
+      ? selected.join(", ")
+      : `${selected.length} ${label.toLowerCase()}`;
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+
+    const onPointerDown = (event: PointerEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    };
+
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => document.removeEventListener("pointerdown", onPointerDown);
+  }, [open]);
+
+  const toggle = (name: string) => {
+    if (name === allLabel) {
+      onChange(allLabel);
+      return;
+    }
+
+    const current = isAll ? [] : [...selected];
+    const exists = current.some(
+      (item) => item.toLowerCase() === name.toLowerCase(),
+    );
+    const next = exists
+      ? current.filter((item) => item.toLowerCase() !== name.toLowerCase())
+      : [...current, name];
+
+    if (next.length === 0 || (options.length > 0 && next.length === options.length)) {
+      onChange(allLabel);
+      return;
+    }
+
+    onChange(next.join(", "));
+  };
+
+  return (
+    <div ref={rootRef} className={`relative ${compact ? "space-y-0.5" : "space-y-1.5"}`}>
+      <span
+        className={`font-medium text-slate-500 ${
+          compact ? "text-[11px]" : "text-xs"
+        }`}
+      >
+        {label}
+      </span>
+      <button
+        type="button"
+        onClick={() => setOpen((current) => !current)}
+        className={`flex w-full items-center justify-between border border-slate-200 bg-white text-left font-medium text-slate-800 outline-none focus:border-blue-500 ${
+          compact
+            ? "h-8 rounded-lg px-2 text-sm"
+            : "h-11 rounded-xl px-3 text-sm"
+        }`}
+        aria-label={label}
+        aria-expanded={open}
+        aria-haspopup="listbox"
+      >
+        <span className="truncate">{display}</span>
+        <ChevronDown
+          className={`h-3.5 w-3.5 shrink-0 text-slate-400 ${
+            open ? "rotate-180" : ""
+          }`}
+        />
+      </button>
+      {open ? (
+        <div
+          className="absolute right-0 z-30 mt-1 max-h-56 w-max min-w-full overflow-auto rounded-xl border border-slate-200 bg-white p-1 shadow-lg"
+          role="listbox"
+          aria-multiselectable="true"
+        >
+          <AssignmentOption
+            checked={isAll}
+            label={allLabel}
+            onClick={() => toggle(allLabel)}
+          />
+          {options.map((option) => (
+            <AssignmentOption
+              key={option}
+              checked={!isAll && selected.some((item) => item.toLowerCase() === option.toLowerCase())}
+              label={option}
+              onClick={() => toggle(option)}
+            />
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function AssignmentOption({
+  checked,
+  label,
+  onClick,
+}: {
+  checked: boolean;
+  label: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      role="option"
+      aria-selected={checked}
+      onClick={onClick}
+      className={`flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm font-medium ${
+        checked ? "bg-slate-950 text-white" : "text-slate-700 hover:bg-slate-50"
+      }`}
+    >
+      <span
+        className={`grid h-4 w-4 place-items-center rounded border ${
+          checked
+            ? "border-white bg-white text-slate-950"
+            : "border-slate-300 bg-white"
+        }`}
+      >
+        {checked ? <Check className="h-3 w-3" /> : null}
+      </span>
+      {label}
+    </button>
+  );
+}
+
 function NumberField({
+  compact = false,
   label,
   value,
   suffix,
   disabled = false,
   onChange,
 }: {
+  compact?: boolean;
   label: string;
   value: number;
   suffix: string;
@@ -2189,11 +2877,19 @@ function NumberField({
   onChange: (value: number) => void;
 }) {
   return (
-    <label className="space-y-1.5">
-      <span className="text-xs font-medium text-slate-500">
+    <label className={compact ? "space-y-0.5" : "space-y-1.5"}>
+      <span
+        className={`font-medium text-slate-500 ${
+          compact ? "text-[11px]" : "text-xs"
+        }`}
+      >
         {label}
       </span>
-      <div className="flex h-11 items-center rounded-xl border border-slate-200 bg-white px-3 focus-within:border-blue-500">
+      <div
+        className={`flex items-center border border-slate-200 bg-white focus-within:border-blue-500 ${
+          compact ? "h-8 rounded-lg px-2" : "h-11 rounded-xl px-3"
+        }`}
+      >
         <input
           type="number"
           min={0}
@@ -2210,10 +2906,12 @@ function NumberField({
 
 function Toggle({
   checked,
+  compact = false,
   label,
   onClick,
 }: {
   checked: boolean;
+  compact?: boolean;
   label: string;
   onClick: () => void;
 }) {
@@ -2221,7 +2919,9 @@ function Toggle({
     <button
       type="button"
       onClick={onClick}
-      className={`rounded-full px-3 py-1.5 text-sm font-medium ${
+      className={`rounded-full font-medium ${
+        compact ? "px-2.5 py-1 text-xs" : "px-3 py-1.5 text-sm"
+      } ${
         checked
           ? "bg-emerald-100 text-emerald-700"
           : "bg-slate-200 text-slate-600"
@@ -2233,11 +2933,13 @@ function Toggle({
 }
 
 function IconButton({
+  compact = false,
   label,
   disabled = false,
   onClick,
   children,
 }: {
+  compact?: boolean;
   label: string;
   disabled?: boolean;
   onClick: () => void;
@@ -2249,7 +2951,9 @@ function IconButton({
       title={label}
       disabled={disabled}
       onClick={onClick}
-      className="grid h-10 w-10 place-items-center rounded-xl border border-slate-200 bg-white text-slate-600 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-35"
+      className={`grid place-items-center border border-slate-200 bg-white text-slate-600 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-35 ${
+        compact ? "h-8 w-8 rounded-lg" : "h-10 w-10 rounded-xl"
+      }`}
     >
       {children}
     </button>
@@ -2308,6 +3012,7 @@ function TikTokGlyph({ className }: { className?: string }) {
 function PublicPreview({
   center,
   services,
+  serviceCategories,
   coverPreview,
   logoPreview,
   photoPreviews,
@@ -2330,6 +3035,7 @@ function PublicPreview({
     };
   };
   services: Service[];
+  serviceCategories?: string[];
   coverPreview: string;
   logoPreview: string;
   photoPreviews: string[];
@@ -2337,9 +3043,10 @@ function PublicPreview({
   offers: CenterPublicOffer[];
   reviewAutomation: CenterReviewAutomation;
 }) {
-  const sortedServices = [...services]
-    .filter((service) => service.visible)
-    .sort((a, b) => Number(b.topListed) - Number(a.topListed));
+  const sortedServices = sortServicesByCategory(
+    services.filter((service) => service.visible),
+    mergeServiceCategories(serviceCategories, services),
+  );
   const averageRating =
     externalReviews.length > 0
       ? (
@@ -2547,7 +3254,7 @@ function PublicPreview({
                     </p>
                   </div>
                   <p className="text-base font-semibold text-slate-950">
-                    {service.price} €
+                    {formatCenterServicePrice(service)}
                   </p>
                 </div>
                 <div className="mt-3 flex flex-wrap gap-2">
@@ -2581,4 +3288,20 @@ function readFileAsDataUrl(file: File) {
     reader.onerror = reject;
     reader.readAsDataURL(file);
   });
+}
+
+function publicSaveErrorMessage(error: unknown) {
+  const message = error instanceof Error ? error.message : "";
+
+  if (/row-level security|not authorized|permission|42501/i.test(message)) {
+    return "Enregistrement refusé. Seul un gérant du centre peut modifier la fiche publique.";
+  }
+
+  if (/duplicate|unique/i.test(message)) {
+    return "Cette URL publique est déjà utilisée. Changez le slug puis réessayez.";
+  }
+
+  return message
+    ? `Impossible d'enregistrer la fiche publique : ${message}`
+    : "Impossible d'enregistrer la fiche publique.";
 }

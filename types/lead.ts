@@ -38,7 +38,7 @@ export interface Lead {
   postalCode?: string;
   city?: string;
   treatment: string;
-  source: "Facebook" | "Instagram" | "Google" | "Site Web" | "Organique";
+  source: string;
   campaign: string;
   status: LeadStatus;
   dealAmount: number;

@@ -36,8 +36,12 @@ import {
   defaultCenterServices,
   defaultCenterOffers,
   defaultExternalReviews,
+  formatCenterServicePrice,
+  loadPublishedCenterProfile,
+  mergeServiceCategories,
   publicCenterCategories,
   readCenterSettings,
+  sortServicesByCategory,
   type CenterPublicOffer,
   type StoredCenterSettings,
 } from "@/lib/center-settings";
@@ -73,6 +77,7 @@ type Center = {
   services?: Array<{
     name: string;
     price: number;
+    onQuote?: boolean;
     duration: string;
     color: string;
     deposit: number;
@@ -516,6 +521,7 @@ export function PublicBooking() {
   const [activeCategory, setActiveCategory] = useState("Tous");
   const [filtersExpanded, setFiltersExpanded] = useState(false);
   const [storedSettings, setStoredSettings] = useState<StoredCenterSettings | null>(null);
+  const appliedConfiguredRef = useRef(false);
   const [customerForm, setCustomerForm] = useState({
     firstName: "Julie",
     lastName: "Martin",
@@ -530,6 +536,15 @@ export function PublicBooking() {
     window.addEventListener("bookea-center-settings-updated", refreshSettings);
     window.addEventListener("storage", refreshSettings);
 
+    const slug =
+      readCenterSettings()?.center?.slug || "jfg-clinique-clermont";
+
+    void loadPublishedCenterProfile(slug).then((remote) => {
+      if (remote) {
+        setStoredSettings(remote);
+      }
+    });
+
     return () => {
       window.removeEventListener("bookea-center-settings-updated", refreshSettings);
       window.removeEventListener("storage", refreshSettings);
@@ -543,8 +558,14 @@ export function PublicBooking() {
       return null;
     }
 
-    const visibleServices = (storedSettings?.services ?? defaultCenterServices).filter(
-      (service) => service.visible,
+    const visibleServices = sortServicesByCategory(
+      (storedSettings?.services ?? defaultCenterServices).filter(
+        (service) => service.visible,
+      ),
+      mergeServiceCategories(
+        storedSettings?.serviceCategories,
+        storedSettings?.services,
+      ),
     );
     const topService =
       visibleServices.find((service) => service.topListed) ?? visibleServices[0];
@@ -603,6 +624,7 @@ export function PublicBooking() {
       services: visibleServices.slice(0, 4).map((service) => ({
         name: service.name,
         price: service.price,
+        onQuote: service.onQuote === true,
         duration: `${service.duration} min`,
         color: service.color,
         deposit: service.depositEnabled ? service.depositAmount : 0,
@@ -615,6 +637,18 @@ export function PublicBooking() {
       ),
     };
   }, [storedSettings]);
+
+  useEffect(() => {
+    if (!configuredCenter || appliedConfiguredRef.current) {
+      return;
+    }
+
+    appliedConfiguredRef.current = true;
+    setSelectedCenterName(configuredCenter.name);
+    if (configuredCenter.city) {
+      setLocationQuery(configuredCenter.city);
+    }
+  }, [configuredCenter]);
 
   const allCenters = useMemo(() => {
     if (!configuredCenter) {
@@ -1735,7 +1769,7 @@ export function PublicBooking() {
                               {service.name}
                             </span>
                             <span className="mt-0.5 block text-sm font-bold text-slate-500">
-                              {service.duration} - {service.price},00 €
+                              {service.duration} - {formatCenterServicePrice(service)}
                             </span>
                           </span>
                           <ChevronRight className="h-5 w-5 shrink-0 text-slate-300 transition group-hover:translate-x-0.5 group-hover:text-blue-500" />

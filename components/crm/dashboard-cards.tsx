@@ -20,6 +20,7 @@ import {
   CircleX,
   History,
   Phone,
+  Sparkles,
   Users,
 } from "lucide-react";
 
@@ -118,6 +119,14 @@ export default function DashboardCards({
 
   const followUpStats: StatCard[] = [
     {
+      title: "Nouveaux",
+      value: leads.filter((lead) => lead.status === "Nouveau").length,
+      subtitle: "Encore en statut Nouveau",
+      icon: Sparkles,
+      color: "text-blue-600",
+      status: "Nouveau",
+    },
+    {
       title: "À recontacter",
       value: leads.filter((lead) =>
         [
@@ -146,9 +155,10 @@ export default function DashboardCards({
     {
       title: "Perdus",
       value: leads.filter((lead) =>
-        inactiveLeadStatuses.includes(lead.status),
+        inactiveLeadStatuses.includes(lead.status) &&
+        isLeadCreatedSince(lead, monthStart),
       ).length,
-      subtitle: "Classés en bas",
+      subtitle: "Leads rouge du mois",
       icon: CircleX,
       color: "text-red-600",
       status: "Prospect perdu",
@@ -172,7 +182,7 @@ export default function DashboardCards({
           renderStatCard(stat, activeStatus, activeQuickFilter, onStatusFilter, onQuickFilter)
         }
       </StatGroup>
-      <StatGroup title="Suivi" cards={followUpStats} columns="md:grid-cols-3">
+      <StatGroup title="Suivi" cards={followUpStats} columns="xl:grid-cols-4">
         {(stat) =>
           renderStatCard(stat, activeStatus, activeQuickFilter, onStatusFilter, onQuickFilter)
         }

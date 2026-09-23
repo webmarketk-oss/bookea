@@ -15,6 +15,12 @@ import {
   persistCrmAppointment,
 } from "@/lib/agenda-supabase";
 import { issueAppointmentConfirmationUrl } from "@/lib/appointment-confirmation";
+import { markPastAppointmentsPresent } from "@/lib/appointment-presence";
+import {
+  emptyClientBalanceDueIndex,
+  hasOutstandingPayment,
+  loadClientBalanceDueIndex,
+} from "@/lib/client-balance";
 import {
   loadCrmAgendaContacts,
   type CrmAgendaContact,
@@ -24,12 +30,16 @@ import {
   cancelAppointmentSmsJobs,
   rescheduleAppointmentSmsJobs,
   scheduleAppointmentReminderSms,
+  sendBookeaSms,
   sendSavedTemplateSms,
   syncBirthdaySms,
 } from "@/lib/send-sms";
 import {
   addCenterService,
+  defaultCenterDepositLinks,
   getCenterServices,
+  readCenterSettings,
+  type CenterDepositLinkSetting,
   type CenterServiceSetting,
 } from "@/lib/center-settings";
 import {
@@ -62,6 +72,7 @@ import {
   ChevronRight,
   CheckCircle2,
   Clock3,
+  CreditCard,
   Grip,
   Minus,
   Plus,
@@ -73,7 +84,7 @@ import {
 } from "lucide-react";
 
 const timeOptions = createTimeSlots(7, 19, 15);
-const SLOT_ROW_HEIGHT_REM = 5;
+const SLOT_ROW_HEIGHT_REM = 1.85;
 const TIME_COLUMN_PX = 92;
 const CABIN_COLUMN_MIN_PX = 260;
 
@@ -294,7 +305,15 @@ const defaultTeamSchedules: TeamSchedule[] = [
 export default function AgendaBoard() {
   const searchParams = useSearchParams();
   const rdvPrefill = getRdvPrefill(searchParams);
-  const [appointmentList, setAppointmentList] = useState<Appointment[]>([]);
+  const agendaFocus = getAgendaFocus(searchParams);
+  const [storedAppointments, setAppointmentList] = useState<Appointment[]>([]);
+  const appointmentList = useMemo(
+    () => markPastAppointmentsPresent(storedAppointments),
+    [storedAppointments],
+  );
+  const [balanceDueIndex, setBalanceDueIndex] = useState(
+    emptyClientBalanceDueIndex,
+  );
   const [cabinList, setCabinList] = useState(cabins);
   const [isLoadingAgenda, setIsLoadingAgenda] = useState(true);
   const [agendaError, setAgendaError] = useState("");
@@ -303,7 +322,7 @@ export default function AgendaBoard() {
   const [agendaView, setAgendaView] = useState<AgendaView>("day");
   const [teamSchedules, setTeamSchedules] = useState(defaultTeamSchedules);
   const [selectedDate, setSelectedDate] = useState(
-    rdvPrefill?.date ?? todayIso()
+    agendaFocus?.date ?? rdvPrefill?.date ?? todayIso()
   );
   const [selectedCabin, setSelectedCabin] = useState("Toutes");
   const [selectedPractitioner, setSelectedPractitioner] = useState("Toutes");
@@ -322,17 +341,26 @@ export default function AgendaBoard() {
   const [agendaContacts, setAgendaContacts] = useState<CrmAgendaContact[]>([]);
   const [selectedAppointmentId, setSelectedAppointmentId] = useState<
     string | null
-  >(null);
+  >(agendaFocus?.appointmentId ?? null);
   const [movingAppointmentId, setMovingAppointmentId] = useState<string | null>(
     null
   );
   const boardScrollRef = useRef<HTMLDivElement>(null);
-  const [appointmentForm, setAppointmentForm] = useState(() => ({
-    ...emptyAppointment,
-    ...rdvPrefill,
-  }));
+  const [appointmentForm, setAppointmentForm] = useState(() =>
+    applyClientPositionStatus({
+      ...emptyAppointment,
+      ...rdvPrefill,
+    }),
+  );
   const [sendSmsNow, setSendSmsNow] = useState(true);
   const [sendSms48h, setSendSms48h] = useState(false);
+  const [sendDepositLink, setSendDepositLink] = useState(false);
+  const [depositLinks, setDepositLinks] = useState<CenterDepositLinkSetting[]>(
+    defaultCenterDepositLinks.filter((link) => link.active),
+  );
+  const [selectedDepositLinkId, setSelectedDepositLinkId] = useState(
+    String(defaultCenterDepositLinks[0]?.id ?? ""),
+  );
   const [sendBirthdaySms, setSendBirthdaySms] = useState(true);
   const [smsSettings, setSmsSettings] = useState<CenterSmsSettings | null>(null);
   const [contactSearch, setContactSearch] = useState(
@@ -341,6 +369,7 @@ export default function AgendaBoard() {
   const [pickedContact, setPickedContact] = useState<CrmAgendaContact | null>(
     null
   );
+  const [editingClient, setEditingClient] = useState(false);
   const [portalTarget, setPortalTarget] = useState<HTMLElement | null>(null);
   const [isSavingAppointment, setIsSavingAppointment] = useState(false);
   const savingAppointmentRef = useRef(false);
@@ -350,11 +379,13 @@ export default function AgendaBoard() {
     setAgendaError("");
 
     try {
-      const [loadedAppointments, center] = await Promise.all([
+      const [loadedAppointments, center, nextBalanceDueIndex] = await Promise.all([
         loadCrmAppointments(),
         getActiveCenterContext(),
+        loadClientBalanceDueIndex().catch(() => emptyClientBalanceDueIndex()),
       ]);
       centerNameRef.current = center.centerName;
+      setBalanceDueIndex(nextBalanceDueIndex);
 
       setAppointmentList(
         mergePublicBookingsIntoAppointments(
@@ -395,6 +426,45 @@ export default function AgendaBoard() {
   useEffect(() => {
     setPortalTarget(document.body);
   }, []);
+
+  useEffect(() => {
+    const appointmentId = agendaFocus?.appointmentId;
+
+    if (!appointmentId || isLoadingAgenda) {
+      return;
+    }
+
+    const focusedAppointment = appointmentList.find(
+      (appointment) => appointment.id === appointmentId
+    );
+
+    if (focusedAppointment && focusedAppointment.date !== selectedDate) {
+      setSelectedDate(focusedAppointment.date);
+      return;
+    }
+
+    const frame = window.requestAnimationFrame(() => {
+      const node = boardScrollRef.current?.querySelector(
+        `[data-appointment-id="${CSS.escape(appointmentId)}"]`
+      );
+
+      if (!(node instanceof HTMLElement)) {
+        return;
+      }
+
+      boardScrollRef.current
+        ?.closest("section")
+        ?.scrollIntoView({ block: "start", behavior: "instant" });
+      node.scrollIntoView({ block: "center", behavior: "smooth" });
+    });
+
+    return () => window.cancelAnimationFrame(frame);
+  }, [
+    agendaFocus?.appointmentId,
+    appointmentList,
+    isLoadingAgenda,
+    selectedDate,
+  ]);
 
   useEffect(() => {
     function syncPublicBookings() {
@@ -438,7 +508,31 @@ export default function AgendaBoard() {
     void loadCrmAgendaContacts()
       .then(setAgendaContacts)
       .catch(() => setAgendaContacts([]));
+
+    function refreshDepositLinks() {
+      const nextLinks = activeDepositLinks();
+      setDepositLinks(nextLinks);
+      setSelectedDepositLinkId((current) =>
+        nextLinks.some((link) => String(link.id) === current)
+          ? current
+          : String(nextLinks[0]?.id ?? ""),
+      );
+    }
+
+    refreshDepositLinks();
+    window.addEventListener("bookea-center-settings-updated", refreshDepositLinks);
+    return () =>
+      window.removeEventListener(
+        "bookea-center-settings-updated",
+        refreshDepositLinks,
+      );
   }, []);
+
+  useEffect(() => {
+    setSelectedDepositLinkId((current) =>
+      pickDepositLinkId(depositLinks, appointmentForm.treatment, current),
+    );
+  }, [appointmentForm.treatment, depositLinks]);
 
   const visibleAppointments = useMemo(
     () =>
@@ -654,11 +748,18 @@ export default function AgendaBoard() {
   }
 
   function openAppointmentModal() {
-    setAppointmentForm({ ...emptyAppointment, date: selectedDate });
+    setAppointmentForm(
+      applyClientPositionStatus({ ...emptyAppointment, date: selectedDate }),
+    );
     setContactSearch("");
     setPickedContact(null);
+    setEditingClient(false);
     setSendSmsNow(true);
     setSendSms48h(false);
+    setSendDepositLink(false);
+    setSelectedDepositLinkId((current) =>
+      pickDepositLinkId(depositLinks, "", current),
+    );
     setSendBirthdaySms(true);
     setIsModalOpen(true);
     void loadCrmAgendaContacts()
@@ -683,7 +784,14 @@ export default function AgendaBoard() {
       date: appointmentForm.date,
       start: appointmentForm.start,
       duration: appointmentForm.duration,
-      status: appointmentForm.status,
+      status:
+        appointmentForm.source === "Client" &&
+        (appointmentForm.kind ?? "Rendez-vous") === "Rendez-vous"
+          ? statusWhenClientAppointmentPositioned(
+              appointmentForm.date,
+              appointmentForm.start,
+            )
+          : appointmentForm.status,
       source: appointmentForm.source,
       email: appointmentForm.email.trim() || undefined,
       kind: appointmentForm.kind,
@@ -767,6 +875,34 @@ export default function AgendaBoard() {
           );
         }
 
+        if (sendDepositLink) {
+          const depositLink =
+            depositLinks.find(
+              (link) => String(link.id) === selectedDepositLinkId,
+            ) ?? depositLinks[0];
+
+          if (depositLink?.url.trim()) {
+            const deposit = await sendBookeaSms({
+              phone: savedAppointment.phone,
+              firstName: smsVars.firstName,
+              lastName: smsVars.lastName,
+              date: smsVars.date,
+              time: smsVars.time,
+              treatment: savedAppointment.treatment,
+              centerName: centerNameRef.current,
+              appointmentId: savedAppointment.id,
+              message: `${depositLink.message} ${depositLink.url}`.trim(),
+            });
+            notices.push(
+              deposit.ok
+                ? "Lien d'acompte envoyé."
+                : "Le lien d'acompte n'a pas pu partir.",
+            );
+          } else {
+            notices.push("Aucun lien d'acompte configuré.");
+          }
+        }
+
         if (appointment.birthDate) {
           const birthday = await syncBirthdaySms({
             clientId: savedAppointment.clientId,
@@ -796,6 +932,7 @@ export default function AgendaBoard() {
       setAgendaNotice(notices.join(" "));
       setSendSmsNow(true);
       setSendSms48h(false);
+      setSendDepositLink(false);
       setSendBirthdaySms(true);
       setIsModalOpen(false);
       void loadCrmAgendaContacts()
@@ -822,7 +959,7 @@ export default function AgendaBoard() {
     setAppointmentList((currentAppointments) =>
       currentAppointments.map((appointment) =>
         appointment.id === appointmentId
-          ? {
+          ? withClientPositionStatus({
               ...appointment,
               cabinId,
               date: selectedDate,
@@ -831,7 +968,7 @@ export default function AgendaBoard() {
                 appointment.kind && appointment.kind !== "Rendez-vous"
                   ? appointment.treatment
                   : cabinTreatment,
-            }
+            })
           : appointment
       )
     );
@@ -840,7 +977,7 @@ export default function AgendaBoard() {
       return;
     }
 
-    const updatedAppointment: Appointment = {
+    const updatedAppointment = withClientPositionStatus({
       ...appointmentBeforeMove,
       cabinId,
       date: selectedDate,
@@ -849,7 +986,7 @@ export default function AgendaBoard() {
         appointmentBeforeMove.kind && appointmentBeforeMove.kind !== "Rendez-vous"
           ? appointmentBeforeMove.treatment
           : cabinTreatment,
-    };
+    });
 
     persistCrmAppointment(updatedAppointment)
       .then((savedAppointment) => {
@@ -1005,16 +1142,19 @@ export default function AgendaBoard() {
   function selectContact(contact: (typeof agendaContacts)[number]) {
     setPickedContact(contact);
     setContactSearch(contact.name);
-    setAppointmentForm((form) => ({
-      ...form,
-      personName: contact.name,
-      phone: contact.phone,
-      treatment: contact.treatment,
-      source: contact.type,
-      email: contact.email,
-      birthDate: contact.birthDate || "",
-      kind: "Rendez-vous",
-    }));
+    setEditingClient(false);
+    setAppointmentForm((form) =>
+      applyClientPositionStatus({
+        ...form,
+        personName: contact.name,
+        phone: contact.phone,
+        treatment: contact.treatment,
+        source: contact.type,
+        email: contact.email,
+        birthDate: contact.birthDate || "",
+        kind: "Rendez-vous",
+      }),
+    );
   }
 
   function createSeyaBlock() {
@@ -1131,8 +1271,8 @@ export default function AgendaBoard() {
   const cabinBoardColumns = `${TIME_COLUMN_PX}px repeat(${cabinList.length}, minmax(${CABIN_COLUMN_MIN_PX}px, 1fr))`;
 
   return (
-    <main className="min-h-screen min-w-0 bg-slate-100">
-      <div className="mx-auto min-w-0 max-w-[1800px] space-y-6 p-8">
+    <main className="min-w-0 bg-slate-100">
+      <div className="mx-auto min-w-0 max-w-[1800px] space-y-6 px-8 pt-8 pb-6">
         <header className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
           <div>
             <p className="text-sm font-semibold text-violet-600">
@@ -1456,7 +1596,7 @@ export default function AgendaBoard() {
         )}
 
         <Card className="relative z-20 border-slate-200 py-0 shadow-sm">
-          <CardContent className="flex flex-wrap items-center justify-between gap-3 p-4">
+          <CardContent className="flex flex-wrap items-center justify-between gap-3 px-3 py-2">
             <div className="flex flex-wrap items-center gap-3">
               <p className="mr-2 text-xs font-medium text-slate-500">
                 Praticiennes du jour
@@ -1464,7 +1604,7 @@ export default function AgendaBoard() {
               {practitionersOfDay.map((practitioner) => (
                 <div
                   key={practitioner.id}
-                  className="flex items-center gap-3 rounded-xl bg-slate-50 px-3 py-2"
+                  className="flex items-center gap-2 rounded-xl bg-slate-50 px-2.5 py-1"
                 >
                   <span
                     className={`h-3 w-3 rounded-full ${practitioner.color}`}
@@ -1531,31 +1671,55 @@ export default function AgendaBoard() {
           </CardContent>
         </Card>
 
-        {agendaView === "day" ? (
-        <section className="min-w-0">
-          <Card className="relative z-0 overflow-hidden border-slate-200 py-0 shadow-sm">
-            <CardContent className="relative min-w-0 p-0">
+        {agendaView === "week" ? (
+          <WeekSchedule
+            appointmentList={appointmentList}
+            cabinList={cabinList}
+            hasOutstandingPayment={(appointment) =>
+              hasOutstandingPayment(balanceDueIndex, appointment)
+            }
+            selectedCabin={selectedCabin}
+            selectedDate={selectedDate}
+            selectedPractitioner={selectedPractitioner}
+            onDelete={deleteAppointment}
+            onOpen={setSelectedAppointmentId}
+          />
+        ) : null}
+          </>
+        ) : (
+          <TeamPlanning
+            schedules={teamSchedules}
+            onScheduleChange={updateTeamSchedule}
+          />
+        )}
+      </div>
+
+        {activeTab === "agenda" && agendaView === "day" ? (
+        <section className="sticky top-0 z-20 h-dvh bg-slate-100 px-4 pb-3 pt-1 lg:px-8">
+          <div className="mx-auto h-full min-w-0 max-w-[1800px]">
+          <Card className="relative z-0 h-full overflow-hidden border-slate-200 py-0 shadow-sm">
+            <CardContent className="relative h-full min-w-0 p-0">
               <div
                 ref={boardScrollRef}
-                className="isolate max-h-[70vh] overflow-auto overscroll-contain"
+                className="isolate h-full overflow-auto overscroll-contain"
               >
-                <div
-                  className="min-w-full"
-                  style={{ minWidth: cabinBoardMinWidth }}
-                >
+              <div
+                className="min-w-full"
+                style={{ minWidth: cabinBoardMinWidth }}
+              >
               <div
                 className="sticky top-0 z-30 grid border-b border-slate-200 bg-white text-sm font-bold text-slate-500 shadow-[0_8px_16px_-10px_rgba(15,23,42,0.45)]"
                 style={{
                   gridTemplateColumns: cabinBoardColumns,
                 }}
               >
-                <div className="sticky left-0 z-40 border-r border-slate-100 bg-white p-4">
+                <div className="sticky left-0 z-40 border-r border-slate-100 bg-white px-3 py-1.5">
                   Heure
                 </div>
                 {cabinList.map((cabin) => (
                   <div
                     key={cabin.id}
-                    className={`border-r border-slate-100 bg-gradient-to-br ${cabin.color} p-4 text-white last:border-r-0`}
+                    className={`border-r border-slate-100 bg-gradient-to-br ${cabin.color} px-2.5 py-1.5 text-white last:border-r-0`}
                   >
                     <input
                       value={cabin.name}
@@ -1600,7 +1764,7 @@ export default function AgendaBoard() {
                   {agendaSlots.map((hour, slotIndex) => (
                     <div
                       key={`hour-${hour}`}
-                      className="sticky left-0 z-20 border-r border-b border-slate-100 bg-slate-50 p-4 text-sm font-bold text-slate-400"
+                      className="sticky left-0 z-20 flex items-start border-r border-b border-slate-100 bg-slate-50 px-3 py-1 text-xs font-bold text-slate-400"
                       style={{
                         gridColumn: 1,
                         gridRow: slotIndex + 1,
@@ -1640,7 +1804,7 @@ export default function AgendaBoard() {
                               setMovingAppointmentId(null);
                             }
                           }}
-                          className={`border-r border-b border-slate-100 p-2 last:border-r-0 ${cabin.softColor}`}
+                          className={`border-r border-b border-slate-100 p-0.5 last:border-r-0 ${cabin.softColor}`}
                           style={{
                             gridColumn: cabinIndex + 2,
                             gridRow: slotIndex + 1,
@@ -1665,6 +1829,10 @@ export default function AgendaBoard() {
                                   cabinId: cabin.id,
                                   date: selectedDate,
                                   start: hour,
+                                  status: statusWhenClientAppointmentPositioned(
+                                    selectedDate,
+                                    hour,
+                                  ),
                                   treatment: getCabinTreatment(
                                     cabinList,
                                     cabin.id
@@ -1672,12 +1840,21 @@ export default function AgendaBoard() {
                                 });
                                 setContactSearch("");
                                 setPickedContact(null);
+                                setEditingClient(false);
                                 setSendSmsNow(true);
                                 setSendSms48h(false);
+                                setSendDepositLink(false);
+                                setSelectedDepositLinkId((current) =>
+                                  pickDepositLinkId(
+                                    depositLinks,
+                                    getCabinTreatment(cabinList, cabin.id),
+                                    current,
+                                  ),
+                                );
                                 setSendBirthdaySms(true);
                                 setIsModalOpen(true);
                               }}
-                              className="flex h-full min-h-12 w-full items-center justify-center rounded-lg border border-dashed border-slate-200 text-[11px] font-semibold text-slate-300 transition-colors [touch-action:pan-x_pan-y] hover:border-blue-200 hover:bg-blue-50 hover:text-blue-600"
+                              className="flex h-full w-full items-center justify-center rounded-md border border-dashed border-slate-200 text-[10px] font-semibold text-slate-300 transition-colors [touch-action:pan-x_pan-y] hover:border-blue-200 hover:bg-blue-50 hover:text-blue-600"
                             >
                               Créneau libre
                             </button>
@@ -1707,7 +1884,8 @@ export default function AgendaBoard() {
                     return (
                       <div
                         key={appointment.id}
-                        className="z-10 p-2"
+                        data-appointment-id={appointment.id}
+                        className="z-10 p-0.5"
                         style={{
                           gridColumn: cabinIndex + 2,
                           gridRow: `${slotIndex + 1} / span ${slotSpan}`,
@@ -1715,6 +1893,10 @@ export default function AgendaBoard() {
                       >
                         <AppointmentCard
                           appointment={appointment}
+                          hasOutstandingPayment={hasOutstandingPayment(
+                            balanceDueIndex,
+                            appointment,
+                          )}
                           selectedForMove={
                             movingAppointmentId === appointment.id
                           }
@@ -1732,30 +1914,13 @@ export default function AgendaBoard() {
                   })}
                 </div>
               )}
-                </div>
+              </div>
               </div>
             </CardContent>
           </Card>
+          </div>
         </section>
-        ) : (
-          <WeekSchedule
-            appointmentList={appointmentList}
-            cabinList={cabinList}
-            selectedCabin={selectedCabin}
-            selectedDate={selectedDate}
-            selectedPractitioner={selectedPractitioner}
-            onDelete={deleteAppointment}
-            onOpen={setSelectedAppointmentId}
-          />
-        )}
-          </>
-        ) : (
-          <TeamPlanning
-            schedules={teamSchedules}
-            onScheduleChange={updateTeamSchedule}
-          />
-        )}
-      </div>
+        ) : null}
 
       {isHoursModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-6 backdrop-blur-sm">
@@ -1907,7 +2072,64 @@ export default function AgendaBoard() {
             ) : null}
 
             <div className="grid gap-4 sm:grid-cols-2">
-              <div className="relative sm:col-span-2">
+              <div className="sm:col-span-2">
+              <Field label="Type">
+                <Select
+                  value={appointmentForm.kind}
+                  options={[
+                    "Rendez-vous",
+                    "Pause",
+                    "Formation",
+                    "Indisponible",
+                  ]}
+                  onChange={(value) =>
+                    setAppointmentForm((form) => ({
+                      ...form,
+                      kind: value as AppointmentKind,
+                      source: value === "Rendez-vous" ? form.source : "Seya",
+                      treatment:
+                        value === "Rendez-vous" ? form.treatment : value,
+                      personName:
+                        value === "Rendez-vous"
+                          ? form.personName
+                          : form.personName || value,
+                    }))
+                  }
+                />
+              </Field>
+              </div>
+
+              {appointmentForm.kind === "Rendez-vous" &&
+              !editingClient &&
+              isAgendaClientReady(appointmentForm, pickedContact) ? (
+                <div className="sm:col-span-2">
+                  <SelectedClientChip
+                    name={appointmentForm.personName}
+                    email={appointmentForm.email}
+                    phone={appointmentForm.phone}
+                    onClear={() => {
+                      setPickedContact(null);
+                      setEditingClient(true);
+                      setContactSearch(appointmentForm.personName);
+                    }}
+                  />
+                </div>
+              ) : (
+                <>
+              <div
+                className="relative sm:col-span-2"
+                onBlur={(event) => {
+                  if (
+                    event.currentTarget.contains(event.relatedTarget as Node)
+                  ) {
+                    return;
+                  }
+
+                  if (isAgendaClientReady(appointmentForm, pickedContact)) {
+                    setEditingClient(false);
+                  }
+                }}
+              >
                 <Field label="Rechercher prospect ou client">
                   <Input
                     placeholder="Tapez 2 lettres, un téléphone ou un email..."
@@ -1923,22 +2145,6 @@ export default function AgendaBoard() {
                     }}
                   />
                 </Field>
-
-                {pickedContact ? (
-                  <div className="mt-3 flex items-center justify-between gap-4 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
-                    <div>
-                      <p className="font-bold text-slate-900">
-                        {pickedContact.name}
-                      </p>
-                      <p className="text-sm text-slate-500">
-                        {pickedContact.phone} · {pickedContact.email}
-                      </p>
-                    </div>
-                    <span className="rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-slate-600">
-                      {pickedContact.type}
-                    </span>
-                  </div>
-                ) : null}
 
                 {contactMatches.length > 0 && (
                   <div className="absolute z-30 mt-2 max-h-64 w-full overflow-y-auto rounded-xl border border-slate-200 bg-white shadow-xl">
@@ -1975,6 +2181,11 @@ export default function AgendaBoard() {
                       phone: event.target.value,
                     }))
                   }
+                  onBlur={() => {
+                    if (isAgendaClientReady(appointmentForm, pickedContact)) {
+                      setEditingClient(false);
+                    }
+                  }}
                 />
               </Field>
 
@@ -1988,12 +2199,17 @@ export default function AgendaBoard() {
                       email: event.target.value,
                     }))
                   }
+                  onBlur={() => {
+                    if (isAgendaClientReady(appointmentForm, pickedContact)) {
+                      setEditingClient(false);
+                    }
+                  }}
                 />
               </Field>
 
               <Field label="Nom">
                 <Input
-                  required
+                  required={appointmentForm.kind === "Rendez-vous"}
                   value={appointmentForm.personName}
                   onChange={(event) =>
                     setAppointmentForm((form) => ({
@@ -2001,9 +2217,21 @@ export default function AgendaBoard() {
                       personName: event.target.value,
                     }))
                   }
+                  onBlur={() => {
+                    if (isAgendaClientReady(appointmentForm, pickedContact)) {
+                      setEditingClient(false);
+                    }
+                  }}
                 />
               </Field>
+                </>
+              )}
 
+              {!(
+                appointmentForm.kind === "Rendez-vous" &&
+                !editingClient &&
+                isAgendaClientReady(appointmentForm, pickedContact)
+              ) ? (
               <Field label="Date d'anniversaire">
                 <Input
                   type="date"
@@ -2016,31 +2244,7 @@ export default function AgendaBoard() {
                   }
                 />
               </Field>
-
-              <Field label="Type">
-                <Select
-                  value={appointmentForm.kind}
-                  options={[
-                    "Rendez-vous",
-                    "Pause",
-                    "Formation",
-                    "Indisponible",
-                  ]}
-                  onChange={(value) =>
-                    setAppointmentForm((form) => ({
-                      ...form,
-                      kind: value as AppointmentKind,
-                      source: value === "Rendez-vous" ? form.source : "Seya",
-                      treatment:
-                        value === "Rendez-vous" ? form.treatment : value,
-                      personName:
-                        value === "Rendez-vous"
-                          ? form.personName
-                          : form.personName || value,
-                    }))
-                  }
-                />
-              </Field>
+              ) : null}
 
               <Field label="Prestation">
                 {appointmentForm.kind === "Rendez-vous" ? (
@@ -2058,6 +2262,14 @@ export default function AgendaBoard() {
                           cabinList.some((cabin) => cabin.id === next.cabinId)
                             ? next.cabinId
                             : form.cabinId,
+                        practitionerId:
+                          next.practitionerId &&
+                          practitioners.some(
+                            (practitioner) =>
+                              practitioner.id === next.practitionerId,
+                          )
+                            ? next.practitionerId
+                            : form.practitionerId,
                       }))
                     }
                   />
@@ -2080,10 +2292,12 @@ export default function AgendaBoard() {
                   value={appointmentForm.source}
                   options={["Client", "Prospect", "Seya", "Organique"]}
                   onChange={(value) =>
-                    setAppointmentForm((form) => ({
-                      ...form,
-                      source: value as AppointmentSource,
-                    }))
+                    setAppointmentForm((form) =>
+                      applyClientPositionStatus({
+                        ...form,
+                        source: value as AppointmentSource,
+                      }),
+                    )
                   }
                 />
               </Field>
@@ -2133,10 +2347,12 @@ export default function AgendaBoard() {
                   type="date"
                   value={appointmentForm.date}
                   onChange={(event) =>
-                    setAppointmentForm((form) => ({
-                      ...form,
-                      date: event.target.value,
-                    }))
+                    setAppointmentForm((form) =>
+                      applyClientPositionStatus({
+                        ...form,
+                        date: event.target.value,
+                      }),
+                    )
                   }
                 />
               </Field>
@@ -2146,7 +2362,9 @@ export default function AgendaBoard() {
                   value={appointmentForm.start}
                   options={agendaSlots}
                   onChange={(value) =>
-                    setAppointmentForm((form) => ({ ...form, start: value }))
+                    setAppointmentForm((form) =>
+                      applyClientPositionStatus({ ...form, start: value }),
+                    )
                   }
                 />
               </Field>
@@ -2231,6 +2449,54 @@ export default function AgendaBoard() {
                   </span>
                 </span>
               </label>
+              <label className="flex items-start gap-3 text-sm font-bold text-slate-800">
+                <input
+                  type="checkbox"
+                  checked={sendDepositLink}
+                  disabled={!appointmentForm.phone.trim() || depositLinks.length === 0}
+                  onChange={(event) => {
+                    const next = event.target.checked;
+                    setSendDepositLink(next);
+                    if (next) {
+                      setSelectedDepositLinkId((current) =>
+                        pickDepositLinkId(
+                          depositLinks,
+                          appointmentForm.treatment,
+                          current,
+                        ),
+                      );
+                    }
+                  }}
+                  className="mt-1 h-4 w-4"
+                />
+                <span>
+                  Envoyer le lien d’acompte
+                  <span className="mt-1 block text-xs font-semibold text-slate-500">
+                    Envoie le SMS avec le lien de paiement pour bloquer le rendez-vous.
+                  </span>
+                </span>
+              </label>
+              {sendDepositLink ? (
+                depositLinks.length > 0 ? (
+                  <select
+                    value={selectedDepositLinkId}
+                    onChange={(event) =>
+                      setSelectedDepositLinkId(event.target.value)
+                    }
+                    className="h-8 w-full rounded-lg border border-input bg-white px-2.5 py-1 text-sm outline-none transition-colors focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+                  >
+                    {depositLinks.map((link) => (
+                      <option key={link.id} value={String(link.id)}>
+                        {link.name}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <p className="text-xs font-semibold text-slate-500">
+                    Aucun lien d’acompte actif dans Paramètres centre.
+                  </p>
+                )
+              ) : null}
             </div>
 
             <div className="mt-6 flex justify-end gap-3">
@@ -2479,6 +2745,7 @@ function AgendaTabButton({
 function WeekSchedule({
   appointmentList,
   cabinList,
+  hasOutstandingPayment: appointmentHasOutstandingPayment,
   onDelete,
   onOpen,
   selectedCabin,
@@ -2487,6 +2754,7 @@ function WeekSchedule({
 }: {
   appointmentList: Appointment[];
   cabinList: Cabin[];
+  hasOutstandingPayment: (appointment: Appointment) => boolean;
   onDelete: (appointmentId: string) => void;
   onOpen: (appointmentId: string) => void;
   selectedCabin: string;
@@ -2559,6 +2827,10 @@ function WeekSchedule({
                         onClick={() => onOpen(appointment.id)}
                         className={`w-full rounded-xl border p-3 text-left text-sm shadow-sm transition-transform hover:-translate-y-0.5 hover:shadow-md ${
                           statusClasses[appointment.status]
+                        } ${
+                          appointmentHasOutstandingPayment(appointment)
+                            ? "ring-2 ring-amber-400"
+                            : ""
                         }`}
                         role="button"
                         tabIndex={0}
@@ -2570,8 +2842,14 @@ function WeekSchedule({
                       >
                         <div className="flex items-start justify-between gap-2">
                           <div>
-                            <p className="font-semibold">
+                            <p className="flex items-center gap-1.5 font-semibold">
                               {appointment.start} · {appointment.personName}
+                              {appointmentHasOutstandingPayment(appointment) ? (
+                                <CreditCard
+                                  className="h-3.5 w-3.5 shrink-0 text-amber-600"
+                                  aria-label="Règlement en attente"
+                                />
+                              ) : null}
                             </p>
                             <p className="mt-1 text-xs font-semibold opacity-75">
                               {appointment.duration} min ·{" "}
@@ -2960,6 +3238,20 @@ function isPractitionerWorkingOnDate(schedule: TeamSchedule, date: string) {
 
 function isAppointmentSource(value: string): value is AppointmentSource {
   return ["Prospect", "Client", "Seya", "Organique"].includes(value);
+}
+
+function getAgendaFocus(searchParams: Pick<URLSearchParams, "get">) {
+  const date = searchParams.get("date");
+  const appointmentId = searchParams.get("rdv");
+
+  if (!date && !appointmentId) {
+    return null;
+  }
+
+  return {
+    date: date && /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : null,
+    appointmentId: appointmentId?.trim() || null,
+  };
 }
 
 function getRdvPrefill(searchParams: Pick<URLSearchParams, "get">) {
@@ -3489,6 +3781,7 @@ function formatWeekday(value: string) {
 
 function AppointmentCard({
   appointment,
+  hasOutstandingPayment: appointmentHasOutstandingPayment,
   onDelete,
   onMove,
   onOpen,
@@ -3496,6 +3789,7 @@ function AppointmentCard({
   selectedForMove,
 }: {
   appointment: Appointment;
+  hasOutstandingPayment?: boolean;
   onDelete: () => void;
   onMove: () => void;
   onOpen: () => void;
@@ -3513,14 +3807,24 @@ function AppointmentCard({
         event.dataTransfer.setData("appointmentId", appointment.id);
         event.dataTransfer.effectAllowed = "move";
       }}
-      className={`relative z-10 flex h-full cursor-grab flex-col overflow-hidden rounded-xl border p-3 shadow-sm transition-transform hover:-translate-y-0.5 hover:shadow-md active:cursor-grabbing ${
+      className={`relative z-10 flex h-full cursor-grab flex-col overflow-hidden rounded-lg border px-2 py-1 shadow-sm transition-transform hover:-translate-y-0.5 hover:shadow-md active:cursor-grabbing ${
         statusClasses[appointment.status]
+      } ${
+        appointmentHasOutstandingPayment
+          ? "ring-2 ring-amber-400"
+          : ""
       } ${selectedForMove ? "ring-2 ring-blue-500" : ""}`}
     >
-      <div className="mb-2 flex items-start justify-between gap-2">
+      <div className="mb-1 flex items-start justify-between gap-1">
         <div className="min-w-0 flex-1">
-          <p className="break-words font-semibold leading-tight">
-            {appointment.personName}
+          <p className="flex items-start gap-1 break-words font-semibold leading-tight">
+            <span className="min-w-0">{appointment.personName}</span>
+            {appointmentHasOutstandingPayment ? (
+              <CreditCard
+                className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-600"
+                aria-label="Règlement en attente"
+              />
+            ) : null}
           </p>
           <p className="text-xs font-semibold opacity-75">
             {appointment.start} · {appointment.duration} min
@@ -3589,6 +3893,65 @@ function AppointmentCard({
   );
 }
 
+const CLIENT_AUTO_CONFIRM_HOURS = 48;
+
+function isAppointmentMoreThanHoursAhead(
+  date: string,
+  start: string,
+  hours: number,
+) {
+  const when = new Date(`${date}T${start}:00`);
+  if (Number.isNaN(when.getTime())) {
+    return false;
+  }
+
+  return when.getTime() - Date.now() > hours * 60 * 60 * 1000;
+}
+
+function statusWhenClientAppointmentPositioned(
+  date: string,
+  start: string,
+): AppointmentStatus {
+  return isAppointmentMoreThanHoursAhead(
+    date,
+    start,
+    CLIENT_AUTO_CONFIRM_HOURS,
+  )
+    ? "Confirmé"
+    : "À confirmer";
+}
+
+function applyClientPositionStatus<
+  T extends {
+    source: AppointmentSource;
+    kind?: AppointmentKind;
+    date: string;
+    start: string;
+    status: AppointmentStatus;
+  },
+>(item: T): T {
+  if (item.source !== "Client") {
+    return item;
+  }
+
+  if ((item.kind ?? "Rendez-vous") !== "Rendez-vous") {
+    return item;
+  }
+
+  if (item.status !== "Confirmé" && item.status !== "À confirmer") {
+    return item;
+  }
+
+  return {
+    ...item,
+    status: statusWhenClientAppointmentPositioned(item.date, item.start),
+  };
+}
+
+function withClientPositionStatus(appointment: Appointment): Appointment {
+  return applyClientPositionStatus(appointment);
+}
+
 function getAppointmentSlotSpan(duration: number) {
   return Math.max(1, Math.ceil(duration / 15));
 }
@@ -3614,6 +3977,7 @@ function AppointmentDetailsModal({
     kind: appointment.kind ?? "Rendez-vous",
     notes: appointment.notes ?? "",
   });
+  const [editingClient, setEditingClient] = useState(false);
 
   function saveAppointment(event?: React.FormEvent<HTMLFormElement>) {
     event?.preventDefault();
@@ -3670,19 +4034,6 @@ function AppointmentDetailsModal({
         </div>
 
         <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="Nom ou motif">
-            <Input
-              required
-              value={form.personName}
-              onChange={(event) =>
-                setForm((currentForm) => ({
-                  ...currentForm,
-                  personName: event.target.value,
-                }))
-              }
-            />
-          </Field>
-
           <Field label="Type">
             <Select
               value={form.kind}
@@ -3699,6 +4050,37 @@ function AppointmentDetailsModal({
             />
           </Field>
 
+          {form.kind === "Rendez-vous" &&
+          !editingClient &&
+          isAgendaClientReady(form) ? (
+            <div className="sm:col-span-1">
+              <SelectedClientChip
+                name={form.personName}
+                email={form.email}
+                phone={form.phone}
+                onClear={() => setEditingClient(true)}
+              />
+            </div>
+          ) : (
+            <>
+          <Field label="Nom ou motif">
+            <Input
+              required
+              value={form.personName}
+              onChange={(event) =>
+                setForm((currentForm) => ({
+                  ...currentForm,
+                  personName: event.target.value,
+                }))
+              }
+              onBlur={() => {
+                if (isAgendaClientReady(form)) {
+                  setEditingClient(false);
+                }
+              }}
+            />
+          </Field>
+
           <Field label="Téléphone">
             <Input
               value={form.phone}
@@ -3708,6 +4090,11 @@ function AppointmentDetailsModal({
                   phone: event.target.value,
                 }))
               }
+              onBlur={() => {
+                if (isAgendaClientReady(form)) {
+                  setEditingClient(false);
+                }
+              }}
             />
           </Field>
 
@@ -3721,8 +4108,15 @@ function AppointmentDetailsModal({
                   email: event.target.value,
                 }))
               }
+              onBlur={() => {
+                if (isAgendaClientReady(form)) {
+                  setEditingClient(false);
+                }
+              }}
             />
           </Field>
+            </>
+          )}
 
           <Field label="Prestation">
             {form.kind === "Rendez-vous" ? (
@@ -3740,6 +4134,14 @@ function AppointmentDetailsModal({
                       cabinList.some((cabin) => cabin.id === next.cabinId)
                         ? next.cabinId
                         : currentForm.cabinId,
+                    practitionerId:
+                      next.practitionerId &&
+                      practitioners.some(
+                        (practitioner) =>
+                          practitioner.id === next.practitionerId,
+                      )
+                        ? next.practitionerId
+                        : currentForm.practitionerId,
                   }))
                 }
               />
@@ -3917,6 +4319,53 @@ function Suggestion({ text }: { text: string }) {
   );
 }
 
+function isAgendaClientReady(
+  form: { personName?: string; phone?: string },
+  pickedContact?: { name?: string } | null,
+) {
+  if (pickedContact) {
+    return true;
+  }
+
+  return (
+    Boolean(form.personName?.trim()) &&
+    form.phone?.replace(/\D/g, "").length >= 9
+  );
+}
+
+function SelectedClientChip({
+  name,
+  email,
+  phone,
+  onClear,
+}: {
+  name: string;
+  email?: string;
+  phone?: string;
+  onClear: () => void;
+}) {
+  const details = [email?.trim(), phone?.trim()].filter(Boolean).join(" • ");
+
+  return (
+    <div className="flex h-11 items-center gap-3 rounded-xl border border-slate-200 bg-white px-3">
+      <p className="min-w-0 flex-1 truncate text-sm text-slate-900">
+        <span className="font-semibold">{name.trim() || "Cliente"}</span>
+        {details ? (
+          <span className="font-medium text-slate-500"> {details}</span>
+        ) : null}
+      </p>
+      <button
+        type="button"
+        onClick={onClear}
+        className="rounded-md p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+        aria-label="Modifier le client"
+      >
+        <X className="h-4 w-4" />
+      </button>
+    </div>
+  );
+}
+
 function Field({
   label,
   children,
@@ -3954,6 +4403,7 @@ function TreatmentPicker({
   onChange: (next: {
     cabinId?: string;
     duration?: number;
+    practitionerId?: string;
     treatment: string;
   }) => void;
   value: string;
@@ -4012,6 +4462,7 @@ function TreatmentPicker({
       treatment: nextValue,
       duration: service?.duration,
       cabinId: findCabinIdForService(service, cabinList),
+      practitionerId: findPractitionerIdForService(service),
     });
   }
 
@@ -4114,15 +4565,20 @@ function getTreatmentPickerMode(
   return "custom";
 }
 
+function findAssignedName(value?: string) {
+  const raw = value?.trim() ?? "";
+  if (!raw || /^(toutes?|tous)$/i.test(raw)) {
+    return undefined;
+  }
+
+  return raw.split(",")[0]?.trim() || undefined;
+}
+
 function findCabinIdForService(
   service: CenterServiceSetting | undefined,
   cabinList: Cabin[]
 ) {
-  if (!service?.cabins || service.cabins === "Toutes") {
-    return undefined;
-  }
-
-  const cabinName = service.cabins.split(",")[0]?.trim();
+  const cabinName = findAssignedName(service?.cabins);
   if (!cabinName) {
     return undefined;
   }
@@ -4134,8 +4590,60 @@ function findCabinIdForService(
   )?.id;
 }
 
+function findPractitionerIdForService(service: CenterServiceSetting | undefined) {
+  const practitionerName = findAssignedName(service?.practitioners);
+  if (!practitionerName) {
+    return undefined;
+  }
+
+  return practitioners.find(
+    (practitioner) =>
+      normalize(practitioner.name) === normalize(practitionerName) ||
+      normalize(practitionerName).includes(normalize(practitioner.name)),
+  )?.id;
+}
+
 function formatDurationLabel(minutes: number) {
   return appointmentDurationLabels[String(minutes)] ?? `${minutes} min`;
+}
+
+function activeDepositLinks() {
+  const settings = readCenterSettings();
+  const links = settings?.depositLinks?.length
+    ? settings.depositLinks
+    : defaultCenterDepositLinks;
+  return links.filter((link) => link.active && link.url.trim());
+}
+
+function pickDepositLinkId(
+  links: CenterDepositLinkSetting[],
+  treatment: string,
+  currentId: string,
+) {
+  const treatmentName = treatment.trim().toLowerCase();
+  const match = links.find((link) => {
+    const name = link.name.toLowerCase();
+    const keywords = name
+      .replace(/acompte/gi, "")
+      .split(/\s+/)
+      .filter((part) => part.length > 3);
+    return (
+      Boolean(treatmentName) &&
+      (name.includes(treatmentName) ||
+        treatmentName.includes(name) ||
+        keywords.some((keyword) => treatmentName.includes(keyword)))
+    );
+  });
+
+  if (match) {
+    return String(match.id);
+  }
+
+  if (currentId && links.some((link) => String(link.id) === currentId)) {
+    return currentId;
+  }
+
+  return String(links[0]?.id ?? "");
 }
 
 function Select({

@@ -4,6 +4,15 @@ import { useEffect, useRef, useState } from "react";
 
 export const SIDEBAR_CLOSED_WIDTH = 80;
 export const SIDEBAR_OPEN_WIDTH = 288;
+export const COLLAPSE_SIDEBAR_EVENT = "bookea-collapse-sidebar";
+
+export function collapseDashboardSidebar() {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  window.dispatchEvent(new Event(COLLAPSE_SIDEBAR_EVENT));
+}
 const SNAP_WIDTH = (SIDEBAR_CLOSED_WIDTH + SIDEBAR_OPEN_WIDTH) / 2;
 const DRAG_THRESHOLD = 10;
 

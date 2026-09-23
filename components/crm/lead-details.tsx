@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { PlaceSuggestField } from "@/components/forms/place-suggest-field";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -668,11 +669,23 @@ export default function LeadDetails({
                   setInfoForm((form) => ({ ...form, gender: value }))
                 }
               />
-              <InfoField
+              <PlaceSuggestField
                 label="Adresse"
+                kind="address"
                 value={infoForm.address}
+                placeholder="12 rue de France"
+                labelClassName="text-xs font-medium text-slate-500"
+                inputClassName="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none focus:border-blue-500"
                 onChange={(value) =>
                   setInfoForm((form) => ({ ...form, address: value }))
+                }
+                onSelect={(place) =>
+                  setInfoForm((form) => ({
+                    ...form,
+                    address: place.street,
+                    postalCode: place.postcode || form.postalCode,
+                    city: place.city || form.city,
+                  }))
                 }
               />
               <div className="grid grid-cols-[7.5rem_1fr] gap-2">
@@ -683,11 +696,22 @@ export default function LeadDetails({
                     setInfoForm((form) => ({ ...form, postalCode: value }))
                   }
                 />
-                <InfoField
+                <PlaceSuggestField
                   label="Ville"
+                  kind="city"
                   value={infoForm.city}
+                  placeholder="Gap"
+                  labelClassName="text-xs font-medium text-slate-500"
+                  inputClassName="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none focus:border-blue-500"
                   onChange={(value) =>
                     setInfoForm((form) => ({ ...form, city: value }))
+                  }
+                  onSelect={(place) =>
+                    setInfoForm((form) => ({
+                      ...form,
+                      city: place.city,
+                      postalCode: place.postcode || form.postalCode,
+                    }))
                   }
                 />
               </div>

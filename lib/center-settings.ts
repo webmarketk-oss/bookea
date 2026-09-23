@@ -1,3 +1,6 @@
+import { getActiveCenterContext } from "@/lib/center-access";
+import { createClient } from "@/lib/supabase";
+
 export const CENTER_SETTINGS_STORAGE_KEY = "bookea-center-settings";
 
 export const publicCenterCategories = [
@@ -12,12 +15,111 @@ export const publicCenterCategories = [
   "Barbier",
 ];
 
+export const defaultServiceCategories = [
+  "Bilan",
+  "Soin visage",
+  "Soins minceur",
+  "Soin du visage",
+  "Minceur",
+  "Laser",
+  "Silhouette",
+  "Beauté des ongles",
+  "Beauté du regard",
+  "Bien-être",
+  "Spa",
+];
+
+export const defaultProductCategories = [
+  "Produits visage",
+  "Produits corps",
+  "Soin après séance",
+  "Visage",
+  "Compléments",
+  "Hygiène",
+];
+
+function mergeNamedCategories(
+  stored?: string[] | null,
+  items?: Array<{ category?: string }> | null,
+  fallback: string[] = [],
+) {
+  const values = [
+    ...(stored && stored.length > 0 ? stored : fallback),
+    ...(items ?? []).map((item) => item.category ?? ""),
+  ]
+    .map((value) => value.trim())
+    .filter(
+      (value) =>
+        value.length > 0 && value.toLowerCase() !== "catégorie",
+    );
+
+  const seen = new Set<string>();
+
+  return values.filter((value) => {
+    const key = value.toLowerCase();
+    if (seen.has(key)) {
+      return false;
+    }
+    seen.add(key);
+    return true;
+  });
+}
+
+export function mergeServiceCategories(
+  stored?: string[] | null,
+  services?: Array<{ category?: string }> | null,
+) {
+  return mergeNamedCategories(stored, services, defaultServiceCategories);
+}
+
+export function mergeProductCategories(
+  stored?: string[] | null,
+  products?: Array<{ category?: string }> | null,
+) {
+  return mergeNamedCategories(stored, products, defaultProductCategories);
+}
+
+export function sortServicesByCategory<
+  T extends { category?: string; topListed?: boolean },
+>(services: T[], categoryOrder: string[] = []) {
+  const order = new Map(
+    categoryOrder.map((name, index) => [name.trim().toLowerCase(), index]),
+  );
+
+  return services
+    .map((service, index) => ({ service, index }))
+    .sort((a, b) => {
+      const categoryA = (a.service.category ?? "").trim().toLowerCase();
+      const categoryB = (b.service.category ?? "").trim().toLowerCase();
+      const rankA = order.get(categoryA) ?? Number.MAX_SAFE_INTEGER;
+      const rankB = order.get(categoryB) ?? Number.MAX_SAFE_INTEGER;
+
+      if (rankA !== rankB) {
+        return rankA - rankB;
+      }
+
+      if (categoryA !== categoryB) {
+        return categoryA.localeCompare(categoryB, "fr");
+      }
+
+      const pinned =
+        Number(Boolean(b.service.topListed)) - Number(Boolean(a.service.topListed));
+      if (pinned !== 0) {
+        return pinned;
+      }
+
+      return a.index - b.index;
+    })
+    .map(({ service }) => service);
+}
+
 export type CenterServiceSetting = {
   id: number;
   name: string;
   category: string;
   color: string;
   price: number;
+  onQuote?: boolean;
   vatRate: number;
   duration: number;
   depositEnabled: boolean;
@@ -91,6 +193,7 @@ export type StoredCenterSettings = {
     slug: string;
     city: string;
     address: string;
+    postalCode?: string;
     phone: string;
     email: string;
     description: string;
@@ -105,8 +208,10 @@ export type StoredCenterSettings = {
     };
   };
   services?: CenterServiceSetting[];
+  serviceCategories?: string[];
   sources?: CenterSourceSetting[];
   products?: CenterProductSetting[];
+  productCategories?: string[];
   depositLinks?: CenterDepositLinkSetting[];
   stripeConnected?: boolean;
   coverPreview?: string;
@@ -154,6 +259,7 @@ export const defaultCenterServices: CenterServiceSetting[] = [
     category: "Silhouette",
     color: "#8b5cf6",
     price: 180,
+    onQuote: true,
     vatRate: 20,
     duration: 75,
     depositEnabled: false,
@@ -336,17 +442,422 @@ export function readCenterSettings(): StoredCenterSettings | null {
   }
 }
 
-export function mergeCenterSettings(nextSettings: StoredCenterSettings) {
+export function mergeCenterSettings(
+  nextSettings: StoredCenterSettings,
+  options?: { emit?: boolean },
+) {
+  writeCenterSettingsSafe(nextSettings, options?.emit !== false);
+}
+
+export async function loadPublicCenterProfile() {
+  const local = readCenterSettings();
+
+  try {
+    const context = await getActiveCenterContext();
+    const supabase = createClient();
+    const { data, error } = await supabase
+      .from("centers")
+      .select(CENTER_PROFILE_COLUMNS)
+      .eq("id", context.centerId)
+      .maybeSingle();
+
+    if (error || !data) {
+      return { centerId: context.centerId, settings: local };
+    }
+
+    const remote = storedSettingsFromCenterRow(data as CenterProfileRow);
+    const hasRemotePublic = hasStoredPublicSettings(data.settings);
+    const merged = mergeLocalAndRemote(local, remote, hasRemotePublic);
+
+    if (hasRemotePublic || !local) {
+      writeCenterSettingsSafe(merged);
+    }
+
+    return { centerId: context.centerId, settings: merged };
+  } catch {
+    return { settings: local };
+  }
+}
+
+export async function loadPublishedCenterProfile(slug: string) {
+  const normalized = slug.trim().toLowerCase();
+
+  if (!normalized) {
+    return null;
+  }
+
+  const supabase = createClient();
+  const bySlug = await supabase
+    .from("centers")
+    .select(CENTER_PROFILE_COLUMNS)
+    .eq("slug", normalized)
+    .eq("public_profile_enabled", true)
+    .maybeSingle();
+
+  let row = (bySlug.data ?? null) as CenterProfileRow | null;
+
+  if (!row) {
+    const byPublicSlug = await supabase
+      .from("centers")
+      .select(CENTER_PROFILE_COLUMNS)
+      .eq("public_slug", normalized)
+      .eq("public_profile_enabled", true)
+      .maybeSingle();
+
+    if (!byPublicSlug.error) {
+      row = (byPublicSlug.data ?? null) as CenterProfileRow | null;
+    }
+  }
+
+  if (!row) {
+    return null;
+  }
+
+  return mergeLocalAndRemote(
+    readCenterSettings(),
+    storedSettingsFromCenterRow(row),
+    hasStoredPublicSettings(row.settings),
+  );
+}
+
+export async function savePublicCenterProfile(nextSettings: StoredCenterSettings) {
+  writeCenterSettingsSafe(nextSettings);
+
+  const context = await getActiveCenterContext();
+  const supabase = createClient();
+  const { data } = await supabase
+    .from("centers")
+    .select("settings, slug")
+    .eq("id", context.centerId)
+    .maybeSingle();
+
+  const currentSettings = asRecord(data?.settings);
+  const currentSlug = asString(data?.slug, context.centerSlug);
+  const nextSlug = sanitizeCenterSlug(nextSettings.center?.slug ?? "", currentSlug);
+  const publicSettings = withoutDataUrls(nextSettings);
+
+  const payload: Record<string, unknown> = {
+    name: nextSettings.center?.name?.trim() || context.centerName,
+    slug: nextSlug,
+    public_slug: nextSlug,
+    city: emptyToNull(nextSettings.center?.city),
+    email: emptyToNull(nextSettings.center?.email),
+    phone: emptyToNull(nextSettings.center?.phone),
+    description: emptyToNull(nextSettings.center?.description),
+    address_line1: emptyToNull(nextSettings.center?.address),
+    postal_code: emptyToNull(nextSettings.center?.postalCode),
+    theme_color: nextSettings.center?.profileColor || "#2563eb",
+    public_profile_enabled: nextSettings.center?.published !== false,
+    is_public: nextSettings.center?.published !== false,
+    instagram_url: emptyToNull(nextSettings.center?.socialLinks?.instagram),
+    facebook_url: emptyToNull(nextSettings.center?.socialLinks?.facebook),
+    tiktok_url: emptyToNull(nextSettings.center?.socialLinks?.tiktok),
+    settings: {
+      ...currentSettings,
+      public: publicSettings,
+    },
+    updated_at: new Date().toISOString(),
+  };
+
+  let result = await supabase
+    .from("centers")
+    .update(payload)
+    .eq("id", context.centerId)
+    .select("id")
+    .maybeSingle();
+
+  if (result.error && isUnknownColumnError(result.error.message)) {
+    result = await supabase
+      .from("centers")
+      .update({
+        name: payload.name,
+        slug: payload.slug,
+        city: payload.city,
+        email: payload.email,
+        phone: payload.phone,
+        description: payload.description,
+        address_line1: payload.address_line1,
+        postal_code: payload.postal_code,
+        theme_color: payload.theme_color,
+        public_profile_enabled: payload.public_profile_enabled,
+        instagram_url: payload.instagram_url,
+        facebook_url: payload.facebook_url,
+        tiktok_url: payload.tiktok_url,
+        settings: payload.settings,
+        updated_at: payload.updated_at,
+      })
+      .eq("id", context.centerId)
+      .select("id")
+      .maybeSingle();
+  }
+
+  if (
+    result.error &&
+    isSlugConflict(result.error.message) &&
+    nextSlug !== currentSlug
+  ) {
+    result = await supabase
+      .from("centers")
+      .update({
+        ...payload,
+        slug: currentSlug,
+        public_slug: currentSlug,
+      })
+      .eq("id", context.centerId)
+      .select("id")
+      .maybeSingle();
+
+    if (!result.error && result.data?.id) {
+      writeCenterSettingsSafe({
+        ...nextSettings,
+        center: nextSettings.center
+          ? { ...nextSettings.center, slug: currentSlug }
+          : nextSettings.center,
+      });
+    }
+  }
+
+  if (result.error) {
+    throw new Error(result.error.message);
+  }
+
+  if (!result.data?.id) {
+    throw new Error(
+      "Enregistrement refusé. Seul un gérant du centre peut modifier la fiche publique.",
+    );
+  }
+
+  return { centerId: context.centerId };
+}
+
+const CENTER_PROFILE_COLUMNS =
+  "name,slug,city,email,phone,description,address_line1,postal_code,theme_color,public_profile_enabled,instagram_url,facebook_url,tiktok_url,settings";
+
+type CenterProfileRow = {
+  address_line1?: string | null;
+  city?: string | null;
+  description?: string | null;
+  email?: string | null;
+  facebook_url?: string | null;
+  instagram_url?: string | null;
+  name?: string | null;
+  phone?: string | null;
+  postal_code?: string | null;
+  public_profile_enabled?: boolean | null;
+  settings?: unknown;
+  slug?: string | null;
+  theme_color?: string | null;
+  tiktok_url?: string | null;
+};
+
+function writeCenterSettingsSafe(
+  nextSettings: StoredCenterSettings,
+  emit = true,
+) {
   if (typeof window === "undefined") {
     return;
   }
 
-  const current = readCenterSettings() ?? {};
-  window.localStorage.setItem(
-    CENTER_SETTINGS_STORAGE_KEY,
-    JSON.stringify({ ...current, ...nextSettings }),
-  );
-  window.dispatchEvent(new Event("bookea-center-settings-updated"));
+  const merged = { ...(readCenterSettings() ?? {}), ...nextSettings };
+
+  try {
+    window.localStorage.setItem(
+      CENTER_SETTINGS_STORAGE_KEY,
+      JSON.stringify(merged),
+    );
+  } catch {
+    try {
+      window.localStorage.setItem(
+        CENTER_SETTINGS_STORAGE_KEY,
+        JSON.stringify(withoutDataUrls(merged)),
+      );
+    } catch {
+      // Keep the in-memory save path even if the browser cache is full.
+    }
+  }
+
+  if (emit) {
+    window.dispatchEvent(new Event("bookea-center-settings-updated"));
+  }
+}
+
+function storedSettingsFromCenterRow(row: CenterProfileRow): StoredCenterSettings {
+  const publicSettings = asRecord(asRecord(row.settings).public);
+  const fromJsonCenter = asRecord(publicSettings.center);
+  const socialLinks = asRecord(fromJsonCenter.socialLinks);
+
+  return {
+    center: {
+      name: asString(row.name, asString(fromJsonCenter.name)),
+      slug: asString(row.slug, asString(fromJsonCenter.slug)),
+      city: asString(row.city, asString(fromJsonCenter.city)),
+      address: asString(row.address_line1, asString(fromJsonCenter.address)),
+      postalCode: asString(row.postal_code, asString(fromJsonCenter.postalCode)),
+      phone: asString(row.phone, asString(fromJsonCenter.phone)),
+      email: asString(row.email, asString(fromJsonCenter.email)),
+      description: asString(row.description, asString(fromJsonCenter.description)),
+      bookingMode: asString(
+        fromJsonCenter.bookingMode,
+        "Réservation avec acompte selon prestation",
+      ),
+      published: row.public_profile_enabled !== false,
+      categories: asStringArray(fromJsonCenter.categories),
+      profileColor: asString(
+        row.theme_color,
+        asString(fromJsonCenter.profileColor, "#2563eb"),
+      ),
+      socialLinks: {
+        instagram: asString(row.instagram_url, asString(socialLinks.instagram)),
+        facebook: asString(row.facebook_url, asString(socialLinks.facebook)),
+        tiktok: asString(row.tiktok_url, asString(socialLinks.tiktok)),
+      },
+    },
+    services: asArray(publicSettings.services),
+    serviceCategories: asStringArray(publicSettings.serviceCategories),
+    sources: asArray(publicSettings.sources),
+    products: asArray(publicSettings.products),
+    productCategories: asStringArray(publicSettings.productCategories),
+    depositLinks: asArray(publicSettings.depositLinks),
+    stripeConnected:
+      typeof publicSettings.stripeConnected === "boolean"
+        ? publicSettings.stripeConnected
+        : undefined,
+    coverPreview: asOptionalString(publicSettings.coverPreview),
+    logoPreview: asOptionalString(publicSettings.logoPreview),
+    photoPreviews: asStringArray(publicSettings.photoPreviews),
+    externalReviews: asArray(publicSettings.externalReviews),
+    offers: asArray(publicSettings.offers),
+    reviewAutomation: Object.keys(asRecord(publicSettings.reviewAutomation))
+      .length
+      ? (asRecord(publicSettings.reviewAutomation) as CenterReviewAutomation)
+      : undefined,
+  };
+}
+
+function mergeLocalAndRemote(
+  local: StoredCenterSettings | null,
+  remote: StoredCenterSettings,
+  remotePublicSaved: boolean,
+): StoredCenterSettings {
+  if (!remotePublicSaved && local) {
+    return {
+      ...remote,
+      ...local,
+      center: {
+        ...remote.center,
+        ...local.center,
+        categories:
+          local.center?.categories && local.center.categories.length > 0
+            ? local.center.categories
+            : remote.center?.categories,
+        socialLinks: {
+          ...remote.center?.socialLinks,
+          ...local.center?.socialLinks,
+        },
+      },
+    };
+  }
+
+  return {
+    ...local,
+    ...remote,
+    center: remote.center
+      ? {
+          ...local?.center,
+          ...remote.center,
+          categories:
+            remote.center.categories && remote.center.categories.length > 0
+              ? remote.center.categories
+              : local?.center?.categories,
+          socialLinks: {
+            ...local?.center?.socialLinks,
+            ...remote.center.socialLinks,
+          },
+        }
+      : local?.center,
+    coverPreview: remote.coverPreview || local?.coverPreview,
+    logoPreview: remote.logoPreview || local?.logoPreview,
+    photoPreviews:
+      remote.photoPreviews && remote.photoPreviews.length > 0
+        ? remote.photoPreviews
+        : local?.photoPreviews,
+    services: remote.services ?? local?.services,
+    serviceCategories: remote.serviceCategories ?? local?.serviceCategories,
+    sources: remote.sources ?? local?.sources,
+    products: remote.products ?? local?.products,
+    productCategories: remote.productCategories ?? local?.productCategories,
+    depositLinks: remote.depositLinks ?? local?.depositLinks,
+    externalReviews: remote.externalReviews ?? local?.externalReviews,
+    offers: remote.offers ?? local?.offers,
+    reviewAutomation: remote.reviewAutomation ?? local?.reviewAutomation,
+    stripeConnected: remote.stripeConnected ?? local?.stripeConnected,
+  };
+}
+
+function hasStoredPublicSettings(settings: unknown) {
+  return Object.keys(asRecord(asRecord(settings).public)).length > 0;
+}
+
+function withoutDataUrls(settings: StoredCenterSettings): StoredCenterSettings {
+  return {
+    ...settings,
+    coverPreview: isDataUrl(settings.coverPreview) ? "" : settings.coverPreview,
+    logoPreview: isDataUrl(settings.logoPreview) ? "" : settings.logoPreview,
+    photoPreviews: (settings.photoPreviews ?? []).filter((src) => !isDataUrl(src)),
+  };
+}
+
+function sanitizeCenterSlug(value: string, fallback: string) {
+  const slug = value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 80);
+
+  return slug || fallback;
+}
+
+function isDataUrl(value?: string) {
+  return Boolean(value?.startsWith("data:"));
+}
+
+function isUnknownColumnError(message: string) {
+  return /column|schema cache|could not find/i.test(message);
+}
+
+function isSlugConflict(message: string) {
+  return /duplicate|unique|slug/i.test(message);
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function asArray<T>(value: unknown): T[] | undefined {
+  return Array.isArray(value) ? (value as T[]) : undefined;
+}
+
+function asStringArray(value: unknown): string[] | undefined {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string")
+    : undefined;
+}
+
+function asString(value: unknown, fallback = "") {
+  return typeof value === "string" && value.trim() ? value : fallback;
+}
+
+function asOptionalString(value: unknown) {
+  return typeof value === "string" ? value : undefined;
+}
+
+function emptyToNull(value?: string) {
+  const trimmed = value?.trim() ?? "";
+  return trimmed || null;
 }
 
 export function getServiceNames(settings: StoredCenterSettings | null) {
@@ -355,10 +866,33 @@ export function getServiceNames(settings: StoredCenterSettings | null) {
 
 export function getCenterServices(settings?: StoredCenterSettings | null) {
   const stored = settings === undefined ? readCenterSettings() : settings;
-
-  return (stored?.services ?? defaultCenterServices).filter(
-    (service) => service.visible !== false
+  const services = (stored?.services ?? defaultCenterServices).filter(
+    (service) => service.visible !== false,
   );
+
+  return sortServicesByCategory(
+    services,
+    mergeServiceCategories(stored?.serviceCategories, stored?.services),
+  );
+}
+
+export function getCenterProducts(settings?: StoredCenterSettings | null) {
+  const stored = settings === undefined ? readCenterSettings() : settings;
+  const products = (stored?.products ?? defaultCenterProducts).filter(
+    (product) => product.visible !== false,
+  );
+
+  return sortServicesByCategory(
+    products,
+    mergeProductCategories(stored?.productCategories, stored?.products),
+  );
+}
+
+export function formatCenterServicePrice(service: {
+  onQuote?: boolean;
+  price: number;
+}) {
+  return service.onQuote ? "Sur devis" : `${service.price} €`;
 }
 
 export function addCenterService(input: {
@@ -387,9 +921,12 @@ export function addCenterService(input: {
   const nextService: CenterServiceSetting = {
     id: Date.now(),
     name,
-    category: "Soin",
+    category:
+      mergeServiceCategories(readCenterSettings()?.serviceCategories, existing)[0] ??
+      "Soin",
     color: "#2563eb",
     price: 0,
+    onQuote: false,
     vatRate: 20,
     duration,
     depositEnabled: false,
