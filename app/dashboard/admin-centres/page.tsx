@@ -9,9 +9,12 @@ import {
   Mail,
   MapPin,
   Plus,
+  Power,
   RefreshCw,
+  Search,
   ShieldCheck,
   Smartphone,
+  Trash2,
   UserRoundPlus,
 } from "lucide-react";
 import type { FormEvent, ReactNode } from "react";
@@ -36,6 +39,9 @@ type CenterRow = {
   owner_profile_id: string | null;
   created_at: string;
   settings?: {
+    admin?: {
+      isActive?: boolean;
+    };
     sms?: {
       quota?: SmsQuotaRecord;
     };
@@ -51,7 +57,9 @@ type ProfileRow = {
 
 type CenterMemberRow = {
   center_id: string;
+  profile_id: string;
   role: string | null;
+  is_active?: boolean | null;
   profiles:
     | {
         email: string | null;
@@ -65,7 +73,9 @@ type CenterMemberRow = {
 };
 
 type CenterCardData = Omit<CenterRow, "settings"> & {
+  isActive: boolean;
   members: Array<{
+    profileId: string;
     email: string;
     name: string;
     role: string;
@@ -88,7 +98,13 @@ export default function AdminCentresPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [attachingCenterId, setAttachingCenterId] = useState<string | null>(null);
+  const [removingMemberKey, setRemovingMemberKey] = useState<string | null>(null);
+  const [togglingCenterId, setTogglingCenterId] = useState<string | null>(null);
   const [creditingCenterId, setCreditingCenterId] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
+  const [activityFilter, setActivityFilter] = useState<"all" | "active" | "inactive">(
+    "all",
+  );
   const [notice, setNotice] = useState<{
     type: "success" | "error" | "info";
     message: string;
@@ -124,7 +140,7 @@ export default function AdminCentresPage() {
       if (centerIds.length > 0) {
         const { data: members, error: membersError } = await supabase
           .from("center_members")
-          .select("center_id,role,profiles(email,full_name)")
+          .select("center_id,profile_id,role,is_active,profiles(email,full_name)")
           .in("center_id", centerIds);
 
         if (membersError) throw new Error(membersError.message);
@@ -144,11 +160,16 @@ export default function AdminCentresPage() {
             public_profile_enabled: center.public_profile_enabled,
             owner_profile_id: center.owner_profile_id,
             created_at: center.created_at,
+            isActive: isCenterActive(center.settings),
             members: memberRows
-              .filter((member) => member.center_id === center.id)
+              .filter(
+                (member) =>
+                  member.center_id === center.id && member.is_active !== false,
+              )
               .map((member) => {
                 const profile = relationObject(member.profiles);
                 return {
+                  profileId: member.profile_id,
                   email: profile?.email ?? "Compte sans email",
                   name: profile?.full_name ?? "Utilisateur Bookea",
                   role: member.role ?? "viewer",
@@ -268,6 +289,7 @@ export default function AdminCentresPage() {
         message: `Responsable rattaché : ${owner.email ?? ownerEmail}`,
       });
       await loadCenters();
+      return true;
     } catch (error) {
       setNotice({
         type: "error",
@@ -278,6 +300,119 @@ export default function AdminCentresPage() {
       });
     } finally {
       setAttachingCenterId(null);
+    }
+
+    return false;
+  }
+
+  async function handleRemoveMember(centerId: string, profileId: string) {
+    setRemovingMemberKey(`${centerId}:${profileId}`);
+    setNotice(null);
+
+    try {
+      const { error } = await supabase
+        .from("center_members")
+        .delete()
+        .eq("center_id", centerId)
+        .eq("profile_id", profileId);
+
+      if (error) {
+        throw new Error(error.message);
+      }
+
+      const center = centers.find((item) => item.id === centerId);
+      if (center?.owner_profile_id === profileId) {
+        const { error: ownerError } = await supabase
+          .from("centers")
+          .update({ owner_profile_id: null, updated_at: new Date().toISOString() })
+          .eq("id", centerId);
+
+        if (ownerError) {
+          throw new Error(ownerError.message);
+        }
+      }
+
+      setNotice({
+        type: "success",
+        message: "Accès retiré. Vous pouvez rattacher un autre email.",
+      });
+      await loadCenters();
+    } catch (error) {
+      setNotice({
+        type: "error",
+        message:
+          error instanceof Error
+            ? error.message
+            : "Impossible de retirer cet accès.",
+      });
+    } finally {
+      setRemovingMemberKey(null);
+    }
+  }
+
+  async function handleToggleActive(centerId: string, nextActive: boolean) {
+    setTogglingCenterId(centerId);
+    setNotice(null);
+
+    try {
+      const { data, error } = await supabase
+        .from("centers")
+        .select("settings")
+        .eq("id", centerId)
+        .maybeSingle();
+
+      if (error) {
+        throw new Error(error.message);
+      }
+
+      const currentSettings =
+        data?.settings && typeof data.settings === "object"
+          ? (data.settings as Record<string, unknown>)
+          : {};
+      const currentAdmin =
+        currentSettings.admin && typeof currentSettings.admin === "object"
+          ? (currentSettings.admin as Record<string, unknown>)
+          : {};
+
+      const { error: updateError } = await supabase
+        .from("centers")
+        .update({
+          settings: {
+            ...currentSettings,
+            admin: {
+              ...currentAdmin,
+              isActive: nextActive,
+            },
+          },
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", centerId);
+
+      if (updateError) {
+        throw new Error(updateError.message);
+      }
+
+      setCenters((current) =>
+        current.map((center) =>
+          center.id === centerId ? { ...center, isActive: nextActive } : center,
+        ),
+      );
+      setNotice({
+        type: "success",
+        message: nextActive
+          ? "Centre réactivé. Il réapparaît dans le sélecteur."
+          : "Centre passé inactif. Il n’apparaît plus dans le sélecteur.",
+      });
+    } catch (error) {
+      setNotice({
+        type: "error",
+        message:
+          error instanceof Error
+            ? error.message
+            : "Impossible de changer le statut du centre.",
+      });
+    } finally {
+      setTogglingCenterId(null);
     }
   }
 
@@ -380,6 +515,36 @@ export default function AdminCentresPage() {
 
     if (error) throw new Error(error.message);
   }
+
+  const filteredCenters = useMemo(() => {
+    const query = search.trim().toLowerCase();
+
+    return centers.filter((center) => {
+      if (activityFilter === "active" && !center.isActive) {
+        return false;
+      }
+
+      if (activityFilter === "inactive" && center.isActive) {
+        return false;
+      }
+
+      if (!query) {
+        return true;
+      }
+
+      const haystack = [
+        center.name,
+        center.slug,
+        center.city,
+        center.email,
+        ...center.members.map((member) => `${member.name} ${member.email}`),
+      ]
+        .join(" ")
+        .toLowerCase();
+
+      return haystack.includes(query);
+    });
+  }, [activityFilter, centers, search]);
 
   return (
     <main className="min-h-screen bg-[#f4f7fb] text-slate-950">
@@ -506,6 +671,45 @@ export default function AdminCentresPage() {
           </form>
 
           <div className="space-y-4">
+            <div className="rounded-[2rem] border border-slate-200 bg-white p-4 shadow-sm">
+              <label className="relative block">
+                <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                <input
+                  type="search"
+                  value={search}
+                  onChange={(event) => setSearch(event.target.value)}
+                  placeholder="Rechercher un centre, une ville ou un email…"
+                  className="h-12 w-full rounded-2xl border border-slate-200 bg-slate-50 pl-11 pr-4 text-sm font-medium text-slate-950 outline-none transition focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-100"
+                />
+              </label>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {(
+                  [
+                    ["all", "Tous"],
+                    ["active", "Actifs"],
+                    ["inactive", "Inactifs"],
+                  ] as const
+                ).map(([value, label]) => (
+                  <button
+                    key={value}
+                    type="button"
+                    onClick={() => setActivityFilter(value)}
+                    className={`h-9 rounded-full px-3 text-sm font-medium ${
+                      activityFilter === value
+                        ? "bg-slate-950 text-white"
+                        : "bg-slate-100 text-slate-600"
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+                <span className="self-center text-xs font-medium text-slate-400">
+                  {filteredCenters.length} centre
+                  {filteredCenters.length > 1 ? "s" : ""}
+                </span>
+              </div>
+            </div>
+
             {loading ? (
               <div className="grid min-h-80 place-items-center rounded-[2rem] border border-slate-200 bg-white text-slate-500">
                 <div className="flex items-center gap-3 font-semibold">
@@ -521,14 +725,30 @@ export default function AdminCentresPage() {
                   Créez le premier centre Bookea.
                 </p>
               </div>
+            ) : filteredCenters.length === 0 ? (
+              <div className="rounded-[2rem] border border-dashed border-slate-200 bg-white p-10 text-center">
+                <Search className="mx-auto h-10 w-10 text-slate-300" />
+                <p className="mt-4 text-base font-semibold">Aucun résultat</p>
+                <p className="mt-2 font-medium text-slate-500">
+                  Aucun centre ne correspond à cette recherche.
+                </p>
+              </div>
             ) : (
-              centers.map((center) => (
+              filteredCenters.map((center) => (
                 <CenterCard
                   key={center.id}
                   center={center}
                   attaching={attachingCenterId === center.id}
+                  removingMemberKey={removingMemberKey}
+                  toggling={togglingCenterId === center.id}
                   crediting={creditingCenterId === center.id}
                   onAttachOwner={(email) => handleAttachOwner(center.id, email)}
+                  onRemoveMember={(profileId) =>
+                    handleRemoveMember(center.id, profileId)
+                  }
+                  onToggleActive={(nextActive) =>
+                    handleToggleActive(center.id, nextActive)
+                  }
                   onCreditSms={(amount) => handleCreditSms(center.id, amount)}
                 />
               ))
@@ -543,14 +763,22 @@ export default function AdminCentresPage() {
 function CenterCard({
   center,
   attaching,
+  removingMemberKey,
+  toggling,
   crediting,
   onAttachOwner,
+  onRemoveMember,
+  onToggleActive,
   onCreditSms,
 }: {
   center: CenterCardData;
   attaching: boolean;
+  removingMemberKey: string | null;
+  toggling: boolean;
   crediting: boolean;
-  onAttachOwner: (email: string) => void;
+  onAttachOwner: (email: string) => Promise<boolean>;
+  onRemoveMember: (profileId: string) => void;
+  onToggleActive: (nextActive: boolean) => void;
   onCreditSms: (amount: number) => void;
 }) {
   const [ownerEmail, setOwnerEmail] = useState("");
@@ -561,9 +789,12 @@ function CenterCard({
       ? `/api/meta/connect?center_slug=${encodeURIComponent(center.slug)}&page_id=${encodeURIComponent(facebookPageId.trim())}`
       : "";
 
-  function submitOwner(event: FormEvent<HTMLFormElement>) {
+  async function submitOwner(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    onAttachOwner(ownerEmail);
+    const attached = await onAttachOwner(ownerEmail);
+    if (attached) {
+      setOwnerEmail("");
+    }
   }
 
   function submitSmsCredit(event: FormEvent<HTMLFormElement>) {
@@ -579,7 +810,11 @@ function CenterCard({
   }
 
   return (
-    <article className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
+    <article
+      className={`rounded-[2rem] border bg-white p-6 shadow-sm ${
+        center.isActive ? "border-slate-200" : "border-orange-200 bg-orange-50/30"
+      }`}
+    >
       <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
         <div>
           <div className="flex items-center gap-3">
@@ -593,18 +828,37 @@ function CenterCard({
               </p>
             </div>
           </div>
-          <button
-            type="button"
-            onClick={() => {
-              saveActiveCenterId(center.id);
-              window.setTimeout(() => {
-                window.location.href = "/dashboard";
-              }, 700);
-            }}
-            className="mt-4 inline-flex h-10 items-center justify-center rounded-xl bg-slate-950 px-4 text-sm font-semibold text-white transition hover:bg-blue-700"
-          >
-            Ouvrir ce centre
-          </button>
+          <div className="mt-4 flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                saveActiveCenterId(center.id);
+                window.setTimeout(() => {
+                  window.location.href = "/dashboard";
+                }, 700);
+              }}
+              className="inline-flex h-10 items-center justify-center rounded-xl bg-slate-950 px-4 text-sm font-semibold text-white transition hover:bg-blue-700"
+            >
+              Ouvrir ce centre
+            </button>
+            <button
+              type="button"
+              disabled={toggling}
+              onClick={() => onToggleActive(!center.isActive)}
+              className={`inline-flex h-10 items-center justify-center gap-2 rounded-xl px-4 text-sm font-semibold transition disabled:opacity-60 ${
+                center.isActive
+                  ? "border border-orange-200 bg-white text-orange-700 hover:bg-orange-50"
+                  : "bg-emerald-600 text-white hover:bg-emerald-700"
+              }`}
+            >
+              {toggling ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Power className="h-4 w-4" />
+              )}
+              {center.isActive ? "Passer inactif" : "Réactiver"}
+            </button>
+          </div>
 
           <div className="mt-5 flex flex-wrap gap-2">
             {center.city && (
@@ -616,6 +870,9 @@ function CenterCard({
             <Badge icon={<ShieldCheck className="h-4 w-4" />}>
               {center.public_profile_enabled ? "Profil public actif" : "Profil public masqué"}
             </Badge>
+            <Badge icon={<Power className="h-4 w-4" />}>
+              {center.isActive ? "Centre actif" : "Centre inactif"}
+            </Badge>
           </div>
         </div>
 
@@ -625,22 +882,43 @@ function CenterCard({
           </p>
           {center.members.length > 0 ? (
             <div className="space-y-2">
-              {center.members.map((member) => (
-                <div
-                  key={`${member.email}-${member.role}`}
-                  className="flex items-center justify-between gap-3 rounded-xl bg-white px-3 py-2"
-                >
-                  <div className="min-w-0">
-                    <p className="truncate font-semibold">{member.name}</p>
-                    <p className="truncate text-sm font-semibold text-slate-400">
-                      {member.email}
-                    </p>
+              {center.members.map((member) => {
+                const memberKey = `${center.id}:${member.profileId}`;
+                const removing = removingMemberKey === memberKey;
+
+                return (
+                  <div
+                    key={memberKey}
+                    className="flex items-center justify-between gap-3 rounded-xl bg-white px-3 py-2"
+                  >
+                    <div className="min-w-0">
+                      <p className="truncate font-semibold">{member.name}</p>
+                      <p className="truncate text-sm font-semibold text-slate-400">
+                        {member.email}
+                      </p>
+                    </div>
+                    <div className="flex shrink-0 items-center gap-2">
+                      <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-medium text-blue-700">
+                        {member.role}
+                      </span>
+                      <button
+                        type="button"
+                        disabled={removing}
+                        onClick={() => onRemoveMember(member.profileId)}
+                        className="grid h-8 w-8 place-items-center rounded-lg text-slate-400 transition hover:bg-rose-50 hover:text-rose-600 disabled:opacity-50"
+                        title="Retirer cet accès"
+                        aria-label={`Retirer ${member.email}`}
+                      >
+                        {removing ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Trash2 className="h-4 w-4" />
+                        )}
+                      </button>
+                    </div>
                   </div>
-                  <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-medium text-blue-700">
-                    {member.role}
-                  </span>
-                </div>
-              ))}
+                );
+              })}
             </div>
           ) : (
             <div className="flex items-center gap-3 rounded-xl bg-white p-3 text-slate-500">
@@ -675,6 +953,7 @@ function CenterCard({
               </button>
             </div>
             <p className="text-xs font-semibold text-slate-400">
+              Autant d’emails que nécessaire. Retirez un accès pour le remplacer.
               Le compte doit déjà avoir été créé sur la page connexion.
             </p>
           </form>
@@ -801,6 +1080,19 @@ function Badge({
       {children}
     </span>
   );
+}
+
+function isCenterActive(settings: CenterRow["settings"] | unknown) {
+  const record =
+    settings && typeof settings === "object"
+      ? (settings as Record<string, unknown>)
+      : {};
+  const admin =
+    record.admin && typeof record.admin === "object"
+      ? (record.admin as { isActive?: boolean })
+      : {};
+
+  return admin.isActive !== false;
 }
 
 function slugify(value: string) {

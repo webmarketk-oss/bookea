@@ -24,12 +24,14 @@ type CenterRelation =
       name: string | null;
       slug: string | null;
       city: string | null;
+      settings?: CenterRow["settings"];
     }
   | Array<{
       id: string | null;
       name: string | null;
       slug: string | null;
       city: string | null;
+      settings?: CenterRow["settings"];
     }>
   | null;
 
@@ -44,6 +46,11 @@ type CenterRow = {
   name: string | null;
   slug: string | null;
   city: string | null;
+  settings?: {
+    admin?: {
+      isActive?: boolean;
+    };
+  } | null;
 };
 
 export async function loadAccessibleCenters(
@@ -67,19 +74,21 @@ export async function loadAccessibleCenters(
   if (isAdmin) {
     const { data, error } = await supabase
       .from("centers")
-      .select("id,name,slug,city")
+      .select("id,name,slug,city,settings")
       .order("name", { ascending: true });
 
     if (error) {
       throw new Error(error.message);
     }
 
-    return ((data ?? []) as CenterRow[]).map(toAccessibleCenter);
+    return ((data ?? []) as CenterRow[])
+      .filter(isCenterActiveRow)
+      .map(toAccessibleCenter);
   }
 
   const { data, error } = await supabase
     .from("center_members")
-    .select("center_id,role,centers(id,name,slug,city)")
+    .select("center_id,role,centers(id,name,slug,city,settings)")
     .eq("profile_id", user.id)
     .eq("is_active", true)
     .order("created_at", { ascending: true });
@@ -93,7 +102,7 @@ export async function loadAccessibleCenters(
   for (const row of (data ?? []) as unknown as CenterMemberRow[]) {
     const center = relationObject(row.centers);
 
-    if (center?.id) {
+    if (center?.id && isCenterActiveRow(center)) {
       accessibleCenters.push({
         id: center.id,
         name: center.name ?? "Centre Bookea",
@@ -178,6 +187,19 @@ async function getIsBookeaAdmin(supabase: SupabaseClient, profileId: string) {
   }
 
   return Boolean(data?.profile_id);
+}
+
+function isCenterActiveRow(center: { settings?: CenterRow["settings"] | unknown }) {
+  const settings =
+    center.settings && typeof center.settings === "object"
+      ? (center.settings as Record<string, unknown>)
+      : {};
+  const admin =
+    settings.admin && typeof settings.admin === "object"
+      ? (settings.admin as { isActive?: boolean })
+      : {};
+
+  return admin.isActive !== false;
 }
 
 function toAccessibleCenter(center: CenterRow): AccessibleCenter {
