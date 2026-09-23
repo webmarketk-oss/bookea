@@ -27,15 +27,21 @@ function publicAppointmentView(row) {
     date: formatPublicAppointmentDate(row?.appointment_date),
     time,
     treatment: String(service?.name || "").trim(),
+    durationMinutes: Number(row?.duration_minutes) || 0,
   };
+}
+
+function canRescheduleState(state) {
+  return state === "pending" || state === "confirmed" || state === "rescheduled";
 }
 
 function jsonState(state, row) {
   return {
-    ok: state === "pending" || state === "confirmed" || state === "cancelled" || state === "need_phone",
+    ok: state === "pending" || state === "confirmed" || state === "cancelled" || state === "need_phone" || state === "rescheduled",
     state,
     message: stateMessage(state),
     appointment: row && state !== "invalid" ? publicAppointmentView(row) : null,
+    canReschedule: canRescheduleState(state),
   };
 }
 

@@ -17,6 +17,7 @@ import {
 import type { FormEvent, ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
 
+import { saveActiveCenterId } from "@/lib/center-access";
 import { createClient } from "@/lib/supabase";
 import {
   creditSmsQuota,
@@ -592,6 +593,18 @@ function CenterCard({
               </p>
             </div>
           </div>
+          <button
+            type="button"
+            onClick={() => {
+              saveActiveCenterId(center.id);
+              window.setTimeout(() => {
+                window.location.href = "/dashboard";
+              }, 700);
+            }}
+            className="mt-4 inline-flex h-10 items-center justify-center rounded-xl bg-slate-950 px-4 text-sm font-semibold text-white transition hover:bg-blue-700"
+          >
+            Ouvrir ce centre
+          </button>
 
           <div className="mt-5 flex flex-wrap gap-2">
             {center.city && (

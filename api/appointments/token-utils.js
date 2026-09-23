@@ -132,6 +132,8 @@ function stateMessage(state) {
   switch (state) {
     case "confirmed":
       return "Votre rendez-vous est confirmé. Nous avons hâte de vous accueillir !";
+    case "rescheduled":
+      return "Votre rendez-vous a bien été déplacé. Nous avons hâte de vous accueillir !";
     case "cancelled":
       return "Votre rendez-vous a bien été annulé. Vous pouvez contacter le centre si vous souhaitez choisir un nouveau créneau.";
     case "expired":

@@ -116,7 +116,9 @@ export async function getActiveCenterContext(
     centers.find((center) => center.id === savedCenterId) ?? centers[0];
 
   if (activeCenter) {
-    saveActiveCenterId(activeCenter.id);
+    if (savedCenterId !== activeCenter.id) {
+      saveActiveCenterId(activeCenter.id);
+    }
 
     return {
       centerId: activeCenter.id,

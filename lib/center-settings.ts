@@ -1,7 +1,29 @@
-import { getActiveCenterContext } from "@/lib/center-access";
+import {
+  getActiveCenterContext,
+  readActiveCenterId,
+} from "@/lib/center-access";
 import { createClient } from "@/lib/supabase";
 
 export const CENTER_SETTINGS_STORAGE_KEY = "bookea-center-settings";
+const CENTER_SETTINGS_OWNER_KEY = "bookea-center-settings-owner";
+
+function settingsStorageKey(centerId?: string | null) {
+  return centerId
+    ? `${CENTER_SETTINGS_STORAGE_KEY}:${centerId}`
+    : CENTER_SETTINGS_STORAGE_KEY;
+}
+
+function parseStoredSettings(raw: string | null): StoredCenterSettings | null {
+  if (!raw) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(raw) as StoredCenterSettings;
+  } catch {
+    return null;
+  }
+}
 
 export const publicCenterCategories = [
   "Coiffeur",
@@ -428,18 +450,38 @@ export const defaultReviewAutomation: CenterReviewAutomation = {
   loyaltyPointsReward: 25,
 };
 
-export function readCenterSettings(): StoredCenterSettings | null {
+export function readCenterSettings(
+  centerId?: string | null,
+): StoredCenterSettings | null {
   if (typeof window === "undefined") {
     return null;
   }
 
-  try {
-    const stored = window.localStorage.getItem(CENTER_SETTINGS_STORAGE_KEY);
-    return stored ? (JSON.parse(stored) as StoredCenterSettings) : null;
-  } catch {
-    window.localStorage.removeItem(CENTER_SETTINGS_STORAGE_KEY);
+  const id = centerId ?? readActiveCenterId();
+
+  if (id) {
+    const keyed = parseStoredSettings(
+      window.localStorage.getItem(settingsStorageKey(id)),
+    );
+    if (keyed) {
+      return keyed;
+    }
+  }
+
+  const legacy = parseStoredSettings(
+    window.localStorage.getItem(CENTER_SETTINGS_STORAGE_KEY),
+  );
+
+  if (!legacy) {
     return null;
   }
+
+  const owner = window.localStorage.getItem(CENTER_SETTINGS_OWNER_KEY);
+  if (id && owner && owner !== id) {
+    return null;
+  }
+
+  return legacy;
 }
 
 export function mergeCenterSettings(
@@ -450,10 +492,9 @@ export function mergeCenterSettings(
 }
 
 export async function loadPublicCenterProfile() {
-  const local = readCenterSettings();
-
   try {
     const context = await getActiveCenterContext();
+    const local = readCenterSettings(context.centerId);
     const supabase = createClient();
     const { data, error } = await supabase
       .from("centers")
@@ -468,14 +509,11 @@ export async function loadPublicCenterProfile() {
     const remote = storedSettingsFromCenterRow(data as CenterProfileRow);
     const hasRemotePublic = hasStoredPublicSettings(data.settings);
     const merged = mergeLocalAndRemote(local, remote, hasRemotePublic);
-
-    if (hasRemotePublic || !local) {
-      writeCenterSettingsSafe(merged);
-    }
+    writeCenterSettingsSafe(merged, true, context.centerId);
 
     return { centerId: context.centerId, settings: merged };
   } catch {
-    return { settings: local };
+    return { settings: readCenterSettings() };
   }
 }
 
@@ -513,17 +551,20 @@ export async function loadPublishedCenterProfile(slug: string) {
     return null;
   }
 
+  const local = readCenterSettings();
+  const localSlug = local?.center?.slug?.trim().toLowerCase();
+  const sameCenter = Boolean(localSlug && localSlug === normalized);
+
   return mergeLocalAndRemote(
-    readCenterSettings(),
+    sameCenter ? local : null,
     storedSettingsFromCenterRow(row),
     hasStoredPublicSettings(row.settings),
   );
 }
 
 export async function savePublicCenterProfile(nextSettings: StoredCenterSettings) {
-  writeCenterSettingsSafe(nextSettings);
-
   const context = await getActiveCenterContext();
+  writeCenterSettingsSafe(nextSettings, true, context.centerId);
   const supabase = createClient();
   const { data } = await supabase
     .from("centers")
@@ -608,12 +649,16 @@ export async function savePublicCenterProfile(nextSettings: StoredCenterSettings
       .maybeSingle();
 
     if (!result.error && result.data?.id) {
-      writeCenterSettingsSafe({
-        ...nextSettings,
-        center: nextSettings.center
-          ? { ...nextSettings.center, slug: currentSlug }
-          : nextSettings.center,
-      });
+      writeCenterSettingsSafe(
+        {
+          ...nextSettings,
+          center: nextSettings.center
+            ? { ...nextSettings.center, slug: currentSlug }
+            : nextSettings.center,
+        },
+        true,
+        context.centerId,
+      );
     }
   }
 
@@ -653,24 +698,27 @@ type CenterProfileRow = {
 function writeCenterSettingsSafe(
   nextSettings: StoredCenterSettings,
   emit = true,
+  centerId?: string | null,
 ) {
   if (typeof window === "undefined") {
     return;
   }
 
-  const merged = { ...(readCenterSettings() ?? {}), ...nextSettings };
+  const id = centerId ?? readActiveCenterId();
+  const merged = { ...(readCenterSettings(id) ?? {}), ...nextSettings };
+  const key = settingsStorageKey(id);
 
   try {
-    window.localStorage.setItem(
-      CENTER_SETTINGS_STORAGE_KEY,
-      JSON.stringify(merged),
-    );
+    window.localStorage.setItem(key, JSON.stringify(merged));
+    if (id) {
+      window.localStorage.setItem(CENTER_SETTINGS_OWNER_KEY, id);
+    }
   } catch {
     try {
-      window.localStorage.setItem(
-        CENTER_SETTINGS_STORAGE_KEY,
-        JSON.stringify(withoutDataUrls(merged)),
-      );
+      window.localStorage.setItem(key, JSON.stringify(withoutDataUrls(merged)));
+      if (id) {
+        window.localStorage.setItem(CENTER_SETTINGS_OWNER_KEY, id);
+      }
     } catch {
       // Keep the in-memory save path even if the browser cache is full.
     }

@@ -59,6 +59,7 @@ import {
   removePublicBooking,
 } from "@/lib/public-bookings";
 import { getActiveCenterContext } from "@/lib/center-access";
+import { loadCenterHours, saveCenterHours } from "@/lib/center-hours";
 import {
   Appointment,
   AppointmentKind,
@@ -385,13 +386,18 @@ export default function AgendaBoard() {
     setAgendaError("");
 
     try {
-      const [loadedAppointments, center, nextBalanceDueIndex] = await Promise.all([
-        loadCrmAppointments(),
-        getActiveCenterContext(),
-        loadClientBalanceDueIndex().catch(() => emptyClientBalanceDueIndex()),
-      ]);
+      const [loadedAppointments, center, nextBalanceDueIndex, nextHours] =
+        await Promise.all([
+          loadCrmAppointments(),
+          getActiveCenterContext(),
+          loadClientBalanceDueIndex().catch(() => emptyClientBalanceDueIndex()),
+          loadCenterHours().catch(() => null),
+        ]);
       centerNameRef.current = center.centerName;
       setBalanceDueIndex(nextBalanceDueIndex);
+      if (nextHours) {
+        setCenterDayHours(nextHours);
+      }
 
       setAppointmentList(
         mergePublicBookingsIntoAppointments(
@@ -2101,7 +2107,12 @@ export default function AgendaBoard() {
             <div className="mt-5 flex justify-end">
               <button
                 type="button"
-                onClick={() => setIsHoursModalOpen(false)}
+                onClick={() => {
+                  void saveCenterHours(centerDayHours)
+                    .then((nextHours) => setCenterDayHours(nextHours))
+                    .catch(() => null)
+                    .finally(() => setIsHoursModalOpen(false));
+                }}
                 className="rounded-2xl bg-slate-950 px-5 py-3 font-semibold text-white"
               >
                 Valider les horaires

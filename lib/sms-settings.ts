@@ -53,7 +53,7 @@ export const defaultSmsTemplates: SmsTemplate[] = [
   {
     id: "confirmation-rdv",
     name: "Confirmation RDV",
-    body: "BOOKEA - Rappel : votre RDV chez {{centre}} est prévu le {{date}} à {{heure}}.\n\nConfirmez ou annulez ici : {{lien_confirmation}}",
+    body: "BOOKEA - Rappel : votre RDV chez {{centre}} est prévu le {{date}} à {{heure}}.\n\nConfirmez, modifiez ou annulez ici : {{lien_confirmation}}",
   },
   {
     id: "contre-indications-laser-j7",
@@ -63,17 +63,17 @@ export const defaultSmsTemplates: SmsTemplate[] = [
   {
     id: "rappel-j5",
     name: "Rappel J-5",
-    body: "Bonjour {{prenom}}, rappel : votre rendez-vous {{soin}} est dans 5 jours, le {{date}} à {{heure}} chez {{centre}}.\nConfirmez ou annulez ici : {{lien_confirmation}}",
+    body: "Bonjour {{prenom}}, rappel : votre rendez-vous {{soin}} est dans 5 jours, le {{date}} à {{heure}} chez {{centre}}.\nConfirmez, modifiez ou annulez ici : {{lien_confirmation}}",
   },
   {
     id: "rappel-48h",
     name: "Rappel 48h avant RDV",
-    body: "Bonjour {{prenom}}, rappel : votre rendez-vous {{soin}} est dans 48h, le {{date}} à {{heure}} chez {{centre}}.\nConfirmez ou annulez ici : {{lien_confirmation}}",
+    body: "Bonjour {{prenom}}, rappel : votre rendez-vous {{soin}} est dans 48h, le {{date}} à {{heure}} chez {{centre}}.\nConfirmez, modifiez ou annulez ici : {{lien_confirmation}}",
   },
   {
     id: "rappel-24h",
     name: "Rappel 24h avant RDV",
-    body: "Bonjour {{prenom}}, rappel : votre rendez-vous {{soin}} est demain, le {{date}} à {{heure}} chez {{centre}}.\nConfirmez ou annulez ici : {{lien_confirmation}}",
+    body: "Bonjour {{prenom}}, rappel : votre rendez-vous {{soin}} est demain, le {{date}} à {{heure}} chez {{centre}}.\nConfirmez, modifiez ou annulez ici : {{lien_confirmation}}",
   },
   {
     id: "accueil-prospect",
@@ -503,7 +503,7 @@ export function fillSmsTemplate(template: string, vars: SmsTemplateVars) {
       /(?:www\.)?bookeai\.fr\/r\/[A-Za-z0-9_-]+/i.test(output);
 
     if (!alreadyThere) {
-      output = `${output}\n\nConfirmez ou annulez ici : ${confirmationLink}`;
+      output = `${output}\n\nConfirmez, modifiez ou annulez ici : ${confirmationLink}`;
     }
   }
 

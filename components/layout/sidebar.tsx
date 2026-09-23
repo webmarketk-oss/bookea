@@ -112,7 +112,10 @@ export default function Sidebar({
         </button>
       </div>
 
-      <CenterSwitcher collapsed={collapsed} />
+      <CenterSwitcher
+        collapsed={collapsed}
+        onExpand={() => onCollapsedChange(false)}
+      />
 
       <nav className="min-h-0 flex-1 space-y-2 overflow-y-auto">
         <NavItem
