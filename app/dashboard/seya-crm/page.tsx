@@ -45,10 +45,12 @@ import {
   loadSeyaAgentSettings,
   readLocalSeyaConversations,
   saveSeyaAgentSettings,
+  saveSeyaConversations,
   writeLocalSeyaConversations,
   type SeyaAgentSettings,
   type SeyaConversation,
 } from "@/lib/seya-settings";
+import { formatSharedWhatsAppNumber } from "@/lib/seya-whatsapp";
 import type { Appointment } from "@/types/agenda";
 import type { Lead } from "@/types/lead";
 
@@ -234,6 +236,8 @@ export default function SeyaCrmPage() {
   const [reply, setReply] = useState("");
   const [savingAgent, setSavingAgent] = useState(false);
   const [agentFeedback, setAgentFeedback] = useState("");
+  const [sharedNumber, setSharedNumber] = useState("Numéro Bookea unique");
+  const [whatsappConnected, setWhatsappConnected] = useState(false);
 
   const stats = useMemo(
     () => ({
@@ -296,6 +300,7 @@ export default function SeyaCrmPage() {
               centerId: "",
               centerName: "le centre",
               settings: defaultSeyaAgentSettings,
+              conversations: [],
             })),
             loadCenterHours().catch(() => defaultCenterDayHours),
           ]);
@@ -304,9 +309,11 @@ export default function SeyaCrmPage() {
           return;
         }
 
-        const storedConversations = seya.centerId
-          ? readLocalSeyaConversations(seya.centerId)
-          : [];
+        const storedConversations = seya.conversations?.length
+          ? seya.conversations
+          : seya.centerId
+            ? readLocalSeyaConversations(seya.centerId)
+            : [];
         const nextConversations = seya.settings.whatsappAgentEnabled
           ? [
               ...storedConversations,
@@ -324,6 +331,7 @@ export default function SeyaCrmPage() {
 
         if (seya.centerId) {
           writeLocalSeyaConversations(seya.centerId, nextConversations);
+          void saveSeyaConversations(nextConversations).catch(() => null);
         }
 
         setCenterId(seya.centerId);
@@ -359,6 +367,21 @@ export default function SeyaCrmPage() {
     }
 
     void load();
+    void fetch("/api/seya/whatsapp")
+      .then((response) => response.json())
+      .then((payload) => {
+        if (cancelled) {
+          return;
+        }
+        setSharedNumber(
+          payload?.number
+            ? formatSharedWhatsAppNumber(String(payload.number))
+            : "Numéro Bookea unique",
+        );
+        setWhatsappConnected(Boolean(payload?.connected));
+      })
+      .catch(() => null);
+
     return () => {
       cancelled = true;
     };
@@ -373,6 +396,7 @@ export default function SeyaCrmPage() {
     setConversations(next);
     if (centerId) {
       writeLocalSeyaConversations(centerId, next);
+      void saveSeyaConversations(next).catch(() => null);
     }
   }
 
@@ -525,8 +549,8 @@ export default function SeyaCrmPage() {
           <p className="text-sm font-medium text-violet-600">Bookea Agent IA</p>
           <h1 className="mt-1 text-xl font-semibold tracking-tight">Seya CRM</h1>
           <p className="mt-2 max-w-3xl text-sm text-slate-500">
-            L&apos;agent qui parle au prospect dès son inscription, le qualify et
-            pose le rendez-vous. Ce n&apos;est pas une suite de messages automatiques.
+            Un seul numéro WhatsApp Bookea pour tous les centres. Les leads, le
+            planning et les consignes restent ceux de ce centre.
           </p>
         </div>
         <button
@@ -547,12 +571,20 @@ export default function SeyaCrmPage() {
           <div>
             <h2 className="text-base font-semibold">Agent WhatsApp Seya</h2>
             <p className="mt-1 max-w-3xl text-sm font-medium text-slate-500">
-              Pas de scénario figé comme les SMS. Seya pose des questions, qualify,
-              puis propose de vrais créneaux du planning de ce centre. Tant que
-              WhatsApp Cloud n’est pas validé par Meta, le premier message
-              s’ouvre dans WhatsApp.
+              Le prospect écrit toujours au même numéro Bookea. Seya retrouve le
+              centre du lead, applique les consignes de ce centre, et ne propose
+              que les créneaux de ce planning.
             </p>
           </div>
+        </div>
+
+        <div className="mt-5 rounded-2xl border border-emerald-100 bg-emerald-50 px-4 py-3">
+          <p className="text-sm font-semibold text-emerald-800">{sharedNumber}</p>
+          <p className="mt-1 text-xs font-medium text-emerald-700">
+            {whatsappConnected
+              ? "Numéro partagé connecté. Chaque centre garde son CRM, son planning et ses automatisations."
+              : "Même numéro pour tout le monde. On le connecte ensemble ; en attendant, Envoyer sur WhatsApp ouvre le message de ce centre."}
+          </p>
         </div>
 
         <div className="mt-5 grid gap-3">

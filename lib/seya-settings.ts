@@ -265,11 +265,77 @@ export async function loadSeyaAgentSettings() {
 
   writeLocalSeyaSettings(context.centerId, settings);
 
+  const remoteConversations = Array.isArray(remote.conversations)
+    ? (remote.conversations as SeyaConversation[])
+    : [];
+  const conversations = mergeSeyaConversations(
+    remoteConversations,
+    readLocalSeyaConversations(context.centerId),
+  );
+  writeLocalSeyaConversations(context.centerId, conversations);
+
   return {
     centerId: context.centerId,
     centerName: context.centerName,
     settings,
+    conversations,
   };
+}
+
+export function mergeSeyaConversations(
+  ...lists: SeyaConversation[][]
+): SeyaConversation[] {
+  const merged = new Map<string, SeyaConversation>();
+
+  for (const list of lists) {
+    for (const item of list) {
+      if (!item?.leadId) {
+        continue;
+      }
+      const current = merged.get(item.leadId);
+      if (!current || String(item.updatedAt || "") >= String(current.updatedAt || "")) {
+        merged.set(item.leadId, item);
+      }
+    }
+  }
+
+  return [...merged.values()]
+    .sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)))
+    .slice(0, 80);
+}
+
+export async function saveSeyaConversations(conversations: SeyaConversation[]) {
+  const context = await getActiveCenterContext();
+  const next = mergeSeyaConversations(conversations);
+  writeLocalSeyaConversations(context.centerId, next);
+
+  const supabase = createClient();
+  const { data } = await supabase
+    .from("centers")
+    .select("settings")
+    .eq("id", context.centerId)
+    .maybeSingle();
+
+  const currentSettings = asRecord(data?.settings);
+  const currentSeya = asRecord(currentSettings.seya);
+  const { error } = await supabase
+    .from("centers")
+    .update({
+      settings: {
+        ...currentSettings,
+        seya: {
+          ...currentSeya,
+          conversations: next,
+        },
+      },
+    })
+    .eq("id", context.centerId);
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return next;
 }
 
 export async function saveSeyaAgentSettings(settings: SeyaAgentSettings) {
