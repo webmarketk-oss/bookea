@@ -431,7 +431,44 @@ export default function SeyaCrmPage() {
       return;
     }
 
-    window.open(whatsappHref(conversation.phone, message.text), "_blank");
+    if (whatsappConnected) {
+      setAgentFeedback("Envoi depuis le numéro Bookea…");
+      try {
+        const response = await fetch("/api/seya/whatsapp", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "send",
+            phone: conversation.phone,
+            text: message.text,
+          }),
+        });
+        const payload = (await response.json().catch(() => ({}))) as {
+          sent?: boolean;
+          reason?: string;
+          error?: string;
+        };
+        if (!payload.sent) {
+          if (payload.reason === "template_required") {
+            setAgentFeedback(
+              "Meta exige un modèle pour le premier message. On le crée ensuite dans le Gestionnaire WhatsApp.",
+            );
+          } else {
+            setAgentFeedback(
+              payload.error || "L’envoi Bookea a échoué. Réessaie dans une minute.",
+            );
+          }
+          return;
+        }
+        setAgentFeedback("Message envoyé depuis +33 6 23 16 50 61 (Bookea).");
+      } catch {
+        setAgentFeedback("Impossible de joindre l’API WhatsApp Bookea.");
+        return;
+      }
+    } else {
+      window.open(whatsappHref(conversation.phone, message.text), "_blank");
+    }
+
     const next: SeyaConversation = {
       ...conversation,
       status: conversation.status === "À envoyer" ? "En cours" : conversation.status,

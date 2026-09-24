@@ -43,7 +43,13 @@ module.exports = async function handler(req, res) {
   }
 
   try {
-    const incoming = extractIncomingMessages(req.body);
+    const payload = parseBody(req.body);
+    if (payload.action === "send" || payload.type === "outbound") {
+      const result = await sendSharedWhatsApp(payload.phone, payload.text);
+      return res.status(result.sent ? 200 : 409).json(result);
+    }
+
+    const incoming = extractIncomingMessages(payload);
     if (incoming.length === 0) {
       return res.status(200).json({ received: true, handled: 0 });
     }
@@ -61,6 +67,20 @@ module.exports = async function handler(req, res) {
     return res.status(500).json({ error: "Unable to handle WhatsApp message" });
   }
 };
+
+function parseBody(body) {
+  if (!body) {
+    return {};
+  }
+  if (typeof body === "string") {
+    try {
+      return JSON.parse(body);
+    } catch {
+      return {};
+    }
+  }
+  return body;
+}
 
 function displayNumber() {
   return (
@@ -347,7 +367,13 @@ async function sendSharedWhatsApp(phone, text) {
   );
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
-    throw new Error(data?.error?.message || "WhatsApp send failed");
+    return {
+      sent: false,
+      reason: data?.error?.code === 131030 || /template|24/i.test(data?.error?.message || "")
+        ? "template_required"
+        : "send_failed",
+      error: data?.error?.message || "WhatsApp send failed",
+    };
   }
   return { sent: true, id: data?.messages?.[0]?.id || null };
 }
