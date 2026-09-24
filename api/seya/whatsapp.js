@@ -26,6 +26,12 @@ module.exports = async function handler(req, res) {
       return res.status(200).send(challenge);
     }
 
+    let graph = null;
+    try {
+      graph = await probeGraph();
+    } catch {
+      graph = { reachable: false, error: "probe_failed" };
+    }
     return res.status(200).json({
       ok: true,
       sharedNumber: true,
@@ -34,6 +40,7 @@ module.exports = async function handler(req, res) {
         process.env.WHATSAPP_TOKEN && process.env.WHATSAPP_PHONE_NUMBER_ID,
       ),
       webhook: "/api/seya/whatsapp",
+      graph,
     });
   }
 
@@ -45,7 +52,11 @@ module.exports = async function handler(req, res) {
   try {
     const payload = parseBody(req.body);
     if (payload.action === "send" || payload.type === "outbound") {
-      const result = await sendSharedWhatsApp(payload.phone, payload.text);
+      const result = await sendSharedWhatsApp(payload.phone, payload.text, {
+        firstName: payload.firstName,
+        centerName: payload.centerName,
+        treatment: payload.treatment,
+      });
       return res.status(result.sent ? 200 : 409).json(result);
     }
 
@@ -340,15 +351,111 @@ function asRecord(value) {
   return value && typeof value === "object" ? value : {};
 }
 
-async function sendSharedWhatsApp(phone, text) {
+function wabaId() {
+  return (
+    process.env.WHATSAPP_WABA_ID ||
+    process.env.WHATSAPP_BUSINESS_ACCOUNT_ID ||
+    "20162664690279331"
+  ).trim();
+}
+
+async function graphGet(path) {
+  const token = process.env.WHATSAPP_TOKEN;
+  const response = await fetch(
+    `https://graph.facebook.com/${GRAPH_VERSION}/${path}`,
+    {
+      headers: { Authorization: `Bearer ${token}` },
+    },
+  );
+  const data = await response.json().catch(() => ({}));
+  return { ok: response.ok, status: response.status, data };
+}
+
+async function probeGraph() {
   const token = process.env.WHATSAPP_TOKEN;
   const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID;
   if (!token || !phoneNumberId) {
-    return { sent: false, reason: "not_connected" };
+    return { reachable: false, reason: "not_connected" };
   }
 
-  const to = last9Phone(phone);
-  const intl = to.length === 9 ? `33${to}` : String(phone).replace(/\D/g, "");
+  const phone = await graphGet(
+    `${phoneNumberId}?fields=display_phone_number,verified_name,quality_rating,code_verification_status`,
+  );
+  if (!phone.ok) {
+    return {
+      reachable: false,
+      phoneNumberIdSuffix: String(phoneNumberId).slice(-4),
+      error: phone.data?.error?.message || "graph_phone_failed",
+      code: phone.data?.error?.code || null,
+    };
+  }
+
+  const templates = await graphGet(
+    `${wabaId()}/message_templates?limit=80&fields=name,status,language,category`,
+  );
+
+  return {
+    reachable: true,
+    displayPhoneNumber: phone.data.display_phone_number || null,
+    verifiedName: phone.data.verified_name || null,
+    qualityRating: phone.data.quality_rating || null,
+    codeVerificationStatus: phone.data.code_verification_status || null,
+    templates: Array.isArray(templates.data?.data)
+      ? templates.data.data.map((item) => ({
+          name: item.name,
+          status: item.status,
+          language: item.language,
+          category: item.category,
+        }))
+      : [],
+    templatesError: templates.ok
+      ? null
+      : templates.data?.error?.message || "templates_failed",
+  };
+}
+
+function templateVarCount(template) {
+  const body = (template.components || []).find(
+    (item) => String(item.type || "").toUpperCase() === "BODY",
+  );
+  return ((body?.text || "").match(/\{\{\d+\}\}/g) || []).length;
+}
+
+function isTemplateRequired(error) {
+  const code = error?.code;
+  const message = `${error?.message || ""} ${error?.error_data?.details || ""}`;
+  return (
+    code === 131047 ||
+    code === 131051 ||
+    /template|24 hour|re-engagement|must be a template/i.test(message)
+  );
+}
+
+function frenchSendError(error, fallback) {
+  const code = error?.code;
+  const message = error?.message || fallback || "WhatsApp send failed";
+  if (code === 190) {
+    return "Le jeton WhatsApp a expiré. Il faut en recréer un dans Meta.";
+  }
+  if (
+    code === 10 ||
+    (code === 100 && /permission|does not exist|unsupported/i.test(message))
+  ) {
+    return "Le jeton n’a pas le droit d’envoyer depuis ce numéro Bookea.";
+  }
+  if (code === 133010 || /not registered|hors ligne|offline/i.test(message)) {
+    return "Le numéro Bookea n’est pas encore en ligne sur l’API Cloud.";
+  }
+  if (code === 131030) {
+    return "Ce numéro destinataire n’est pas autorisé (mode test Meta).";
+  }
+  if (isTemplateRequired(error)) {
+    return "Meta bloque le premier message tant qu’un modèle WhatsApp n’est pas approuvé.";
+  }
+  return message;
+}
+
+async function sendGraphMessage(phoneNumberId, token, body) {
   const response = await fetch(
     `https://graph.facebook.com/${GRAPH_VERSION}/${phoneNumberId}/messages`,
     {
@@ -357,23 +464,219 @@ async function sendSharedWhatsApp(phone, text) {
         Authorization: `Bearer ${token}`,
         "Content-Type": "application/json",
       },
+      body: JSON.stringify(body),
+    },
+  );
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    console.error("[seya/whatsapp] graph send", {
+      status: response.status,
+      code: data?.error?.code || null,
+      message: data?.error?.message || null,
+    });
+  }
+  return { ok: response.ok, data };
+}
+
+async function listTemplates() {
+  const listed = await graphGet(
+    `${wabaId()}/message_templates?limit=80&fields=name,status,language,category,components`,
+  );
+  if (!listed.ok) {
+    return { templates: [], error: listed.data?.error || { message: "templates_failed" } };
+  }
+  return {
+    templates: Array.isArray(listed.data?.data) ? listed.data.data : [],
+    error: null,
+  };
+}
+
+async function ensureSeyaTemplate() {
+  const { templates, error } = await listTemplates();
+  if (error) {
+    return { template: null, error };
+  }
+
+  const approved = templates.find(
+    (item) =>
+      item.name === "seya_accueil" &&
+      String(item.status || "").toUpperCase() === "APPROVED",
+  );
+  if (approved) {
+    return { template: approved, error: null };
+  }
+
+  const existing = templates.find((item) => item.name === "seya_accueil");
+  if (existing) {
+    return { template: existing, error: null };
+  }
+
+  const token = process.env.WHATSAPP_TOKEN;
+  const response = await fetch(
+    `https://graph.facebook.com/${GRAPH_VERSION}/${wabaId()}/message_templates`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
       body: JSON.stringify({
-        messaging_product: "whatsapp",
-        to: intl,
-        type: "text",
-        text: { body: text },
+        name: "seya_accueil",
+        language: "fr",
+        category: "UTILITY",
+        components: [
+          {
+            type: "BODY",
+            text: "Bonjour {{1}}, merci pour votre inscription chez {{2}}. Je suis Seya. Vous avez indiqué {{3}}. Répondez-moi ici pour que je vous propose un créneau.",
+            example: {
+              body_text: [["Sam", "le centre", "votre soin"]],
+            },
+          },
+        ],
       }),
     },
   );
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
+    return { template: null, error: data?.error || { message: "template_create_failed" } };
+  }
+  return {
+    template: {
+      name: "seya_accueil",
+      status: data.status || "PENDING",
+      language: "fr",
+      category: "UTILITY",
+      components: [
+        {
+          type: "BODY",
+          text: "Bonjour {{1}}, merci pour votre inscription chez {{2}}. Je suis Seya. Vous avez indiqué {{3}}.",
+        },
+      ],
+    },
+    error: null,
+  };
+}
+
+function pickApprovedTemplate(templates) {
+  const approved = templates.filter(
+    (item) => String(item.status || "").toUpperCase() === "APPROVED",
+  );
+  return (
+    approved.find((item) => item.name === "seya_accueil") ||
+    approved.find((item) => item.name === "hello_world") ||
+    approved[0] ||
+    null
+  );
+}
+
+async function sendTemplateMessage(phoneNumberId, token, intl, template, vars) {
+  const count = templateVarCount(template);
+  const parameters = [vars.firstName, vars.centerName, vars.treatment]
+    .map((value) => String(value || "").trim())
+    .filter(Boolean);
+  const padded = [
+    parameters[0] || "bonjour",
+    parameters[1] || "notre centre",
+    parameters[2] || "votre soin",
+  ].slice(0, Math.max(count, 0));
+
+  const body = {
+    messaging_product: "whatsapp",
+    to: intl,
+    type: "template",
+    template: {
+      name: template.name,
+      language: { code: template.language || "fr" },
+    },
+  };
+  if (count > 0) {
+    body.template.components = [
+      {
+        type: "body",
+        parameters: padded.slice(0, count).map((text) => ({ type: "text", text })),
+      },
+    ];
+  }
+
+  return sendGraphMessage(phoneNumberId, token, body);
+}
+
+async function sendSharedWhatsApp(phone, text, extras = {}) {
+  const token = process.env.WHATSAPP_TOKEN;
+  const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID;
+  if (!token || !phoneNumberId) {
+    return { sent: false, reason: "not_connected" };
+  }
+
+  const to = last9Phone(phone);
+  const intl = to.length === 9 ? `33${to}` : String(phone).replace(/\D/g, "");
+  const vars = {
+    firstName: extras.firstName || "bonjour",
+    centerName: extras.centerName || "notre centre",
+    treatment: extras.treatment || "votre soin",
+  };
+
+  const textResult = await sendGraphMessage(phoneNumberId, token, {
+    messaging_product: "whatsapp",
+    to: intl,
+    type: "text",
+    text: { body: String(text || "").trim() },
+  });
+  if (textResult.ok) {
+    return { sent: true, id: textResult.data?.messages?.[0]?.id || null, via: "text" };
+  }
+
+  const textError = textResult.data?.error || {};
+  if (!isTemplateRequired(textError)) {
     return {
       sent: false,
-      reason: data?.error?.code === 131030 || /template|24/i.test(data?.error?.message || "")
-        ? "template_required"
-        : "send_failed",
-      error: data?.error?.message || "WhatsApp send failed",
+      reason: "send_failed",
+      code: textError.code || null,
+      error: frenchSendError(textError),
     };
   }
-  return { sent: true, id: data?.messages?.[0]?.id || null };
+
+  const listed = await listTemplates();
+  let template = pickApprovedTemplate(listed.templates);
+  if (!template) {
+    const ensured = await ensureSeyaTemplate();
+    if (ensured.template && String(ensured.template.status || "").toUpperCase() === "APPROVED") {
+      template = ensured.template;
+    } else {
+      return {
+        sent: false,
+        reason: "template_required",
+        code: textError.code || null,
+        error:
+          ensured.template
+            ? "Le modèle seya_accueil est envoyé à Meta. Dès qu’il est Approuvé, le premier message partira."
+            : frenchSendError(ensured.error || textError),
+        templateStatus: ensured.template?.status || null,
+      };
+    }
+  }
+
+  const templateResult = await sendTemplateMessage(
+    phoneNumberId,
+    token,
+    intl,
+    template,
+    vars,
+  );
+  if (templateResult.ok) {
+    return {
+      sent: true,
+      id: templateResult.data?.messages?.[0]?.id || null,
+      via: "template",
+      template: template.name,
+    };
+  }
+
+  return {
+    sent: false,
+    reason: "template_failed",
+    code: templateResult.data?.error?.code || null,
+    error: frenchSendError(templateResult.data?.error, textError.message),
+    template: template.name,
+  };
 }

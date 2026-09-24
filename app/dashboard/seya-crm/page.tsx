@@ -441,6 +441,10 @@ export default function SeyaCrmPage() {
             action: "send",
             phone: conversation.phone,
             text: message.text,
+            firstName: conversation.firstName,
+            centerName,
+            treatment:
+              conversation.qualification?.need || conversation.treatment || "",
           }),
         });
         const payload = (await response.json().catch(() => ({}))) as {
@@ -819,6 +823,9 @@ export default function SeyaCrmPage() {
                   Envoyer sur WhatsApp
                 </button>
               </div>
+              {agentFeedback ? (
+                <p className="mt-3 text-sm font-medium text-amber-800">{agentFeedback}</p>
+              ) : null}
 
               <div className="mt-5 grid gap-3">
                 {selectedConversation.messages.map((message) => (
