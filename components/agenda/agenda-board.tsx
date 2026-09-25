@@ -551,13 +551,17 @@ export default function AgendaBoard() {
       return;
     }
 
+    const scrollBoard = board;
+
     function onWheel(event: WheelEvent) {
-      const atTop = board.scrollTop <= 0;
+      const atTop = scrollBoard.scrollTop <= 0;
       const atBottom =
-        board.scrollTop + board.clientHeight >= board.scrollHeight - 1;
-      const atLeft = board.scrollLeft <= 0;
+        scrollBoard.scrollTop + scrollBoard.clientHeight >=
+        scrollBoard.scrollHeight - 1;
+      const atLeft = scrollBoard.scrollLeft <= 0;
       const atRight =
-        board.scrollLeft + board.clientWidth >= board.scrollWidth - 1;
+        scrollBoard.scrollLeft + scrollBoard.clientWidth >=
+        scrollBoard.scrollWidth - 1;
 
       if (
         (event.deltaY < 0 && atTop) ||
