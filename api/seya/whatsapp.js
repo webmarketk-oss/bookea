@@ -28,9 +28,9 @@ module.exports = async function handler(req, res) {
 
     let graph = null;
     try {
-      graph = await probeGraph();
+      graph = await diagnoseGraph();
     } catch {
-      graph = { reachable: false, error: "probe_failed" };
+      graph = { reachable: false, error: "probe_failed", diagnosis: "probe_failed" };
     }
     return res.status(200).json({
       ok: true,
@@ -371,35 +371,151 @@ async function graphGet(path) {
   return { ok: response.ok, status: response.status, data };
 }
 
-async function probeGraph() {
-  const token = process.env.WHATSAPP_TOKEN;
-  const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID;
-  if (!token || !phoneNumberId) {
-    return { reachable: false, reason: "not_connected" };
+function graphError(result) {
+  return {
+    ok: Boolean(result?.ok),
+    code: result?.data?.error?.code || null,
+    error: result?.data?.error?.message || null,
+    type: result?.data?.error?.type || null,
+  };
+}
+
+function idSuffix(value) {
+  const text = String(value || "");
+  return text ? text.slice(-4) : null;
+}
+
+async function debugAccessToken(token) {
+  const appId = process.env.META_APP_ID;
+  const appSecret = process.env.META_APP_SECRET;
+  if (!appId || !appSecret) {
+    return { available: false, reason: "no_app_secret" };
   }
 
-  const phone = await graphGet(
-    `${phoneNumberId}?fields=display_phone_number,verified_name,quality_rating,code_verification_status`,
+  const response = await fetch(
+    `https://graph.facebook.com/${GRAPH_VERSION}/debug_token?input_token=${encodeURIComponent(
+      token,
+    )}&access_token=${encodeURIComponent(`${appId}|${appSecret}`)}`,
   );
-  if (!phone.ok) {
+  const data = await response.json().catch(() => ({}));
+  const info = data?.data || {};
+  if (!response.ok || data?.error) {
     return {
-      reachable: false,
-      phoneNumberIdSuffix: String(phoneNumberId).slice(-4),
-      error: phone.data?.error?.message || "graph_phone_failed",
-      code: phone.data?.error?.code || null,
+      available: true,
+      ok: false,
+      error: data?.error?.message || "debug_token_failed",
+      code: data?.error?.code || null,
     };
   }
 
-  const templates = await graphGet(
-    `${wabaId()}/message_templates?limit=80&fields=name,status,language,category`,
-  );
+  return {
+    available: true,
+    ok: Boolean(info.is_valid),
+    isValid: Boolean(info.is_valid),
+    type: info.type || null,
+    appId: info.app_id || null,
+    expiresAt: info.expires_at || 0,
+    scopes: Array.isArray(info.scopes) ? info.scopes : [],
+    granularScopes: Array.isArray(info.granular_scopes)
+      ? info.granular_scopes.map((item) => item.scope).filter(Boolean)
+      : [],
+  };
+}
+
+function diagnoseFromParts({ me, debug, phone, waba, phones }) {
+  if (me.code === 190 || debug.code === 190 || debug.isValid === false) {
+    return "token_invalide_ou_expire";
+  }
+  if (waba.ok === false && (waba.code === 100 || waba.code === 10)) {
+    return "jeton_sans_acces_waba";
+  }
+  if (phone.ok === false && (phone.code === 100 || phone.code === 10)) {
+    if (phones.length === 0) {
+      return "jeton_sans_whatsapp";
+    }
+    return "mauvais_phone_number_id";
+  }
+  if (phone.ok && waba.ok) {
+    return "ok";
+  }
+  return "graph_partiel";
+}
+
+async function diagnoseGraph() {
+  const token = process.env.WHATSAPP_TOKEN;
+  const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID;
+  if (!token || !phoneNumberId) {
+    return { reachable: false, reason: "not_connected", diagnosis: "not_connected" };
+  }
+
+  const waba = wabaId();
+  const [me, debug, phone, wabaInfo, phoneList] = await Promise.all([
+    graphGet("me?fields=id,name"),
+    debugAccessToken(token),
+    graphGet(
+      `${phoneNumberId}?fields=display_phone_number,verified_name,quality_rating,code_verification_status`,
+    ),
+    graphGet(
+      `${waba}?fields=id,name,currency,ownership_type,account_review_status`,
+    ),
+    graphGet(
+      `${waba}/phone_numbers?fields=id,display_phone_number,verified_name,code_verification_status,quality_rating`,
+    ),
+  ]);
+
+  const phonesOnWaba = Array.isArray(phoneList.data?.data)
+    ? phoneList.data.data.map((item) => ({
+        idSuffix: idSuffix(item.id),
+        displayPhoneNumber: item.display_phone_number || null,
+        verifiedName: item.verified_name || null,
+        matchesConfigured: String(item.id) === String(phoneNumberId),
+      }))
+    : [];
+
+  const phonePart = graphError(phone);
+  const wabaPart = graphError(wabaInfo);
+  const diagnosis = diagnoseFromParts({
+    me: graphError(me),
+    debug,
+    phone: phonePart,
+    waba: wabaPart,
+    phones: phonesOnWaba,
+  });
+
+  const templates = phone.ok
+    ? await graphGet(
+        `${waba}/message_templates?limit=80&fields=name,status,language,category`,
+      )
+    : { ok: false, data: {} };
 
   return {
-    reachable: true,
-    displayPhoneNumber: phone.data.display_phone_number || null,
-    verifiedName: phone.data.verified_name || null,
-    qualityRating: phone.data.quality_rating || null,
-    codeVerificationStatus: phone.data.code_verification_status || null,
+    reachable: Boolean(phone.ok),
+    diagnosis,
+    phoneNumberIdSuffix: idSuffix(phoneNumberId),
+    wabaIdSuffix: idSuffix(waba),
+    token: {
+      ok: Boolean(me.ok),
+      name: me.data?.name || null,
+      idSuffix: idSuffix(me.data?.id),
+      ...graphError(me),
+    },
+    debug,
+    phone: {
+      ...phonePart,
+      displayPhoneNumber: phone.data?.display_phone_number || null,
+      verifiedName: phone.data?.verified_name || null,
+      qualityRating: phone.data?.quality_rating || null,
+      codeVerificationStatus: phone.data?.code_verification_status || null,
+    },
+    waba: {
+      ...wabaPart,
+      name: wabaInfo.data?.name || null,
+      review: wabaInfo.data?.account_review_status || null,
+    },
+    phonesOnWaba,
+    phonesOnWabaError: phoneList.ok
+      ? null
+      : phoneList.data?.error?.message || "phones_failed",
     templates: Array.isArray(templates.data?.data)
       ? templates.data.data.map((item) => ({
           name: item.name,
@@ -410,7 +526,9 @@ async function probeGraph() {
       : [],
     templatesError: templates.ok
       ? null
-      : templates.data?.error?.message || "templates_failed",
+      : templates.data?.error?.message || null,
+    error: phonePart.error,
+    code: phonePart.code,
   };
 }
 
