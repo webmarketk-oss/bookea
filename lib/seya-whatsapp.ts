@@ -13,7 +13,7 @@ export function toIntlPhone(value: string) {
   return digits;
 }
 
-export const BOOKEA_SHARED_WHATSAPP_NUMBER = "0623165061";
+export const BOOKEA_SHARED_WHATSAPP_NUMBER = "0629926249";
 
 export function sharedWhatsAppNumber() {
   return (

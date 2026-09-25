@@ -97,7 +97,7 @@ function displayNumber() {
   return (
     process.env.NEXT_PUBLIC_WHATSAPP_NUMBER ||
     process.env.WHATSAPP_DISPLAY_NUMBER ||
-    "0623165061"
+    "0629926249"
   ).trim();
 }
 
