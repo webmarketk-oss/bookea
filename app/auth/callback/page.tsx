@@ -1,7 +1,11 @@
 "use client";
 
 import { BookeaLogo } from "@/components/bookea-logo";
-import { RESET_PASSWORD_PATH, parseAuthRedirect } from "@/lib/auth-recovery";
+import {
+  RESET_PASSWORD_PATH,
+  isPasswordRecoveryPending,
+  parseAuthRedirect,
+} from "@/lib/auth-recovery";
 import { createClient } from "@/lib/supabase";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
@@ -14,58 +18,70 @@ export default function AuthCallbackPage() {
     async function finishAuth() {
       const auth = parseAuthRedirect();
       const supabase = createClient();
-      const shouldDetectRecovery =
-        Boolean(auth.code || auth.tokenHash) && !auth.next && !auth.isRecovery;
-      let isRecovery = auth.isRecovery;
+      let isRecovery =
+        auth.isRecovery ||
+        isPasswordRecoveryPending() ||
+        (auth.next || "").includes(RESET_PASSWORD_PATH);
 
-      const recoveryWait = shouldDetectRecovery
-        ? new Promise<boolean>((resolve) => {
-            let settled = false;
-            const { data } = supabase.auth.onAuthStateChange((event) => {
-              if (event === "PASSWORD_RECOVERY") {
-                settled = true;
-                data.subscription.unsubscribe();
-                resolve(true);
-              }
-            });
+      const recoveryWait = new Promise<boolean>((resolve) => {
+        let settled = false;
+        const { data } = supabase.auth.onAuthStateChange((event) => {
+          if (event === "PASSWORD_RECOVERY") {
+            settled = true;
+            data.subscription.unsubscribe();
+            resolve(true);
+          }
+        });
 
-            window.setTimeout(() => {
-              if (!settled) {
-                data.subscription.unsubscribe();
-                resolve(false);
-              }
-            }, 800);
-          })
-        : Promise.resolve(false);
+        window.setTimeout(() => {
+          if (!settled) {
+            data.subscription.unsubscribe();
+            resolve(false);
+          }
+        }, 1500);
+      });
 
       if (auth.code) {
         const { error } = await supabase.auth.exchangeCodeForSession(auth.code);
 
         if (error) {
-          setMessage("Le lien n'a pas pu être validé.");
-          router.replace("/login");
-          return;
+          const { data: existing } = await supabase.auth.getSession();
+          if (!existing.session) {
+            setMessage("Le lien n'a pas pu être validé.");
+            router.replace(
+              isRecovery ? `${RESET_PASSWORD_PATH}?error=expired` : "/login?reset=expired",
+            );
+            return;
+          }
         }
       } else if (auth.tokenHash) {
         const { error } = await supabase.auth.verifyOtp({
-          type: auth.type === "recovery" ? "recovery" : "email",
+          type: auth.type === "recovery" || isRecovery ? "recovery" : "email",
           token_hash: auth.tokenHash,
         });
 
         if (error) {
-          setMessage("Le lien n'a pas pu être validé.");
-          router.replace("/login");
-          return;
+          const { data: existing } = await supabase.auth.getSession();
+          if (!existing.session) {
+            setMessage("Le lien n'a pas pu être validé.");
+            router.replace(
+              isRecovery ? `${RESET_PASSWORD_PATH}?error=expired` : "/login?reset=expired",
+            );
+            return;
+          }
         }
       }
 
       isRecovery = isRecovery || (await recoveryWait);
 
-      const next =
-        isRecovery || auth.next?.includes(RESET_PASSWORD_PATH)
-          ? RESET_PASSWORD_PATH
-          : auth.next || "/dashboard";
+      const { data: sessionData } = await supabase.auth.getSession();
 
+      if (isRecovery) {
+        router.replace(RESET_PASSWORD_PATH);
+        return;
+      }
+
+      const next = auth.next || (sessionData.session ? "/dashboard" : "/login");
       router.replace(next);
     }
 

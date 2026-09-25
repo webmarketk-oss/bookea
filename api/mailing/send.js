@@ -57,6 +57,13 @@ function personalize(text, vars = {}) {
     nom: String(vars.lastName || vars.nom || "").trim(),
     centre: String(vars.centerName || vars.centre || "").trim(),
     nom_centre: String(vars.centerName || vars.nom_centre || "").trim(),
+    date: String(vars.date || "").trim(),
+    heure: String(vars.time || vars.heure || "").trim(),
+    soin: String(vars.treatment || vars.soin || "").trim(),
+    lien_confirmation: String(
+      vars.confirmationLink || vars.lien_confirmation || vars.lien || "",
+    ).trim(),
+    lien: String(vars.confirmationLink || vars.lien_confirmation || vars.lien || "").trim(),
   };
 
   let output = String(text || "");
@@ -292,6 +299,10 @@ module.exports = async function handler(req, res) {
         firstName: recipient.firstName,
         lastName: recipient.lastName,
         centerName: center.name,
+        date: recipient.date,
+        time: recipient.time,
+        treatment: recipient.treatment,
+        confirmationLink: recipient.confirmationLink,
       };
       const nextSubject = personalize(subject, vars);
       const nextMessage = personalize(message, vars);
@@ -367,6 +378,12 @@ async function loadAllowedRecipients(supabase, centerId, recipientsInput) {
         email: String(item?.email || "").trim().toLowerCase(),
         firstName: String(item?.firstName || item?.prenom || "vous").trim() || "vous",
         lastName: String(item?.lastName || item?.nom || "").trim(),
+        date: String(item?.date || "").trim(),
+        time: String(item?.time || item?.heure || "").trim(),
+        treatment: String(item?.treatment || item?.soin || "").trim(),
+        confirmationLink: String(
+          item?.confirmationLink || item?.lien_confirmation || item?.lien || "",
+        ).trim(),
       };
     })
     .filter((item) => isValidEmail(item.email));
@@ -436,19 +453,91 @@ async function loadAllowedRecipients(supabase, centerId, recipientsInput) {
     });
   }
 
+  const unmatchedEmails = [
+    ...new Set(
+      requested
+        .filter((item) => {
+          const allowed = allowedEmails.get(item.id);
+          return !allowed;
+        })
+        .map((item) => item.email),
+    ),
+  ];
+
+  if (unmatchedEmails.length > 0) {
+    const { data: emailClients, error: emailClientsError } = await supabase
+      .from("clients")
+      .select("id, first_name, last_name, email")
+      .eq("center_id", centerId)
+      .in("email", unmatchedEmails);
+
+    if (emailClientsError) {
+      throw new Error(emailClientsError.message);
+    }
+
+    const registerClient = (row) => {
+      const email = String(row.email || "").trim().toLowerCase();
+      if (!isValidEmail(email) || allowedEmails.has(`client:${row.id}`)) {
+        return;
+      }
+      allowedEmails.set(email, {
+        kind: "client",
+        rawId: row.id,
+        email,
+        firstName: String(row.first_name || "").trim() || "vous",
+        lastName: String(row.last_name || "").trim(),
+      });
+    };
+
+    for (const row of emailClients ?? []) {
+      registerClient(row);
+    }
+
+    const foundEmails = new Set(
+      (emailClients ?? []).map((row) =>
+        String(row.email || "").trim().toLowerCase(),
+      ),
+    );
+
+    for (const email of unmatchedEmails.filter((value) => !foundEmails.has(value))) {
+      const { data: row, error } = await supabase
+        .from("clients")
+        .select("id, first_name, last_name, email")
+        .eq("center_id", centerId)
+        .ilike("email", email)
+        .limit(1)
+        .maybeSingle();
+
+      if (error) {
+        throw new Error(error.message);
+      }
+
+      if (row) {
+        registerClient(row);
+      }
+    }
+  }
+
   const unique = new Map();
 
   for (const item of requested) {
-    const allowed = allowedEmails.get(item.id);
-    if (!allowed || allowed.email !== item.email) {
+    const allowed = allowedEmails.get(item.id) || allowedEmails.get(item.email);
+    if (!allowed) {
       continue;
     }
     if (unique.has(allowed.email)) {
       continue;
     }
     unique.set(allowed.email, {
-      id: item.id,
+      id: item.id || `client:${allowed.rawId}`,
       ...allowed,
+      email: allowed.email,
+      firstName: item.firstName || allowed.firstName,
+      lastName: item.lastName || allowed.lastName,
+      date: item.date,
+      time: item.time,
+      treatment: item.treatment,
+      confirmationLink: item.confirmationLink,
     });
   }
 

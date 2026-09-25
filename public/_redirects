@@ -6,3 +6,5 @@
 /dashboard/crm-leads/pipeline /dashboard/crm-leads/pipeline/index.html 200
 /dashboard/crm-leads/tasks /dashboard/crm-leads/tasks/index.html 200
 /login /login/index.html 200
+/auth/callback /auth/callback/index.html 200
+/auth/reset-password /auth/reset-password/index.html 200

@@ -18,14 +18,16 @@ import { issueAppointmentConfirmationUrl } from "@/lib/appointment-confirmation"
 import { markPastAppointmentsPresent } from "@/lib/appointment-presence";
 import {
   emptyClientBalanceDueIndex,
-  hasOutstandingPayment,
+  getPaymentTone,
   loadClientBalanceDueIndex,
+  paymentToneStyles,
 } from "@/lib/client-balance";
 import {
   loadCrmAgendaContacts,
   type CrmAgendaContact,
 } from "@/lib/crm-supabase";
 import { saveAppointmentStatusOverride } from "@/lib/appointment-crm-sync";
+import { sendAppointmentConfirmationEmail } from "@/lib/send-mailing";
 import {
   cancelAppointmentSmsJobs,
   rescheduleAppointmentSmsJobs,
@@ -61,17 +63,32 @@ import {
 import { getActiveCenterContext } from "@/lib/center-access";
 import { loadCenterHours, saveCenterHours } from "@/lib/center-hours";
 import {
+  dayHoursForSchedule,
+  defaultTeamSchedules,
+  emptyTeamSchedule,
+  isPractitionerWorkingOnDate,
+  loadTeamPlanning,
+  practitionerColorOptions,
+  saveTeamPlanning,
+  teamAbsenceTypes,
+  type TeamAbsence,
+  type TeamAbsenceType,
+  type TeamSchedule,
+} from "@/lib/team-planning";
+import {
   Appointment,
   AppointmentKind,
   AppointmentSource,
   AppointmentStatus,
   Cabin,
+  Practitioner,
 } from "@/types/agenda";
 import {
   Bot,
   CalendarClock,
   CalendarDays,
   CalendarCheck,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   CheckCircle2,
@@ -210,23 +227,6 @@ type ParsedSeyaBlock = {
   start: string;
 };
 
-type TeamAbsence = {
-  id: string;
-  date: string;
-  type: "Vacance" | "Repos exceptionnel";
-};
-
-type TeamSchedule = {
-  practitionerId: string;
-  startDate: string;
-  months: 1 | 3 | 6;
-  workingDays: number[];
-  startTime: string;
-  endTime: string;
-  absenceDate: string;
-  absences: TeamAbsence[];
-};
-
 type CenterDayHours = {
   weekday: number;
   label: string;
@@ -253,59 +253,6 @@ const defaultCenterDayHours: CenterDayHours[] = weekDays.map((day) => ({
   closed: false,
 }));
 
-const defaultTeamSchedules: TeamSchedule[] = [
-  {
-    practitionerId: "samantha",
-    startDate: todayIso(),
-    months: 6,
-    workingDays: [1, 2, 3, 4, 5],
-    startTime: "09:00",
-    endTime: "18:00",
-    absenceDate: todayIso(),
-    absences: [],
-  },
-  {
-    practitionerId: "marie",
-    startDate: todayIso(),
-    months: 3,
-    workingDays: [1, 2, 3, 5],
-    startTime: "09:00",
-    endTime: "17:00",
-    absenceDate: todayIso(),
-    absences: [],
-  },
-  {
-    practitionerId: "camille",
-    startDate: todayIso(),
-    months: 3,
-    workingDays: [2, 3, 4, 5, 6],
-    startTime: "10:00",
-    endTime: "19:00",
-    absenceDate: todayIso(),
-    absences: [],
-  },
-  {
-    practitionerId: "ines",
-    startDate: todayIso(),
-    months: 1,
-    workingDays: [1, 3, 5],
-    startTime: "09:30",
-    endTime: "16:30",
-    absenceDate: todayIso(),
-    absences: [],
-  },
-  {
-    practitionerId: "aurelie",
-    startDate: todayIso(),
-    months: 6,
-    workingDays: [1, 2, 3, 5, 6],
-    startTime: "09:00",
-    endTime: "18:00",
-    absenceDate: todayIso(),
-    absences: [],
-  },
-];
-
 export default function AgendaBoard() {
   const searchParams = useSearchParams();
   const rdvPrefill = getRdvPrefill(searchParams);
@@ -319,6 +266,7 @@ export default function AgendaBoard() {
     emptyClientBalanceDueIndex,
   );
   const [cabinList, setCabinList] = useState(cabins);
+  const [practitionerList, setPractitionerList] = useState(practitioners);
   const [isLoadingAgenda, setIsLoadingAgenda] = useState(true);
   const [agendaError, setAgendaError] = useState("");
   const [agendaNotice, setAgendaNotice] = useState("");
@@ -328,8 +276,10 @@ export default function AgendaBoard() {
   const [selectedDate, setSelectedDate] = useState(
     agendaFocus?.date ?? rdvPrefill?.date ?? todayIso()
   );
-  const [selectedCabin, setSelectedCabin] = useState("Toutes");
-  const [selectedPractitioner, setSelectedPractitioner] = useState("Toutes");
+  const [selectedCabinIds, setSelectedCabinIds] = useState<string[]>([]);
+  const [selectedPractitionerIds, setSelectedPractitionerIds] = useState<
+    string[]
+  >([]);
   const [centerDayHours, setCenterDayHours] = useState(defaultCenterDayHours);
   const [seyaCommand, setSeyaCommand] = useState("");
   const [seyaFeedback, setSeyaFeedback] = useState("");
@@ -345,6 +295,9 @@ export default function AgendaBoard() {
   const [agendaContacts, setAgendaContacts] = useState<CrmAgendaContact[]>([]);
   const [selectedAppointmentId, setSelectedAppointmentId] = useState<
     string | null
+  >(null);
+  const [focusedAppointmentId, setFocusedAppointmentId] = useState<
+    string | null
   >(agendaFocus?.appointmentId ?? null);
   const [movingAppointmentId, setMovingAppointmentId] = useState<string | null>(
     null
@@ -357,19 +310,20 @@ export default function AgendaBoard() {
     }),
   );
   const [sendSmsNow, setSendSmsNow] = useState(true);
+  const [sendEmailNow, setSendEmailNow] = useState(true);
   const [sendSmsJ7, setSendSmsJ7] = useState(false);
   const [sendSmsJ5, setSendSmsJ5] = useState(false);
   const [sendSms48h, setSendSms48h] = useState(false);
   const [sendSms24h, setSendSms24h] = useState(false);
-  const [sendDepositLink, setSendDepositLink] = useState(false);
   const [depositLinks, setDepositLinks] = useState<CenterDepositLinkSetting[]>(
     defaultCenterDepositLinks.filter((link) => link.active),
   );
-  const [selectedDepositLinkId, setSelectedDepositLinkId] = useState(
-    String(defaultCenterDepositLinks[0]?.id ?? ""),
-  );
+  const [selectedDepositLinkId, setSelectedDepositLinkId] = useState("");
   const [sendBirthdaySms, setSendBirthdaySms] = useState(true);
   const [smsSettings, setSmsSettings] = useState<CenterSmsSettings | null>(null);
+  const [moveNotifyAppointment, setMoveNotifyAppointment] =
+    useState<Appointment | null>(null);
+  const [isSendingMoveNotify, setIsSendingMoveNotify] = useState(false);
   const [contactSearch, setContactSearch] = useState(
     rdvPrefill?.personName ?? ""
   );
@@ -381,22 +335,36 @@ export default function AgendaBoard() {
   const [isSavingAppointment, setIsSavingAppointment] = useState(false);
   const savingAppointmentRef = useRef(false);
   const centerNameRef = useRef("");
+  const teamSaveTimerRef = useRef<number | null>(null);
+  const teamPlanningRef = useRef({
+    practitioners,
+    schedules: defaultTeamSchedules(),
+  });
 
   async function refreshAgenda() {
     setAgendaError("");
 
     try {
-      const [loadedAppointments, center, nextBalanceDueIndex, nextHours] =
+      const [loadedAppointments, center, nextBalanceDueIndex, nextHours, team] =
         await Promise.all([
           loadCrmAppointments(),
           getActiveCenterContext(),
           loadClientBalanceDueIndex().catch(() => emptyClientBalanceDueIndex()),
           loadCenterHours().catch(() => null),
+          loadTeamPlanning().catch(() => null),
         ]);
       centerNameRef.current = center.centerName;
       setBalanceDueIndex(nextBalanceDueIndex);
       if (nextHours) {
         setCenterDayHours(nextHours);
+      }
+      if (team) {
+        teamPlanningRef.current = {
+          practitioners: team.practitioners,
+          schedules: team.schedules,
+        };
+        setPractitionerList(team.practitioners);
+        setTeamSchedules(team.schedules);
       }
 
       setAppointmentList(
@@ -440,43 +408,170 @@ export default function AgendaBoard() {
   }, []);
 
   useEffect(() => {
-    const appointmentId = agendaFocus?.appointmentId;
-
-    if (!appointmentId || isLoadingAgenda) {
+    if (isLoadingAgenda) {
       return;
     }
 
-    const focusedAppointment = appointmentList.find(
-      (appointment) => appointment.id === appointmentId
-    );
+    if (!agendaFocus?.appointmentId && !agendaFocus?.date && !agendaFocus?.start) {
+      return;
+    }
+
+    const focusedAppointment =
+      (agendaFocus.appointmentId
+        ? appointmentList.find(
+            (appointment) => appointment.id === agendaFocus.appointmentId,
+          )
+        : undefined) ??
+      appointmentList.find(
+        (appointment) =>
+          Boolean(agendaFocus.date) &&
+          Boolean(agendaFocus.start) &&
+          appointment.date === agendaFocus.date &&
+          appointment.start === agendaFocus.start,
+      );
 
     if (focusedAppointment && focusedAppointment.date !== selectedDate) {
       setSelectedDate(focusedAppointment.date);
       return;
     }
 
-    const frame = window.requestAnimationFrame(() => {
-      const node = boardScrollRef.current?.querySelector(
-        `[data-appointment-id="${CSS.escape(appointmentId)}"]`
-      );
+    if (
+      !focusedAppointment &&
+      agendaFocus.date &&
+      agendaFocus.date !== selectedDate
+    ) {
+      setSelectedDate(agendaFocus.date);
+      return;
+    }
 
-      if (!(node instanceof HTMLElement)) {
-        return;
+    if (activeTab !== "agenda") {
+      setActiveTab("agenda");
+      return;
+    }
+
+    if (agendaView !== "day") {
+      setAgendaView("day");
+      return;
+    }
+
+    if (
+      focusedAppointment &&
+      selectedCabinIds.length > 0 &&
+      !selectedCabinIds.includes(focusedAppointment.cabinId)
+    ) {
+      setSelectedCabinIds([]);
+      return;
+    }
+
+    if (
+      focusedAppointment &&
+      selectedPractitionerIds.length > 0 &&
+      !selectedPractitionerIds.includes(focusedAppointment.practitionerId)
+    ) {
+      setSelectedPractitionerIds([]);
+      return;
+    }
+
+    if (focusedAppointment && focusedAppointmentId !== focusedAppointment.id) {
+      setFocusedAppointmentId(focusedAppointment.id);
+    }
+
+    const targetId = focusedAppointment?.id ?? agendaFocus.appointmentId;
+    const targetStart = focusedAppointment?.start ?? agendaFocus.start;
+
+    function scrollBoardToFocus() {
+      const board = boardScrollRef.current;
+
+      if (!board) {
+        return false;
       }
 
-      boardScrollRef.current
-        ?.closest("section")
-        ?.scrollIntoView({ block: "start", behavior: "instant" });
-      node.scrollIntoView({ block: "center", behavior: "smooth" });
-    });
+      const card = targetId
+        ? board.querySelector(
+            `[data-appointment-id="${CSS.escape(targetId)}"]`,
+          )
+        : null;
+      const slot = targetStart
+        ? board.querySelector(`[data-agenda-slot="${CSS.escape(targetStart)}"]`)
+        : null;
+      const node =
+        card instanceof HTMLElement
+          ? card
+          : slot instanceof HTMLElement
+            ? slot
+            : null;
 
-    return () => window.cancelAnimationFrame(frame);
+      if (!node) {
+        return false;
+      }
+
+      const boardRect = board.getBoundingClientRect();
+      const nodeRect = node.getBoundingClientRect();
+      board.scrollTo({
+        top: Math.max(
+          0,
+          board.scrollTop +
+            (nodeRect.top - boardRect.top) -
+            board.clientHeight / 2 +
+            nodeRect.height / 2,
+        ),
+        behavior: "smooth",
+      });
+
+      return true;
+    }
+
+    const timers = [0, 80, 250, 600].map((delay) =>
+      window.setTimeout(() => {
+        scrollBoardToFocus();
+      }, delay),
+    );
+
+    return () => {
+      timers.forEach((timer) => window.clearTimeout(timer));
+    };
   }, [
+    activeTab,
     agendaFocus?.appointmentId,
+    agendaFocus?.date,
+    agendaFocus?.start,
+    agendaSlots,
+    agendaView,
     appointmentList,
+    focusedAppointmentId,
     isLoadingAgenda,
+    selectedCabinIds,
     selectedDate,
+    selectedPractitionerIds,
   ]);
+
+  useEffect(() => {
+    const board = boardScrollRef.current;
+    if (!board) {
+      return;
+    }
+
+    function onWheel(event: WheelEvent) {
+      const atTop = board.scrollTop <= 0;
+      const atBottom =
+        board.scrollTop + board.clientHeight >= board.scrollHeight - 1;
+      const atLeft = board.scrollLeft <= 0;
+      const atRight =
+        board.scrollLeft + board.clientWidth >= board.scrollWidth - 1;
+
+      if (
+        (event.deltaY < 0 && atTop) ||
+        (event.deltaY > 0 && atBottom) ||
+        (event.deltaX < 0 && atLeft) ||
+        (event.deltaX > 0 && atRight)
+      ) {
+        event.preventDefault();
+      }
+    }
+
+    board.addEventListener("wheel", onWheel, { passive: false });
+    return () => board.removeEventListener("wheel", onWheel);
+  }, [activeTab, agendaView]);
 
   useEffect(() => {
     function syncPublicBookings() {
@@ -537,17 +632,13 @@ export default function AgendaBoard() {
       .then((result) => setSmsSettings(result.settings))
       .catch(() => null);
     void fetch("/api/sms/dispatch").catch(() => null);
-    void loadCrmAgendaContacts()
-      .then(setAgendaContacts)
-      .catch(() => setAgendaContacts([]));
+    void refreshAgendaContacts();
 
     function refreshDepositLinks() {
       const nextLinks = activeDepositLinks();
       setDepositLinks(nextLinks);
       setSelectedDepositLinkId((current) =>
-        nextLinks.some((link) => String(link.id) === current)
-          ? current
-          : String(nextLinks[0]?.id ?? ""),
+        nextLinks.some((link) => String(link.id) === current) ? current : "",
       );
     }
 
@@ -560,28 +651,37 @@ export default function AgendaBoard() {
       );
   }, []);
 
-  useEffect(() => {
-    setSelectedDepositLinkId((current) =>
-      pickDepositLinkId(depositLinks, appointmentForm.treatment, current),
-    );
-  }, [appointmentForm.treatment, depositLinks]);
-
   const visibleAppointments = useMemo(
     () =>
       appointmentList.filter((appointment) => {
         const dateMatch = appointment.date === selectedDate;
-        const cabinMatch =
-          selectedCabin === "Toutes" || appointment.cabinId === selectedCabin;
-        const practitionerMatch =
-          selectedPractitioner === "Toutes" ||
-          appointment.practitionerId === selectedPractitioner;
+        const cabinMatch = matchesMultiSelection(
+          selectedCabinIds,
+          appointment.cabinId,
+        );
+        const practitionerMatch = matchesMultiSelection(
+          selectedPractitionerIds,
+          appointment.practitionerId,
+        );
 
         return dateMatch && cabinMatch && practitionerMatch;
       }),
-    [appointmentList, selectedCabin, selectedDate, selectedPractitioner]
+    [appointmentList, selectedCabinIds, selectedDate, selectedPractitionerIds]
   );
 
-  const practitionersOfDay = practitioners.filter((practitioner) => {
+  const visibleCabinList = useMemo(() => {
+    if (selectedCabinIds.length === 0) {
+      return cabinList;
+    }
+
+    const nextCabins = cabinList.filter((cabin) =>
+      selectedCabinIds.includes(cabin.id),
+    );
+
+    return nextCabins.length > 0 ? nextCabins : cabinList;
+  }, [cabinList, selectedCabinIds]);
+
+  const practitionersOfDay = practitionerList.filter((practitioner) => {
     const schedule = teamSchedules.find(
       (item) => item.practitionerId === practitioner.id
     );
@@ -626,29 +726,29 @@ export default function AgendaBoard() {
   }
 
   const appointmentsToConfirm = useMemo(() => {
-    const seen = new Set<string>();
+    return appointmentList
+      .filter((appointment) => {
+        if (appointment.status !== "À confirmer") {
+          return false;
+        }
 
-    return visibleAppointments.filter((appointment) => {
-      if (appointment.status !== "À confirmer") {
-        return false;
-      }
+        if (appointment.kind && appointment.kind !== "Rendez-vous") {
+          return false;
+        }
 
-      if (appointment.kind && appointment.kind !== "Rendez-vous") {
-        return false;
-      }
-
-      const key =
-        appointment.clientId ||
-        `${appointment.personName.trim().toLowerCase()}|${appointment.phone}`;
-
-      if (seen.has(key)) {
-        return false;
-      }
-
-      seen.add(key);
-      return true;
-    });
-  }, [visibleAppointments]);
+        return isAppointmentWithinHoursAhead(
+          appointment.date,
+          appointment.start,
+          72,
+        );
+      })
+      .sort((current, next) => {
+        const dateCompare = current.date.localeCompare(next.date);
+        return dateCompare !== 0
+          ? dateCompare
+          : current.start.localeCompare(next.start);
+      });
+  }, [appointmentList]);
 
   const stats = useMemo(() => {
     const confirmed = visibleAppointments.filter(
@@ -758,30 +858,117 @@ export default function AgendaBoard() {
         )
       );
 
-      if (selectedCabin === cabinToRemove.id) {
-        setSelectedCabin("Toutes");
-      }
+      setSelectedCabinIds((current) =>
+        current.filter((id) => id !== cabinToRemove.id),
+      );
 
       return currentCabins.slice(0, -1);
     });
+  }
+
+  function persistTeamPlanning(next?: {
+    practitioners?: Practitioner[];
+    schedules?: TeamSchedule[];
+  }) {
+    teamPlanningRef.current = {
+      practitioners:
+        next?.practitioners ?? teamPlanningRef.current.practitioners,
+      schedules: next?.schedules ?? teamPlanningRef.current.schedules,
+    };
+    if (teamSaveTimerRef.current) {
+      window.clearTimeout(teamSaveTimerRef.current);
+    }
+    teamSaveTimerRef.current = window.setTimeout(() => {
+      void saveTeamPlanning(teamPlanningRef.current).catch(() => null);
+    }, 400);
   }
 
   function updateTeamSchedule(
     practitionerId: string,
     updates: Partial<TeamSchedule>
   ) {
-    setTeamSchedules((currentSchedules) =>
-      currentSchedules.map((schedule) =>
+    setTeamSchedules((currentSchedules) => {
+      const nextSchedules = currentSchedules.map((schedule) =>
         schedule.practitionerId === practitionerId
           ? { ...schedule, ...updates }
           : schedule
-      )
+      );
+      persistTeamPlanning({ schedules: nextSchedules });
+      return nextSchedules;
+    });
+  }
+
+  function updatePractitioner(
+    practitionerId: string,
+    updates: Partial<Practitioner>,
+  ) {
+    setPractitionerList((current) => {
+      const next = current.map((practitioner) =>
+        practitioner.id === practitionerId
+          ? { ...practitioner, ...updates }
+          : practitioner
+      );
+      persistTeamPlanning({
+        practitioners: next.map((practitioner) => ({
+          ...practitioner,
+          name: practitioner.name.trim() || "Praticienne",
+        })),
+      });
+      return next;
+    });
+  }
+
+  function addPractitioner() {
+    const usedColors = new Set(practitionerList.map((item) => item.color));
+    const color =
+      practitionerColorOptions.find((item) => !usedColors.has(item)) ??
+      practitionerColorOptions[
+        practitionerList.length % practitionerColorOptions.length
+      ];
+    const practitioner: Practitioner = {
+      id: `praticienne-${crypto.randomUUID()}`,
+      name: "Nouvelle praticienne",
+      role: "Polyvalente",
+      color,
+    };
+    const nextPractitioners = [...practitionerList, practitioner];
+    const nextSchedules = [
+      ...teamSchedules,
+      emptyTeamSchedule(practitioner.id),
+    ];
+    setPractitionerList(nextPractitioners);
+    setTeamSchedules(nextSchedules);
+    persistTeamPlanning({
+      practitioners: nextPractitioners,
+      schedules: nextSchedules,
+    });
+  }
+
+  function removePractitioner(practitionerId: string) {
+    const nextPractitioners = practitionerList.filter(
+      (practitioner) => practitioner.id !== practitionerId,
     );
+    const nextSchedules = teamSchedules.filter(
+      (schedule) => schedule.practitionerId !== practitionerId,
+    );
+    setPractitionerList(nextPractitioners);
+    setTeamSchedules(nextSchedules);
+    persistTeamPlanning({
+      practitioners: nextPractitioners,
+      schedules: nextSchedules,
+    });
+  }
+
+  function refreshAgendaContacts() {
+    return loadCrmAgendaContacts()
+      .then(setAgendaContacts)
+      .catch(() => setAgendaContacts([]));
   }
 
   function applyReminderDefaults(settings = smsSettings) {
     const flags = reminderFlagsFromSettings(settings);
     setSendSmsNow(flags.sendSmsNow);
+    setSendEmailNow(flags.sendEmailNow);
     setSendSmsJ5(flags.sendSmsJ5);
     setSendSms48h(flags.sendSms48h);
     setSendSms24h(flags.sendSms24h);
@@ -795,15 +982,10 @@ export default function AgendaBoard() {
     setPickedContact(null);
     setEditingClient(false);
     applyReminderDefaults();
-    setSendDepositLink(false);
-    setSelectedDepositLinkId((current) =>
-      pickDepositLinkId(depositLinks, "", current),
-    );
+    setSelectedDepositLinkId("");
     setSendBirthdaySms(true);
     setIsModalOpen(true);
-    void loadCrmAgendaContacts()
-      .then(setAgendaContacts)
-      .catch(() => null);
+    void refreshAgendaContacts();
   }
 
   async function addAppointment() {
@@ -823,20 +1005,20 @@ export default function AgendaBoard() {
       date: appointmentForm.date,
       start: appointmentForm.start,
       duration: appointmentForm.duration,
-      status:
-        appointmentForm.source === "Client" &&
-        (appointmentForm.kind ?? "Rendez-vous") === "Rendez-vous"
-          ? statusWhenClientAppointmentPositioned(
-              appointmentForm.date,
-              appointmentForm.start,
-            )
-          : appointmentForm.status,
+      status: appointmentForm.status,
       source: appointmentForm.source,
       email: appointmentForm.email.trim() || undefined,
       kind: appointmentForm.kind,
       notes: appointmentForm.notes.trim() || undefined,
       birthDate: appointmentForm.birthDate || undefined,
     };
+
+    Object.assign(appointment, withClientPositionStatus(appointment));
+
+    if (isAgendaBlockKind(appointment.kind)) {
+      appointment.personName = appointment.personName || appointment.kind || "Pause";
+      appointment.treatment = appointment.treatment || appointment.kind || "Pause";
+    }
 
     if (!appointment.personName) {
       setAgendaError("Indiquez un nom.");
@@ -870,13 +1052,19 @@ export default function AgendaBoard() {
         appointmentId: savedAppointment.id,
       };
       const notices = ["RDV enregistré."];
-
-      if (
+      const appointmentEmail = String(
+        savedAppointment.email || appointment.email || "",
+      ).trim();
+      const shouldSendConfirmationEmail =
+        sendEmailNow &&
+        smsSettings?.confirmationEmailEnabled !== false &&
+        Boolean(appointmentEmail);
+      const canNotifyAppointment =
         appointment.kind !== "Pause" &&
         appointment.kind !== "Formation" &&
-        appointment.kind !== "Indisponible" &&
-        savedAppointment.phone
-      ) {
+        appointment.kind !== "Indisponible";
+
+      if (canNotifyAppointment && (savedAppointment.phone || shouldSendConfirmationEmail)) {
         const reminderJobs: Array<{
           kind: AppointmentReminderKind;
           templateId?: string;
@@ -884,7 +1072,9 @@ export default function AgendaBoard() {
         }> = [];
 
         if (
+          savedAppointment.phone &&
           sendSmsJ7 &&
+          smsSettings?.reminderJ7Enabled !== false &&
           isLaserRdv(
             savedAppointment.treatment,
             savedAppointment.cabinId,
@@ -898,7 +1088,7 @@ export default function AgendaBoard() {
           });
         }
 
-        if (sendSmsJ5) {
+        if (savedAppointment.phone && sendSmsJ5 && smsSettings?.reminderJ5Enabled) {
           reminderJobs.push({
             kind: "reminder_j5",
             templateId: smsSettings?.reminderJ5TemplateId,
@@ -906,7 +1096,7 @@ export default function AgendaBoard() {
           });
         }
 
-        if (sendSms48h) {
+        if (savedAppointment.phone && sendSms48h && smsSettings?.reminder48hEnabled) {
           reminderJobs.push({
             kind: "reminder_48h",
             templateId: smsSettings?.reminder48hTemplateId,
@@ -914,7 +1104,7 @@ export default function AgendaBoard() {
           });
         }
 
-        if (sendSms24h) {
+        if (savedAppointment.phone && sendSms24h && smsSettings?.reminder24hEnabled) {
           reminderJobs.push({
             kind: "reminder_24h",
             templateId: smsSettings?.reminder24hTemplateId,
@@ -922,7 +1112,13 @@ export default function AgendaBoard() {
           });
         }
 
-        if (sendSmsNow || reminderJobs.length > 0) {
+        if (
+          (sendSmsNow &&
+            smsSettings?.confirmationEnabled !== false &&
+            savedAppointment.phone) ||
+          shouldSendConfirmationEmail ||
+          reminderJobs.length > 0
+        ) {
           try {
             smsVars.confirmationLink = await issueAppointmentConfirmationUrl(
               savedAppointment.id,
@@ -932,7 +1128,11 @@ export default function AgendaBoard() {
           }
         }
 
-        if (sendSmsNow) {
+        if (
+          savedAppointment.phone &&
+          sendSmsNow &&
+          smsSettings?.confirmationEnabled !== false
+        ) {
           const confirmation = await sendSavedTemplateSms(
             smsSettings?.confirmationTemplateId,
             smsVars,
@@ -941,6 +1141,24 @@ export default function AgendaBoard() {
             confirmation.ok
               ? "SMS de confirmation envoyé."
               : "Le SMS de confirmation n'a pas pu partir.",
+          );
+        }
+
+        if (shouldSendConfirmationEmail) {
+          const confirmationEmail = await sendAppointmentConfirmationEmail({
+            clientId: savedAppointment.clientId,
+            email: appointmentEmail,
+            firstName: smsVars.firstName,
+            lastName: smsVars.lastName,
+            date: smsVars.date,
+            time: smsVars.time,
+            treatment: smsVars.treatment,
+            confirmationLink: smsVars.confirmationLink,
+          });
+          notices.push(
+            confirmationEmail.ok
+              ? "Mail de confirmation envoyé."
+              : "Le mail de confirmation n'a pas pu partir.",
           );
         }
 
@@ -960,42 +1178,25 @@ export default function AgendaBoard() {
           );
         }
 
-        if (sendDepositLink) {
-          const depositLink =
-            depositLinks.find(
-              (link) => String(link.id) === selectedDepositLinkId,
-            ) ?? depositLinks[0];
-
-          if (depositLink?.url.trim()) {
-            const deposit = await sendBookeaSms({
-              phone: savedAppointment.phone,
-              firstName: smsVars.firstName,
-              lastName: smsVars.lastName,
-              date: smsVars.date,
-              time: smsVars.time,
-              treatment: savedAppointment.treatment,
-              centerName: centerNameRef.current,
-              appointmentId: savedAppointment.id,
-              message: `${depositLink.message} ${depositLink.url}`.trim(),
-            });
-            notices.push(
-              deposit.ok
-                ? "Lien d'acompte envoyé."
-                : "Le lien d'acompte n'a pas pu partir.",
-            );
-          } else {
-            notices.push("Aucun lien d'acompte configuré.");
-          }
+        if (savedAppointment.phone && selectedDepositLinkId) {
+          notices.push(
+            await sendSelectedDepositLinkSms(
+              savedAppointment,
+              selectedDepositLinkId,
+              depositLinks,
+              centerNameRef.current,
+            ),
+          );
         }
 
-        if (appointment.birthDate) {
+        if (savedAppointment.phone && appointment.birthDate) {
           const birthday = await syncBirthdaySms({
             clientId: savedAppointment.clientId,
             birthDate: appointment.birthDate,
             phone: savedAppointment.phone,
             firstName: smsVars.firstName,
             lastName: smsVars.lastName,
-            enabled: sendBirthdaySms,
+            enabled: sendBirthdaySms && smsSettings?.birthdaySmsEnabled !== false,
           });
           notices.push(
             sendBirthdaySms
@@ -1016,12 +1217,10 @@ export default function AgendaBoard() {
       setSelectedDate(savedAppointment.date);
       setAgendaNotice(notices.join(" "));
       applyReminderDefaults();
-      setSendDepositLink(false);
+      setSelectedDepositLinkId("");
       setSendBirthdaySms(true);
       setIsModalOpen(false);
-      void loadCrmAgendaContacts()
-        .then(setAgendaContacts)
-        .catch(() => null);
+      void refreshAgendaContacts();
     } catch (error) {
       setAgendaError(
         error instanceof Error
@@ -1073,10 +1272,15 @@ export default function AgendaBoard() {
     });
 
     persistCrmAppointment(updatedAppointment)
-      .then((savedAppointment) => {
+      .then(async (savedAppointment) => {
         replaceAppointment(appointmentId, savedAppointment);
         unlinkPublicBooking(appointmentBeforeMove);
-        return rescheduleAppointmentSmsJobs(savedAppointment.id);
+        await rescheduleAppointmentSmsJobs(savedAppointment.id);
+        if (canOfferAppointmentNotify(savedAppointment, smsSettings)) {
+          setMoveNotifyAppointment(savedAppointment);
+        } else {
+          setAgendaNotice("RDV déplacé.");
+        }
       })
       .catch((error) => {
       setAgendaError(
@@ -1086,6 +1290,19 @@ export default function AgendaBoard() {
       );
       void refreshAgenda();
     });
+  }
+
+  async function sendSelectedConfirmations(
+    appointment: Appointment,
+    notify: { email: boolean; sms: boolean },
+    prefix = "",
+  ) {
+    const notices = await sendAppointmentConfirmations(appointment, {
+      ...notify,
+      settings: smsSettings,
+    });
+
+    setAgendaNotice([prefix, ...notices].filter(Boolean).join(" ").trim());
   }
 
   function startMoveAppointment(appointmentId: string) {
@@ -1133,27 +1350,52 @@ export default function AgendaBoard() {
     }
   }
 
-  async function updateAppointment(updatedAppointment: Appointment) {
+  async function updateAppointment(
+    updatedAppointment: Appointment,
+    notify?: { email?: boolean; sms?: boolean; depositLinkId?: string },
+  ) {
     const previousAppointments = appointmentList;
     const localId = updatedAppointment.id;
+    const nextAppointment = withClientPositionStatus(updatedAppointment);
     setAppointmentList((currentAppointments) =>
       currentAppointments.map((appointment) =>
-        appointment.id === localId ? updatedAppointment : appointment
+        appointment.id === localId ? nextAppointment : appointment
       )
     );
-    saveAppointmentStatusOverride(updatedAppointment);
+    saveAppointmentStatusOverride(nextAppointment);
     setSelectedDate(updatedAppointment.date);
 
     try {
-      const savedAppointment = await persistCrmAppointment(updatedAppointment);
+      const savedAppointment = await persistCrmAppointment(nextAppointment);
       replaceAppointment(localId, savedAppointment);
-      unlinkPublicBooking(updatedAppointment);
+      unlinkPublicBooking(nextAppointment);
       if (savedAppointment.status === "Annulation") {
         await cancelAppointmentSmsJobs(savedAppointment.id);
         setAgendaNotice("RDV mis à jour. Les rappels SMS prévus sont annulés.");
       } else {
         await rescheduleAppointmentSmsJobs(savedAppointment.id);
-        setAgendaNotice("RDV mis à jour.");
+        const confirmationNotices = await sendAppointmentConfirmations(
+          savedAppointment,
+          {
+            sms: Boolean(notify?.sms),
+            email: Boolean(notify?.email),
+            settings: smsSettings,
+          },
+        );
+        const depositNotice = notify?.depositLinkId
+          ? await sendSelectedDepositLinkSms(
+              savedAppointment,
+              notify.depositLinkId,
+              depositLinks,
+              centerNameRef.current,
+            )
+          : "";
+        setAgendaNotice(
+          ["RDV mis à jour.", ...confirmationNotices, depositNotice]
+            .filter(Boolean)
+            .join(" ")
+            .trim(),
+        );
       }
     } catch (error) {
       setAppointmentList(previousAppointments);
@@ -1225,7 +1467,7 @@ export default function AgendaBoard() {
 
   function selectContact(contact: (typeof agendaContacts)[number]) {
     setPickedContact(contact);
-    setContactSearch(contact.name);
+    setContactSearch("");
     setEditingClient(false);
     setAppointmentForm((form) =>
       applyClientPositionStatus({
@@ -1239,6 +1481,19 @@ export default function AgendaBoard() {
         kind: "Rendez-vous",
       }),
     );
+  }
+
+  function clearSelectedClient() {
+    setPickedContact(null);
+    setEditingClient(true);
+    setContactSearch("");
+    setAppointmentForm((form) => ({
+      ...form,
+      personName: "",
+      phone: "",
+      email: "",
+      birthDate: "",
+    }));
   }
 
   function createSeyaBlock() {
@@ -1294,7 +1549,7 @@ export default function AgendaBoard() {
       block.cabinIds.map((cabinId) => {
         const practitionerId =
           getFirstWorkingPractitionerId(teamSchedules, date) ??
-          practitioners[0]?.id ??
+          practitionerList[0]?.id ??
           "samantha";
 
         return {
@@ -1351,8 +1606,9 @@ export default function AgendaBoard() {
     });
   }
 
-  const cabinBoardMinWidth = TIME_COLUMN_PX + cabinList.length * CABIN_COLUMN_MIN_PX;
-  const cabinBoardColumns = `${TIME_COLUMN_PX}px repeat(${cabinList.length}, minmax(${CABIN_COLUMN_MIN_PX}px, 1fr))`;
+  const cabinBoardMinWidth =
+    TIME_COLUMN_PX + visibleCabinList.length * CABIN_COLUMN_MIN_PX;
+  const cabinBoardColumns = `${TIME_COLUMN_PX}px repeat(${visibleCabinList.length}, minmax(${CABIN_COLUMN_MIN_PX}px, 1fr))`;
 
   return (
     <main className="min-w-0 bg-slate-100">
@@ -1404,33 +1660,27 @@ export default function AgendaBoard() {
               className="h-11 rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
             />
 
-            <select
-              value={selectedCabin}
-              onChange={(event) => setSelectedCabin(event.target.value)}
-              className="h-11 rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
-            >
-              <option>Toutes</option>
-              {cabinList.map((cabin) => (
-                <option key={cabin.id} value={cabin.id}>
-                  {cabin.name}
-                </option>
-              ))}
-            </select>
+            <MultiCheckFilter
+              allLabel="Toutes les cabines"
+              label="cabines"
+              options={cabinList.map((cabin) => ({
+                id: cabin.id,
+                name: cabin.name,
+              }))}
+              selectedIds={selectedCabinIds}
+              onChange={setSelectedCabinIds}
+            />
 
-            <select
-              value={selectedPractitioner}
-              onChange={(event) =>
-                setSelectedPractitioner(event.target.value)
-              }
-              className="h-11 rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
-            >
-              <option>Toutes</option>
-              {practitioners.map((practitioner) => (
-                <option key={practitioner.id} value={practitioner.id}>
-                  {practitioner.name}
-                </option>
-              ))}
-            </select>
+            <MultiCheckFilter
+              allLabel="Toutes les praticiennes"
+              label="praticiennes"
+              options={practitionerList.map((practitioner) => ({
+                id: practitioner.id,
+                name: practitioner.name,
+              }))}
+              selectedIds={selectedPractitionerIds}
+              onChange={setSelectedPractitionerIds}
+            />
 
             <Button
               variant="outline"
@@ -1619,9 +1869,17 @@ export default function AgendaBoard() {
                           <Link
                             key={appointment.id}
                             href={clientFicheHref(appointment)}
-                            className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-medium text-amber-900 transition-colors hover:border-amber-300 hover:bg-amber-100"
+                            className="flex flex-col rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-amber-900 transition-colors hover:border-amber-300 hover:bg-amber-100"
                           >
-                            {appointment.personName}
+                            <span className="text-[11px] font-semibold capitalize leading-tight text-amber-700">
+                              {formatConfirmChipDay(appointment.date)}
+                              {appointment.start
+                                ? ` · ${appointment.start}`
+                                : ""}
+                            </span>
+                            <span className="text-sm font-medium">
+                              {appointment.personName}
+                            </span>
                           </Link>
                         ))
                       )}
@@ -1680,7 +1938,7 @@ export default function AgendaBoard() {
         )}
 
         <Card className="relative z-40 border-slate-200 py-0 shadow-sm">
-          <CardContent className="flex flex-wrap items-center justify-between gap-3 px-3 py-2">
+          <CardContent className="flex flex-col gap-2 px-3 py-2">
             <div className="flex flex-wrap items-center gap-3">
               <p className="mr-2 text-xs font-medium text-slate-500">
                 Praticiennes du jour
@@ -1707,7 +1965,7 @@ export default function AgendaBoard() {
               )}
             </div>
 
-            <div className="flex flex-wrap items-center gap-2">
+            <div className="flex flex-wrap items-center justify-between gap-2">
               {agendaView === "day" ? (
                 <div className="flex items-center gap-1 rounded-xl border border-slate-200 bg-white p-1 shadow-sm">
                   <button
@@ -1759,12 +2017,13 @@ export default function AgendaBoard() {
           <WeekSchedule
             appointmentList={appointmentList}
             cabinList={cabinList}
-            hasOutstandingPayment={(appointment) =>
-              hasOutstandingPayment(balanceDueIndex, appointment)
+            centerDayHours={centerDayHours}
+            paymentTone={(appointment) =>
+              getPaymentTone(balanceDueIndex, appointment) ?? null
             }
-            selectedCabin={selectedCabin}
+            selectedCabinIds={selectedCabinIds}
             selectedDate={selectedDate}
-            selectedPractitioner={selectedPractitioner}
+            selectedPractitionerIds={selectedPractitionerIds}
             onDelete={deleteAppointment}
             onOpen={setSelectedAppointmentId}
           />
@@ -1772,7 +2031,11 @@ export default function AgendaBoard() {
           </>
         ) : (
           <TeamPlanning
+            practitioners={practitionerList}
             schedules={teamSchedules}
+            onAddPractitioner={addPractitioner}
+            onPractitionerChange={updatePractitioner}
+            onRemovePractitioner={removePractitioner}
             onScheduleChange={updateTeamSchedule}
           />
         )}
@@ -1800,7 +2063,7 @@ export default function AgendaBoard() {
                 <div className="sticky left-0 z-40 border-r border-slate-100 bg-white px-3 py-1.5">
                   Heure
                 </div>
-                {cabinList.map((cabin) => (
+                {visibleCabinList.map((cabin) => (
                   <div
                     key={cabin.id}
                     className={`border-r border-slate-100 bg-gradient-to-br ${cabin.color} px-2.5 py-1.5 text-white last:border-r-0`}
@@ -1848,6 +2111,7 @@ export default function AgendaBoard() {
                   {agendaSlots.map((hour, slotIndex) => (
                     <div
                       key={`hour-${hour}`}
+                      data-agenda-slot={hour}
                       className="sticky left-0 z-20 flex items-start border-r border-b border-slate-100 bg-slate-50 px-3 py-1 text-xs font-bold text-slate-400"
                       style={{
                         gridColumn: 1,
@@ -1858,7 +2122,7 @@ export default function AgendaBoard() {
                     </div>
                   ))}
 
-                  {cabinList.flatMap((cabin, cabinIndex) =>
+                  {visibleCabinList.flatMap((cabin, cabinIndex) =>
                     agendaSlots.map((hour, slotIndex) => {
                       const slotAppointments = getAppointmentsStartingAtSlot(
                         visibleAppointments,
@@ -1908,34 +2172,26 @@ export default function AgendaBoard() {
                                   return;
                                 }
 
-                                setAppointmentForm({
+                                setAppointmentForm(
+                                  applyClientPositionStatus({
                                   ...emptyAppointment,
                                   cabinId: cabin.id,
                                   date: selectedDate,
                                   start: hour,
-                                  status: statusWhenClientAppointmentPositioned(
-                                    selectedDate,
-                                    hour,
-                                  ),
                                   treatment: getCabinTreatment(
                                     cabinList,
                                     cabin.id
                                   ),
-                                });
+                                  }),
+                                );
                                 setContactSearch("");
                                 setPickedContact(null);
                                 setEditingClient(false);
                                 applyReminderDefaults();
-                                setSendDepositLink(false);
-                                setSelectedDepositLinkId((current) =>
-                                  pickDepositLinkId(
-                                    depositLinks,
-                                    getCabinTreatment(cabinList, cabin.id),
-                                    current,
-                                  ),
-                                );
+                                setSelectedDepositLinkId("");
                                 setSendBirthdaySms(true);
                                 setIsModalOpen(true);
+                                void refreshAgendaContacts();
                               }}
                               className="flex h-full w-full items-center justify-center rounded-md border border-dashed border-slate-200 text-[10px] font-semibold text-slate-300 transition-colors [touch-action:pan-x_pan-y] hover:border-blue-200 hover:bg-blue-50 hover:text-blue-600"
                             >
@@ -1948,11 +2204,12 @@ export default function AgendaBoard() {
                   )}
 
                   {visibleAppointments.map((appointment) => {
-                    const cabinIndex = cabinList.findIndex(
+                    const cabinIndex = visibleCabinList.findIndex(
                       (cabin) => cabin.id === appointment.cabinId
                     );
-                    const slotIndex = agendaSlots.findIndex(
-                      (slot) => slot === appointment.start
+                    const slotIndex = closestAgendaSlotIndex(
+                      agendaSlots,
+                      appointment.start,
                     );
 
                     if (cabinIndex === -1 || slotIndex === -1) {
@@ -1976,10 +2233,12 @@ export default function AgendaBoard() {
                       >
                         <AppointmentCard
                           appointment={appointment}
-                          hasOutstandingPayment={hasOutstandingPayment(
+                          practitionerList={practitionerList}
+                          paymentTone={getPaymentTone(
                             balanceDueIndex,
                             appointment,
                           )}
+                          focused={focusedAppointmentId === appointment.id}
                           selectedForMove={
                             movingAppointmentId === appointment.id
                           }
@@ -2187,7 +2446,10 @@ export default function AgendaBoard() {
               </Field>
               </div>
 
+              {!isAgendaBlockKind(appointmentForm.kind) ? (
+                <>
               {appointmentForm.kind === "Rendez-vous" &&
+              !contactSearch.trim() &&
               !editingClient &&
               isAgendaClientReady(appointmentForm, pickedContact) ? (
                 <div className="sm:col-span-2">
@@ -2195,11 +2457,7 @@ export default function AgendaBoard() {
                     name={appointmentForm.personName}
                     email={appointmentForm.email}
                     phone={appointmentForm.phone}
-                    onClear={() => {
-                      setPickedContact(null);
-                      setEditingClient(true);
-                      setContactSearch(appointmentForm.personName);
-                    }}
+                    onClear={clearSelectedClient}
                   />
                 </div>
               ) : (
@@ -2214,6 +2472,7 @@ export default function AgendaBoard() {
                   }
 
                   if (isAgendaClientReady(appointmentForm, pickedContact)) {
+                    setContactSearch("");
                     setEditingClient(false);
                   }
                 }}
@@ -2223,41 +2482,43 @@ export default function AgendaBoard() {
                     placeholder="Tapez 2 lettres, un téléphone ou un email..."
                     value={contactSearch}
                     onChange={(event) => {
-                      const value = event.target.value;
                       setPickedContact(null);
-                      setContactSearch(value);
-                      setAppointmentForm((form) => ({
-                        ...form,
-                        personName: value,
-                      }));
+                      setEditingClient(true);
+                      setContactSearch(event.target.value);
                     }}
                   />
                 </Field>
 
-                {contactMatches.length > 0 && (
+                {contactSearch.trim().length >= 2 && !pickedContact ? (
                   <div className="absolute z-30 mt-2 max-h-64 w-full overflow-y-auto rounded-xl border border-slate-200 bg-white shadow-xl">
-                    {contactMatches.map((contact) => (
-                      <button
-                        key={contact.id}
-                        type="button"
-                        onClick={() => selectContact(contact)}
-                        className="flex w-full items-center justify-between gap-4 border-b border-slate-100 px-4 py-3 text-left last:border-b-0 hover:bg-blue-50"
-                      >
-                        <div>
-                          <p className="font-bold text-slate-900">
-                            {contact.name}
-                          </p>
-                          <p className="text-sm text-slate-500">
-                            {contact.phone} · {contact.email}
-                          </p>
-                        </div>
-                        <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-600">
-                          {contact.type}
-                        </span>
-                      </button>
-                    ))}
+                    {contactMatches.length > 0 ? (
+                      contactMatches.map((contact) => (
+                        <button
+                          key={contact.id}
+                          type="button"
+                          onClick={() => selectContact(contact)}
+                          className="flex w-full items-center justify-between gap-4 border-b border-slate-100 px-4 py-3 text-left last:border-b-0 hover:bg-blue-50"
+                        >
+                          <div>
+                            <p className="font-bold text-slate-900">
+                              {contact.name}
+                            </p>
+                            <p className="text-sm text-slate-500">
+                              {contact.phone} · {contact.email}
+                            </p>
+                          </div>
+                          <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-600">
+                            {contact.type}
+                          </span>
+                        </button>
+                      ))
+                    ) : (
+                      <p className="px-4 py-3 text-sm font-semibold text-slate-500">
+                        Aucun prospect ou client trouvé.
+                      </p>
+                    )}
                   </div>
-                )}
+                ) : null}
               </div>
 
               <Field label="Téléphone">
@@ -2271,6 +2532,7 @@ export default function AgendaBoard() {
                   }
                   onBlur={() => {
                     if (isAgendaClientReady(appointmentForm, pickedContact)) {
+                      setContactSearch("");
                       setEditingClient(false);
                     }
                   }}
@@ -2289,6 +2551,7 @@ export default function AgendaBoard() {
                   }
                   onBlur={() => {
                     if (isAgendaClientReady(appointmentForm, pickedContact)) {
+                      setContactSearch("");
                       setEditingClient(false);
                     }
                   }}
@@ -2307,6 +2570,7 @@ export default function AgendaBoard() {
                   }
                   onBlur={() => {
                     if (isAgendaClientReady(appointmentForm, pickedContact)) {
+                      setContactSearch("");
                       setEditingClient(false);
                     }
                   }}
@@ -2317,6 +2581,7 @@ export default function AgendaBoard() {
 
               {!(
                 appointmentForm.kind === "Rendez-vous" &&
+                !contactSearch.trim() &&
                 !editingClient &&
                 isAgendaClientReady(appointmentForm, pickedContact)
               ) ? (
@@ -2335,10 +2600,10 @@ export default function AgendaBoard() {
               ) : null}
 
               <Field label="Prestation">
-                {appointmentForm.kind === "Rendez-vous" ? (
                   <TreatmentPicker
                     cabinList={cabinList}
                     duration={appointmentForm.duration}
+                    practitionerList={practitionerList}
                     value={appointmentForm.treatment}
                     onChange={(next) =>
                       setAppointmentForm((form) => ({
@@ -2352,7 +2617,7 @@ export default function AgendaBoard() {
                             : form.cabinId,
                         practitionerId:
                           next.practitionerId &&
-                          practitioners.some(
+                          practitionerList.some(
                             (practitioner) =>
                               practitioner.id === next.practitionerId,
                           )
@@ -2361,18 +2626,6 @@ export default function AgendaBoard() {
                       }))
                     }
                   />
-                ) : (
-                  <Input
-                    required
-                    value={appointmentForm.treatment}
-                    onChange={(event) =>
-                      setAppointmentForm((form) => ({
-                        ...form,
-                        treatment: event.target.value,
-                      }))
-                    }
-                  />
-                )}
               </Field>
 
               <Field label="Provenance">
@@ -2413,9 +2666,9 @@ export default function AgendaBoard() {
               <Field label="Praticienne">
                 <Select
                   value={appointmentForm.practitionerId}
-                  options={practitioners.map((practitioner) => practitioner.id)}
+                  options={practitionerList.map((practitioner) => practitioner.id)}
                   labels={Object.fromEntries(
-                    practitioners.map((practitioner) => [
+                    practitionerList.map((practitioner) => [
                       practitioner.id,
                       practitioner.name,
                     ])
@@ -2428,6 +2681,8 @@ export default function AgendaBoard() {
                   }
                 />
               </Field>
+                </>
+              ) : null}
 
               <Field label="Date">
                 <Input
@@ -2489,7 +2744,9 @@ export default function AgendaBoard() {
               </div>
             </div>
 
+            {!isAgendaBlockKind(appointmentForm.kind) ? (
             <div className="mt-5 grid gap-3 rounded-2xl border border-blue-100 bg-blue-50 p-4">
+              {smsSettings?.confirmationEnabled !== false ? (
               <label className="flex items-start gap-3 text-sm font-bold text-slate-800">
                 <input
                   type="checkbox"
@@ -2505,7 +2762,25 @@ export default function AgendaBoard() {
                   </span>
                 </span>
               </label>
-              {laserAppointment ? (
+              ) : null}
+              {smsSettings?.confirmationEmailEnabled !== false ? (
+              <label className="flex items-start gap-3 text-sm font-bold text-slate-800">
+                <input
+                  type="checkbox"
+                  checked={sendEmailNow}
+                  disabled={!appointmentForm.email.trim()}
+                  onChange={(event) => setSendEmailNow(event.target.checked)}
+                  className="mt-1 h-4 w-4"
+                />
+                <span>
+                  Envoyer le mail de confirmation
+                  <span className="mt-1 block text-xs font-semibold text-slate-500">
+                    Part sur l’email de la fiche client. Même texte que le SMS de confirmation.
+                  </span>
+                </span>
+              </label>
+              ) : null}
+              {laserAppointment && smsSettings?.reminderJ7Enabled !== false ? (
                 <label className="flex items-start gap-3 text-sm font-bold text-slate-800">
                   <input
                     type="checkbox"
@@ -2522,6 +2797,7 @@ export default function AgendaBoard() {
                   </span>
                 </label>
               ) : null}
+              {smsSettings?.reminderJ5Enabled ? (
               <label className="flex items-start gap-3 text-sm font-bold text-slate-800">
                 <input
                   type="checkbox"
@@ -2537,6 +2813,8 @@ export default function AgendaBoard() {
                   </span>
                 </span>
               </label>
+              ) : null}
+              {smsSettings?.reminder48hEnabled ? (
               <label className="flex items-start gap-3 text-sm font-bold text-slate-800">
                 <input
                   type="checkbox"
@@ -2552,6 +2830,8 @@ export default function AgendaBoard() {
                   </span>
                 </span>
               </label>
+              ) : null}
+              {smsSettings?.reminder24hEnabled ? (
               <label className="flex items-start gap-3 text-sm font-bold text-slate-800">
                 <input
                   type="checkbox"
@@ -2567,6 +2847,8 @@ export default function AgendaBoard() {
                   </span>
                 </span>
               </label>
+              ) : null}
+              {smsSettings?.birthdaySmsEnabled !== false ? (
               <label className="flex items-start gap-3 text-sm font-bold text-slate-800">
                 <input
                   type="checkbox"
@@ -2584,55 +2866,15 @@ export default function AgendaBoard() {
                   </span>
                 </span>
               </label>
-              <label className="flex items-start gap-3 text-sm font-bold text-slate-800">
-                <input
-                  type="checkbox"
-                  checked={sendDepositLink}
-                  disabled={!appointmentForm.phone.trim() || depositLinks.length === 0}
-                  onChange={(event) => {
-                    const next = event.target.checked;
-                    setSendDepositLink(next);
-                    if (next) {
-                      setSelectedDepositLinkId((current) =>
-                        pickDepositLinkId(
-                          depositLinks,
-                          appointmentForm.treatment,
-                          current,
-                        ),
-                      );
-                    }
-                  }}
-                  className="mt-1 h-4 w-4"
-                />
-                <span>
-                  Envoyer le lien d’acompte
-                  <span className="mt-1 block text-xs font-semibold text-slate-500">
-                    Envoie le SMS avec le lien de paiement pour bloquer le rendez-vous.
-                  </span>
-                </span>
-              </label>
-              {sendDepositLink ? (
-                depositLinks.length > 0 ? (
-                  <select
-                    value={selectedDepositLinkId}
-                    onChange={(event) =>
-                      setSelectedDepositLinkId(event.target.value)
-                    }
-                    className="h-8 w-full rounded-lg border border-input bg-white px-2.5 py-1 text-sm outline-none transition-colors focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
-                  >
-                    {depositLinks.map((link) => (
-                      <option key={link.id} value={String(link.id)}>
-                        {link.name}
-                      </option>
-                    ))}
-                  </select>
-                ) : (
-                  <p className="text-xs font-semibold text-slate-500">
-                    Aucun lien d’acompte actif dans Paramètres centre.
-                  </p>
-                )
               ) : null}
+              <DepositLinkChooser
+                links={depositLinks}
+                phone={appointmentForm.phone}
+                selectedId={selectedDepositLinkId}
+                onChange={setSelectedDepositLinkId}
+              />
             </div>
+            ) : null}
 
             <div className="mt-6 flex justify-end gap-3">
               <Button
@@ -2665,9 +2907,43 @@ export default function AgendaBoard() {
             appointment={selectedAppointment}
             agendaSlots={agendaSlots}
             cabinList={cabinList}
+            practitionerList={practitionerList}
+            depositLinks={depositLinks}
+            smsSettings={smsSettings}
             onClose={() => setSelectedAppointmentId(null)}
             onDelete={() => deleteAppointment(selectedAppointment.id)}
             onSave={updateAppointment}
+          />,
+          portalTarget,
+        )}
+
+      {moveNotifyAppointment &&
+        portalTarget &&
+        createPortal(
+          <MoveNotifyDialog
+            appointment={moveNotifyAppointment}
+            sending={isSendingMoveNotify}
+            smsSettings={smsSettings}
+            onClose={() => {
+              if (isSendingMoveNotify) {
+                return;
+              }
+              setMoveNotifyAppointment(null);
+              setAgendaNotice("RDV déplacé.");
+            }}
+            onSend={async (notify) => {
+              setIsSendingMoveNotify(true);
+              try {
+                await sendSelectedConfirmations(
+                  moveNotifyAppointment,
+                  notify,
+                  "RDV déplacé.",
+                );
+              } finally {
+                setIsSendingMoveNotify(false);
+                setMoveNotifyAppointment(null);
+              }
+            }}
           />,
           portalTarget,
         )}
@@ -2922,32 +3198,49 @@ function AgendaTabButton({
 function WeekSchedule({
   appointmentList,
   cabinList,
-  hasOutstandingPayment: appointmentHasOutstandingPayment,
+  centerDayHours,
+  paymentTone: appointmentPaymentTone,
   onDelete,
   onOpen,
-  selectedCabin,
+  selectedCabinIds,
   selectedDate,
-  selectedPractitioner,
+  selectedPractitionerIds,
 }: {
   appointmentList: Appointment[];
   cabinList: Cabin[];
-  hasOutstandingPayment: (appointment: Appointment) => boolean;
+  centerDayHours: CenterDayHours[];
+  paymentTone: (appointment: Appointment) => ReturnType<typeof getPaymentTone>;
   onDelete: (appointmentId: string) => void;
   onOpen: (appointmentId: string) => void;
-  selectedCabin: string;
+  selectedCabinIds: string[];
   selectedDate: string;
-  selectedPractitioner: string;
+  selectedPractitionerIds: string[];
 }) {
-  const weekDates = getWeekDates(selectedDate);
+  const weekDates = getWeekDates(selectedDate).filter(
+    (date) => !isCenterDayClosed(centerDayHours, date),
+  );
+  const weekColClass =
+    {
+      1: "lg:grid-cols-1",
+      2: "lg:grid-cols-2",
+      3: "lg:grid-cols-3",
+      4: "lg:grid-cols-4",
+      5: "lg:grid-cols-5",
+      6: "lg:grid-cols-6",
+      7: "lg:grid-cols-7",
+    }[weekDates.length] ?? "lg:grid-cols-7";
   const appointmentsByDate = weekDates.map((date) => {
     const dayAppointments = appointmentList
       .filter((appointment) => {
         const dateMatch = appointment.date === date;
-        const cabinMatch =
-          selectedCabin === "Toutes" || appointment.cabinId === selectedCabin;
-        const practitionerMatch =
-          selectedPractitioner === "Toutes" ||
-          appointment.practitionerId === selectedPractitioner;
+        const cabinMatch = matchesMultiSelection(
+          selectedCabinIds,
+          appointment.cabinId,
+        );
+        const practitionerMatch = matchesMultiSelection(
+          selectedPractitionerIds,
+          appointment.practitionerId,
+        );
 
         return dateMatch && cabinMatch && practitionerMatch;
       })
@@ -2963,8 +3256,11 @@ function WeekSchedule({
           <div>
             <h2 className="text-base font-semibold text-slate-950">Vue semaine</h2>
             <p className="text-sm font-semibold text-slate-500">
-              Du {formatAgendaDate(weekDates[0])} au{" "}
-              {formatAgendaDate(weekDates[6])}
+              {weekDates.length > 1
+                ? `Du ${formatAgendaDate(weekDates[0])} au ${formatAgendaDate(weekDates[weekDates.length - 1])}`
+                : weekDates[0]
+                  ? formatAgendaDate(weekDates[0])
+                  : "Aucun jour ouvert cette semaine"}
             </p>
           </div>
           <div className="rounded-xl bg-violet-50 px-3 py-2 text-sm font-bold text-violet-700">
@@ -2976,7 +3272,12 @@ function WeekSchedule({
           </div>
         </div>
 
-        <div className="grid gap-3 lg:grid-cols-7">
+        <div className={`grid gap-3 ${weekColClass}`}>
+          {appointmentsByDate.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 p-8 text-center text-sm font-semibold text-slate-400">
+              Aucun jour ouvert cette semaine.
+            </div>
+          ) : null}
           {appointmentsByDate.map(({ date, appointments: dayAppointments }) => (
             <div
               key={date}
@@ -2997,18 +3298,16 @@ function WeekSchedule({
                     const cabin = cabinList.find(
                       (item) => item.id === appointment.cabinId
                     );
+                    const tone = appointmentPaymentTone(appointment);
 
                     return (
                       <article
                         key={appointment.id}
+                        data-appointment-id={appointment.id}
                         onClick={() => onOpen(appointment.id)}
                         className={`w-full rounded-xl border p-3 text-left text-sm shadow-sm transition-transform hover:-translate-y-0.5 hover:shadow-md ${
                           statusClasses[appointment.status]
-                        } ${
-                          appointmentHasOutstandingPayment(appointment)
-                            ? "ring-2 ring-amber-400"
-                            : ""
-                        }`}
+                        } ${tone ? paymentToneStyles[tone].ring : ""}`}
                         role="button"
                         tabIndex={0}
                         onKeyDown={(event) => {
@@ -3021,10 +3320,10 @@ function WeekSchedule({
                           <div>
                             <p className="flex items-center gap-1.5 font-semibold">
                               {appointment.start} · {appointment.personName}
-                              {appointmentHasOutstandingPayment(appointment) ? (
+                              {tone ? (
                                 <CreditCard
-                                  className="h-3.5 w-3.5 shrink-0 text-amber-600"
-                                  aria-label="Règlement en attente"
+                                  className={`h-3.5 w-3.5 shrink-0 ${paymentToneStyles[tone].icon}`}
+                                  aria-label={paymentToneStyles[tone].label}
                                 />
                               ) : null}
                             </p>
@@ -3066,10 +3365,21 @@ function WeekSchedule({
 }
 
 function TeamPlanning({
+  practitioners,
   schedules,
+  onAddPractitioner,
+  onPractitionerChange,
+  onRemovePractitioner,
   onScheduleChange,
 }: {
+  practitioners: Practitioner[];
   schedules: TeamSchedule[];
+  onAddPractitioner: () => void;
+  onPractitionerChange: (
+    practitionerId: string,
+    updates: Partial<Practitioner>,
+  ) => void;
+  onRemovePractitioner: (practitionerId: string) => void;
   onScheduleChange: (
     practitionerId: string,
     updates: Partial<TeamSchedule>
@@ -3089,14 +3399,18 @@ function TeamPlanning({
               </h2>
             </div>
             <p className="mt-2 text-sm text-slate-500">
-              Remplissez les jours travaillés pour 1, 3 ou 6 mois. Le bandeau
-              “Praticiennes du jour” de l’agenda se met à jour avec ces règles.
+              Modifiez les noms, les couleurs et les horaires de chaque jour.
+              Les absences se posent d’une date à une autre, avec un motif
+              modifiable.
             </p>
           </div>
-          <div className="rounded-xl bg-violet-50 px-4 py-3 text-sm font-semibold text-violet-800">
-            Les praticiennes cochées aujourd&apos;hui remontent automatiquement
-            dans l&apos;agenda.
-          </div>
+          <Button
+            className="bg-violet-700 hover:bg-violet-800"
+            onClick={onAddPractitioner}
+          >
+            <Plus className="mr-2 h-4 w-4" />
+            Ajouter une praticienne
+          </Button>
         </CardContent>
       </Card>
 
@@ -3120,19 +3434,58 @@ function TeamPlanning({
             >
               <CardContent className="space-y-4 p-5">
                 <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div className="flex items-center gap-3">
-                    <span
-                      className={`h-3.5 w-3.5 rounded-full ${practitioner.color}`}
-                    />
-                    <div>
-                      <p className="text-sm font-medium text-slate-950">
-                        {practitioner.name}
-                      </p>
+                  <div className="min-w-0 flex-1 space-y-2">
+                    <div className="flex items-center gap-3">
+                      <span
+                        className={`h-3.5 w-3.5 shrink-0 rounded-full ${practitioner.color}`}
+                      />
+                      <Input
+                        value={practitioner.name}
+                        onChange={(event) =>
+                          onPractitionerChange(schedule.practitionerId, {
+                            name: event.target.value,
+                          })
+                        }
+                        className="h-10 font-medium"
+                        aria-label="Nom de la praticienne"
+                      />
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {practitionerColorOptions.map((color) => (
+                        <button
+                          key={color}
+                          type="button"
+                          onClick={() =>
+                            onPractitionerChange(schedule.practitionerId, {
+                              color,
+                            })
+                          }
+                          className={`h-6 w-6 rounded-full ${color} ${
+                            practitioner.color === color
+                              ? "ring-2 ring-slate-900 ring-offset-2"
+                              : "opacity-70 hover:opacity-100"
+                          }`}
+                          aria-label={`Couleur ${color}`}
+                        />
+                      ))}
                     </div>
                   </div>
-                  <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-500">
-                    {activeDays.length} j / semaine
-                  </span>
+                  <div className="flex flex-col items-end gap-2">
+                    <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-500">
+                      {activeDays.length} j / semaine
+                    </span>
+                    {practitioners.length > 1 ? (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          onRemovePractitioner(schedule.practitionerId)
+                        }
+                        className="text-xs font-semibold text-slate-400 hover:text-rose-600"
+                      >
+                        Retirer
+                      </button>
+                    ) : null}
+                  </div>
                 </div>
 
                 <div className="grid gap-3 md:grid-cols-[1fr_120px_1fr]">
@@ -3242,7 +3595,14 @@ function TeamPlanning({
                                 ? schedule.workingDays.filter(
                                     (value) => value !== day.value
                                   )
-                                : [...schedule.workingDays, day.value].sort(),
+                                : [...schedule.workingDays, day.value].sort(
+                                    (left, right) => left - right,
+                                  ),
+                              dayHours: checked
+                                ? schedule.dayHours.filter(
+                                    (item) => item.weekday !== day.value,
+                                  )
+                                : schedule.dayHours,
                             })
                           }
                           className={`min-h-16 rounded-xl border text-sm font-medium transition-colors ${
@@ -3259,80 +3619,182 @@ function TeamPlanning({
                       );
                     })}
                   </div>
+
+                  {activeDays.length > 0 ? (
+                    <div className="mt-3 space-y-2">
+                      <p className="text-xs font-semibold text-slate-500">
+                        Horaires par jour
+                      </p>
+                      {activeDays.map((day) => {
+                        const hours = dayHoursForSchedule(schedule, day.value);
+                        return (
+                          <div
+                            key={day.value}
+                            className="grid grid-cols-[64px_1fr_1fr] items-center gap-2"
+                          >
+                            <span className="text-sm font-medium text-slate-700">
+                              {day.label}
+                            </span>
+                            <Select
+                              value={hours.startTime}
+                              options={teamTimeOptions}
+                              onChange={(value) =>
+                                onScheduleChange(schedule.practitionerId, {
+                                  dayHours: upsertDayHours(
+                                    schedule.dayHours,
+                                    day.value,
+                                    value,
+                                    hours.endTime,
+                                  ),
+                                })
+                              }
+                            />
+                            <Select
+                              value={hours.endTime}
+                              options={timeOptions}
+                              onChange={(value) =>
+                                onScheduleChange(schedule.practitionerId, {
+                                  dayHours: upsertDayHours(
+                                    schedule.dayHours,
+                                    day.value,
+                                    hours.startTime,
+                                    value,
+                                  ),
+                                })
+                              }
+                            />
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : null}
                 </div>
 
                 <div className="rounded-2xl border border-slate-100 bg-slate-50 p-3">
-                  <div className="mb-3 flex flex-col gap-2 lg:flex-row lg:items-end lg:justify-between">
-                    <Field label="Absence ponctuelle">
+                  <div className="mb-3 grid gap-2 md:grid-cols-2">
+                    <Field label="Du">
                       <Input
                         type="date"
-                        value={schedule.absenceDate}
+                        value={schedule.absenceStartDate}
                         onChange={(event) =>
                           onScheduleChange(schedule.practitionerId, {
-                            absenceDate: event.target.value,
+                            absenceStartDate: event.target.value,
                           })
                         }
                         className="bg-white"
                       />
                     </Field>
-                    <div className="flex flex-wrap gap-2">
-                      <button
-                        type="button"
-                        onClick={() =>
-                          addTeamAbsence(
-                            schedule,
-                            "Vacance",
-                            onScheduleChange
-                          )
+                    <Field label="Au">
+                      <Input
+                        type="date"
+                        value={schedule.absenceEndDate}
+                        onChange={(event) =>
+                          onScheduleChange(schedule.practitionerId, {
+                            absenceEndDate: event.target.value,
+                          })
                         }
-                        className="rounded-lg bg-sky-100 px-3 py-2 text-xs font-medium text-sky-700 transition-colors hover:bg-sky-200"
-                      >
-                        Vacance
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() =>
-                          addTeamAbsence(
-                            schedule,
-                            "Repos exceptionnel",
-                            onScheduleChange
-                          )
+                        className="bg-white"
+                      />
+                    </Field>
+                    <Field label="Motif">
+                      <Select
+                        value={schedule.absenceType}
+                        options={[...teamAbsenceTypes]}
+                        onChange={(value) =>
+                          onScheduleChange(schedule.practitionerId, {
+                            absenceType: value as TeamAbsenceType,
+                          })
                         }
-                        className="rounded-lg bg-rose-100 px-3 py-2 text-xs font-medium text-rose-700 transition-colors hover:bg-rose-200"
-                      >
-                        Repos exceptionnel
-                      </button>
-                    </div>
+                      />
+                    </Field>
+                    <Field label="Précision (optionnel)">
+                      <Input
+                        value={schedule.absenceNote}
+                        onChange={(event) =>
+                          onScheduleChange(schedule.practitionerId, {
+                            absenceNote: event.target.value,
+                          })
+                        }
+                        placeholder="Ex. mariage, déplacement…"
+                        className="bg-white"
+                      />
+                    </Field>
                   </div>
+                  <button
+                    type="button"
+                    onClick={() => addTeamAbsence(schedule, onScheduleChange)}
+                    className="mb-3 rounded-lg bg-violet-100 px-3 py-2 text-xs font-medium text-violet-800 transition-colors hover:bg-violet-200"
+                  >
+                    Ajouter l’absence
+                  </button>
 
                   {schedule.absences.length > 0 ? (
-                    <div className="flex flex-wrap gap-2">
+                    <div className="space-y-2">
                       {schedule.absences
                         .slice()
                         .sort((current, next) =>
-                          current.date.localeCompare(next.date)
+                          current.startDate.localeCompare(next.startDate)
                         )
                         .map((absence) => (
-                          <button
+                          <div
                             key={absence.id}
-                            type="button"
-                            onClick={() =>
-                              onScheduleChange(schedule.practitionerId, {
-                                absences: schedule.absences.filter(
-                                  (item) => item.id !== absence.id
-                                ),
-                              })
-                            }
-                            className={`flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-bold ${
-                              absence.type === "Vacance"
-                                ? "bg-sky-100 text-sky-700"
-                                : "bg-rose-100 text-rose-700"
-                            }`}
-                            title="Supprimer cette absence"
+                            className={`rounded-xl px-3 py-2 ${absenceTypeClasses(absence.type)}`}
                           >
-                            {absence.type} · {formatAgendaDate(absence.date)}
-                            <X className="h-3.5 w-3.5" />
-                          </button>
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <p className="text-xs font-bold">
+                                {formatAbsenceRange(absence)}
+                              </p>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  onScheduleChange(schedule.practitionerId, {
+                                    absences: schedule.absences.filter(
+                                      (item) => item.id !== absence.id
+                                    ),
+                                  })
+                                }
+                                className="rounded-md p-1 hover:bg-white/70"
+                                title="Supprimer cette absence"
+                              >
+                                <X className="h-3.5 w-3.5" />
+                              </button>
+                            </div>
+                            <div className="mt-2 grid gap-2 md:grid-cols-2">
+                              <Select
+                                value={absence.type}
+                                options={[...teamAbsenceTypes]}
+                                onChange={(value) =>
+                                  onScheduleChange(schedule.practitionerId, {
+                                    absences: schedule.absences.map((item) =>
+                                      item.id === absence.id
+                                        ? {
+                                            ...item,
+                                            type: value as TeamAbsenceType,
+                                          }
+                                        : item,
+                                    ),
+                                  })
+                                }
+                              />
+                              <Input
+                                value={absence.note}
+                                onChange={(event) =>
+                                  onScheduleChange(schedule.practitionerId, {
+                                    absences: schedule.absences.map((item) =>
+                                      item.id === absence.id
+                                        ? {
+                                            ...item,
+                                            note: event.target.value,
+                                          }
+                                        : item,
+                                    ),
+                                  })
+                                }
+                                placeholder="Motif / précision"
+                                className="bg-white"
+                              />
+                            </div>
+                          </div>
                         ))}
                     </div>
                   ) : (
@@ -3376,41 +3838,78 @@ function matchesAgendaContact(contact: CrmAgendaContact, query: string) {
   );
 }
 
+function upsertDayHours(
+  dayHours: TeamSchedule["dayHours"],
+  weekday: number,
+  startTime: string,
+  endTime: string,
+) {
+  return [
+    ...dayHours.filter((item) => item.weekday !== weekday),
+    { weekday, startTime, endTime },
+  ].sort((left, right) => left.weekday - right.weekday);
+}
+
+function formatAbsenceRange(absence: TeamAbsence) {
+  if (absence.startDate === absence.endDate) {
+    return formatAgendaDate(absence.startDate);
+  }
+
+  return `${formatAgendaDate(absence.startDate)} → ${formatAgendaDate(absence.endDate)}`;
+}
+
+function absenceTypeClasses(type: TeamAbsenceType) {
+  if (type === "Congé payé") return "bg-sky-100 text-sky-800";
+  if (type === "Congé sans solde") return "bg-amber-100 text-amber-800";
+  if (type === "Exceptionnel") return "bg-violet-100 text-violet-800";
+  if (type === "Vacance") return "bg-cyan-100 text-cyan-800";
+  if (type === "Repos exceptionnel") return "bg-rose-100 text-rose-800";
+  if (type === "Arrêt maladie") return "bg-orange-100 text-orange-800";
+  return "bg-slate-200 text-slate-700";
+}
+
 function addTeamAbsence(
   schedule: TeamSchedule,
-  type: TeamAbsence["type"],
   onScheduleChange: (
     practitionerId: string,
     updates: Partial<TeamSchedule>
   ) => void
 ) {
-  if (!schedule.absenceDate) {
+  const start = schedule.absenceStartDate;
+  const end = schedule.absenceEndDate || start;
+  if (!start) {
     return;
   }
 
+  const startDate = start <= end ? start : end;
+  const endDate = end >= start ? end : start;
   const nextAbsence: TeamAbsence = {
-    id: `${schedule.practitionerId}-${schedule.absenceDate}-${type}`,
-    date: schedule.absenceDate,
-    type,
+    id: crypto.randomUUID(),
+    startDate,
+    endDate,
+    type: schedule.absenceType,
+    note: schedule.absenceNote.trim(),
   };
   const absences = [
     ...schedule.absences.filter(
       (absence) =>
-        !(absence.date === nextAbsence.date && absence.type === nextAbsence.type)
+        !(
+          absence.startDate === nextAbsence.startDate &&
+          absence.endDate === nextAbsence.endDate &&
+          absence.type === nextAbsence.type
+        ),
     ),
     nextAbsence,
   ];
 
-  onScheduleChange(schedule.practitionerId, { absences });
+  onScheduleChange(schedule.practitionerId, {
+    absences,
+    absenceNote: "",
+  });
 }
 
-function isPractitionerWorkingOnDate(schedule: TeamSchedule, date: string) {
-  const day = new Date(`${date}T00:00:00`).getDay();
-  const hasException = schedule.absences.some(
-    (absence) => absence.date === date
-  );
-
-  return schedule.workingDays.includes(day) && !hasException;
+function isAgendaBlockKind(kind?: AppointmentKind | string) {
+  return kind === "Pause" || kind === "Formation" || kind === "Indisponible";
 }
 
 function isAppointmentSource(value: string): value is AppointmentSource {
@@ -3420,14 +3919,16 @@ function isAppointmentSource(value: string): value is AppointmentSource {
 function getAgendaFocus(searchParams: Pick<URLSearchParams, "get">) {
   const date = searchParams.get("date");
   const appointmentId = searchParams.get("rdv");
+  const start = searchParams.get("heure");
 
-  if (!date && !appointmentId) {
+  if (!date && !appointmentId && !start) {
     return null;
   }
 
   return {
     date: date && /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : null,
     appointmentId: appointmentId?.trim() || null,
+    start: start && /^\d{2}:\d{2}/.test(start) ? start.slice(0, 5) : null,
   };
 }
 
@@ -3752,6 +4253,17 @@ function getWeekdayFromIso(date: string) {
   return new Date(year, month - 1, day).getDay();
 }
 
+function isCenterDayClosed(centerDayHours: CenterDayHours[], date: string) {
+  const hours =
+    centerDayHours.find((day) => day.weekday === getWeekdayFromIso(date)) ??
+    defaultCenterDayHours[0];
+
+  return (
+    hours.closed ||
+    timeToMinutes(hours.endTime) <= timeToMinutes(hours.startTime)
+  );
+}
+
 function formatDateInput(date: Date) {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, "0");
@@ -3870,6 +4382,29 @@ function timeToMinutes(time: string) {
   return Number(hour) * 60 + Number(minutes);
 }
 
+function closestAgendaSlotIndex(slots: string[], start: string) {
+  const exactIndex = slots.indexOf(start);
+
+  if (exactIndex !== -1) {
+    return exactIndex;
+  }
+
+  const startMinutes = timeToMinutes(start);
+  let closestIndex = -1;
+  let closestDiff = Number.POSITIVE_INFINITY;
+
+  slots.forEach((slot, index) => {
+    const diff = Math.abs(timeToMinutes(slot) - startMinutes);
+
+    if (diff < closestDiff) {
+      closestDiff = diff;
+      closestIndex = index;
+    }
+  });
+
+  return closestIndex;
+}
+
 function minutesToTime(totalMinutes: number) {
   const hour = Math.floor(totalMinutes / 60)
     .toString()
@@ -3967,22 +4502,26 @@ function formatWeekday(value: string) {
 
 function AppointmentCard({
   appointment,
-  hasOutstandingPayment: appointmentHasOutstandingPayment,
+  paymentTone,
   onDelete,
   onMove,
   onOpen,
   onStatusChange,
+  practitionerList,
+  focused = false,
   selectedForMove,
 }: {
   appointment: Appointment;
-  hasOutstandingPayment?: boolean;
+  paymentTone?: ReturnType<typeof getPaymentTone>;
   onDelete: () => void;
   onMove: () => void;
   onOpen: () => void;
   onStatusChange: (status: AppointmentStatus) => void;
+  practitionerList: Practitioner[];
+  focused?: boolean;
   selectedForMove: boolean;
 }) {
-  const practitioner = practitioners.find(
+  const practitioner = practitionerList.find(
     (item) => item.id === appointment.practitionerId
   );
   return (
@@ -3995,20 +4534,18 @@ function AppointmentCard({
       }}
       className={`relative z-10 flex h-full cursor-grab flex-col overflow-hidden rounded-lg border px-2 py-1 shadow-sm transition-transform hover:-translate-y-0.5 hover:shadow-md active:cursor-grabbing ${
         statusClasses[appointment.status]
-      } ${
-        appointmentHasOutstandingPayment
-          ? "ring-2 ring-amber-400"
-          : ""
+      } ${paymentTone ? paymentToneStyles[paymentTone].ring : ""} ${
+        focused ? "ring-2 ring-blue-500 ring-offset-2" : ""
       } ${selectedForMove ? "ring-2 ring-blue-500" : ""}`}
     >
       <div className="mb-1 flex items-start justify-between gap-1">
         <div className="min-w-0 flex-1">
           <p className="flex items-start gap-1 break-words font-semibold leading-tight">
             <span className="min-w-0">{appointment.personName}</span>
-            {appointmentHasOutstandingPayment ? (
+            {paymentTone ? (
               <CreditCard
-                className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-600"
-                aria-label="Règlement en attente"
+                className={`mt-0.5 h-3.5 w-3.5 shrink-0 ${paymentToneStyles[paymentTone].icon}`}
+                aria-label={paymentToneStyles[paymentTone].label}
               />
             ) : null}
           </p>
@@ -4020,9 +4557,19 @@ function AppointmentCard({
           <div className="flex flex-col items-end gap-1">
             <span
               className={`mt-1 h-3 w-3 rounded-full ${
-                statusDotClasses[appointment.status]
+                paymentTone === "paid"
+                  ? "bg-emerald-500"
+                  : paymentTone === "partial"
+                    ? "bg-orange-500"
+                    : paymentTone === "unpaid"
+                      ? "bg-red-500"
+                      : statusDotClasses[appointment.status]
               }`}
-              aria-label={`Statut ${appointment.status}`}
+              aria-label={
+                paymentTone
+                  ? paymentToneStyles[paymentTone].label
+                  : `Statut ${appointment.status}`
+              }
             />
             <select
               value={appointment.status}
@@ -4081,17 +4628,56 @@ function AppointmentCard({
 
 const CLIENT_AUTO_CONFIRM_HOURS = 48;
 
+function appointmentLocalDate(date: string, start: string) {
+  const [year, month, day] = date.split("-").map(Number);
+  const [hours, minutes] = (start || "00:00").split(":").map(Number);
+
+  if (!year || !month || !day) {
+    return null;
+  }
+
+  const when = new Date(year, month - 1, day, hours || 0, minutes || 0, 0, 0);
+  return Number.isNaN(when.getTime()) ? null : when;
+}
+
 function isAppointmentMoreThanHoursAhead(
   date: string,
   start: string,
   hours: number,
 ) {
-  const when = new Date(`${date}T${start}:00`);
-  if (Number.isNaN(when.getTime())) {
+  const when = appointmentLocalDate(date, start);
+  if (!when) {
     return false;
   }
 
   return when.getTime() - Date.now() > hours * 60 * 60 * 1000;
+}
+
+function isAppointmentWithinHoursAhead(
+  date: string,
+  start: string,
+  hours: number,
+) {
+  const when = appointmentLocalDate(date, start);
+  if (!when) {
+    return false;
+  }
+
+  const delta = when.getTime() - Date.now();
+  return delta >= 0 && delta <= hours * 60 * 60 * 1000;
+}
+
+function formatConfirmChipDay(date: string) {
+  const [year, month, day] = date.split("-").map(Number);
+  if (!year || !month || !day) {
+    return date;
+  }
+
+  return new Date(year, month - 1, day).toLocaleDateString("fr-FR", {
+    weekday: "long",
+    day: "numeric",
+    month: "numeric",
+  });
 }
 
 function statusWhenClientAppointmentPositioned(
@@ -4114,9 +4700,13 @@ function applyClientPositionStatus<
     date: string;
     start: string;
     status: AppointmentStatus;
+    clientId?: string;
   },
 >(item: T): T {
-  if (item.source !== "Client") {
+  const isClientRdv =
+    item.source === "Client" || Boolean(item.clientId);
+
+  if (!isClientRdv) {
     return item;
   }
 
@@ -4124,7 +4714,11 @@ function applyClientPositionStatus<
     return item;
   }
 
-  if (item.status !== "Confirmé" && item.status !== "À confirmer") {
+  if (
+    item.status !== "Confirmé" &&
+    item.status !== "À confirmer" &&
+    item.status !== emptyAppointment.status
+  ) {
     return item;
   }
 
@@ -4142,10 +4736,212 @@ function getAppointmentSlotSpan(duration: number) {
   return Math.max(1, Math.ceil(duration / 15));
 }
 
+function isBookableNotifyKind(appointment: Appointment) {
+  const kind = appointment.kind ?? "Rendez-vous";
+  return (
+    kind !== "Pause" && kind !== "Formation" && kind !== "Indisponible"
+  );
+}
+
+function canOfferAppointmentNotify(
+  appointment: Appointment,
+  settings: CenterSmsSettings | null,
+) {
+  if (!isBookableNotifyKind(appointment)) {
+    return false;
+  }
+
+  const canSms =
+    settings?.confirmationEnabled !== false && Boolean(appointment.phone?.trim());
+  const canEmail =
+    settings?.confirmationEmailEnabled !== false &&
+    Boolean(appointment.email?.trim());
+
+  return canSms || canEmail;
+}
+
+async function sendAppointmentConfirmations(
+  appointment: Appointment,
+  options: {
+    email: boolean;
+    settings: CenterSmsSettings | null;
+    sms: boolean;
+  },
+) {
+  if (!isBookableNotifyKind(appointment)) {
+    return [];
+  }
+
+  const notices: string[] = [];
+  const appointmentEmail = String(appointment.email || "").trim();
+  const sendSms =
+    options.sms &&
+    options.settings?.confirmationEnabled !== false &&
+    Boolean(appointment.phone?.trim());
+  const sendEmail =
+    options.email &&
+    options.settings?.confirmationEmailEnabled !== false &&
+    Boolean(appointmentEmail);
+
+  if (!sendSms && !sendEmail) {
+    return notices;
+  }
+
+  const vars = {
+    phone: appointment.phone,
+    ...splitPersonName(appointment.personName),
+    date: formatSmsDate(appointment.date),
+    time: appointment.start,
+    treatment: appointment.treatment,
+    confirmationLink: "",
+    appointmentId: appointment.id,
+  };
+
+  try {
+    vars.confirmationLink = await issueAppointmentConfirmationUrl(appointment.id);
+  } catch {
+    vars.confirmationLink = "";
+  }
+
+  if (sendSms) {
+    const confirmation = await sendSavedTemplateSms(
+      options.settings?.confirmationTemplateId,
+      vars,
+    );
+    notices.push(
+      confirmation.ok
+        ? "SMS de confirmation envoyé."
+        : "Le SMS de confirmation n'a pas pu partir.",
+    );
+  }
+
+  if (sendEmail) {
+    const confirmationEmail = await sendAppointmentConfirmationEmail({
+      clientId: appointment.clientId,
+      email: appointmentEmail,
+      firstName: vars.firstName,
+      lastName: vars.lastName,
+      date: vars.date,
+      time: vars.time,
+      treatment: vars.treatment,
+      confirmationLink: vars.confirmationLink,
+    });
+    notices.push(
+      confirmationEmail.ok
+        ? "Mail de confirmation envoyé."
+        : "Le mail de confirmation n'a pas pu partir.",
+    );
+  }
+
+  return notices;
+}
+
+function MoveNotifyDialog({
+  appointment,
+  sending,
+  smsSettings,
+  onClose,
+  onSend,
+}: {
+  appointment: Appointment;
+  sending: boolean;
+  smsSettings: CenterSmsSettings | null;
+  onClose: () => void;
+  onSend: (notify: { email: boolean; sms: boolean }) => Promise<void>;
+}) {
+  const canSms =
+    smsSettings?.confirmationEnabled !== false &&
+    Boolean(appointment.phone?.trim());
+  const canEmail =
+    smsSettings?.confirmationEmailEnabled !== false &&
+    Boolean(appointment.email?.trim());
+  const [sendSms, setSendSms] = useState(false);
+  const [sendEmail, setSendEmail] = useState(false);
+
+  return (
+    <div
+      className="fixed inset-0 z-[220] flex items-center justify-center bg-slate-950/40 p-6"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget && !sending) {
+          onClose();
+        }
+      }}
+    >
+      <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
+        <div className="mb-4 flex items-start justify-between gap-4">
+          <div>
+            <h2 className="text-lg font-semibold text-slate-950">
+              RDV déplacé
+            </h2>
+            <p className="mt-1 text-sm font-semibold text-slate-500">
+              {appointment.personName} · {formatSmsDate(appointment.date)} à{" "}
+              {appointment.start}. Envoyer une confirmation ?
+            </p>
+          </div>
+          <button
+            type="button"
+            disabled={sending}
+            onClick={onClose}
+            className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700 disabled:opacity-50"
+            aria-label="Fermer"
+          >
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
+        <div className="grid gap-3 rounded-2xl border border-blue-100 bg-blue-50 p-4">
+          {canSms ? (
+            <label className="flex items-start gap-3 text-sm font-bold text-slate-800">
+              <input
+                type="checkbox"
+                checked={sendSms}
+                disabled={sending}
+                onChange={(event) => setSendSms(event.target.checked)}
+                className="mt-1 h-4 w-4"
+              />
+              <span>SMS</span>
+            </label>
+          ) : null}
+          {canEmail ? (
+            <label className="flex items-start gap-3 text-sm font-bold text-slate-800">
+              <input
+                type="checkbox"
+                checked={sendEmail}
+                disabled={sending}
+                onChange={(event) => setSendEmail(event.target.checked)}
+                className="mt-1 h-4 w-4"
+              />
+              <span>Email</span>
+            </label>
+          ) : null}
+        </div>
+
+        <div className="mt-5 flex justify-end gap-3">
+          <Button type="button" variant="outline" disabled={sending} onClick={onClose}>
+            Non
+          </Button>
+          <Button
+            type="button"
+            disabled={sending || (!sendSms && !sendEmail)}
+            onClick={() => {
+              void onSend({ sms: sendSms, email: sendEmail });
+            }}
+          >
+            {sending ? "Envoi…" : "Envoyer"}
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function AppointmentDetailsModal({
   agendaSlots,
   appointment,
   cabinList,
+  practitionerList,
+  depositLinks,
+  smsSettings,
   onClose,
   onDelete,
   onSave,
@@ -4153,9 +4949,15 @@ function AppointmentDetailsModal({
   agendaSlots: string[];
   appointment: Appointment;
   cabinList: Cabin[];
+  practitionerList: Practitioner[];
+  depositLinks: CenterDepositLinkSetting[];
+  smsSettings: CenterSmsSettings | null;
   onClose: () => void;
   onDelete: () => boolean | void | Promise<boolean | void>;
-  onSave: (appointment: Appointment) => void;
+  onSave: (
+    appointment: Appointment,
+    notify?: { email?: boolean; sms?: boolean; depositLinkId?: string },
+  ) => void;
 }) {
   const [form, setForm] = useState({
     ...appointment,
@@ -4164,19 +4966,30 @@ function AppointmentDetailsModal({
     notes: appointment.notes ?? "",
   });
   const [editingClient, setEditingClient] = useState(false);
+  const [sendSms, setSendSms] = useState(false);
+  const [sendEmail, setSendEmail] = useState(false);
+  const [selectedDepositLinkId, setSelectedDepositLinkId] = useState("");
 
   function saveAppointment(event?: React.FormEvent<HTMLFormElement>) {
     event?.preventDefault();
 
-    onSave({
-      ...appointment,
-      ...form,
-      personName: form.personName.trim(),
-      phone: form.phone.trim(),
-      treatment: form.treatment.trim(),
-      email: form.email.trim() || undefined,
-      notes: form.notes.trim() || undefined,
-    });
+    const isBlock = isAgendaBlockKind(form.kind);
+    onSave(
+      withClientPositionStatus({
+        ...appointment,
+        ...form,
+        personName: form.personName.trim() || (isBlock ? form.kind : ""),
+        phone: form.phone.trim(),
+        treatment: form.treatment.trim() || (isBlock ? form.kind : ""),
+        email: form.email.trim() || undefined,
+        notes: form.notes.trim() || undefined,
+      }),
+      {
+        sms: sendSms,
+        email: sendEmail,
+        depositLinkId: selectedDepositLinkId || undefined,
+      },
+    );
     if ((form.kind ?? "Rendez-vous") === "Rendez-vous" && form.treatment.trim()) {
       addCenterService({
         name: form.treatment.trim(),
@@ -4205,8 +5018,8 @@ function AppointmentDetailsModal({
               Modifier le rendez-vous
             </h2>
             <p className="mt-1 text-sm font-semibold text-slate-500">
-              Changez la date, l&apos;heure, la cabine, la durée, le statut ou le
-              commentaire.
+              Changez la date, l&apos;heure ou la cabine, puis coche SMS / Email
+              pour renvoyer une confirmation tout de suite.
             </p>
           </div>
           <button
@@ -4236,15 +5049,25 @@ function AppointmentDetailsModal({
             />
           </Field>
 
+          {!isAgendaBlockKind(form.kind) ? (
+            <>
           {form.kind === "Rendez-vous" &&
           !editingClient &&
           isAgendaClientReady(form) ? (
-            <div className="sm:col-span-1">
+            <div className="sm:col-span-2">
               <SelectedClientChip
                 name={form.personName}
                 email={form.email}
                 phone={form.phone}
-                onClear={() => setEditingClient(true)}
+                onClear={() => {
+                  setEditingClient(true);
+                  setForm((currentForm) => ({
+                    ...currentForm,
+                    personName: "",
+                    phone: "",
+                    email: "",
+                  }));
+                }}
               />
             </div>
           ) : (
@@ -4305,10 +5128,10 @@ function AppointmentDetailsModal({
           )}
 
           <Field label="Prestation">
-            {form.kind === "Rendez-vous" ? (
               <TreatmentPicker
                 cabinList={cabinList}
                 duration={form.duration}
+                practitionerList={practitionerList}
                 value={form.treatment}
                 onChange={(next) =>
                   setForm((currentForm) => ({
@@ -4322,7 +5145,7 @@ function AppointmentDetailsModal({
                         : currentForm.cabinId,
                     practitionerId:
                       next.practitionerId &&
-                      practitioners.some(
+                      practitionerList.some(
                         (practitioner) =>
                           practitioner.id === next.practitionerId,
                       )
@@ -4331,18 +5154,6 @@ function AppointmentDetailsModal({
                   }))
                 }
               />
-            ) : (
-              <Input
-                required
-                value={form.treatment}
-                onChange={(event) =>
-                  setForm((currentForm) => ({
-                    ...currentForm,
-                    treatment: event.target.value,
-                  }))
-                }
-              />
-            )}
           </Field>
 
           <Field label="Statut">
@@ -4357,6 +5168,8 @@ function AppointmentDetailsModal({
               }
             />
           </Field>
+            </>
+          ) : null}
 
           <Field label="Date">
             <Input
@@ -4396,6 +5209,8 @@ function AppointmentDetailsModal({
             />
           </Field>
 
+          {!isAgendaBlockKind(form.kind) ? (
+            <>
           <Field label="Cabine">
             <Select
               value={form.cabinId}
@@ -4420,9 +5235,9 @@ function AppointmentDetailsModal({
           <Field label="Praticienne">
             <Select
               value={form.practitionerId}
-              options={practitioners.map((practitioner) => practitioner.id)}
+              options={practitionerList.map((practitioner) => practitioner.id)}
               labels={Object.fromEntries(
-                practitioners.map((practitioner) => [
+                practitionerList.map((practitioner) => [
                   practitioner.id,
                   practitioner.name,
                 ])
@@ -4448,6 +5263,8 @@ function AppointmentDetailsModal({
               }
             />
           </Field>
+            </>
+          ) : null}
 
           <div className="sm:col-span-2">
             <Field label="Commentaire">
@@ -4465,6 +5282,68 @@ function AppointmentDetailsModal({
             </Field>
           </div>
         </div>
+
+        {(form.kind ?? "Rendez-vous") === "Rendez-vous" &&
+        (smsSettings?.confirmationEnabled !== false ||
+          smsSettings?.confirmationEmailEnabled !== false) ? (
+          <div className="mt-5 grid gap-3 rounded-2xl border border-blue-100 bg-blue-50 p-4">
+            <p className="text-sm font-bold text-slate-800">
+              Renvoyer une confirmation
+            </p>
+            <p className="text-xs font-semibold text-slate-500">
+              Coche SMS ou Email, puis Enregistrer : ça part tout de suite.
+            </p>
+            {smsSettings?.confirmationEnabled !== false ? (
+              <label className="flex items-start gap-3 text-sm font-bold text-slate-800">
+                <input
+                  type="checkbox"
+                  checked={sendSms}
+                  disabled={!form.phone.trim()}
+                  onChange={(event) => setSendSms(event.target.checked)}
+                  className="mt-1 h-4 w-4"
+                />
+                <span>
+                  SMS
+                  <span className="mt-1 block text-xs font-semibold text-slate-500">
+                    {form.phone.trim()
+                      ? `Sur ${form.phone.trim()}`
+                      : "Ajoute un téléphone pour l’envoyer."}
+                  </span>
+                </span>
+              </label>
+            ) : null}
+            {smsSettings?.confirmationEmailEnabled !== false ? (
+              <label className="flex items-start gap-3 text-sm font-bold text-slate-800">
+                <input
+                  type="checkbox"
+                  checked={sendEmail}
+                  disabled={!form.email.trim()}
+                  onChange={(event) => setSendEmail(event.target.checked)}
+                  className="mt-1 h-4 w-4"
+                />
+                <span>
+                  Email
+                  <span className="mt-1 block text-xs font-semibold text-slate-500">
+                    {form.email.trim()
+                      ? `Sur ${form.email.trim()}`
+                      : "Ajoute un email pour l’envoyer."}
+                  </span>
+                </span>
+              </label>
+            ) : null}
+          </div>
+        ) : null}
+
+        {(form.kind ?? "Rendez-vous") === "Rendez-vous" ? (
+          <div className="mt-5 rounded-2xl border border-amber-100 bg-amber-50 p-4">
+            <DepositLinkChooser
+              links={depositLinks}
+              phone={form.phone}
+              selectedId={selectedDepositLinkId}
+              onChange={setSelectedDepositLinkId}
+            />
+          </div>
+        ) : null}
 
         <div className="mt-6 flex justify-end gap-3">
           <Button type="button" variant="outline" onClick={onClose}>
@@ -4530,24 +5409,124 @@ function SelectedClientChip({
   phone?: string;
   onClear: () => void;
 }) {
-  const details = [email?.trim(), phone?.trim()].filter(Boolean).join(" • ");
+  const details = [phone?.trim(), email?.trim()].filter(Boolean).join(" • ");
 
   return (
-    <div className="flex h-11 items-center gap-3 rounded-xl border border-slate-200 bg-white px-3">
-      <p className="min-w-0 flex-1 truncate text-sm text-slate-900">
-        <span className="font-semibold">{name.trim() || "Cliente"}</span>
-        {details ? (
-          <span className="font-medium text-slate-500"> {details}</span>
-        ) : null}
+    <div>
+      <p className="mb-1.5 text-xs font-medium text-slate-500">
+        Prospect / Client
       </p>
+      <div className="flex min-h-11 items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+        <p className="min-w-0 flex-1 truncate text-sm text-slate-900">
+          <span className="font-semibold">{name.trim() || "Cliente"}</span>
+          {details ? (
+            <span className="font-medium text-slate-500"> {details}</span>
+          ) : null}
+        </p>
+        <button
+          type="button"
+          onClick={onClear}
+          className="grid h-7 w-7 shrink-0 place-items-center rounded-md text-slate-400 transition-colors hover:bg-white hover:text-slate-800"
+          aria-label="Effacer la sélection"
+        >
+          <X className="h-4 w-4" />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function matchesMultiSelection(selectedIds: string[], value: string) {
+  return selectedIds.length === 0 || selectedIds.includes(value);
+}
+
+function MultiCheckFilter({
+  allLabel,
+  label,
+  options,
+  selectedIds,
+  onChange,
+}: {
+  allLabel: string;
+  label: string;
+  options: Array<{ id: string; name: string }>;
+  selectedIds: string[];
+  onChange: (ids: string[]) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const selectedCount = selectedIds.length;
+  const summary =
+    selectedCount === 0
+      ? allLabel
+      : selectedCount === 1
+        ? (options.find((option) => option.id === selectedIds[0])?.name ??
+          allLabel)
+        : `${selectedCount} ${label}`;
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+
+    function handlePointerDown(event: MouseEvent) {
+      if (!rootRef.current?.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    }
+
+    document.addEventListener("mousedown", handlePointerDown);
+    return () => document.removeEventListener("mousedown", handlePointerDown);
+  }, [open]);
+
+  return (
+    <div ref={rootRef} className="relative">
       <button
         type="button"
-        onClick={onClear}
-        className="rounded-md p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
-        aria-label="Modifier le client"
+        onClick={() => setOpen((current) => !current)}
+        className="flex h-11 min-w-44 items-center justify-between gap-2 rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
       >
-        <X className="h-4 w-4" />
+        <span className="truncate">{summary}</span>
+        <ChevronDown className="h-4 w-4 shrink-0 text-slate-400" />
       </button>
+      {open ? (
+        <div className="absolute left-0 z-50 mt-1 w-64 rounded-2xl border border-slate-200 bg-white p-2 shadow-xl">
+          <label className="flex cursor-pointer items-center gap-3 rounded-xl px-3 py-2 text-sm font-bold text-slate-800 hover:bg-slate-50">
+            <input
+              type="checkbox"
+              checked={selectedCount === 0}
+              onChange={() => onChange([])}
+              className="h-4 w-4"
+            />
+            {allLabel}
+          </label>
+          <div className="mt-1 max-h-64 overflow-y-auto">
+            {options.map((option) => {
+              const checked = selectedIds.includes(option.id);
+              return (
+                <label
+                  key={option.id}
+                  className="flex cursor-pointer items-center gap-3 rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                >
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={() =>
+                      onChange(
+                        checked
+                          ? selectedIds.filter((id) => id !== option.id)
+                          : [...selectedIds, option.id],
+                      )
+                    }
+                    className="h-4 w-4"
+                  />
+                  <span className="truncate">{option.name}</span>
+                </label>
+              );
+            })}
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -4582,6 +5561,7 @@ function TreatmentPicker({
   cabinList,
   duration,
   onChange,
+  practitionerList = practitioners,
   value,
 }: {
   cabinList: Cabin[];
@@ -4592,6 +5572,7 @@ function TreatmentPicker({
     practitionerId?: string;
     treatment: string;
   }) => void;
+  practitionerList?: Practitioner[];
   value: string;
 }) {
   const [services, setServices] = useState(getCenterServices);
@@ -4648,7 +5629,7 @@ function TreatmentPicker({
       treatment: nextValue,
       duration: service?.duration,
       cabinId: findCabinIdForService(service, cabinList),
-      practitionerId: findPractitionerIdForService(service),
+      practitionerId: findPractitionerIdForService(service, practitionerList),
     });
   }
 
@@ -4776,13 +5757,16 @@ function findCabinIdForService(
   )?.id;
 }
 
-function findPractitionerIdForService(service: CenterServiceSetting | undefined) {
+function findPractitionerIdForService(
+  service: CenterServiceSetting | undefined,
+  practitionerList: Practitioner[] = practitioners,
+) {
   const practitionerName = findAssignedName(service?.practitioners);
   if (!practitionerName) {
     return undefined;
   }
 
-  return practitioners.find(
+  return practitionerList.find(
     (practitioner) =>
       normalize(practitioner.name) === normalize(practitionerName) ||
       normalize(practitionerName).includes(normalize(practitioner.name)),
@@ -4801,35 +5785,110 @@ function activeDepositLinks() {
   return links.filter((link) => link.active && link.url.trim());
 }
 
-function pickDepositLinkId(
+async function sendSelectedDepositLinkSms(
+  appointment: Appointment,
+  depositLinkId: string,
   links: CenterDepositLinkSetting[],
-  treatment: string,
-  currentId: string,
+  centerName: string,
 ) {
-  const treatmentName = treatment.trim().toLowerCase();
-  const match = links.find((link) => {
-    const name = link.name.toLowerCase();
-    const keywords = name
-      .replace(/acompte/gi, "")
-      .split(/\s+/)
-      .filter((part) => part.length > 3);
-    return (
-      Boolean(treatmentName) &&
-      (name.includes(treatmentName) ||
-        treatmentName.includes(name) ||
-        keywords.some((keyword) => treatmentName.includes(keyword)))
-    );
+  if (!appointment.phone.trim() || !depositLinkId) {
+    return "";
+  }
+
+  const depositLink =
+    links.find((link) => String(link.id) === depositLinkId) ?? null;
+
+  if (!depositLink?.url.trim()) {
+    return "Aucun lien d'acompte configuré.";
+  }
+
+  const names = splitPersonName(appointment.personName);
+  const deposit = await sendBookeaSms({
+    phone: appointment.phone,
+    firstName: names.firstName,
+    lastName: names.lastName,
+    date: formatSmsDate(appointment.date),
+    time: appointment.start,
+    treatment: appointment.treatment,
+    centerName,
+    appointmentId: appointment.id,
+    message: `${depositLink.message} ${depositLink.url}`.trim(),
   });
 
-  if (match) {
-    return String(match.id);
-  }
+  return deposit.ok
+    ? `Lien d'acompte « ${depositLink.name} » envoyé.`
+    : "Le lien d'acompte n'a pas pu partir.";
+}
 
-  if (currentId && links.some((link) => String(link.id) === currentId)) {
-    return currentId;
-  }
+function DepositLinkChooser({
+  links,
+  phone,
+  selectedId,
+  onChange,
+}: {
+  links: CenterDepositLinkSetting[];
+  phone: string;
+  selectedId: string;
+  onChange: (id: string) => void;
+}) {
+  const selectedLink =
+    links.find((link) => String(link.id) === selectedId) ?? null;
 
-  return String(links[0]?.id ?? "");
+  return (
+    <div className="space-y-2">
+      <p className="text-sm font-bold text-slate-800">Quel acompte envoyer ?</p>
+      <p className="text-xs font-semibold text-slate-500">
+        Clique l’acompte voulu. Rien ne part si tu laisses « Ne pas envoyer ».
+      </p>
+      {!phone.trim() ? (
+        <p className="text-xs font-semibold text-slate-500">
+          Ajoute un téléphone pour pouvoir l’envoyer.
+        </p>
+      ) : null}
+      {links.length === 0 ? (
+        <p className="text-xs font-semibold text-slate-500">
+          Aucun lien d’acompte actif dans Paramètres centre.
+        </p>
+      ) : (
+        <div className="grid gap-2 sm:grid-cols-2">
+          <button
+            type="button"
+            onClick={() => onChange("")}
+            className={`rounded-xl border px-3 py-2 text-left text-sm font-bold transition-colors ${
+              selectedId === ""
+                ? "border-slate-800 bg-white text-slate-950"
+                : "border-slate-200 bg-white/70 text-slate-600 hover:border-slate-300"
+            }`}
+          >
+            Ne pas envoyer
+          </button>
+          {links.map((link) => (
+            <button
+              type="button"
+              key={link.id}
+              disabled={!phone.trim()}
+              onClick={() => onChange(String(link.id))}
+              className={`rounded-xl border px-3 py-2 text-left text-sm font-bold transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+                selectedId === String(link.id)
+                  ? "border-amber-500 bg-white text-amber-800 ring-2 ring-amber-200"
+                  : "border-slate-200 bg-white/70 text-slate-700 hover:border-amber-300"
+              }`}
+            >
+              {link.name}
+            </button>
+          ))}
+        </div>
+      )}
+      {selectedLink ? (
+        <p className="text-xs font-semibold leading-5 text-slate-600">
+          {selectedLink.message}{" "}
+          <span className="break-all font-bold text-slate-800">
+            {selectedLink.url}
+          </span>
+        </p>
+      ) : null}
+    </div>
+  );
 }
 
 function Select({

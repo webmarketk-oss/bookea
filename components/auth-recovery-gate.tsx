@@ -6,7 +6,9 @@ import { usePathname, useRouter } from "next/navigation";
 import {
   AUTH_CALLBACK_PATH,
   RESET_PASSWORD_PATH,
+  buildCallbackHref,
   buildResetPasswordHref,
+  isPasswordRecoveryPending,
   parseAuthRedirect,
 } from "@/lib/auth-recovery";
 import { createClient } from "@/lib/supabase";
@@ -16,24 +18,19 @@ export function AuthRecoveryGate() {
   const router = useRouter();
 
   useEffect(() => {
-    const auth = parseAuthRedirect();
-
-    if (auth.isRecovery && pathname !== RESET_PASSWORD_PATH) {
-      router.replace(buildResetPasswordHref());
+    if (pathname === RESET_PASSWORD_PATH || pathname === AUTH_CALLBACK_PATH) {
       return;
     }
 
-    if (
-      auth.hasAuthPayload &&
-      pathname === "/" &&
-      !auth.isRecovery
-    ) {
-      const callback = new URL(AUTH_CALLBACK_PATH, window.location.origin);
-      auth.url.searchParams.forEach((value, key) => {
-        callback.searchParams.set(key, value);
-      });
-      callback.hash = auth.url.hash;
-      router.replace(`${callback.pathname}${callback.search}${callback.hash}`);
+    const auth = parseAuthRedirect();
+
+    if (auth.hasAuthPayload) {
+      if (auth.isRecovery || isPasswordRecoveryPending()) {
+        router.replace(buildResetPasswordHref());
+        return;
+      }
+
+      router.replace(buildCallbackHref());
       return;
     }
 

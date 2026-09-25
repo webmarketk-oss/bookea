@@ -51,6 +51,10 @@ import {
   type CrmClientNote as ClientNote,
   type CrmClientStatus as ClientStatus,
 } from "@/lib/crm-supabase";
+import {
+  paymentToneFromClient,
+  paymentToneStyles,
+} from "@/lib/client-balance";
 import { syncBirthdaySms } from "@/lib/send-sms";
 
 const statusStyles: Record<ClientStatus, string> = {
@@ -323,13 +327,22 @@ export default function CRMClientsPage() {
     window.open(`/dashboard/agenda?${params.toString()}`, "_blank", "noopener,noreferrer");
   }
 
-  function openAppointmentOnAgenda(appointment: { id: string; date: string }) {
+  function openAppointmentOnAgenda(appointment: {
+    id: string;
+    date: string;
+    start?: string;
+  }) {
     const params = new URLSearchParams({
       date: appointment.date,
+      view: "day",
     });
 
     if (appointment.id && !appointment.id.endsWith("-next-appointment")) {
       params.set("rdv", appointment.id);
+    }
+
+    if (appointment.start) {
+      params.set("heure", appointment.start.slice(0, 5));
     }
 
     window.location.assign(`/dashboard/agenda?${params.toString()}`);
@@ -599,7 +612,7 @@ export default function CRMClientsPage() {
                 {filteredClients.map((client) => {
                   const selected = selectedClient?.id === client.id;
                   const birthdayGift = getBirthdayGift(client.birthDate);
-                  const hasBalanceDue = client.balanceDue > 0;
+                  const paymentTone = paymentToneFromClient(client);
 
                   return (
                     <button
@@ -614,8 +627,8 @@ export default function CRMClientsPage() {
                       className={`grid w-full grid-cols-[minmax(0,2.2fr)_1fr_1fr_96px] items-center gap-4 px-5 py-3 text-left transition-colors hover:bg-blue-50/70 ${
                         selected
                           ? "bg-blue-50 ring-1 ring-inset ring-blue-200"
-                          : hasBalanceDue
-                            ? "bg-amber-50"
+                          : paymentTone
+                            ? paymentToneStyles[paymentTone].row
                             : "bg-white"
                       }`}
                     >
@@ -630,10 +643,10 @@ export default function CRMClientsPage() {
                               <span className="truncate">
                                 {client.firstName} {client.lastName}
                               </span>
-                              {hasBalanceDue ? (
+                              {paymentTone ? (
                                 <CreditCard
-                                  className="h-4 w-4 shrink-0 text-amber-600"
-                                  aria-label="Règlement en attente"
+                                  className={`h-4 w-4 shrink-0 ${paymentToneStyles[paymentTone].icon}`}
+                                  aria-label={paymentToneStyles[paymentTone].label}
                                 />
                               ) : null}
                               {birthdayGift && birthdayGift.tone !== "month" ? (
@@ -744,7 +757,11 @@ function ClientPanel({
   onNoteVisibilityChange: (value: "private" | "shared") => void;
   onOpenFull: () => void;
   onOpenRdv: () => void;
-  onOpenAppointment: (appointment: { id: string; date: string }) => void;
+  onOpenAppointment: (appointment: {
+    id: string;
+    date: string;
+    start?: string;
+  }) => void;
   onBirthDateChange: (value: string) => void;
 }) {
   const [activePanel, setActivePanel] = useState<
@@ -753,14 +770,14 @@ function ClientPanel({
   const [isMoreOpen, setIsMoreOpen] = useState(false);
   const appointmentHistory = getClientAppointmentHistory(client, appointments);
   const birthdayGift = getBirthdayGift(client.birthDate);
-  const hasBalanceDue = client.balanceDue > 0;
+  const paymentTone = paymentToneFromClient(client);
 
   return (
     <Card
       data-client-fiche="true"
       className={`h-fit py-0 shadow-sm ${
-        hasBalanceDue
-          ? "border-amber-300 bg-amber-50/70"
+        paymentTone
+          ? `${paymentToneStyles[paymentTone].border} ${paymentToneStyles[paymentTone].surface}`
           : "border-slate-200"
       }`}
     >
@@ -774,10 +791,13 @@ function ClientPanel({
               <Badge className={statusStyles[client.status]}>
                 {client.status}
               </Badge>
-              {hasBalanceDue ? (
-                <Badge className="border-amber-200 bg-amber-100 text-amber-800">
+              {paymentTone ? (
+                <Badge className={paymentToneStyles[paymentTone].badge}>
                   <CreditCard className="mr-1 h-3.5 w-3.5" />
-                  {formatCurrency(client.balanceDue)}
+                  {paymentToneStyles[paymentTone].label}
+                  {client.balanceDue > 0
+                    ? ` · ${formatCurrency(client.balanceDue)}`
+                    : ""}
                 </Badge>
               ) : null}
             </div>
@@ -958,7 +978,8 @@ function ClientPanel({
         <div className="grid grid-cols-2 gap-3">
           <MiniInfo label="Total dépensé" value={formatCurrency(client.totalSpent)} />
           <MiniInfo
-            highlight={hasBalanceDue}
+            highlight={Boolean(paymentTone && paymentTone !== "paid")}
+            tone={paymentTone}
             label="Reste dû"
             value={formatCurrency(client.balanceDue)}
           />
@@ -1127,7 +1148,11 @@ function FullClientModal({
   onAddNote: () => void;
   onNoteDraftChange: (value: string) => void;
   onNoteVisibilityChange: (value: "private" | "shared") => void;
-  onOpenAppointment: (appointment: { id: string; date: string }) => void;
+  onOpenAppointment: (appointment: {
+    id: string;
+    date: string;
+    start?: string;
+  }) => void;
   onOpenRdv: () => void;
   onClose: () => void;
   onSave: (client: Client) => void;
@@ -1144,6 +1169,7 @@ function FullClientModal({
   }, [client.notes, client.documents]);
 
   const birthdayGift = getBirthdayGift(form.birthDate);
+  const paymentTone = paymentToneFromClient(form);
 
   return (
     <div
@@ -1161,8 +1187,14 @@ function FullClientModal({
           onSave(form);
         }}
         className={`max-h-[92vh] w-full max-w-5xl overflow-y-auto rounded-2xl p-6 shadow-2xl ${
-          form.balanceDue > 0
-            ? "bg-amber-50 ring-2 ring-amber-300"
+          paymentTone
+            ? `${paymentToneStyles[paymentTone].surface} ring-2 ${
+                paymentTone === "paid"
+                  ? "ring-emerald-300"
+                  : paymentTone === "partial"
+                    ? "ring-orange-300"
+                    : "ring-red-300"
+              }`
             : "bg-white"
         }`}
       >
@@ -1173,10 +1205,13 @@ function FullClientModal({
             </p>
             <h2 className="mt-1 flex flex-wrap items-center gap-2 text-lg font-semibold text-slate-950">
               {form.firstName} {form.lastName}
-              {form.balanceDue > 0 ? (
-                <Badge className="border-amber-200 bg-amber-100 text-amber-800">
+              {paymentTone ? (
+                <Badge className={paymentToneStyles[paymentTone].badge}>
                   <CreditCard className="mr-1 h-3.5 w-3.5" />
-                  {formatCurrency(form.balanceDue)}
+                  {paymentToneStyles[paymentTone].label}
+                  {form.balanceDue > 0
+                    ? ` · ${formatCurrency(form.balanceDue)}`
+                    : ""}
                 </Badge>
               ) : null}
             </h2>
@@ -1253,7 +1288,8 @@ function FullClientModal({
                 value={formatCurrency(form.totalSpent)}
               />
               <MiniInfo
-                highlight={form.balanceDue > 0}
+                highlight={Boolean(paymentTone && paymentTone !== "paid")}
+                tone={paymentTone}
                 label="Reste dû"
                 value={formatCurrency(form.balanceDue)}
               />
@@ -1570,13 +1606,27 @@ function ClientCares({ cares }: { cares: ClientCare[] }) {
                   {care.date}
                 </p>
               </div>
-              <Badge className="border-slate-100 bg-slate-50 text-slate-600">
+              <Badge
+                className={
+                  care.status === "Payé"
+                    ? paymentToneStyles.paid.badge
+                    : care.status === "Acompte"
+                      ? paymentToneStyles.partial.badge
+                      : paymentToneStyles.unpaid.badge
+                }
+              >
                 {care.status}
               </Badge>
             </div>
             <div className="mt-3 h-2 rounded-full bg-slate-100">
               <div
-                className="h-2 rounded-full bg-gradient-to-r from-violet-500 to-cyan-400"
+                className={`h-2 rounded-full ${
+                  care.status === "Payé"
+                    ? "bg-emerald-500"
+                    : care.status === "Acompte"
+                      ? "bg-orange-500"
+                      : "bg-red-500"
+                }`}
                 style={{
                   width: `${Math.min(
                     100,
@@ -1604,7 +1654,11 @@ function ClientAppointments({
 }: {
   appointments: ReturnType<typeof getClientAppointmentHistory>;
   onOpenRdv: () => void;
-  onOpenAppointment: (appointment: { id: string; date: string }) => void;
+  onOpenAppointment: (appointment: {
+    id: string;
+    date: string;
+    start?: string;
+  }) => void;
 }) {
   const [page, setPage] = useState(0);
   const pageCount = Math.max(
@@ -1990,29 +2044,52 @@ function ClientDocuments({
 function MiniInfo({
   highlight = false,
   label,
+  tone,
   value,
 }: {
   highlight?: boolean;
   label: string;
+  tone?: ReturnType<typeof paymentToneFromClient>;
   value: string;
 }) {
+  const toneClass =
+    tone === "paid"
+      ? "bg-emerald-100"
+      : tone === "partial"
+        ? "bg-orange-100"
+        : tone === "unpaid"
+          ? "bg-red-100"
+          : highlight
+            ? "bg-orange-100"
+            : "bg-slate-50";
+  const labelClass =
+    tone === "paid"
+      ? "text-emerald-700"
+      : tone === "partial"
+        ? "text-orange-700"
+        : tone === "unpaid"
+          ? "text-red-700"
+          : highlight
+            ? "text-orange-700"
+            : "text-slate-400";
+  const valueClass =
+    tone === "paid"
+      ? "text-emerald-900"
+      : tone === "partial"
+        ? "text-orange-900"
+        : tone === "unpaid"
+          ? "text-red-900"
+          : highlight
+            ? "text-orange-900"
+            : "text-slate-800";
+
   return (
-    <div
-      className={`rounded-xl p-3 ${
-        highlight ? "bg-amber-100" : "bg-slate-50"
-      }`}
-    >
-      <p
-        className={`text-xs font-medium ${
-          highlight ? "text-amber-700" : "text-slate-400"
-        }`}
-      >
+    <div className={`rounded-xl p-3 ${toneClass}`}>
+      <p className={`text-xs font-medium ${labelClass}`}>
         {label}
       </p>
       <p
-        className={`mt-1 truncate text-sm font-bold ${
-          highlight ? "text-amber-900" : "text-slate-800"
-        }`}
+        className={`mt-1 truncate text-sm font-bold ${valueClass}`}
       >
         {value}
       </p>

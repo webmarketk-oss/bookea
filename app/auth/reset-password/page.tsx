@@ -1,7 +1,10 @@
 "use client";
 
 import { BookeaLogo } from "@/components/bookea-logo";
-import { parseAuthRedirect } from "@/lib/auth-recovery";
+import {
+  clearPasswordRecoveryPending,
+  parseAuthRedirect,
+} from "@/lib/auth-recovery";
 import { createClient } from "@/lib/supabase";
 import { useRouter } from "next/navigation";
 import { FormEvent, useEffect, useState } from "react";
@@ -18,9 +21,31 @@ export default function ResetPasswordPage() {
   } | null>(null);
 
   useEffect(() => {
+    const supabase = createClient();
+    let cancelled = false;
+
+    const { data } = supabase.auth.onAuthStateChange((event, session) => {
+      if (cancelled) {
+        return;
+      }
+
+      if (event === "PASSWORD_RECOVERY" || session) {
+        setReady(true);
+        setFeedback(null);
+      }
+    });
+
     async function prepareReset() {
-      const supabase = createClient();
       const auth = parseAuthRedirect();
+
+      if (auth.url.searchParams.get("error") === "expired") {
+        setFeedback({
+          type: "error",
+          message:
+            "Ce lien de réinitialisation est invalide ou a expiré. Demandez-en un nouveau depuis la page de connexion.",
+        });
+        return;
+      }
 
       if (auth.code) {
         const { error } = await supabase.auth.exchangeCodeForSession(auth.code);
@@ -53,30 +78,30 @@ export default function ResetPasswordPage() {
         }
       }
 
-      const { data } = await supabase.auth.getSession();
-      if (!data.session) {
+      for (let attempt = 0; attempt < 8 && !cancelled; attempt += 1) {
+        const { data: sessionData } = await supabase.auth.getSession();
+        if (sessionData.session) {
+          setReady(true);
+          setFeedback(null);
+          return;
+        }
+
+        await new Promise((resolve) => window.setTimeout(resolve, 250));
+      }
+
+      if (!cancelled) {
         setFeedback({
           type: "error",
           message:
             "Ce lien de réinitialisation est invalide ou a expiré. Demandez-en un nouveau.",
         });
-        return;
       }
-
-      setReady(true);
     }
-
-    const supabase = createClient();
-    const { data } = supabase.auth.onAuthStateChange((event) => {
-      if (event === "PASSWORD_RECOVERY") {
-        setReady(true);
-        setFeedback(null);
-      }
-    });
 
     void prepareReset();
 
     return () => {
+      cancelled = true;
       data.subscription.unsubscribe();
     };
   }, []);
@@ -117,6 +142,7 @@ export default function ResetPasswordPage() {
       return;
     }
 
+    clearPasswordRecoveryPending();
     setFeedback({
       type: "success",
       message: "Mot de passe mis à jour. Redirection vers votre espace...",

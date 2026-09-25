@@ -24,6 +24,8 @@ import {
   Users,
 } from "lucide-react";
 
+const rdvBookedSubtitle = "RDV pris, acompte envoyé, acompte reçu…";
+
 type DashboardCardsProps = {
   leads: Lead[];
   activeStatus: "Tous" | LeadStatus;
@@ -58,7 +60,7 @@ export default function DashboardCards({
     {
       title: "Nouveaux",
       value: leads.filter((lead) => isLeadCreatedOn(lead, today)).length,
-      subtitle: "Leads acquis aujourd'hui",
+      subtitle: "Prospects acquis aujourd'hui",
       icon: Users,
       color: "text-blue-600",
       quickFilter: "Aujourd'hui",
@@ -66,7 +68,7 @@ export default function DashboardCards({
     {
       title: "Hier",
       value: leads.filter((lead) => isLeadCreatedOn(lead, yesterday)).length,
-      subtitle: "Prospects acquis la veille",
+      subtitle: "Prospects acquis hier",
       icon: History,
       color: "text-slate-600",
       quickFilter: "Hier",
@@ -95,6 +97,7 @@ export default function DashboardCards({
     {
       title: "RDV pris aujourd'hui",
       value: leads.filter((lead) => isLeadRdvTakenOn(lead, today)).length,
+      subtitle: rdvBookedSubtitle,
       icon: CalendarCheck2,
       color: "text-violet-600",
       quickFilter: "RDV aujourd'hui",
@@ -102,6 +105,7 @@ export default function DashboardCards({
     {
       title: "RDV pris hier",
       value: leads.filter((lead) => isLeadRdvTakenOn(lead, yesterday)).length,
+      subtitle: rdvBookedSubtitle,
       icon: CalendarCheck2,
       color: "text-fuchsia-600",
       quickFilter: "RDV hier",
@@ -111,6 +115,7 @@ export default function DashboardCards({
       value: leads.filter((lead) =>
         isLeadRdvTakenBetween(lead, sevenDaysAgo, today),
       ).length,
+      subtitle: rdvBookedSubtitle,
       icon: CalendarCheck2,
       color: "text-purple-600",
       quickFilter: "RDV 7 jours",
@@ -143,14 +148,12 @@ export default function DashboardCards({
       status: "À relancer",
     },
     {
-      title: "Clients",
-      value: leads.filter((lead) =>
-        ["Client converti", "Vendu"].includes(lead.status),
-      ).length,
-      subtitle: "Convertis",
+      title: "RDV pris aujourd'hui",
+      value: leads.filter((lead) => isLeadRdvTakenOn(lead, today)).length,
+      subtitle: rdvBookedSubtitle,
       icon: CircleCheck,
       color: "text-green-600",
-      status: "Client converti",
+      quickFilter: "RDV aujourd'hui",
     },
     {
       title: "Perdus",

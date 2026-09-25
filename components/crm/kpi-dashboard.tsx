@@ -45,8 +45,10 @@ const rdvStatuses = [
   "RDV confirmé",
   "RDV programmé",
   "RDV fixé",
+  "Acompte envoyé",
   "Acompte reçu",
   "Acompte validé",
+  "Acompte en attente",
 ];
 const presentStatuses = [
   "Vendu",
@@ -450,66 +452,147 @@ export default function KPIDashboard({ leads }: KPIDashboardProps) {
               Aucune campagne sur cette période.
             </p>
           ) : (
-            <div className="mt-6 overflow-x-auto">
-              <div
-                className="flex h-72 min-w-full items-end gap-4 px-1"
-                style={{
-                  minWidth: `${Math.max(campaignStats.length * 88, 320)}px`,
-                }}
-              >
-                {campaignStats.map((row) => (
-                  <div
-                    key={row.name}
-                    className="flex min-w-[72px] flex-1 flex-col items-center gap-2"
-                  >
-                    <div className="flex h-48 w-full items-end justify-center gap-1.5">
-                      <div
-                        className="w-4 rounded-t bg-violet-500"
-                        style={{
-                          height: `${Math.max(
-                            (row.leads / campaignChartMax) * 100,
-                            row.leads > 0 ? 6 : 0,
-                          )}%`,
-                        }}
-                        title={`${row.leads} leads`}
-                      />
-                      <div
-                        className="w-4 rounded-t bg-blue-500"
-                        style={{
-                          height: `${Math.max(
-                            (row.rdv / campaignChartMax) * 100,
-                            row.rdv > 0 ? 6 : 0,
-                          )}%`,
-                        }}
-                        title={`${row.rdv} RDV pris`}
-                      />
-                    </div>
-                    <p className="w-full truncate text-center text-xs font-semibold text-slate-700">
-                      {row.name}
-                    </p>
-                    <p className="text-[11px] font-medium text-slate-500">
-                      {row.leads} leads · {row.rdv} RDV
-                    </p>
-                  </div>
-                ))}
-              </div>
-            </div>
+            <CampaignBarChart
+              rows={campaignStats}
+              maxValue={campaignChartMax}
+            />
           )}
-
-          <div className="mt-4 flex gap-5 text-xs font-semibold text-slate-500">
-            <span className="flex items-center gap-2">
-              <i className="h-2 w-2 rounded-full bg-violet-500" />
-              Leads
-            </span>
-            <span className="flex items-center gap-2">
-              <i className="h-2 w-2 rounded-full bg-blue-500" />
-              RDV pris
-            </span>
-          </div>
         </CardContent>
       </Card>
     </div>
   );
+}
+
+function CampaignBarChart({
+  rows,
+  maxValue,
+}: {
+  rows: Array<{ name: string; leads: number; rdv: number }>;
+  maxValue: number;
+}) {
+  const chartMax = niceChartMax(maxValue);
+  const ticks = [0, 0.25, 0.5, 0.75, 1].map((step) => Math.round(chartMax * step));
+  const columnWidth = Math.max(92, Math.min(140, 720 / Math.max(rows.length, 1)));
+
+  return (
+    <div className="mt-6">
+      <div className="mb-4 flex flex-wrap gap-5 text-xs font-semibold text-slate-500">
+        <span className="flex items-center gap-2">
+          <i className="h-2.5 w-2.5 rounded-sm bg-violet-500" />
+          Leads
+        </span>
+        <span className="flex items-center gap-2">
+          <i className="h-2.5 w-2.5 rounded-sm bg-blue-500" />
+          RDV pris
+        </span>
+      </div>
+
+      <div className="overflow-x-auto rounded-2xl border border-slate-100 bg-slate-50/70 p-4">
+        <div
+          className="grid"
+          style={{
+            minWidth: `${Math.max(rows.length * columnWidth + 44, 360)}px`,
+            gridTemplateColumns: `44px repeat(${rows.length}, minmax(${columnWidth}px, 1fr))`,
+          }}
+        >
+          <div className="relative h-64">
+            {ticks.map((tick) => (
+              <div
+                key={`label-${tick}`}
+                className="absolute right-2 -translate-y-1/2 text-[11px] font-semibold text-slate-400"
+                style={{ bottom: `${(tick / chartMax) * 100}%` }}
+              >
+                {tick}
+              </div>
+            ))}
+          </div>
+
+          {rows.map((row) => (
+            <div key={row.name} className="relative h-64 px-3">
+              {ticks.map((tick) => (
+                <div
+                  key={`${row.name}-${tick}`}
+                  className="absolute inset-x-0 border-t border-dashed border-slate-200"
+                  style={{ bottom: `${(tick / chartMax) * 100}%` }}
+                />
+              ))}
+              <div className="relative z-10 flex h-full items-end justify-center gap-2 pb-0">
+                <ChartBar
+                  value={row.leads}
+                  max={chartMax}
+                  color="bg-violet-500"
+                  label={`${row.leads} leads`}
+                />
+                <ChartBar
+                  value={row.rdv}
+                  max={chartMax}
+                  color="bg-blue-500"
+                  label={`${row.rdv} RDV`}
+                />
+              </div>
+            </div>
+          ))}
+
+          <div />
+          {rows.map((row) => (
+            <div key={`${row.name}-label`} className="px-2 pt-3 text-center">
+              <p className="truncate text-xs font-bold text-slate-800" title={row.name}>
+                {row.name}
+              </p>
+              <p className="mt-1 text-[11px] font-medium text-slate-500">
+                {row.leads} leads · {row.rdv} RDV
+              </p>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ChartBar({
+  value,
+  max,
+  color,
+  label,
+}: {
+  value: number;
+  max: number;
+  color: string;
+  label: string;
+}) {
+  const height = value > 0 ? Math.max((value / max) * 100, 8) : 0;
+
+  return (
+    <div className="flex h-full w-8 items-end justify-center">
+      <div
+        className={`relative w-full rounded-t-md ${color}`}
+        style={{ height: `${height}%` }}
+        title={label}
+      >
+        {value > 0 ? (
+          <span className="absolute inset-x-0 -top-5 text-center text-[11px] font-black text-slate-700">
+            {value}
+          </span>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function niceChartMax(value: number) {
+  const safe = Math.max(1, value);
+
+  if (safe <= 4) {
+    return 4;
+  }
+
+  if (safe <= 8) {
+    return 8;
+  }
+
+  const magnitude = 10 ** Math.floor(Math.log10(safe));
+  return Math.ceil(safe / magnitude) * magnitude;
 }
 
 function Rate({

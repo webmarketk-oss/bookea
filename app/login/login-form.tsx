@@ -1,9 +1,17 @@
 "use client";
 
 import { AuthFeedback, getAuthFeedback } from "@/lib/auth-errors";
+import {
+  RESET_PASSWORD_PATH,
+  buildPasswordRecoveryRedirectTo,
+  clearPasswordRecoveryPending,
+  isPasswordRecoveryPending,
+  markPasswordRecoveryPending,
+  parseAuthRedirect,
+} from "@/lib/auth-recovery";
 import { createClient } from "@/lib/supabase";
 import { useRouter } from "next/navigation";
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 
 type AuthMode = "login" | "signup";
 
@@ -19,6 +27,8 @@ export function LoginForm({ initialError }: LoginFormProps) {
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [recoveryMode, setRecoveryMode] = useState(false);
   const [loading, setLoading] = useState(false);
   const [feedback, setFeedback] = useState<{
     message: string;
@@ -28,6 +38,47 @@ export function LoginForm({ initialError }: LoginFormProps) {
   } | null>(
     initialError ?? null
   );
+
+  useEffect(() => {
+    const auth = parseAuthRedirect();
+    const recoveryPending = isPasswordRecoveryPending();
+    const client = createClient();
+
+    if (auth.isRecovery || (auth.hasAuthPayload && recoveryPending)) {
+      router.replace(RESET_PASSWORD_PATH + auth.url.search + auth.url.hash);
+    }
+
+    if (typeof window !== "undefined" && window.location.search.includes("reset=expired")) {
+      setFeedback({
+        type: "error",
+        message:
+          "Le lien de réinitialisation est invalide ou a expiré. Demandez-en un nouveau.",
+      });
+    }
+
+    const { data } = client.auth.onAuthStateChange((event, session) => {
+      if (event === "PASSWORD_RECOVERY" || (session && recoveryPending)) {
+        setRecoveryMode(true);
+        setPassword("");
+        setFeedback({
+          type: "info",
+          message: "Choisissez un nouveau mot de passe pour votre compte.",
+        });
+      }
+    });
+
+    if (recoveryPending || auth.hasAuthPayload) {
+      void client.auth.getSession().then(({ data: sessionData }) => {
+        if (sessionData.session) {
+          setRecoveryMode(true);
+        }
+      });
+    }
+
+    return () => {
+      data.subscription.unsubscribe();
+    };
+  }, [router]);
 
   async function handleEmailAuth(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -99,8 +150,9 @@ export function LoginForm({ initialError }: LoginFormProps) {
     setLoading(true);
     setFeedback(null);
 
+    markPasswordRecoveryPending();
     const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
-      redirectTo: `${window.location.origin}/auth/reset-password`,
+      redirectTo: buildPasswordRecoveryRedirectTo(window.location.origin),
     });
 
     setLoading(false);
@@ -117,8 +169,51 @@ export function LoginForm({ initialError }: LoginFormProps) {
     setFeedback({
       type: "success",
       message:
-        "Si un compte existe avec cet email, un lien de réinitialisation vient d'être envoyé. Pensez à vérifier les spams.",
+        "Si un compte existe avec cet email, un lien de réinitialisation vient d'être envoyé. Ouvrez-le sur cet appareil, puis choisissez un nouveau mot de passe.",
     });
+  }
+
+  async function handleUpdatePassword(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (password.length < 6) {
+      setFeedback({
+        type: "error",
+        message: "Le mot de passe doit contenir au moins 6 caractères.",
+      });
+      return;
+    }
+
+    if (password !== confirmPassword) {
+      setFeedback({
+        type: "error",
+        message: "Les deux mots de passe ne correspondent pas.",
+      });
+      return;
+    }
+
+    setLoading(true);
+    setFeedback(null);
+
+    const { error } = await supabase.auth.updateUser({ password });
+    setLoading(false);
+
+    if (error) {
+      setFeedback({
+        type: "error",
+        message:
+          "Le mot de passe n'a pas pu être enregistré. Réessayez ou demandez un nouveau lien.",
+      });
+      return;
+    }
+
+    clearPasswordRecoveryPending();
+    setFeedback({
+      type: "success",
+      message: "Mot de passe mis à jour. Redirection vers votre espace...",
+    });
+    router.replace("/dashboard");
+    router.refresh();
   }
 
   async function handleGoogleSignIn() {
@@ -186,6 +281,60 @@ export function LoginForm({ initialError }: LoginFormProps) {
         </div>
       )}
 
+      {recoveryMode ? (
+        <form onSubmit={handleUpdatePassword} className="space-y-5">
+          <div>
+            <label
+              htmlFor="new-password"
+              className="mb-2 block text-sm font-medium text-slate-700"
+            >
+              Nouveau mot de passe
+            </label>
+            <input
+              id="new-password"
+              name="new-password"
+              type="password"
+              autoComplete="new-password"
+              required
+              minLength={6}
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              placeholder="••••••••"
+              disabled={loading}
+              className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-slate-900 shadow-sm outline-none transition-colors placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 disabled:opacity-60"
+            />
+          </div>
+          <div>
+            <label
+              htmlFor="confirm-password"
+              className="mb-2 block text-sm font-medium text-slate-700"
+            >
+              Confirmer le mot de passe
+            </label>
+            <input
+              id="confirm-password"
+              name="confirm-password"
+              type="password"
+              autoComplete="new-password"
+              required
+              minLength={6}
+              value={confirmPassword}
+              onChange={(event) => setConfirmPassword(event.target.value)}
+              placeholder="••••••••"
+              disabled={loading}
+              className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-slate-900 shadow-sm outline-none transition-colors placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 disabled:opacity-60"
+            />
+          </div>
+          <button
+            type="submit"
+            disabled={loading}
+            className="w-full rounded-xl bg-gradient-to-r from-blue-600 to-blue-700 py-3.5 text-base font-semibold text-white shadow-lg shadow-blue-600/25 transition-all duration-200 hover:-translate-y-0.5 hover:from-blue-700 hover:to-blue-800 hover:shadow-xl hover:shadow-blue-600/30 disabled:translate-y-0 disabled:opacity-60 disabled:shadow-none"
+          >
+            {loading ? "Enregistrement..." : "Enregistrer le mot de passe"}
+          </button>
+        </form>
+      ) : (
+      <>
       <form onSubmit={handleEmailAuth} className="space-y-5">
         {mode === "signup" && (
           <div>
@@ -341,6 +490,8 @@ export function LoginForm({ initialError }: LoginFormProps) {
           </>
         )}
       </p>
+      </>
+      )}
     </div>
   );
 }

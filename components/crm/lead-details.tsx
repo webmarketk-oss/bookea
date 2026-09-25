@@ -203,6 +203,22 @@ export default function LeadDetails({
       );
   }, []);
 
+  useEffect(() => {
+    function flushLeadBeforeCenterSwitch() {
+      saveLeadInfo();
+    }
+
+    window.addEventListener(
+      "bookea-center-will-switch",
+      flushLeadBeforeCenterSwitch,
+    );
+    return () =>
+      window.removeEventListener(
+        "bookea-center-will-switch",
+        flushLeadBeforeCenterSwitch,
+      );
+  }, []);
+
   const selectedDepositLink =
     depositLinks.find((link) => String(link.id) === selectedDepositLinkId) ??
     depositLinks[0] ??
@@ -264,6 +280,9 @@ export default function LeadDetails({
       campaign: form.campaign.trim() || lead.campaign,
       treatment: form.treatment.trim() || lead.treatment,
       nextAction: form.nextAction.trim() || "À contacter",
+      reminderDate:
+        form.reminderDate ||
+        (form.status !== lead.status ? lead.reminderDate ?? "" : form.reminderDate),
     };
 
     if (JSON.stringify(nextForm) === JSON.stringify(leadToInfoForm(lead))) {

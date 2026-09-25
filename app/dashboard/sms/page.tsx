@@ -516,16 +516,16 @@ export default function SmsPage() {
           <div>
             <h2 className="text-base font-semibold">Suite d&apos;automatisation</h2>
             <p className="mt-1 max-w-3xl text-sm font-medium text-slate-500">
-              Chaque ligne est un envoi différent. Oui = pré-coché au prochain RDV.
-              Non = pas envoyé, sauf si tu le coches à la main sur ce RDV.
-              Cocher seulement « Dès que le RDV est posé » n’envoie pas les rappels, l’accueil ni l’anniversaire.
+              Actif = la case apparaît à la prise de RDV. Inactif = elle n’apparaît
+              pas et le SMS ou le mail ne part pas. L’accueil prospect s’envoie
+              depuis la fiche, pas depuis le rendez-vous.
             </p>
           </div>
         </div>
         <div className="mt-5 grid gap-3">
           <AutomationRow
             title="1. Dès que le RDV est posé"
-            hint="Part tout de suite quand tu enregistres le rendez-vous. Ça n’entraîne aucun autre SMS."
+            hint="Actif : apparaît à la prise de RDV et part tout de suite. Inactif : masqué."
             templateId={smsSettings.confirmationTemplateId}
             templates={smsSettings.templates}
             enabled={smsSettings.confirmationEnabled}
@@ -543,8 +543,28 @@ export default function SmsPage() {
             }
           />
           <AutomationRow
+            title="1 bis. Mail de confirmation RDV"
+            hint="Actif : apparaît à la prise de RDV si un email client est renseigné. Inactif : masqué. Même texte que le SMS de confirmation, envoyé à l’email de la fiche."
+            templateId={smsSettings.confirmationTemplateId}
+            templates={smsSettings.templates}
+            enabled={smsSettings.confirmationEmailEnabled}
+            hideTemplate
+            onTemplateChange={(value) =>
+              void persistSmsSettings({
+                ...smsSettings,
+                confirmationTemplateId: value,
+              })
+            }
+            onToggle={() =>
+              void persistSmsSettings({
+                ...smsSettings,
+                confirmationEmailEnabled: !smsSettings.confirmationEmailEnabled,
+              })
+            }
+          />
+          <AutomationRow
             title="2. Contre-indications laser J-7"
-            hint="7 jours avant, seulement si le RDV est un laser."
+            hint="Actif : apparaît à la prise de RDV laser. Inactif : masqué."
             templateId={smsSettings.reminderJ7TemplateId}
             templates={smsSettings.templates}
             enabled={smsSettings.reminderJ7Enabled}
@@ -563,7 +583,7 @@ export default function SmsPage() {
           />
           <AutomationRow
             title="3. Rappel J-5"
-            hint="5 jours avant le RDV."
+            hint="Actif : apparaît à la prise de RDV. Inactif : masqué."
             templateId={smsSettings.reminderJ5TemplateId}
             templates={smsSettings.templates}
             enabled={smsSettings.reminderJ5Enabled}
@@ -582,7 +602,7 @@ export default function SmsPage() {
           />
           <AutomationRow
             title="4. Rappel 48h"
-            hint="48 heures avant le RDV."
+            hint="Actif : apparaît à la prise de RDV. Inactif : masqué."
             templateId={smsSettings.reminder48hTemplateId}
             templates={smsSettings.templates}
             enabled={smsSettings.reminder48hEnabled}
@@ -601,7 +621,7 @@ export default function SmsPage() {
           />
           <AutomationRow
             title="5. Rappel 24h / la veille"
-            hint="24 heures avant le RDV."
+            hint="Actif : apparaît à la prise de RDV. Inactif : masqué."
             templateId={smsSettings.reminder24hTemplateId}
             templates={smsSettings.templates}
             enabled={smsSettings.reminder24hEnabled}
@@ -888,6 +908,7 @@ function AutomationRow({
   templateId,
   templates,
   enabled,
+  hideTemplate,
   onTemplateChange,
   onToggle,
 }: {
@@ -896,6 +917,7 @@ function AutomationRow({
   templateId: string;
   templates: SmsTemplate[];
   enabled: boolean;
+  hideTemplate?: boolean;
   onTemplateChange: (value: string) => void;
   onToggle: () => void;
 }) {
@@ -905,6 +927,11 @@ function AutomationRow({
         <p className="font-semibold">{title}</p>
         <p className="mt-1 text-xs font-medium leading-4 text-slate-500">{hint}</p>
       </div>
+      {hideTemplate ? (
+        <p className="text-sm font-semibold text-slate-500">
+          Même modèle que le SMS de confirmation
+        </p>
+      ) : (
       <select
         value={templateId}
         onChange={(event) => onTemplateChange(event.target.value)}
@@ -916,6 +943,7 @@ function AutomationRow({
           </option>
         ))}
       </select>
+      )}
       <button
         type="button"
         onClick={onToggle}
@@ -925,7 +953,7 @@ function AutomationRow({
             : "bg-white text-slate-500"
         }`}
       >
-        {enabled ? "Oui" : "Non"}
+        {enabled ? "Actif" : "Inactif"}
       </button>
     </div>
   );

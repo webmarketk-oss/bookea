@@ -29,6 +29,7 @@ export type CenterSmsSettings = {
   reminder48hTemplateId: string;
   reminder24hTemplateId: string;
   confirmationEnabled: boolean;
+  confirmationEmailEnabled: boolean;
   reminderJ7Enabled: boolean;
   reminderJ5Enabled: boolean;
   reminder48hEnabled: boolean;
@@ -91,6 +92,7 @@ export function reminderFlagsFromSettings(
   settings?: Pick<
     CenterSmsSettings,
     | "confirmationEnabled"
+    | "confirmationEmailEnabled"
     | "reminderJ7Enabled"
     | "reminderJ5Enabled"
     | "reminder48hEnabled"
@@ -99,6 +101,7 @@ export function reminderFlagsFromSettings(
 ) {
   return {
     sendSmsNow: settings?.confirmationEnabled !== false,
+    sendEmailNow: settings?.confirmationEmailEnabled !== false,
     sendSmsJ7: settings?.reminderJ7Enabled !== false,
     sendSmsJ5: settings?.reminderJ5Enabled === true,
     sendSms48h: settings?.reminder48hEnabled === true,
@@ -124,6 +127,7 @@ export const defaultSmsSettings: CenterSmsSettings = {
   reminder48hTemplateId: "rappel-48h",
   reminder24hTemplateId: "rappel-24h",
   confirmationEnabled: true,
+  confirmationEmailEnabled: true,
   reminderJ7Enabled: true,
   reminderJ5Enabled: false,
   reminder48hEnabled: false,
@@ -419,6 +423,7 @@ export function normalizeSmsSettings(
       fallbackId,
     ),
     confirmationEnabled: value?.confirmationEnabled !== false,
+    confirmationEmailEnabled: value?.confirmationEmailEnabled !== false,
     reminderJ7Enabled: value?.reminderJ7Enabled !== false,
     reminderJ5Enabled: value?.reminderJ5Enabled === true,
     reminder48hEnabled: value?.reminder48hEnabled === true,
@@ -632,6 +637,9 @@ export async function loadCenterSmsSettings() {
     confirmationEnabled: hasRemote
       ? remoteSettings.confirmationEnabled
       : (localSettings?.confirmationEnabled ?? true),
+    confirmationEmailEnabled: hasRemote
+      ? remoteSettings.confirmationEmailEnabled
+      : (localSettings?.confirmationEmailEnabled ?? true),
     reminderJ7Enabled: hasRemote
       ? remoteSettings.reminderJ7Enabled
       : (localSettings?.reminderJ7Enabled ?? true),

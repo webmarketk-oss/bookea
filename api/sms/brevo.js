@@ -202,6 +202,7 @@ function parseCenterSmsSettings(settings) {
       templates.find((template) => template.id === "rappel-24h")?.id ||
       templates[0]?.id,
     confirmationEnabled: sms.confirmationEnabled !== false,
+    confirmationEmailEnabled: sms.confirmationEmailEnabled !== false,
     reminderJ7Enabled: sms.reminderJ7Enabled !== false,
     reminderJ5Enabled: sms.reminderJ5Enabled === true,
     reminder48hEnabled: sms.reminder48hEnabled === true,

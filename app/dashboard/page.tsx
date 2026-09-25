@@ -18,8 +18,11 @@ import { Card, CardContent } from "@/components/ui/card";
 import { loadCrmAppointments } from "@/lib/agenda-supabase";
 import {
   addDaysIso,
+  formatReminderDayLabel,
   isLeadCreatedOn,
+  isReminderDueOn,
   monthStartIso,
+  reminderDayOffset,
   todayIso,
 } from "@/lib/crm-stats";
 import { loadCrmClients, loadCrmLeads, type CrmClient } from "@/lib/crm-supabase";
@@ -139,7 +142,9 @@ export default function DashboardPage() {
   const recordedRevenue = monthRevenue;
   const fillRate = planningFillRate(todayAppointments, appointments);
   const reminderLeads = leads.filter(
-    (lead) => lead.reminderDate === today && !inactiveLeadStatuses.includes(lead.status),
+    (lead) =>
+      isReminderDueOn(lead.reminderDate, today) &&
+      !inactiveLeadStatuses.includes(lead.status),
   );
   const contactsToHandle = leads
     .filter((lead) => {
@@ -147,14 +152,30 @@ export default function DashboardPage() {
         return false;
       }
 
-      return followUpStatuses.has(lead.status) || lead.reminderDate === today;
+      return (
+        followUpStatuses.has(lead.status) || isReminderDueOn(lead.reminderDate, today)
+      );
     })
     .sort((left, right) => {
-      const leftReminder = left.reminderDate === today ? 0 : 1;
-      const rightReminder = right.reminderDate === today ? 0 : 1;
+      const leftOffset = reminderDayOffset(left.reminderDate, today);
+      const rightOffset = reminderDayOffset(right.reminderDate, today);
+      const leftDue = leftOffset !== null && leftOffset <= 0 ? 0 : 1;
+      const rightDue = rightOffset !== null && rightOffset <= 0 ? 0 : 1;
 
-      if (leftReminder !== rightReminder) {
-        return leftReminder - rightReminder;
+      if (leftDue !== rightDue) {
+        return leftDue - rightDue;
+      }
+
+      if (leftOffset !== null && rightOffset !== null && leftOffset !== rightOffset) {
+        return leftOffset - rightOffset;
+      }
+
+      if (leftOffset !== null && rightOffset === null) {
+        return -1;
+      }
+
+      if (leftOffset === null && rightOffset !== null) {
+        return 1;
       }
 
       if (left.status === "Nouveau" && right.status !== "Nouveau") {
@@ -440,7 +461,10 @@ export default function DashboardPage() {
                     Aucun contact à traiter pour le moment.
                   </p>
                 ) : (
-                  contactsToHandle.map((lead) => (
+                  contactsToHandle.map((lead) => {
+                    const dayLabel = formatReminderDayLabel(lead.reminderDate, today);
+
+                    return (
                     <Link
                       key={lead.id}
                       href="/dashboard/crm-leads"
@@ -451,14 +475,27 @@ export default function DashboardPage() {
                           {lead.firstName} {lead.lastName}
                         </p>
                         <p className="truncate text-sm font-semibold text-slate-500">
-                          {lead.nextAction || lead.treatment}
+                          {lead.status}
+                          {lead.nextAction || lead.treatment
+                            ? ` · ${lead.nextAction || lead.treatment}`
+                            : ""}
                         </p>
                       </div>
-                      <span className="shrink-0 rounded-full bg-orange-50 px-3 py-1 text-xs font-medium text-orange-700">
-                        {lead.status}
+                      <span
+                        className={cn(
+                          "shrink-0 rounded-full px-3 py-1 text-xs font-medium",
+                          dayLabel === "J"
+                            ? "bg-orange-100 text-orange-800"
+                            : dayLabel
+                              ? "bg-slate-100 text-slate-600"
+                              : "bg-orange-50 text-orange-700",
+                        )}
+                      >
+                        {dayLabel || lead.status}
                       </span>
                     </Link>
-                  ))
+                    );
+                  })
                 )}
               </div>
             </CardContent>

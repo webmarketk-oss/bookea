@@ -15,6 +15,7 @@ import { inactiveLeadStatuses, leadStatuses } from "@/lib/lead-statuses";
 import {
   addDaysIso,
   matchesCrmQuickFilter,
+  rdvBookedStatusList,
   todayIso,
   type CrmQuickFilter,
 } from "@/lib/crm-stats";
@@ -124,7 +125,7 @@ const statusGroups: Partial<Record<LeadStatus, LeadStatus[]>> = {
     "Mail envoyé",
     "À relancer",
   ],
-  "RDV pris": ["RDV pris", "RDV confirmé", "Acompte reçu"],
+  "RDV pris": rdvBookedStatusList,
   "Client converti": ["Client converti", "Vendu"],
   "Prospect perdu": inactiveLeadStatuses,
 };
@@ -711,7 +712,9 @@ export default function CRMLeadsPage() {
           commercial: patch.commercial,
           status: nextStatus,
           dealAmount: Number.isFinite(dealAmount) ? dealAmount : lead.dealAmount,
-          reminderDate: patch.reminderDate || undefined,
+          reminderDate:
+            patch.reminderDate ||
+            (statusChanged ? leadBeforeUpdate.reminderDate : undefined),
           nextAction: patch.nextAction,
           updatedDate: todayIso(),
           activityLog: statusChanged
@@ -749,7 +752,9 @@ export default function CRMLeadsPage() {
         status: nextStatus,
         dealAmount: Number.isFinite(dealAmount) ? dealAmount : leadBeforeUpdate.dealAmount,
         nextAction: patch.nextAction,
-        reminderDate: patch.reminderDate,
+        reminderDate:
+          patch.reminderDate ||
+          (statusChanged ? leadBeforeUpdate.reminderDate || "" : patch.reminderDate),
       });
       if (patch.phone) {
         void syncBirthdaySms({

@@ -11,7 +11,19 @@ export type CrmQuickFilter =
   | "RDV hier"
   | "RDV 7 jours";
 
-const rdvBookedStatuses = new Set<LeadStatus>(["RDV pris", "RDV confirmé"]);
+export const rdvBookedStatusList: LeadStatus[] = [
+  "RDV pris",
+  "RDV confirmé",
+  "Acompte envoyé",
+  "Acompte reçu",
+  "Acompte en attente",
+];
+
+const rdvBookedStatuses = new Set<LeadStatus>(rdvBookedStatusList);
+
+export function isRdvBookedStatus(status?: string | null) {
+  return rdvBookedStatuses.has(normalizeLeadStatus(status));
+}
 
 export function todayIso() {
   return toLocalIsoDate(new Date());
@@ -37,6 +49,69 @@ export function toLocalIsoDate(value: string | Date) {
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
+}
+
+export function toDateOnlyIso(value?: string | Date | null) {
+  if (!value) {
+    return undefined;
+  }
+
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? undefined : toLocalIsoDate(value);
+  }
+
+  const trimmed = value.trim();
+
+  if (!trimmed) {
+    return undefined;
+  }
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+    return trimmed;
+  }
+
+  const prefix = trimmed.slice(0, 10);
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(prefix) && (trimmed[10] === "T" || trimmed[10] === " ")) {
+    return toLocalIsoDate(trimmed);
+  }
+
+  const localized = toLocalIsoDate(trimmed);
+  return /^\d{4}-\d{2}-\d{2}$/.test(localized) ? localized : undefined;
+}
+
+export function reminderDayOffset(date?: string | null, today = todayIso()) {
+  const reminderDate = toDateOnlyIso(date);
+
+  if (!reminderDate) {
+    return null;
+  }
+
+  const [reminderYear, reminderMonth, reminderDay] = reminderDate.split("-").map(Number);
+  const [todayYear, todayMonth, todayDay] = today.split("-").map(Number);
+  const reminderUtc = Date.UTC(reminderYear, reminderMonth - 1, reminderDay);
+  const todayUtc = Date.UTC(todayYear, todayMonth - 1, todayDay);
+
+  return Math.round((reminderUtc - todayUtc) / 86_400_000);
+}
+
+export function isReminderDueOn(date?: string | null, today = todayIso()) {
+  const offset = reminderDayOffset(date, today);
+  return offset !== null && offset <= 0;
+}
+
+export function formatReminderDayLabel(date?: string | null, today = todayIso()) {
+  const offset = reminderDayOffset(date, today);
+
+  if (offset === null) {
+    return null;
+  }
+
+  if (offset <= 0) {
+    return "J";
+  }
+
+  return `J+${offset}`;
 }
 
 export function isLeadCreatedToday(lead: Lead) {

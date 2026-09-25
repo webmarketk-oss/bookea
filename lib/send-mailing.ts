@@ -1,12 +1,38 @@
 import { getActiveCenterContext } from "@/lib/center-access";
 import type { MailContact } from "@/lib/mailing-settings";
+import {
+  getSmsTemplate,
+  loadCenterSmsSettings,
+} from "@/lib/sms-settings";
+
+export type MailingRecipient = Pick<
+  MailContact,
+  "id" | "email" | "firstName" | "lastName"
+> & {
+  confirmationLink?: string;
+  date?: string;
+  time?: string;
+  treatment?: string;
+};
 
 export type SendMailingInput = {
   centerId?: string;
   imageDataUrl?: string;
   message: string;
-  recipients: MailContact[];
+  recipients: MailingRecipient[];
   subject: string;
+};
+
+export type AppointmentConfirmationEmailInput = {
+  centerId?: string;
+  clientId?: string;
+  confirmationLink?: string;
+  date?: string;
+  email: string;
+  firstName?: string;
+  lastName?: string;
+  time?: string;
+  treatment?: string;
 };
 
 export type SendMailingResult = {
@@ -68,6 +94,10 @@ export async function sendBookeaMailing(
         email: contact.email,
         firstName: contact.firstName,
         lastName: contact.lastName,
+        date: contact.date || "",
+        time: contact.time || "",
+        treatment: contact.treatment || "",
+        confirmationLink: contact.confirmationLink || "",
       })),
     }),
   });
@@ -96,4 +126,40 @@ export async function sendBookeaMailing(
     failed: result.failed ?? 0,
     senderEmail: result.senderEmail,
   };
+}
+
+export async function sendAppointmentConfirmationEmail(
+  input: AppointmentConfirmationEmailInput,
+): Promise<SendMailingResult> {
+  const email = String(input.email || "").trim();
+
+  if (!email) {
+    return {
+      ok: false,
+      sent: 0,
+      failed: 1,
+      error: "Aucun email client.",
+    };
+  }
+
+  const { settings, centerId } = await loadCenterSmsSettings();
+  const template = getSmsTemplate(settings, settings.confirmationTemplateId);
+
+  return sendBookeaMailing({
+    centerId: input.centerId || centerId,
+    subject: "Confirmation de votre RDV chez {{centre}}",
+    message: template.body,
+    recipients: [
+      {
+        id: input.clientId ? `client:${input.clientId}` : "",
+        email,
+        firstName: input.firstName || "vous",
+        lastName: input.lastName || "",
+        date: input.date || "",
+        time: input.time || "",
+        treatment: input.treatment || "",
+        confirmationLink: input.confirmationLink || "",
+      },
+    ],
+  });
 }

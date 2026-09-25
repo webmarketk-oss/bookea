@@ -1,5 +1,5 @@
 import { getActiveCenterContext } from "@/lib/center-access";
-import { toLocalIsoDate } from "@/lib/crm-stats";
+import { toDateOnlyIso, toLocalIsoDate } from "@/lib/crm-stats";
 import { createClient } from "@/lib/supabase";
 import { normalizeLeadStatus } from "@/lib/lead-statuses";
 import type { Lead, LeadActivity, LeadStatus } from "@/types/lead";
@@ -203,6 +203,17 @@ export type NewCrmLeadInput = {
 
 const sourceFallback: LeadSource = "Organique";
 
+let crmWriteQueue: Promise<unknown> = Promise.resolve();
+
+function trackCrmWrite<T>(work: Promise<T>): Promise<T> {
+  crmWriteQueue = Promise.allSettled([crmWriteQueue, work]).then(() => undefined);
+  return work;
+}
+
+export function flushCrmWrites() {
+  return crmWriteQueue;
+}
+
 export async function loadCrmLeads() {
   const supabase = createClient();
   const context = await getCrmCenterContext(supabase);
@@ -254,6 +265,10 @@ export async function loadCrmLeads() {
 }
 
 export async function createCrmLead(input: NewCrmLeadInput) {
+  return trackCrmWrite(createCrmLeadRecord(input));
+}
+
+async function createCrmLeadRecord(input: NewCrmLeadInput) {
   const supabase = createClient();
   const context = await getCrmCenterContext(supabase);
 
@@ -293,7 +308,7 @@ export async function createCrmLead(input: NewCrmLeadInput) {
       campaign_id: campaignId,
       service_id: serviceId,
       status: input.status,
-      recall_date: input.reminderDate || null,
+      recall_date: toDateOnlyIso(input.reminderDate) || null,
       next_action: input.nextAction.trim() || "À contacter",
       latest_comment: `Lead créé avec le statut ${input.status}.`,
       amount_cure_ttc: input.dealAmount || 0,
@@ -528,7 +543,7 @@ export async function updateCrmLeadAmount(leadId: string, amount: number) {
 
 export async function updateCrmLeadReminder(leadId: string, reminderDate: string) {
   await updateLeadFields(createClient(), leadId, {
-    recall_date: reminderDate || null,
+    recall_date: toDateOnlyIso(reminderDate) || null,
     updated_at: new Date().toISOString(),
   });
 }
@@ -606,7 +621,9 @@ export async function updateCrmLeadDetails(lead: Lead, input: NewCrmLeadInput) {
     campaign_id: campaignId,
     service_id: serviceId,
     status: nextStatus,
-    recall_date: input.reminderDate || null,
+    recall_date:
+      toDateOnlyIso(input.reminderDate) ||
+      (nextStatus !== lead.status ? toDateOnlyIso(lead.reminderDate) || null : null),
     next_action: input.nextAction.trim() || "À contacter",
     amount_cure_ttc: input.dealAmount || 0,
     ...(assignedToProfileId !== undefined
@@ -746,8 +763,8 @@ export type CrmAgendaContact = {
 export async function loadCrmAgendaContacts(): Promise<CrmAgendaContact[]> {
   const supabase = createClient();
   const context = await getCrmCenterContext(supabase);
-  const [{ leads }, clientsResult] = await Promise.all([
-    loadCrmLeads(),
+  const [leadsResult, clientsResult] = await Promise.all([
+    loadCrmLeads().catch(() => ({ leads: [] as Lead[] })),
     supabase
       .from("clients")
       .select("id,first_name,last_name,phone,email,status,birthdate")
@@ -755,8 +772,20 @@ export async function loadCrmAgendaContacts(): Promise<CrmAgendaContact[]> {
       .is("merged_into_client_id", null),
   ]);
 
+  const leads = leadsResult.leads;
+  let clientRows = clientsResult.data ?? [];
+
   if (clientsResult.error) {
-    throw new Error(clientsResult.error.message);
+    const fallback = await supabase
+      .from("clients")
+      .select("id,first_name,last_name,phone,email,status,birthdate")
+      .eq("center_id", context.centerId);
+
+    if (fallback.error) {
+      clientRows = [];
+    } else {
+      clientRows = fallback.data ?? [];
+    }
   }
 
   const contacts: CrmAgendaContact[] = [];
@@ -783,7 +812,7 @@ export async function loadCrmAgendaContacts(): Promise<CrmAgendaContact[]> {
     if (emailKey) seenEmails.add(emailKey);
   }
 
-  for (const client of clientsResult.data ?? []) {
+  for (const client of clientRows) {
     const phoneKey = lastPhoneDigits(String(client.phone || ""));
     const emailKey = String(client.email || "").trim().toLowerCase();
 
@@ -965,11 +994,15 @@ async function updateLeadFields(
   leadId: string,
   fields: Record<string, unknown>,
 ) {
-  const { error } = await supabase.from("leads").update(fields).eq("id", leadId);
+  return trackCrmWrite(
+    (async () => {
+      const { error } = await supabase.from("leads").update(fields).eq("id", leadId);
 
-  if (error) {
-    throw new Error(error.message);
-  }
+      if (error) {
+        throw new Error(error.message);
+      }
+    })(),
+  );
 }
 
 async function ensureClientForConvertedLead(
@@ -1138,18 +1171,22 @@ async function insertLeadEvent(
     note?: string | null;
   },
 ) {
-  const { error } = await supabase.from("lead_events").insert({
-    center_id: centerId,
-    lead_id: leadId,
-    event_type: event.event_type,
-    from_value: event.from_value ?? null,
-    to_value: event.to_value ?? null,
-    note: event.note ?? null,
-  });
+  return trackCrmWrite(
+    (async () => {
+      const { error } = await supabase.from("lead_events").insert({
+        center_id: centerId,
+        lead_id: leadId,
+        event_type: event.event_type,
+        from_value: event.from_value ?? null,
+        to_value: event.to_value ?? null,
+        note: event.note ?? null,
+      });
 
-  if (error) {
-    throw new Error(error.message);
-  }
+      if (error) {
+        throw new Error(error.message);
+      }
+    })(),
+  );
 }
 
 async function ensureLeadSource(
@@ -1355,7 +1392,7 @@ function toLead(row: LeadRow): Lead {
     lastActivityAt: row.last_activity_at,
     updatedDate: row.updated_at?.slice(0, 10),
     nextAction: row.next_action || "À contacter",
-    reminderDate: row.recall_date ?? undefined,
+    reminderDate: toDateOnlyIso(row.recall_date) ?? undefined,
     latestComment: latestComment || undefined,
     activityLog,
   };

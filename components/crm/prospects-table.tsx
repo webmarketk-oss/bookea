@@ -9,6 +9,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { isReminderDueOn, toDateOnlyIso } from "@/lib/crm-stats";
 import {
   isInactiveLeadStatus,
   leadStatusClassName,
@@ -49,8 +50,8 @@ export default function ProspectsTable({
     .sort((current, next) => {
       const currentInactive = isInactiveLeadStatus(current.lead.status);
       const nextInactive = isInactiveLeadStatus(next.lead.status);
-      const currentReminderDue = isReminderDue(current.lead.reminderDate);
-      const nextReminderDue = isReminderDue(next.lead.reminderDate);
+      const currentReminderDue = isReminderDueOn(current.lead.reminderDate);
+      const nextReminderDue = isReminderDueOn(next.lead.reminderDate);
 
       if (currentInactive && !nextInactive) {
         return 1;
@@ -172,7 +173,7 @@ export default function ProspectsTable({
               className={cn(
                 "h-20 cursor-pointer transition-all hover:bg-slate-50",
                 isInactive && "bg-slate-50 hover:bg-slate-100",
-                isReminderDue(lead.reminderDate) &&
+                isReminderDueOn(lead.reminderDate) &&
                   !isInactive &&
                   "bg-amber-50 hover:bg-amber-50",
                 isLeadDetailsOpen &&
@@ -204,14 +205,14 @@ export default function ProspectsTable({
               <TableCell>
                 <input
                   type="date"
-                  value={lead.reminderDate ?? ""}
+                  value={toDateOnlyIso(lead.reminderDate) ?? ""}
                   onClick={(event) => event.stopPropagation()}
                   onChange={(event) =>
                     onReminderDateChange(lead.id, event.target.value)
                   }
                   className={cn(
                     "h-8 w-[11rem] shrink-0 rounded-lg border border-slate-200 bg-white px-2 text-xs font-semibold outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100",
-                    isReminderDue(lead.reminderDate) &&
+                    isReminderDueOn(lead.reminderDate) &&
                       "border-amber-200 bg-amber-100 text-amber-800"
                   )}
                 />
@@ -278,7 +279,7 @@ export default function ProspectsTable({
                 className={cn(
                   "sticky right-0 z-10 whitespace-normal border-l border-slate-200 bg-white shadow-[-8px_0_12px_rgba(15,23,42,0.06)]",
                   isInactive && "bg-slate-50",
-                  isReminderDue(lead.reminderDate) &&
+                  isReminderDueOn(lead.reminderDate) &&
                     !isInactive &&
                     "bg-amber-50",
                   selectedLead.id === lead.id && "bg-blue-50",
@@ -410,12 +411,3 @@ function leadRecency(lead: Lead) {
   return lead.lastActivityAt || lead.updatedDate || lead.createdDate;
 }
 
-function isReminderDue(date?: string) {
-  if (!date) {
-    return false;
-  }
-
-  const today = new Date().toISOString().slice(0, 10);
-
-  return date <= today;
-}

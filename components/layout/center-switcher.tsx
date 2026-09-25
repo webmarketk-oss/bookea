@@ -10,6 +10,7 @@ import {
   readActiveCenterId,
   saveActiveCenterId,
 } from "@/lib/center-access";
+import { flushCrmWrites } from "@/lib/crm-supabase";
 
 type CenterSwitcherProps = {
   collapsed: boolean;
@@ -74,11 +75,18 @@ export function CenterSwitcher({ collapsed, onExpand }: CenterSwitcherProps) {
     }
 
     setSwitching(true);
-    setActiveCenterId(nextCenterId);
-    saveActiveCenterId(nextCenterId);
-    window.setTimeout(() => {
+    window.dispatchEvent(new Event("bookea-center-will-switch"));
+
+    void (async () => {
+      await new Promise((resolve) => window.setTimeout(resolve, 80));
+      await Promise.race([
+        flushCrmWrites(),
+        new Promise((resolve) => window.setTimeout(resolve, 4000)),
+      ]);
+      setActiveCenterId(nextCenterId);
+      saveActiveCenterId(nextCenterId);
       window.location.reload();
-    }, 700);
+    })();
   }
 
   if (collapsed) {

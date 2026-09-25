@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  ArrowLeft,
   CheckCircle2,
   ImagePlus,
   Mail,
@@ -61,6 +62,9 @@ export default function MailingPage() {
   const [isError, setIsError] = useState(false);
   const [isLoadingContacts, setIsLoadingContacts] = useState(false);
   const [activeTemplateId, setActiveTemplateId] = useState("");
+  const [openedExample, setOpenedExample] = useState<MailingTemplate | null>(
+    null,
+  );
   const [sending, setSending] = useState(false);
   const [providerReady, setProviderReady] = useState(false);
   const [senderEmail, setSenderEmail] = useState("");
@@ -172,6 +176,14 @@ export default function MailingPage() {
     setIsError(false);
   }
 
+  function openExample(template: MailingTemplate) {
+    applyTemplate(template);
+    setKind("tous");
+    setStatusFilters([]);
+    setContactSearch("");
+    setOpenedExample(template);
+  }
+
   function saveCurrentAsTemplate() {
     const nextName = templateName.trim() || name.trim() || "Exemple mailing";
 
@@ -255,6 +267,24 @@ export default function MailingPage() {
   function clearVisibleContacts() {
     const visibleIds = new Set(visibleContacts.map((contact) => contact.id));
     setSelectedIds((current) => current.filter((id) => !visibleIds.has(id)));
+  }
+
+  function selectByKind(kind?: "lead" | "client") {
+    if (kind) {
+      setKind(kind);
+    } else {
+      setKind("tous");
+    }
+    setStatusFilters([]);
+    setSelectedIds(
+      contacts
+        .filter((contact) => contact.email && (!kind || contact.kind === kind))
+        .map((contact) => contact.id),
+    );
+  }
+
+  function clearAllContacts() {
+    setSelectedIds([]);
   }
 
   async function sendCampaign(status: MailingCampaign["status"]) {
@@ -345,8 +375,8 @@ export default function MailingPage() {
           <p className="text-sm font-medium text-violet-600">Bookea CRM</p>
           <h1 className="mt-1 text-2xl font-semibold tracking-tight">Mailing</h1>
           <p className="mt-2 max-w-2xl text-sm text-slate-500">
-            Composez un email, ajoutez une photo, enregistrez un exemple, puis
-            choisissez les leads et clients un par un ou par statut.
+            Ajoutez une photo, enregistrez un exemple, puis cliquez dessus pour
+            l’ouvrir et choisir les leads ou les clients.
           </p>
           <p className="mt-2 text-xs text-slate-400">
             {providerReady
@@ -528,7 +558,7 @@ export default function MailingPage() {
           <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
             <h2 className="text-base font-semibold">Exemples</h2>
             <p className="mt-1 text-sm text-slate-500">
-              Cliquez pour préremplir le mailing.
+              Cliquez pour ouvrir l’exemple et choisir les destinataires.
             </p>
             <div className="mt-4 grid gap-2">
               {templates.map((template) => (
@@ -536,7 +566,7 @@ export default function MailingPage() {
                   key={template.id}
                   active={activeTemplateId === template.id}
                   template={template}
-                  onApply={applyTemplate}
+                  onApply={openExample}
                   onDelete={deleteTemplate}
                 />
               ))}
@@ -588,10 +618,31 @@ export default function MailingPage() {
           </div>
           <button
             type="button"
+            onClick={() => selectByKind()}
+            className="h-10 rounded-xl border border-slate-200 px-3 text-sm font-medium text-slate-700"
+          >
+            Tous leads + clients
+          </button>
+          <button
+            type="button"
+            onClick={() => selectByKind("lead")}
+            className="h-10 rounded-xl border border-slate-200 px-3 text-sm font-medium text-slate-700"
+          >
+            Tous les leads
+          </button>
+          <button
+            type="button"
+            onClick={() => selectByKind("client")}
+            className="h-10 rounded-xl border border-slate-200 px-3 text-sm font-medium text-slate-700"
+          >
+            Tous les clients
+          </button>
+          <button
+            type="button"
             onClick={selectVisibleContacts}
             className="h-10 rounded-xl border border-slate-200 px-3 text-sm font-medium text-slate-700"
           >
-            Sélectionner les filtrés
+            Les filtrés
           </button>
           <button
             type="button"
@@ -599,6 +650,13 @@ export default function MailingPage() {
             className="h-10 rounded-xl border border-slate-200 px-3 text-sm font-medium text-slate-500"
           >
             Retirer les filtrés
+          </button>
+          <button
+            type="button"
+            onClick={clearAllContacts}
+            className="h-10 rounded-xl border border-slate-200 px-3 text-sm font-medium text-slate-500"
+          >
+            Tout retirer
           </button>
         </div>
 
@@ -669,6 +727,41 @@ export default function MailingPage() {
         </div>
       </section>
 
+      {openedExample ? (
+        <ExampleSendPage
+          contacts={visibleContacts}
+          imageDataUrl={imageDataUrl}
+          isLoadingContacts={isLoadingContacts}
+          kindFilter={kindFilter}
+          loading={sending}
+          message={message}
+          notice={notice}
+          noticeError={isError}
+          previewName={previewName}
+          selectedCount={selectedContacts.length}
+          selectedIds={selectedIds}
+          statuses={availableStatuses}
+          statusFilters={statusFilters}
+          subject={subject}
+          template={openedExample}
+          totalClients={contacts.filter((contact) => contact.kind === "client" && contact.email).length}
+          totalLeads={contacts.filter((contact) => contact.kind === "lead" && contact.email).length}
+          onClearAll={clearAllContacts}
+          onClearVisible={clearVisibleContacts}
+          onClose={() => setOpenedExample(null)}
+          onSearch={setContactSearch}
+          onSelectAll={() => selectByKind()}
+          onSelectClients={() => selectByKind("client")}
+          onSelectLeads={() => selectByKind("lead")}
+          onSelectVisible={selectVisibleContacts}
+          onSend={() => void sendCampaign("Envoyée")}
+          onSetKind={setKind}
+          onToggleContact={toggleContact}
+          onToggleStatus={toggleStatus}
+          search={contactSearch}
+        />
+      ) : null}
+
       {campaigns.length > 0 ? (
         <section className="mt-5 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <h2 className="text-base font-semibold">Historique</h2>
@@ -702,6 +795,285 @@ export default function MailingPage() {
   );
 }
 
+function ExampleSendPage({
+  contacts,
+  imageDataUrl,
+  isLoadingContacts,
+  kindFilter,
+  loading,
+  message,
+  notice,
+  noticeError,
+  onClearAll,
+  onClearVisible,
+  onClose,
+  onSearch,
+  onSelectAll,
+  onSelectClients,
+  onSelectLeads,
+  onSelectVisible,
+  onSend,
+  onSetKind,
+  onToggleContact,
+  onToggleStatus,
+  previewName,
+  search,
+  selectedCount,
+  selectedIds,
+  statuses,
+  statusFilters,
+  subject,
+  template,
+  totalClients,
+  totalLeads,
+}: {
+  contacts: MailContact[];
+  imageDataUrl: string;
+  isLoadingContacts: boolean;
+  kindFilter: ContactKindFilter;
+  loading: boolean;
+  message: string;
+  notice: string;
+  noticeError: boolean;
+  onClearAll: () => void;
+  onClearVisible: () => void;
+  onClose: () => void;
+  onSearch: (value: string) => void;
+  onSelectAll: () => void;
+  onSelectClients: () => void;
+  onSelectLeads: () => void;
+  onSelectVisible: () => void;
+  onSend: () => void;
+  onSetKind: (kind: ContactKindFilter) => void;
+  onToggleContact: (id: string) => void;
+  onToggleStatus: (status: string) => void;
+  previewName: string;
+  search: string;
+  selectedCount: number;
+  selectedIds: string[];
+  statuses: string[];
+  statusFilters: string[];
+  subject: string;
+  template: MailingTemplate;
+  totalClients: number;
+  totalLeads: number;
+}) {
+  return (
+    <div className="fixed inset-0 z-40 overflow-y-auto bg-slate-100">
+      <div className="mx-auto min-h-screen max-w-6xl px-4 py-5 sm:px-6">
+        <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <button
+            type="button"
+            onClick={onClose}
+            className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700"
+          >
+            <ArrowLeft className="h-4 w-4" />
+            Retour
+          </button>
+          <div className="flex flex-wrap gap-2">
+            <p className="self-center text-sm font-medium text-slate-500">
+              {selectedCount} destinataire{selectedCount > 1 ? "s" : ""}
+            </p>
+            <button
+              type="button"
+              disabled={loading}
+              onClick={onSend}
+              className="inline-flex h-10 items-center gap-2 rounded-xl bg-slate-950 px-4 text-sm font-medium text-white disabled:opacity-60"
+            >
+              <Send className="h-4 w-4" />
+              {loading ? "Envoi…" : "Envoyer"}
+            </button>
+          </div>
+        </div>
+
+        {notice ? (
+          <div
+            className={`mb-5 rounded-xl border px-4 py-3 text-sm font-medium ${
+              noticeError
+                ? "border-red-200 bg-red-50 text-red-700"
+                : "border-emerald-200 bg-emerald-50 text-emerald-700"
+            }`}
+          >
+            {notice}
+          </div>
+        ) : null}
+
+        <div className="grid gap-5 xl:grid-cols-[0.95fr_1.05fr]">
+          <article className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+            <div className="border-b border-slate-100 px-5 py-4">
+              <p className="text-xs font-medium uppercase tracking-wide text-violet-600">
+                Exemple
+              </p>
+              <h2 className="mt-1 text-xl font-semibold">{template.name}</h2>
+              <p className="mt-1 text-sm text-slate-500">
+                Aperçu tel que vu par {previewName}.
+              </p>
+            </div>
+            {imageDataUrl ? (
+              <img
+                src={imageDataUrl}
+                alt=""
+                className="h-56 w-full object-cover"
+              />
+            ) : (
+              <div className="grid h-32 place-items-center bg-slate-50 text-sm text-slate-400">
+                Aucune photo sur cet exemple
+              </div>
+            )}
+            <div className="p-5">
+              <p className="text-xs font-medium text-slate-400">Objet</p>
+              <h3 className="mt-1 text-base font-semibold">{subject}</h3>
+              <p className="mt-4 whitespace-pre-wrap text-sm leading-7 text-slate-600">
+                {fillPreview(message, previewName)}
+              </p>
+            </div>
+          </article>
+
+          <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <h2 className="text-base font-semibold">Destinataires</h2>
+            <p className="mt-1 text-sm text-slate-500">
+              Choisissez certains leads, certains clients, tout le fichier, ou
+              tout puis retirez-en quelques-uns. {totalLeads} leads · {totalClients}{" "}
+              clients avec email.
+            </p>
+
+            <div className="mt-4 flex flex-wrap gap-2">
+              <FilterChip active={kindFilter === "tous"} onClick={() => onSetKind("tous")}>
+                Tous
+              </FilterChip>
+              <FilterChip active={kindFilter === "lead"} onClick={() => onSetKind("lead")}>
+                Leads
+              </FilterChip>
+              <FilterChip active={kindFilter === "client"} onClick={() => onSetKind("client")}>
+                Clients
+              </FilterChip>
+            </div>
+
+            <div className="mt-3 flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={onSelectAll}
+                className="h-9 rounded-xl border border-slate-200 px-3 text-sm font-medium text-slate-700"
+              >
+                Tout le fichier
+              </button>
+              <button
+                type="button"
+                onClick={onSelectLeads}
+                className="h-9 rounded-xl border border-slate-200 px-3 text-sm font-medium text-slate-700"
+              >
+                Tous les leads
+              </button>
+              <button
+                type="button"
+                onClick={onSelectClients}
+                className="h-9 rounded-xl border border-slate-200 px-3 text-sm font-medium text-slate-700"
+              >
+                Tous les clients
+              </button>
+              <button
+                type="button"
+                onClick={onSelectVisible}
+                className="h-9 rounded-xl border border-slate-200 px-3 text-sm font-medium text-slate-700"
+              >
+                Les filtrés
+              </button>
+              <button
+                type="button"
+                onClick={onClearVisible}
+                className="h-9 rounded-xl border border-slate-200 px-3 text-sm font-medium text-slate-500"
+              >
+                Retirer les filtrés
+              </button>
+              <button
+                type="button"
+                onClick={onClearAll}
+                className="h-9 rounded-xl border border-slate-200 px-3 text-sm font-medium text-slate-500"
+              >
+                Tout retirer
+              </button>
+            </div>
+
+            <div className="relative mt-3">
+              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+              <input
+                value={search}
+                onChange={(event) => onSearch(event.target.value)}
+                placeholder="Rechercher un nom, un email, un statut…"
+                className="h-10 w-full rounded-xl border border-slate-200 bg-white pl-10 pr-3 text-sm outline-none focus:border-blue-500"
+              />
+            </div>
+
+            {statuses.length > 0 ? (
+              <div className="mt-3 flex flex-wrap gap-1.5">
+                {statuses.map((status) => (
+                  <button
+                    key={status}
+                    type="button"
+                    onClick={() => onToggleStatus(status)}
+                    className={`rounded-full px-2.5 py-1 text-xs font-medium ${
+                      statusFilters.includes(status)
+                        ? "bg-slate-950 text-white"
+                        : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                    }`}
+                  >
+                    {status}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+
+            <div className="mt-4 max-h-[28rem] overflow-y-auto rounded-xl border border-slate-200">
+              {isLoadingContacts ? (
+                <p className="px-4 py-8 text-center text-sm text-slate-500">
+                  Chargement des leads et clients…
+                </p>
+              ) : contacts.length === 0 ? (
+                <p className="px-4 py-8 text-center text-sm text-slate-500">
+                  Aucun contact pour ce filtre.
+                </p>
+              ) : (
+                contacts.map((contact) => {
+                  const checked = selectedIds.includes(contact.id);
+                  const noEmail = !contact.email;
+
+                  return (
+                    <label
+                      key={contact.id}
+                      className={`flex items-center gap-3 border-b border-slate-100 px-4 py-2.5 last:border-b-0 ${
+                        noEmail ? "opacity-50" : "hover:bg-slate-50"
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        disabled={noEmail}
+                        onChange={() => onToggleContact(contact.id)}
+                        className="h-4 w-4"
+                      />
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-sm font-medium">
+                          {contact.firstName} {contact.lastName}
+                        </span>
+                        <span className="block truncate text-xs text-slate-500">
+                          {contact.email || "Pas d’email"} · {contact.status}
+                        </span>
+                      </span>
+                      <span className="shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-600">
+                        {contact.kind === "lead" ? "Lead" : "Client"}
+                      </span>
+                    </label>
+                  );
+                })
+              )}
+            </div>
+          </section>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ExampleCard({
   active,
   onApply,
@@ -723,12 +1095,26 @@ function ExampleCard({
     >
       <button
         type="button"
-        onPointerDown={() => onApply(template)}
         onClick={() => onApply(template)}
-        className="min-w-0 flex-1 text-left"
+        className="flex min-w-0 flex-1 items-center gap-3 text-left"
       >
-        <p className="text-sm font-medium">{template.name}</p>
-        <p className="truncate text-xs text-slate-500">{template.subject}</p>
+        {template.imageDataUrl ? (
+          <img
+            src={template.imageDataUrl}
+            alt=""
+            className="h-11 w-11 shrink-0 rounded-lg object-cover"
+          />
+        ) : (
+          <span className="grid h-11 w-11 shrink-0 place-items-center rounded-lg bg-slate-100 text-slate-400">
+            <Mail className="h-4 w-4" />
+          </span>
+        )}
+        <span className="min-w-0">
+          <span className="block truncate text-sm font-medium">{template.name}</span>
+          <span className="block truncate text-xs text-slate-500">
+            {template.subject}
+          </span>
+        </span>
       </button>
       {template.builtin ? (
         <span className="shrink-0 pt-0.5 text-[11px] font-medium text-slate-400">
