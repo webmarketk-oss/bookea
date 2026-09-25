@@ -42,7 +42,7 @@ export function createSeyaMessage(
 }
 
 export function buildOpeningMessage(
-  lead: Pick<Lead, "firstName" | "treatment">,
+  lead: Pick<Lead, "firstName" | "treatment" | "campaign">,
   centerName: string,
   settings: SeyaAgentSettings,
 ) {
