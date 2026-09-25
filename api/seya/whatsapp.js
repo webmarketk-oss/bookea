@@ -1,9 +1,15 @@
 /* eslint-disable @typescript-eslint/no-require-imports */
 const { createClient } = require("@supabase/supabase-js");
+const {
+  applyLeadReply,
+  readHours,
+  startConversation,
+  suggestAvailableSlots,
+} = require("./agent");
 
 const GRAPH_VERSION = "v21.0";
 
-module.exports = async function handler(req, res) {
+async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
@@ -165,7 +171,10 @@ async function handleIncoming(supabase, incoming) {
   const existing =
     conversations.find((item) => item.leadId === context.leadId) ||
     startConversation(context, center.name, seya);
-  const next = appendLeadReply(existing, incoming.text, seya);
+  const appointments = await loadCenterAppointments(supabase, center.id);
+  const slots = suggestAvailableSlots(appointments, readHours(center.settings));
+  const result = applyLeadReply(existing, incoming.text, seya, slots);
+  const next = result.conversation;
   const saved = [
     next,
     ...conversations.filter((item) => item.leadId !== next.leadId),
@@ -184,9 +193,21 @@ async function handleIncoming(supabase, incoming) {
     })
     .eq("id", center.id);
 
+  if (result.shouldBook) {
+    await bookSeyaAppointment(supabase, center.id, context, next, result.shouldBook).catch(
+      (bookError) => {
+        console.error("[seya/whatsapp] book failed", bookError);
+      },
+    );
+  }
+
   const reply = [...next.messages].reverse().find((item) => item.author === "seya");
   if (reply?.text) {
-    await sendSharedWhatsApp(incoming.phone, reply.text).catch((sendError) => {
+    await sendSharedWhatsApp(incoming.phone, reply.text, {
+      firstName: context.firstName,
+      centerName: center.name,
+      treatment: next.qualification?.need || context.treatment || "",
+    }).catch((sendError) => {
       console.error("[seya/whatsapp] send failed", sendError);
     });
   }
@@ -198,6 +219,7 @@ async function handleIncoming(supabase, incoming) {
     centerName: center.name,
     leadId: context.leadId,
     status: next.status,
+    booked: Boolean(result.shouldBook),
   };
 }
 
@@ -228,7 +250,7 @@ async function resolveCenterFromPhone(supabase, phone) {
   for (const client of matched) {
     const { data: lead } = await supabase
       .from("leads")
-      .select("id,status,next_action,latest_comment,service_id,updated_at,last_activity_at")
+      .select("id,status,next_action,latest_comment,service_id,updated_at,last_activity_at,campaigns(name)")
       .eq("center_id", client.center_id)
       .eq("client_id", client.id)
       .order("last_activity_at", { ascending: false })
@@ -252,6 +274,9 @@ async function resolveCenterFromPhone(supabase, phone) {
         lastName: client.last_name || "",
         phone: client.phone || phone,
         treatment: service?.name || "",
+        campaign: Array.isArray(lead.campaigns)
+          ? lead.campaigns[0]?.name || ""
+          : lead.campaigns?.name || "",
         status: lead.status || "Nouveau",
       };
     }
@@ -270,81 +295,77 @@ async function resolveCenterFromPhone(supabase, phone) {
   };
 }
 
-function startConversation(context, centerName, seya) {
-  const treatment = context.treatment || "";
-  const brief = resolveTreatmentBrief(seya, treatment);
-  const opening =
-    treatment && !/soin à préciser|lead meta/i.test(treatment)
-      ? `Bonjour ${context.firstName}, merci pour votre inscription chez ${centerName}. Je suis Seya. Vous avez indiqué « ${treatment} ». ${brief || "Dites-moi la zone ou l’objectif, et quels jours vous iraient."}`
-      : `Bonjour ${context.firstName}, merci pour votre inscription chez ${centerName}. Je suis Seya. Quel soin souhaitez-vous, et quels jours vous iraient ?`;
+async function loadCenterAppointments(supabase, centerId) {
+  const { data, error } = await supabase
+    .from("appointments")
+    .select("appointment_date,starts_at,duration_minutes,status")
+    .eq("center_id", centerId)
+    .gte("appointment_date", new Date().toISOString().slice(0, 10));
 
-  return {
-    id: context.leadId,
-    leadId: context.leadId,
-    firstName: context.firstName,
-    lastName: context.lastName,
-    phone: context.phone,
-    treatment,
-    status: "En cours",
-    qualification: { need: treatment, zone: "", delay: "", availability: "" },
-    proposedSlots: [],
-    messages: [message("seya", opening)],
-    updatedAt: new Date().toISOString(),
-  };
-}
-
-function appendLeadReply(conversation, text, seya) {
-  const brief = resolveTreatmentBrief(
-    seya,
-    conversation.qualification?.need || conversation.treatment,
-  );
-  const reply =
-    /^(1|2|3|oui|ok|d['’]?accord)$/i.test(text.trim()) &&
-    conversation.proposedSlots?.length
-      ? `Parfait, je transmets ce créneau à ${conversation.firstName ? "l’équipe" : "l’équipe"} du centre.`
-      : brief ||
-        "Merci. Précisez le soin ou la zone, puis un jour qui vous arrange. Je vous proposerai un vrai créneau de ce centre.";
-
-  return {
-    ...conversation,
-    status: conversation.proposedSlots?.length ? "RDV proposé" : "En cours",
-    messages: [
-      ...(conversation.messages || []),
-      message("lead", text),
-      message("seya", reply),
-    ],
-    updatedAt: new Date().toISOString(),
-  };
-}
-
-function resolveTreatmentBrief(seya, treatment) {
-  const briefs = Array.isArray(seya.treatmentBriefs) ? seya.treatmentBriefs : [];
-  const needle = normalize(treatment);
-  if (!needle) {
-    return "";
+  if (error) {
+    console.error("[seya/whatsapp] appointments", error.message);
+    return [];
   }
-  const found = briefs.find((item) => {
-    const name = normalize(item?.name);
-    return name && (needle.includes(name) || name.includes(needle));
+
+  return (data || []).map((row) => ({
+    date: row.appointment_date,
+    start: String(row.starts_at || "").slice(0, 5),
+    duration: row.duration_minutes || 60,
+    status: row.status || "",
+  }));
+}
+
+async function bookSeyaAppointment(supabase, centerId, context, conversation, slot) {
+  const [{ data: rooms }, { data: practitioners }] = await Promise.all([
+    supabase.from("rooms").select("id").eq("center_id", centerId).limit(1),
+    supabase.from("practitioners").select("id").eq("center_id", centerId).limit(1),
+  ]);
+
+  const start = slot.time;
+  const [hours, minutes] = start.split(":").map(Number);
+  const endMinutes = hours * 60 + minutes + 60;
+  const endsAt = `${String(Math.floor(endMinutes / 60)).padStart(2, "0")}:${String(endMinutes % 60).padStart(2, "0")}`;
+
+  const { error } = await supabase.from("appointments").insert({
+    center_id: centerId,
+    client_id: context.clientId || null,
+    lead_id: context.leadId || null,
+    room_id: rooms?.[0]?.id || null,
+    practitioner_id: practitioners?.[0]?.id || null,
+    appointment_date: slot.date,
+    starts_at: start,
+    ends_at: endsAt,
+    duration_minutes: 60,
+    status: "to_confirm",
+    origin: "seya",
+    notes: `RDV Seya WhatsApp · ${conversation.qualification?.need || context.treatment || "soin"}`,
+    updated_at: new Date().toISOString(),
   });
-  return String(found?.brief || "").trim();
-}
 
-function normalize(value) {
-  return String(value || "")
-    .trim()
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "");
-}
+  if (error) {
+    throw new Error(error.message);
+  }
 
-function message(author, text) {
-  return {
-    id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-    author,
-    text: String(text || "").trim(),
-    at: new Date().toISOString(),
-  };
+  if (context.leadId) {
+    await supabase
+      .from("leads")
+      .update({
+        status: "RDV pris",
+        next_action: "RDV Seya à confirmer",
+        last_activity_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", context.leadId);
+
+    await supabase.from("lead_events").insert({
+      center_id: centerId,
+      lead_id: context.leadId,
+      event_type: "status",
+      from_value: context.status || "",
+      to_value: "RDV pris",
+      note: `RDV Seya posé le ${slot.label}.`,
+    });
+  }
 }
 
 function asRecord(value) {
@@ -798,3 +819,6 @@ async function sendSharedWhatsApp(phone, text, extras = {}) {
     template: template.name,
   };
 }
+
+handler.sendSharedWhatsApp = sendSharedWhatsApp;
+module.exports = handler;

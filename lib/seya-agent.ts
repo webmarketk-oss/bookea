@@ -1,6 +1,7 @@
 import { addDaysIso, todayIso } from "@/lib/crm-stats";
 import type { CenterDayHours } from "@/lib/center-hours";
 import {
+  resolveOfferLabel,
   resolveTreatmentBrief,
   type SeyaAgentMessage,
   type SeyaAgentSettings,
@@ -50,10 +51,14 @@ export function buildOpeningMessage(
   const center = centerName.trim() || "le centre";
 
   const treatmentHint = resolveTreatmentBrief(settings, treatment);
+  const offer = resolveOfferLabel(settings, lead.campaign, treatment);
+  const shown = offer || (treatment && !/soin à préciser|lead meta|offre \d+/i.test(treatment)
+    ? treatment
+    : "");
 
   if (settings.qualifyOnSignup && settings.bookAppointment) {
-    if (treatment && !/soin à préciser|lead meta|à préciser/i.test(treatment)) {
-      return `Bonjour ${firstName}, merci pour votre inscription chez ${center}. Je suis Seya. Vous avez indiqué « ${treatment} ». ${treatmentHint || "Dites-moi la zone ou l’objectif, et quels jours vous iraient cette semaine."} Je vous propose ensuite un vrai créneau.`;
+    if (shown) {
+      return `Bonjour ${firstName}, merci pour votre inscription chez ${center}. Je suis Seya. Vous avez demandé ${shown}. ${treatmentHint || "Dites-moi la zone ou l’objectif, et quels jours vous iraient cette semaine."} Je vous propose ensuite un vrai créneau.`;
     }
 
     return `Bonjour ${firstName}, merci pour votre inscription chez ${center}. Je suis Seya, l’assistante du centre. Quel soin souhaitez-vous, et avez-vous déjà une idée de jour cette semaine ? Je vous propose ensuite un créneau réel.`;
@@ -85,6 +90,8 @@ export function startSeyaConversation({
     lastName: lead.lastName,
     phone: lead.phone,
     treatment,
+    campaign: lead.campaign,
+    offerLabel: resolveOfferLabel(settings, lead.campaign, treatment),
     status: "À envoyer",
     qualification: {
       ...emptyQualification(),
@@ -177,6 +184,61 @@ export function applyLeadReply(
   const chosenSlot =
     matchProposedSlot(text, conversation.proposedSlots) ??
     matchProposedSlot(text, slots);
+
+  const wantsHuman =
+    settings.handoffToHuman &&
+    /conseill|humain|appeler|appelez|rappel/i.test(text);
+  const refuses =
+    /pas int[eé]ress|non merci|stop|ne plus|arr[eê]te/i.test(text);
+  const lastSeyaText =
+    [...conversation.messages].reverse().find((item) => item.author === "seya")
+      ?.text || "";
+  const askedForRdv = /conseill[eè]re|rendez-vous|oui ou non/i.test(lastSeyaText);
+  const wantsRdv =
+    settings.askForAppointment &&
+    !settings.bookAppointment &&
+    ((askedForRdv && /^(oui|ok|d['’]?accord)$/i.test(text.trim())) ||
+      /je (veux|souhaite).*rdv|prendre (un )?(rdv|rendez-vous)/i.test(text));
+
+  if (refuses) {
+    return {
+      conversation: {
+        ...conversation,
+        qualification,
+        status: "Pas intéressé",
+        messages: [
+          ...conversation.messages,
+          createSeyaMessage("lead", text),
+          createSeyaMessage(
+            "seya",
+            "Très bien, j’arrête ici. Si vous changez d’avis, écrivez-nous.",
+          ),
+        ],
+        updatedAt: new Date().toISOString(),
+      },
+      shouldBook: null,
+    };
+  }
+
+  if (wantsHuman || wantsRdv) {
+    return {
+      conversation: {
+        ...conversation,
+        qualification,
+        status: "À recontacter",
+        messages: [
+          ...conversation.messages,
+          createSeyaMessage("lead", text),
+          createSeyaMessage(
+            "seya",
+            "Parfait. Je transmets à une conseillère du centre, elle vous recontacte rapidement.",
+          ),
+        ],
+        updatedAt: new Date().toISOString(),
+      },
+      shouldBook: null,
+    };
+  }
 
   if (chosenSlot && settings.bookAppointment) {
     return {
@@ -279,6 +341,10 @@ function nextQualificationQuestion(
     return "Parfait, je regarde le planning du centre et je vous propose des créneaux réels.";
   }
 
+  if (settings.askForAppointment) {
+    return "Merci. Souhaitez-vous qu’une conseillère vous appelle pour poser un rendez-vous ? Répondez oui ou non.";
+  }
+
   return "Merci, je transmets ces informations à l’équipe du centre.";
 }
 
@@ -304,6 +370,8 @@ function extractNeed(text: string) {
     ["laser", "Épilation laser"],
     ["épilation", "Épilation laser"],
     ["epilation", "Épilation laser"],
+    ["définitive", "Épilation laser"],
+    ["definitive", "Épilation laser"],
     ["minceur", "Soin minceur"],
     ["cryo", "Cryolipolyse"],
     ["cryolipolyse", "Cryolipolyse"],

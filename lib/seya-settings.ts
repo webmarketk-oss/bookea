@@ -10,12 +10,23 @@ export type SeyaTreatmentBrief = {
   brief: string;
 };
 
+export type SeyaOfferMap = {
+  match: string;
+  label: string;
+};
+
 export type SeyaAgentSettings = {
   whatsappAgentEnabled: boolean;
+  autoMessageOnNewLead: boolean;
   qualifyOnSignup: boolean;
+  askForAppointment: boolean;
   bookAppointment: boolean;
+  handoffToHuman: boolean;
+  relanceEnabled: boolean;
+  relanceDays: number[];
   brief: string;
   treatmentBriefs: SeyaTreatmentBrief[];
+  offerMaps: SeyaOfferMap[];
 };
 
 export type SeyaConversationStatus =
@@ -24,7 +35,19 @@ export type SeyaConversationStatus =
   | "Qualifié"
   | "RDV proposé"
   | "RDV pris"
+  | "RDV confirmé"
+  | "Chaud"
+  | "À recontacter"
+  | "Pas intéressé"
   | "Terminé";
+
+export type SeyaInboxTag =
+  | "court"
+  | "chaud"
+  | "humain"
+  | "rdv"
+  | "sans_reponse"
+  | "ferme";
 
 export type SeyaAgentMessage = {
   id: string;
@@ -57,40 +80,93 @@ export type SeyaConversation = {
   qualification: SeyaQualification;
   proposedSlots: SeyaProposedSlot[];
   bookedSlot?: SeyaProposedSlot;
+  campaign?: string;
+  offerLabel?: string;
   messages: SeyaAgentMessage[];
   updatedAt: string;
+  lastRelanceAt?: string | null;
+  relanceCount?: number;
 };
 
 export const defaultTreatmentBriefs: SeyaTreatmentBrief[] = [
   {
     name: "Épilation Laser",
     brief:
-      "Demande la zone (jambes, maillot, aisselles…). Ne promets pas un tarif. Propose un bilan / première séance, puis un créneau.",
+      "Le lead vient pour une épilation définitive. Demande la zone (jambes, maillot, aisselles, visage…). Ne promets pas un tarif. Propose un bilan / première séance, puis un créneau.",
+  },
+  {
+    name: "Épilation définitive",
+    brief:
+      "Le lead vient pour une épilation définitive. Demande la zone (jambes, maillot, aisselles, visage…). Ne promets pas un tarif. Propose un bilan / première séance, puis un créneau.",
   },
   {
     name: "Hydrafacial",
     brief:
-      "Demande l’objectif peau (éclat, pores, acné). Propose un soin visage puis un créneau cette semaine.",
+      "Le lead vient pour un soin visage. Demande l’objectif peau (éclat, pores, acné). Propose un hydrafacial ou un soin visage, puis un créneau cette semaine.",
+  },
+  {
+    name: "Soin visage",
+    brief:
+      "Le lead vient pour un soin visage. Demande l’objectif peau (éclat, pores, acné, hydratation). Propose un soin ou un bilan peau, puis un créneau.",
   },
   {
     name: "Soin minceur",
     brief:
-      "Demande la zone et l’objectif. Propose un bilan minceur, pas une série complète tout de suite.",
+      "Le lead vient pour un minceur. Demande la zone et l’objectif. Propose un bilan minceur, pas une série complète tout de suite, puis un créneau.",
   },
   {
     name: "Cryolipolyse",
     brief:
-      "Demande la zone et si un bilan a déjà été fait. Oriente vers un rendez-vous bilan avant de parler prix.",
+      "Le lead vient pour un minceur / cryolipolyse. Demande la zone et si un bilan a déjà été fait. Oriente vers un rendez-vous bilan avant de parler prix.",
+  },
+];
+
+const treatmentAliases: Array<{ keys: string[]; name: string }> = [
+  {
+    keys: [
+      "epilation",
+      "épilation",
+      "laser",
+      "definitive",
+      "définitive",
+      "epil",
+    ],
+    name: "Épilation Laser",
+  },
+  {
+    keys: ["minceur", "cryo", "cryolipolyse", "cellulite", "ventre"],
+    name: "Soin minceur",
+  },
+  {
+    keys: ["visage", "hydrafacial", "peau", "glow", "acne", "acné"],
+    name: "Soin visage",
+  },
+];
+
+export const defaultSeyaOfferMaps: SeyaOfferMap[] = [
+  {
+    match: "offre 99",
+    label: "une séance découverte / bilan à 99€",
+  },
+  {
+    match: "cryo 99",
+    label: "une séance découverte de cryolipolyse à 99€",
   },
 ];
 
 export const defaultSeyaAgentSettings: SeyaAgentSettings = {
   whatsappAgentEnabled: true,
+  autoMessageOnNewLead: true,
   qualifyOnSignup: true,
-  bookAppointment: true,
+  askForAppointment: true,
+  bookAppointment: false,
+  handoffToHuman: true,
+  relanceEnabled: true,
+  relanceDays: [1, 5, 30],
   brief:
-    "Tu es Seya, l’assistante du centre. Dès qu’un prospect s’inscrit, tu le qualifies (soin, zone, délai) puis tu proposes 2 ou 3 vrais créneaux du planning. Tu restes naturelle, courte, et tu ne balances pas un message automatique figé.",
+    "Tu es Seya, l’assistante du centre. Tu qualifies le besoin (soin, zone, délai) avec le vrai nom de l’offre, jamais le code campagne. Tu ne poses un RDV que si le centre l’a autorisé. Sinon tu demandes si la personne veut un rendez-vous et tu transmets à une conseillère.",
   treatmentBriefs: defaultTreatmentBriefs,
+  offerMaps: defaultSeyaOfferMaps,
 };
 
 export function normalizeTreatmentName(value: string) {
@@ -117,11 +193,25 @@ export function resolveTreatmentBrief(
     return exact.brief.trim();
   }
 
+  const partial = settings.treatmentBriefs.find((item) => {
+    const name = normalizeTreatmentName(item.name);
+    return needle.includes(name) || name.includes(needle);
+  })?.brief.trim();
+  if (partial) {
+    return partial;
+  }
+
+  const alias = treatmentAliases.find((item) =>
+    item.keys.some((key) => needle.includes(normalizeTreatmentName(key))),
+  );
+  if (!alias) {
+    return "";
+  }
+
   return (
-    settings.treatmentBriefs.find((item) => {
-      const name = normalizeTreatmentName(item.name);
-      return needle.includes(name) || name.includes(needle);
-    })?.brief.trim() || ""
+    settings.treatmentBriefs.find(
+      (item) => normalizeTreatmentName(item.name) === normalizeTreatmentName(alias.name),
+    )?.brief.trim() || ""
   );
 }
 
@@ -139,15 +229,94 @@ function seyaConversationsStorageKey(centerId: string) {
   return `bookea-seya-conversations:${centerId}`;
 }
 
+export function resolveOfferLabel(
+  settings: SeyaAgentSettings,
+  campaign?: string | null,
+  treatment?: string | null,
+) {
+  const hay = `${campaign || ""} ${treatment || ""}`;
+  const needle = normalizeTreatmentName(hay);
+  if (!needle) {
+    return "";
+  }
+
+  const found = settings.offerMaps.find((item) => {
+    const match = normalizeTreatmentName(item.match);
+    return match.length > 1 && needle.includes(match);
+  });
+  return found?.label.trim() || "";
+}
+
+export function inboxTag(conversation: SeyaConversation): SeyaInboxTag {
+  const status = conversation.status;
+  if (status === "Pas intéressé" || status === "Terminé") {
+    return "ferme";
+  }
+  if (status === "RDV pris" || status === "RDV confirmé") {
+    return "rdv";
+  }
+  if (status === "À recontacter") {
+    return "humain";
+  }
+  if (status === "Chaud" || status === "RDV proposé") {
+    return "chaud";
+  }
+
+  const leadReplied = conversation.messages.some((item) => item.author === "lead");
+  if (!leadReplied) {
+    return "sans_reponse";
+  }
+
+  return conversation.messages.length <= 4 ? "court" : "chaud";
+}
+
+export function sortSeyaInbox(conversations: SeyaConversation[]) {
+  const rank: Record<SeyaInboxTag, number> = {
+    court: 0,
+    chaud: 1,
+    humain: 2,
+    rdv: 3,
+    sans_reponse: 4,
+    ferme: 5,
+  };
+
+  return [...conversations].sort((a, b) => {
+    const tagGap = rank[inboxTag(a)] - rank[inboxTag(b)];
+    if (tagGap !== 0) {
+      return tagGap;
+    }
+    return a.messages.length - b.messages.length;
+  });
+}
+
+export function inboxTagLabel(tag: SeyaInboxTag) {
+  if (tag === "court") return "En cours";
+  if (tag === "chaud") return "Chaud";
+  if (tag === "humain") return "À recontacter";
+  if (tag === "rdv") return "RDV";
+  if (tag === "sans_reponse") return "Sans réponse";
+  return "Fermé";
+}
+
 export function normalizeSeyaAgentSettings(
   value?: Partial<SeyaAgentSettings> | null,
 ): SeyaAgentSettings {
+  const days = Array.isArray(value?.relanceDays)
+    ? value.relanceDays.map(Number).filter((item) => item > 0)
+    : defaultSeyaAgentSettings.relanceDays;
+
   return {
     whatsappAgentEnabled: value?.whatsappAgentEnabled !== false,
+    autoMessageOnNewLead: value?.autoMessageOnNewLead !== false,
     qualifyOnSignup: value?.qualifyOnSignup !== false,
-    bookAppointment: value?.bookAppointment !== false,
+    askForAppointment: value?.askForAppointment !== false,
+    bookAppointment: value?.bookAppointment === true,
+    handoffToHuman: value?.handoffToHuman !== false,
+    relanceEnabled: value?.relanceEnabled !== false,
+    relanceDays: days.length ? days : [1, 5, 30],
     brief: String(value?.brief || "").trim() || defaultSeyaAgentSettings.brief,
     treatmentBriefs: normalizeTreatmentBriefs(value?.treatmentBriefs),
+    offerMaps: normalizeOfferMaps(value?.offerMaps),
   };
 }
 
@@ -167,6 +336,16 @@ function normalizeTreatmentBriefs(value?: SeyaTreatmentBrief[] | null) {
   }
 
   return [...merged.values()];
+}
+
+function normalizeOfferMaps(value?: SeyaOfferMap[] | null) {
+  const incoming = Array.isArray(value) ? value : defaultSeyaOfferMaps;
+  return incoming
+    .map((item) => ({
+      match: String(item?.match || "").trim(),
+      label: String(item?.label || "").trim(),
+    }))
+    .filter((item) => item.match && item.label);
 }
 
 export function readLocalSeyaSettings(centerId: string) {
@@ -243,15 +422,8 @@ export async function loadSeyaAgentSettings() {
   const remote = asRecord(asRecord(data?.settings).seya);
   const hasRemote = Boolean(asRecord(data?.settings).seya);
   const settings = normalizeSeyaAgentSettings({
-    whatsappAgentEnabled: hasRemote
-      ? remote.whatsappAgentEnabled !== false
-      : (localSettings?.whatsappAgentEnabled ?? true),
-    qualifyOnSignup: hasRemote
-      ? remote.qualifyOnSignup !== false
-      : (localSettings?.qualifyOnSignup ?? true),
-    bookAppointment: hasRemote
-      ? remote.bookAppointment !== false
-      : (localSettings?.bookAppointment ?? true),
+    ...(localSettings ?? {}),
+    ...(hasRemote ? (remote as Partial<SeyaAgentSettings>) : {}),
     brief:
       (typeof remote.brief === "string" && remote.brief.trim()) ||
       localSettings?.brief,
@@ -260,6 +432,12 @@ export async function loadSeyaAgentSettings() {
         ? (remote.treatmentBriefs as SeyaTreatmentBrief[])
         : []),
       ...(localSettings?.treatmentBriefs ?? []),
+    ],
+    offerMaps: [
+      ...(Array.isArray(remote.offerMaps)
+        ? (remote.offerMaps as SeyaOfferMap[])
+        : []),
+      ...(localSettings?.offerMaps ?? []),
     ],
   });
 

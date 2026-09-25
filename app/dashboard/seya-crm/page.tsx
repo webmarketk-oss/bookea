@@ -1,17 +1,6 @@
 "use client";
 
-import {
-  AlertTriangle,
-  Bot,
-  CalendarCheck,
-  CheckCircle2,
-  MessageCircle,
-  Send,
-  Sparkles,
-  Users,
-  Wand2,
-} from "lucide-react";
-import type { ReactNode } from "react";
+import { Bot } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { cabins, practitioners } from "@/lib/agenda-data";
 import {
@@ -46,6 +35,7 @@ import {
   readLocalSeyaConversations,
   saveSeyaAgentSettings,
   saveSeyaConversations,
+  sortSeyaInbox,
   writeLocalSeyaConversations,
   type SeyaAgentSettings,
   type SeyaConversation,
@@ -54,6 +44,7 @@ import {
   BOOKEA_SHARED_WHATSAPP_NUMBER,
   formatSharedWhatsAppNumber,
 } from "@/lib/seya-whatsapp";
+import { SeyaInbox } from "@/components/seya/seya-inbox";
 import type { Appointment } from "@/types/agenda";
 import type { Lead } from "@/types/lead";
 
@@ -167,30 +158,12 @@ function buildSeyaTasks({
   return tasks;
 }
 
-const priorityStyles: Record<Priority, string> = {
-  Haute: "bg-rose-100 text-rose-700 border-rose-200",
-  Moyenne: "bg-orange-100 text-orange-700 border-orange-200",
-  Basse: "bg-blue-100 text-blue-700 border-blue-200",
-};
-
-const channelStyles: Record<SeyaTask["channel"], string> = {
-  WhatsApp: "bg-emerald-50 text-emerald-700 border-emerald-200",
-  SMS: "bg-blue-50 text-blue-700 border-blue-200",
-  Email: "bg-violet-50 text-violet-700 border-violet-200",
-  Agenda: "bg-amber-50 text-amber-700 border-amber-200",
-};
-
-const conversationStatusStyles: Record<SeyaConversation["status"], string> = {
-  "À envoyer": "bg-amber-100 text-amber-800",
-  "En cours": "bg-blue-100 text-blue-700",
-  Qualifié: "bg-violet-100 text-violet-700",
-  "RDV proposé": "bg-cyan-100 text-cyan-800",
-  "RDV pris": "bg-emerald-100 text-emerald-700",
-  Terminé: "bg-slate-100 text-slate-600",
-};
-
-function shouldStartConversation(lead: Lead, conversations: SeyaConversation[]) {
-  if (!lead.phone.trim()) {
+function shouldStartConversation(
+  lead: Lead,
+  conversations: SeyaConversation[],
+  autoStart = true,
+) {
+  if (!autoStart || !lead.phone.trim()) {
     return false;
   }
 
@@ -243,6 +216,7 @@ export default function SeyaCrmPage() {
     formatSharedWhatsAppNumber(BOOKEA_SHARED_WHATSAPP_NUMBER),
   );
   const [whatsappConnected, setWhatsappConnected] = useState(false);
+  const [view, setView] = useState<"inbox" | "settings">("inbox");
 
   const stats = useMemo(
     () => ({
@@ -254,9 +228,11 @@ export default function SeyaCrmPage() {
     [tasks],
   );
 
+  const inbox = useMemo(() => sortSeyaInbox(conversations), [conversations]);
+
   const selectedConversation =
-    conversations.find((item) => item.id === selectedConversationId) ??
-    conversations[0] ??
+    inbox.find((item) => item.id === selectedConversationId) ??
+    inbox[0] ??
     null;
 
   const availableSlots = useMemo(
@@ -323,7 +299,13 @@ export default function SeyaCrmPage() {
           ? [
               ...storedConversations,
               ...leadData.leads
-                .filter((lead) => shouldStartConversation(lead, storedConversations))
+                .filter((lead) =>
+                  shouldStartConversation(
+                    lead,
+                    storedConversations,
+                    seya.settings.autoMessageOnNewLead,
+                  ),
+                )
                 .map((lead) =>
                   startSeyaConversation({
                     lead,
@@ -464,7 +446,9 @@ export default function SeyaCrmPage() {
           }
           return;
         }
-        setAgentFeedback("Message envoyé depuis +33 6 23 16 50 61 (Bookea).");
+        setAgentFeedback(
+          `Message envoyé depuis ${formatSharedWhatsAppNumber()} (Bookea).`,
+        );
       } catch {
         setAgentFeedback("Impossible de joindre l’API WhatsApp Bookea.");
         return;
@@ -587,28 +571,62 @@ export default function SeyaCrmPage() {
 
   return (
     <main
-      className="min-h-screen bg-[#eef3f9] px-6 py-6 text-slate-950"
+      className="min-h-screen bg-[#eef3f9] px-4 py-4 text-slate-950 sm:px-6"
       data-sidebar-collapse-area="true"
     >
-      <section className="mb-6 flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
+      <section className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <p className="text-sm font-medium text-violet-600">Bookea Agent IA</p>
-          <h1 className="mt-1 text-xl font-semibold tracking-tight">Seya CRM</h1>
-          <p className="mt-2 max-w-3xl text-sm text-slate-500">
-            Un seul numéro WhatsApp Bookea pour tous les centres. Les leads, le
-            planning et les consignes restent ceux de ce centre.
+          <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700">
+            {centerName} · {sharedNumber}
           </p>
+          <h1 className="mt-1 text-xl font-semibold tracking-tight">Seya</h1>
         </div>
-        <button
-          type="button"
-          onClick={runSeya}
-          className="inline-flex items-center justify-center gap-2 rounded-2xl bg-slate-950 px-4 py-3 text-sm font-medium text-white shadow-sm"
-        >
-          <Wand2 className="h-6 w-6" />
-          Lancer l&apos;analyse
-        </button>
+        <div className="flex rounded-2xl bg-white p-1 shadow-sm ring-1 ring-slate-200">
+          <button
+            type="button"
+            onClick={() => setView("inbox")}
+            className={`rounded-xl px-4 py-2 text-sm font-semibold ${
+              view === "inbox" ? "bg-slate-950 text-white" : "text-slate-600"
+            }`}
+          >
+            Messagerie
+          </button>
+          <button
+            type="button"
+            onClick={() => setView("settings")}
+            className={`rounded-xl px-4 py-2 text-sm font-semibold ${
+              view === "settings" ? "bg-slate-950 text-white" : "text-slate-600"
+            }`}
+          >
+            Réglages
+          </button>
+        </div>
       </section>
 
+      {view === "inbox" ? (
+        <SeyaInbox
+          inbox={inbox}
+          selected={selectedConversation}
+          leads={leads}
+          settings={agentSettings}
+          reply={reply}
+          feedback={agentFeedback}
+          onSelect={(id) => {
+            setSelectedConversationId(id);
+            setReply("");
+          }}
+          onReplyChange={setReply}
+          onSendReply={() => void submitLeadReply()}
+          onSendWhatsApp={() => {
+            if (selectedConversation) {
+              void sendWhatsApp(selectedConversation);
+            }
+          }}
+          onPickSlot={(index) => void submitLeadReply(index)}
+        />
+      ) : null}
+
+      {view === "settings" ? (
       <section className="mb-6 rounded-3xl border border-emerald-200 bg-white p-5 shadow-sm">
         <div className="flex items-start gap-4">
           <div className="grid h-12 w-12 place-items-center rounded-2xl bg-emerald-50 text-emerald-700">
@@ -635,8 +653,8 @@ export default function SeyaCrmPage() {
 
         <div className="mt-5 grid gap-3">
           <ToggleRow
-            title="Dès qu’un lead s’inscrit"
-            hint="Nouveau prospect avec un téléphone : Seya prépare la conversation tout de suite."
+            title="WhatsApp Seya activé"
+            hint="Si c’est off, Seya ne parle pas pour ce centre (ex. Gap)."
             enabled={agentSettings.whatsappAgentEnabled}
             onToggle={() =>
               void persistAgentSettings({
@@ -646,8 +664,19 @@ export default function SeyaCrmPage() {
             }
           />
           <ToggleRow
+            title="Message dès qu’un lead arrive"
+            hint="Seya ouvre la conversation dès qu’un prospect avec téléphone entre dans le CRM."
+            enabled={agentSettings.autoMessageOnNewLead}
+            onToggle={() =>
+              void persistAgentSettings({
+                ...agentSettings,
+                autoMessageOnNewLead: !agentSettings.autoMessageOnNewLead,
+              })
+            }
+          />
+          <ToggleRow
             title="Qualifier le besoin"
-            hint="Seya demande le soin, la zone et le délai avant de proposer un RDV."
+            hint="Seya cherche le soin, la zone et le délai. Elle ne pose pas de RDV toute seule."
             enabled={agentSettings.qualifyOnSignup}
             onToggle={() =>
               void persistAgentSettings({
@@ -657,13 +686,35 @@ export default function SeyaCrmPage() {
             }
           />
           <ToggleRow
-            title="Prendre un rendez-vous"
-            hint="Après qualification, Seya propose 2 ou 3 créneaux libres et les écrit dans l’agenda."
+            title="Demander s’ils veulent un RDV"
+            hint="Après qualification : « une conseillère vous contacte » si oui. Pas de créneau posé."
+            enabled={agentSettings.askForAppointment}
+            onToggle={() =>
+              void persistAgentSettings({
+                ...agentSettings,
+                askForAppointment: !agentSettings.askForAppointment,
+              })
+            }
+          />
+          <ToggleRow
+            title="Laisser Seya poser le RDV dans l’agenda"
+            hint="Off par défaut. À activer seulement si le centre veut que l’IA booke."
             enabled={agentSettings.bookAppointment}
             onToggle={() =>
               void persistAgentSettings({
                 ...agentSettings,
                 bookAppointment: !agentSettings.bookAppointment,
+              })
+            }
+          />
+          <ToggleRow
+            title="Relances J+1, J+5, J+30"
+            hint="Si le lead est encore en attente, Seya relance le lendemain, à 5 jours, puis une dernière fois à 30 jours."
+            enabled={agentSettings.relanceEnabled}
+            onToggle={() =>
+              void persistAgentSettings({
+                ...agentSettings,
+                relanceEnabled: !agentSettings.relanceEnabled,
               })
             }
           />
@@ -686,6 +737,71 @@ export default function SeyaCrmPage() {
             className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm font-medium leading-6 text-slate-700 outline-none focus:border-emerald-500"
           />
         </label>
+
+        <div className="mt-5">
+          <p className="text-xs font-medium text-slate-500">
+            Offres campagne → texte WhatsApp
+          </p>
+          <p className="mt-1 text-xs font-medium text-slate-400">
+            Si le CRM a « offre 99 », Seya dit « séance découverte à 99€ », jamais le code.
+          </p>
+          <div className="mt-3 grid gap-3">
+            {agentSettings.offerMaps.map((item, index) => (
+              <div
+                key={`${item.match}-${index}`}
+                className="grid gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4 md:grid-cols-[180px_1fr]"
+              >
+                <input
+                  value={item.match}
+                  onChange={(event) =>
+                    setAgentSettings((current) => ({
+                      ...current,
+                      offerMaps: current.offerMaps.map((offer, offerIndex) =>
+                        offerIndex === index
+                          ? { ...offer, match: event.target.value }
+                          : offer,
+                      ),
+                    }))
+                  }
+                  onBlur={() => void persistAgentSettings(agentSettings)}
+                  placeholder="offre 99"
+                  className="h-11 rounded-2xl border border-slate-200 bg-white px-3 text-sm font-semibold outline-none focus:border-emerald-500"
+                />
+                <input
+                  value={item.label}
+                  onChange={(event) =>
+                    setAgentSettings((current) => ({
+                      ...current,
+                      offerMaps: current.offerMaps.map((offer, offerIndex) =>
+                        offerIndex === index
+                          ? { ...offer, label: event.target.value }
+                          : offer,
+                      ),
+                    }))
+                  }
+                  onBlur={() => void persistAgentSettings(agentSettings)}
+                  placeholder="une séance découverte cryo à 99€"
+                  className="h-11 rounded-2xl border border-slate-200 bg-white px-3 text-sm font-medium outline-none focus:border-emerald-500"
+                />
+              </div>
+            ))}
+          </div>
+          <button
+            type="button"
+            onClick={() =>
+              void persistAgentSettings({
+                ...agentSettings,
+                offerMaps: [
+                  ...agentSettings.offerMaps,
+                  { match: "", label: "" },
+                ],
+              })
+            }
+            className="mt-3 rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700"
+          >
+            Ajouter une offre
+          </button>
+        </div>
 
         <div className="mt-5">
           <p className="text-xs font-medium text-slate-500">
@@ -755,264 +871,7 @@ export default function SeyaCrmPage() {
           {savingAgent ? "Enregistrement…" : agentFeedback || `Centre : ${centerName}`}
         </p>
       </section>
-
-      <section className="mb-6 grid gap-4 xl:grid-cols-[280px_1fr]">
-        <div className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm">
-          <h2 className="text-sm font-semibold">Conversations agent</h2>
-          <p className="mt-1 text-xs font-medium text-slate-500">
-            {conversations.length} lead
-            {conversations.length > 1 ? "s" : ""} pris en charge.
-          </p>
-          <div className="mt-4 grid gap-2">
-            {conversations.length === 0 ? (
-              <p className="rounded-2xl bg-slate-50 p-4 text-sm font-medium text-slate-500">
-                Aucun nouveau lead à qualifier pour l’instant.
-              </p>
-            ) : null}
-            {conversations.map((conversation) => (
-              <button
-                key={conversation.id}
-                type="button"
-                onClick={() => {
-                  setSelectedConversationId(conversation.id);
-                  setReply("");
-                }}
-                className={`rounded-2xl border px-4 py-3 text-left ${
-                  selectedConversation?.id === conversation.id
-                    ? "border-emerald-300 bg-emerald-50"
-                    : "border-slate-200 bg-slate-50"
-                }`}
-              >
-                <p className="text-sm font-semibold">
-                  {conversation.firstName} {conversation.lastName}
-                </p>
-                <p className="mt-1 text-xs font-medium text-slate-500">
-                  {conversation.treatment || "Soin à préciser"}
-                </p>
-                <span
-                  className={`mt-2 inline-flex rounded-full px-2 py-1 text-[11px] font-semibold ${conversationStatusStyles[conversation.status]}`}
-                >
-                  {conversation.status}
-                </span>
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-          {selectedConversation ? (
-            <>
-              <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-                <div>
-                  <h2 className="text-base font-semibold">
-                    {selectedConversation.firstName} {selectedConversation.lastName}
-                  </h2>
-                  <p className="mt-1 text-sm font-medium text-slate-500">
-                    {selectedConversation.phone || "Pas de téléphone"} ·{" "}
-                    {selectedConversation.qualification.need ||
-                      selectedConversation.treatment ||
-                      "Besoin à qualifier"}
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => void sendWhatsApp(selectedConversation)}
-                  className="inline-flex items-center justify-center gap-2 rounded-2xl bg-emerald-600 px-4 py-3 text-sm font-semibold text-white"
-                >
-                  <MessageCircle className="h-5 w-5" />
-                  Envoyer sur WhatsApp
-                </button>
-              </div>
-              {agentFeedback ? (
-                <p className="mt-3 text-sm font-medium text-amber-800">{agentFeedback}</p>
-              ) : null}
-
-              <div className="mt-5 grid gap-3">
-                {selectedConversation.messages.map((message) => (
-                  <div
-                    key={message.id}
-                    className={`max-w-3xl rounded-2xl px-4 py-3 text-sm font-medium leading-6 ${
-                      message.author === "lead"
-                        ? "ml-auto bg-slate-100 text-slate-800"
-                        : "bg-emerald-50 text-emerald-900"
-                    }`}
-                  >
-                    <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
-                      {message.author === "lead" ? "Prospect" : "Seya"}
-                    </p>
-                    <p className="whitespace-pre-wrap">{message.text}</p>
-                  </div>
-                ))}
-              </div>
-
-              {selectedConversation.proposedSlots.length > 0 ? (
-                <div className="mt-5 grid gap-2 md:grid-cols-3">
-                  {selectedConversation.proposedSlots.map((slot) => (
-                    <button
-                      key={`${slot.date}-${slot.time}`}
-                      type="button"
-                      onClick={() =>
-                        void submitLeadReply(
-                          String(selectedConversation.proposedSlots.indexOf(slot) + 1),
-                        )
-                      }
-                      className="rounded-2xl border border-cyan-200 bg-cyan-50 px-4 py-3 text-sm font-semibold text-cyan-800"
-                    >
-                      <CalendarCheck className="mb-1 h-4 w-4" />
-                      {slot.label}
-                    </button>
-                  ))}
-                </div>
-              ) : null}
-
-              <div className="mt-5 grid gap-3 md:grid-cols-[1fr_auto]">
-                <input
-                  value={reply}
-                  onChange={(event) => setReply(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter") {
-                      event.preventDefault();
-                      void submitLeadReply();
-                    }
-                  }}
-                  placeholder="Collez ici la réponse WhatsApp du prospect…"
-                  className="h-12 rounded-2xl border border-slate-200 px-4 text-sm font-medium outline-none focus:border-emerald-500"
-                />
-                <button
-                  type="button"
-                  onClick={() => void submitLeadReply()}
-                  className="inline-flex items-center justify-center gap-2 rounded-2xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white"
-                >
-                  <Send className="h-4 w-4" />
-                  Faire répondre Seya
-                </button>
-              </div>
-            </>
-          ) : (
-            <p className="text-sm font-medium text-slate-500">
-              Active l’agent, puis un nouveau lead avec téléphone apparaîtra ici.
-            </p>
-          )}
-        </div>
-      </section>
-
-      <section className="mb-6 grid gap-4 md:grid-cols-4">
-        <StatCard title="Priorité haute" value={stats.urgent} color="text-rose-600" icon={<AlertTriangle />} />
-        <StatCard title="Messages prêts" value={stats.ready} color="text-blue-600" icon={<MessageCircle />} />
-        <StatCard title="Actions envoyées" value={stats.sent} color="text-emerald-600" icon={<CheckCircle2 />} />
-        <StatCard title="À traiter" value={stats.pending} color="text-violet-600" icon={<Users />} />
-      </section>
-
-      <section className="mb-6 rounded-3xl border border-violet-200 bg-violet-50 p-5 shadow-sm">
-        <div className="grid gap-4 xl:grid-cols-[1fr_auto]">
-          <label className="block">
-            <span className="mb-2 block text-xs font-medium text-violet-700">
-              Demander à Seya
-            </span>
-            <input
-              value={prompt}
-              onChange={(event) => setPrompt(event.target.value)}
-              className="h-12 w-full rounded-2xl border border-violet-200 bg-white px-4 text-base font-bold outline-none focus:border-violet-500"
-            />
-          </label>
-          <button
-            type="button"
-            onClick={runSeya}
-            className="self-end rounded-2xl bg-violet-600 px-4 py-3 text-sm font-medium text-white"
-          >
-            Préparer
-          </button>
-        </div>
-        <div className="mt-4 flex items-start gap-3 rounded-2xl bg-white p-4 text-violet-700">
-          <Sparkles className="mt-1 h-6 w-6 shrink-0" />
-          <p className="text-sm font-bold leading-6">{summary}</p>
-        </div>
-      </section>
-
-      <section className="grid gap-4">
-        {tasks.length === 0 ? (
-          <p className="rounded-3xl border border-slate-200 bg-white p-5 text-sm font-semibold text-slate-500 shadow-sm">
-            Aucune tâche Seya pour ce centre aujourd&apos;hui.
-          </p>
-        ) : null}
-        {tasks.map((task) => (
-          <article
-            key={task.id}
-            className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm"
-          >
-            <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
-              <div>
-                <div className="flex flex-wrap gap-2">
-                  <span className={`rounded-full border px-3 py-1 text-sm font-medium ${priorityStyles[task.priority]}`}>
-                    {task.priority}
-                  </span>
-                  <span className={`rounded-full border px-3 py-1 text-sm font-medium ${channelStyles[task.channel]}`}>
-                    {task.channel}
-                  </span>
-                  <span className="rounded-full bg-slate-100 px-3 py-1 text-sm font-medium text-slate-600">
-                    {task.status}
-                  </span>
-                </div>
-                <h2 className="mt-4 text-sm font-medium">{task.title}</h2>
-                <p className="mt-1 text-base font-bold text-slate-500">{task.client}</p>
-                <p className="mt-4 max-w-4xl rounded-2xl bg-slate-50 p-4 text-base font-semibold leading-7 text-slate-700">
-                  {task.suggestion}
-                </p>
-                {task.title.toLowerCase().includes("acompte") && (
-                  <div className="mt-4 grid gap-3 rounded-2xl border border-blue-100 bg-blue-50 p-4 md:grid-cols-[1fr_auto]">
-                    <label className="block">
-                      <span className="mb-2 block text-xs font-medium text-blue-700">
-                        Lien d&apos;acompte à envoyer
-                      </span>
-                      <select
-                        value={selectedDepositLinkId}
-                        onChange={(event) =>
-                          setSelectedDepositLinkId(event.target.value)
-                        }
-                        className="h-12 w-full rounded-2xl border border-blue-200 bg-white px-4 text-sm font-medium text-slate-800 outline-none"
-                      >
-                        {depositLinks.map((link) => (
-                          <option key={link.id} value={link.id}>
-                            {link.name}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <button
-                      type="button"
-                      onClick={() => sendDepositSms(task)}
-                      className="self-end rounded-2xl bg-blue-600 px-5 py-3 text-sm font-medium text-white"
-                    >
-                      SMS acompte
-                    </button>
-                    <p className="text-sm font-semibold leading-6 text-blue-700 md:col-span-2">
-                      {selectedDepositLink?.message}{" "}
-                      <span className="font-semibold">{selectedDepositLink?.url}</span>
-                    </p>
-                  </div>
-                )}
-              </div>
-              <div className="flex gap-3">
-                <button
-                  type="button"
-                  onClick={() => validateTask(task.id)}
-                  className="rounded-2xl border border-slate-200 bg-white px-5 py-3 font-semibold text-slate-700"
-                >
-                  Valider
-                </button>
-                <button
-                  type="button"
-                  onClick={() => sendTask(task.id)}
-                  className="inline-flex items-center gap-2 rounded-2xl bg-blue-600 px-5 py-3 font-semibold text-white"
-                >
-                  <Send className="h-5 w-5" />
-                  Envoyer
-                </button>
-              </div>
-            </div>
-          </article>
-        ))}
-      </section>
+      ) : null}
     </main>
   );
 }
@@ -1047,28 +906,3 @@ function ToggleRow({
   );
 }
 
-function StatCard({
-  title,
-  value,
-  color,
-  icon,
-}: {
-  title: string;
-  value: number;
-  color: string;
-  icon: ReactNode;
-}) {
-  return (
-    <div className="rounded-[24px] border border-slate-200 bg-white p-5 shadow-sm">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <p className="text-sm font-medium text-slate-500">{title}</p>
-          <p className={`mt-3 text-xl font-semibold ${color}`}>{value}</p>
-        </div>
-        <div className="grid h-12 w-12 place-items-center rounded-2xl bg-slate-50 text-blue-600">
-          {icon}
-        </div>
-      </div>
-    </div>
-  );
-}
