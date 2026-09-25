@@ -576,7 +576,7 @@ export default function SeyaCrmPage() {
     >
       <section className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700">
+          <p className="text-xs font-semibold uppercase tracking-wide text-violet-600">
             {centerName} · {sharedNumber}
           </p>
           <h1 className="mt-1 text-xl font-semibold tracking-tight">Seya</h1>
@@ -627,9 +627,9 @@ export default function SeyaCrmPage() {
       ) : null}
 
       {view === "settings" ? (
-      <section className="mb-6 rounded-3xl border border-emerald-200 bg-white p-5 shadow-sm">
+      <section className="mb-6 rounded-3xl border border-violet-200 bg-white p-5 shadow-sm">
         <div className="flex items-start gap-4">
-          <div className="grid h-12 w-12 place-items-center rounded-2xl bg-emerald-50 text-emerald-700">
+          <div className="grid h-12 w-12 place-items-center rounded-2xl bg-violet-50 text-violet-700">
             <Bot className="h-6 w-6" />
           </div>
           <div>
@@ -642,9 +642,9 @@ export default function SeyaCrmPage() {
           </div>
         </div>
 
-        <div className="mt-5 rounded-2xl border border-emerald-100 bg-emerald-50 px-4 py-3">
-          <p className="text-sm font-semibold text-emerald-800">{sharedNumber}</p>
-          <p className="mt-1 text-xs font-medium text-emerald-700">
+        <div className="mt-5 rounded-2xl border border-violet-100 bg-violet-50 px-4 py-3">
+          <p className="text-sm font-semibold text-violet-800">{sharedNumber}</p>
+          <p className="mt-1 text-xs font-medium text-violet-700">
             {whatsappConnected
               ? "Numéro partagé connecté. Chaque centre garde son CRM, son planning et ses automatisations."
               : "Même numéro pour tout le monde. On le connecte ensemble ; en attendant, Envoyer sur WhatsApp ouvre le message de ce centre."}
@@ -734,7 +734,7 @@ export default function SeyaCrmPage() {
             }
             onBlur={() => void persistAgentSettings(agentSettings)}
             rows={3}
-            className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm font-medium leading-6 text-slate-700 outline-none focus:border-emerald-500"
+            className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm font-medium leading-6 text-slate-700 outline-none focus:border-violet-500"
           />
         </label>
 
@@ -765,7 +765,7 @@ export default function SeyaCrmPage() {
                   }
                   onBlur={() => void persistAgentSettings(agentSettings)}
                   placeholder="offre 99"
-                  className="h-11 rounded-2xl border border-slate-200 bg-white px-3 text-sm font-semibold outline-none focus:border-emerald-500"
+                  className="h-11 rounded-2xl border border-slate-200 bg-white px-3 text-sm font-semibold outline-none focus:border-violet-500"
                 />
                 <input
                   value={item.label}
@@ -781,7 +781,7 @@ export default function SeyaCrmPage() {
                   }
                   onBlur={() => void persistAgentSettings(agentSettings)}
                   placeholder="une séance découverte cryo à 99€"
-                  className="h-11 rounded-2xl border border-slate-200 bg-white px-3 text-sm font-medium outline-none focus:border-emerald-500"
+                  className="h-11 rounded-2xl border border-slate-200 bg-white px-3 text-sm font-medium outline-none focus:border-violet-500"
                 />
               </div>
             ))}
@@ -830,7 +830,7 @@ export default function SeyaCrmPage() {
                     }))
                   }
                   onBlur={() => void persistAgentSettings(agentSettings)}
-                  className="h-11 rounded-2xl border border-slate-200 bg-white px-3 text-sm font-semibold outline-none focus:border-emerald-500"
+                  className="h-11 rounded-2xl border border-slate-200 bg-white px-3 text-sm font-semibold outline-none focus:border-violet-500"
                 />
                 <textarea
                   value={item.brief}
@@ -846,7 +846,7 @@ export default function SeyaCrmPage() {
                   }
                   onBlur={() => void persistAgentSettings(agentSettings)}
                   rows={2}
-                  className="rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium leading-5 text-slate-700 outline-none focus:border-emerald-500"
+                  className="rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium leading-5 text-slate-700 outline-none focus:border-violet-500"
                 />
               </div>
             ))}
@@ -897,7 +897,7 @@ function ToggleRow({
         type="button"
         onClick={onToggle}
         className={`h-12 rounded-2xl px-5 text-sm font-semibold ${
-          enabled ? "bg-emerald-100 text-emerald-700" : "bg-white text-slate-500"
+          enabled ? "bg-violet-100 text-violet-700" : "bg-white text-slate-500"
         }`}
       >
         {enabled ? "Oui" : "Non"}

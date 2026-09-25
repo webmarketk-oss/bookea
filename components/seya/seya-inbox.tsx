@@ -15,7 +15,7 @@ const tagStyles: Record<SeyaInboxTag, string> = {
   court: "bg-sky-100 text-sky-800",
   chaud: "bg-orange-100 text-orange-800",
   humain: "bg-amber-200 text-amber-950",
-  rdv: "bg-emerald-100 text-emerald-800",
+  rdv: "bg-violet-100 text-violet-800",
   sans_reponse: "bg-slate-200 text-slate-600",
   ferme: "bg-red-600 text-white",
 };
@@ -25,8 +25,8 @@ const statusStyles: Record<SeyaConversation["status"], string> = {
   "En cours": "bg-blue-100 text-blue-700",
   Qualifié: "bg-violet-100 text-violet-700",
   "RDV proposé": "bg-cyan-100 text-cyan-800",
-  "RDV pris": "bg-emerald-100 text-emerald-700",
-  "RDV confirmé": "bg-emerald-700 text-white",
+  "RDV pris": "bg-violet-100 text-violet-700",
+  "RDV confirmé": "bg-violet-500 text-white",
   Chaud: "bg-orange-100 text-orange-800",
   "À recontacter": "bg-amber-200 text-amber-900",
   "Pas intéressé": "bg-red-600 text-white",
@@ -91,7 +91,7 @@ const ConversationRow = memo(function ConversationRow({
       onClick={() => onSelect(conversation.id)}
       className={`w-full border-b border-slate-100 px-4 py-3 text-left transition-colors ${
         selected
-          ? "bg-emerald-50"
+          ? "bg-violet-50"
           : tag === "ferme"
             ? "bg-red-50/80"
             : "bg-white hover:bg-slate-50"
@@ -201,7 +201,7 @@ export function SeyaInbox({
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
                 placeholder="Rechercher un prospect…"
-                className="h-10 w-full rounded-2xl border border-slate-200 bg-slate-50 pl-9 pr-3 text-sm font-medium outline-none focus:border-emerald-500"
+                className="h-10 w-full rounded-2xl border border-slate-200 bg-slate-50 pl-9 pr-3 text-sm font-medium outline-none focus:border-violet-500"
               />
             </label>
             <div className="mt-3 flex flex-wrap gap-1.5">
@@ -268,7 +268,7 @@ export function SeyaInbox({
                 <button
                   type="button"
                   onClick={onSendWhatsApp}
-                  className="inline-flex items-center gap-2 rounded-2xl bg-emerald-600 px-3.5 py-2 text-sm font-semibold text-white"
+                  className="inline-flex items-center gap-2 rounded-2xl bg-violet-500 px-3.5 py-2 text-sm font-semibold text-white"
                 >
                   <MessageCircle className="h-4 w-4" />
                   WhatsApp
@@ -291,7 +291,7 @@ export function SeyaInbox({
                         className={`max-w-[80%] rounded-2xl px-4 py-3 text-sm font-medium leading-6 shadow-sm ${
                           fromLead
                             ? "bg-white text-slate-800"
-                            : "bg-emerald-600 text-white"
+                            : "bg-violet-500 text-white"
                         }`}
                       >
                         <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide opacity-70">
@@ -338,7 +338,7 @@ export function SeyaInbox({
                   <button
                     type="button"
                     onClick={onSendReply}
-                    className="grid h-9 w-9 place-items-center rounded-full bg-emerald-600 text-white"
+                    className="grid h-9 w-9 place-items-center rounded-full bg-violet-500 text-white"
                     aria-label="Envoyer"
                   >
                     <Send className="h-4 w-4" />
