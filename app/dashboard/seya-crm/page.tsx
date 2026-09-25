@@ -216,6 +216,8 @@ export default function SeyaCrmPage() {
     formatSharedWhatsAppNumber(BOOKEA_SHARED_WHATSAPP_NUMBER),
   );
   const [whatsappConnected, setWhatsappConnected] = useState(false);
+  const [aiEnabled, setAiEnabled] = useState(false);
+  const [replying, setReplying] = useState(false);
   const [view, setView] = useState<"inbox" | "settings">("inbox");
 
   const stats = useMemo(
@@ -366,6 +368,7 @@ export default function SeyaCrmPage() {
             : "Numéro Bookea unique",
         );
         setWhatsappConnected(Boolean(payload?.connected));
+        setAiEnabled(Boolean(payload?.ai));
       })
       .catch(() => null);
 
@@ -480,7 +483,7 @@ export default function SeyaCrmPage() {
   }
 
   async function submitLeadReply(nextReply?: string) {
-    if (!selectedConversation) {
+    if (!selectedConversation || replying) {
       return;
     }
 
@@ -489,14 +492,54 @@ export default function SeyaCrmPage() {
       return;
     }
 
-    const result = applyLeadReply(
+    setReplying(true);
+    setReply("");
+    setAgentFeedback("Seya réfléchit…");
+
+    let result = applyLeadReply(
       selectedConversation,
       text,
       agentSettings,
       availableSlots,
     );
+
+    try {
+      const response = await fetch("/api/seya/reply", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          conversation: selectedConversation,
+          text,
+          settings: agentSettings,
+          slots: availableSlots,
+          centerName,
+        }),
+      });
+      const payload = (await response.json().catch(() => ({}))) as {
+        conversation?: SeyaConversation;
+        shouldBook?: { date: string; time: string; label: string } | null;
+        via?: string;
+        ai?: boolean;
+      };
+      if (payload.conversation) {
+        result = {
+          conversation: payload.conversation,
+          shouldBook: payload.shouldBook ?? null,
+        };
+        setAiEnabled(Boolean(payload.ai));
+        setAgentFeedback(
+          payload.via === "ai" ? "Réponse IA Seya." : "Réponse Seya (règles).",
+        );
+      } else {
+        setAgentFeedback("Réponse Seya (règles).");
+      }
+    } catch {
+      setAgentFeedback("Réponse Seya (règles).");
+    } finally {
+      setReplying(false);
+    }
+
     updateConversation(result.conversation);
-    setReply("");
 
     if (!result.shouldBook) {
       return;
@@ -611,6 +654,7 @@ export default function SeyaCrmPage() {
           settings={agentSettings}
           reply={reply}
           feedback={agentFeedback}
+          busy={replying}
           onSelect={(id) => {
             setSelectedConversationId(id);
             setReply("");
@@ -635,9 +679,9 @@ export default function SeyaCrmPage() {
           <div>
             <h2 className="text-base font-semibold">Agent WhatsApp Seya</h2>
             <p className="mt-1 max-w-3xl text-sm font-medium text-slate-500">
-              Le prospect écrit toujours au même numéro Bookea. Seya retrouve le
-              centre du lead, applique les consignes de ce centre, et ne propose
-              que les créneaux de ce planning.
+              Seya lit le fil avec l’IA, applique les consignes de ce centre, et
+              ne propose que les créneaux de ce planning. Sans clé OpenAI, elle
+              retombe sur les règles.
             </p>
           </div>
         </div>
@@ -647,7 +691,10 @@ export default function SeyaCrmPage() {
           <p className="mt-1 text-xs font-medium text-violet-700">
             {whatsappConnected
               ? "Numéro partagé connecté. Chaque centre garde son CRM, son planning et ses automatisations."
-              : "Même numéro pour tout le monde. On le connecte ensemble ; en attendant, Envoyer sur WhatsApp ouvre le message de ce centre."}
+              : "Même numéro pour tout le monde. On le connecte ensemble ; en attendant, Envoyer sur WhatsApp ouvre le message de ce centre."}{" "}
+            {aiEnabled
+              ? "IA OpenAI branchée."
+              : "IA en attente : ajoute OPENAI_API_KEY sur Vercel."}
           </p>
         </div>
 

@@ -129,6 +129,7 @@ export function SeyaInbox({
   settings,
   reply,
   feedback,
+  busy = false,
   onSelect,
   onReplyChange,
   onSendReply,
@@ -141,6 +142,7 @@ export function SeyaInbox({
   settings: SeyaAgentSettings;
   reply: string;
   feedback: string;
+  busy?: boolean;
   onSelect: (id: string) => void;
   onReplyChange: (value: string) => void;
   onSendReply: () => void;
@@ -332,13 +334,17 @@ export function SeyaInbox({
                         onSendReply();
                       }
                     }}
-                    placeholder="Écrire une réponse au prospect…"
-                    className="h-12 flex-1 bg-transparent text-sm font-medium outline-none"
+                    placeholder={
+                      busy ? "Seya réfléchit…" : "Écrire une réponse au prospect…"
+                    }
+                    disabled={busy}
+                    className="h-12 flex-1 bg-transparent text-sm font-medium outline-none disabled:opacity-60"
                   />
                   <button
                     type="button"
                     onClick={onSendReply}
-                    className="grid h-9 w-9 place-items-center rounded-full bg-violet-500 text-white"
+                    disabled={busy}
+                    className="grid h-9 w-9 place-items-center rounded-full bg-violet-500 text-white disabled:opacity-50"
                     aria-label="Envoyer"
                   >
                     <Send className="h-4 w-4" />

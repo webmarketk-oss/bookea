@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-require-imports */
 const { createClient } = require("@supabase/supabase-js");
+const { generateSeyaReply, hasAiKey } = require("./ai");
 const {
-  applyLeadReply,
   readHours,
   startConversation,
   suggestAvailableSlots,
@@ -47,6 +47,7 @@ async function handler(req, res) {
       ),
       webhook: "/api/seya/whatsapp",
       graph,
+      ai: hasAiKey(),
     });
   }
 
@@ -173,7 +174,13 @@ async function handleIncoming(supabase, incoming) {
     startConversation(context, center.name, seya);
   const appointments = await loadCenterAppointments(supabase, center.id);
   const slots = suggestAvailableSlots(appointments, readHours(center.settings));
-  const result = applyLeadReply(existing, incoming.text, seya, slots);
+  const result = await generateSeyaReply({
+    conversation: existing,
+    text: incoming.text,
+    seya,
+    slots,
+    centerName: center.name,
+  });
   const next = result.conversation;
   const saved = [
     next,

@@ -122,6 +122,7 @@ function agentSettings(seya) {
     handoffToHuman: record.handoffToHuman !== false,
     treatmentBriefs: briefs,
     offerMaps: offers,
+    brief: String(record.brief || ""),
     relanceEnabled: record.relanceEnabled !== false,
     relanceDays: Array.isArray(record.relanceDays)
       ? record.relanceDays.map(Number).filter((item) => item > 0)
@@ -609,8 +610,11 @@ module.exports = {
   lastLeadAt,
   lastSeyaAt,
   daysSince,
+  matchProposedSlot,
+  mergeQualification,
   readHours,
   relanceCopy,
+  resolveOfferLabel,
   resolveTreatmentBrief,
   startConversation,
   suggestAvailableSlots,
