@@ -11,6 +11,7 @@ type LegalPageProps = {
   title: string;
   intro: string;
   sections: LegalSection[];
+  showDisclaimer?: boolean;
 };
 
 const legalLinks = [
@@ -20,6 +21,7 @@ const legalLinks = [
   ["CGV", "/cgv"],
   ["Cookies", "/cookies"],
   ["Réservation", "/conditions-reservation"],
+  ["Suppression des données", "/suppression-des-donnees"],
 ];
 
 export const companyIdentity = {
@@ -29,7 +31,12 @@ export const companyIdentity = {
   email: "info@bookeai.fr",
 };
 
-export function LegalPage({ title, intro, sections }: LegalPageProps) {
+export function LegalPage({
+  title,
+  intro,
+  sections,
+  showDisclaimer = true,
+}: LegalPageProps) {
   return (
     <main className="min-h-screen bg-[#f4f7fb] text-slate-950">
       <header className="border-b border-slate-200/80 bg-white">
@@ -84,12 +91,14 @@ export function LegalPage({ title, intro, sections }: LegalPageProps) {
             ))}
           </div>
 
-          <div className="mt-8 rounded-3xl border border-amber-200 bg-amber-50 p-5 text-sm font-semibold leading-7 text-amber-900">
-            Ces textes sont une base de travail pour Bookea. Avant un lancement
-            commercial définitif, ils doivent être relus et validés par un
-            professionnel du droit, notamment pour les paiements, les données
-            personnelles et les conditions d'annulation.
-          </div>
+          {showDisclaimer ? (
+            <div className="mt-8 rounded-3xl border border-amber-200 bg-amber-50 p-5 text-sm font-semibold leading-7 text-amber-900">
+              Ces textes sont une base de travail pour Bookea. Avant un lancement
+              commercial définitif, ils doivent être relus et validés par un
+              professionnel du droit, notamment pour les paiements, les données
+              personnelles et les conditions d'annulation.
+            </div>
+          ) : null}
         </div>
 
         <nav className="mt-6 flex flex-wrap gap-2">

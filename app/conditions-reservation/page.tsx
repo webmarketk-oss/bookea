@@ -10,7 +10,8 @@ export default function ConditionsReservationPage() {
   return (
     <LegalPage
       title="Conditions de réservation"
-      intro="Ces conditions expliquent le fonctionnement des réservations effectuées depuis Bookea."
+      intro="Ces conditions expliquent le fonctionnement des réservations et des acomptes effectués depuis Bookea."
+      showDisclaimer={false}
       sections={[
         {
           title: "Réservation",
