@@ -709,6 +709,7 @@ function pickApprovedTemplate(templates) {
   );
   return (
     approved.find((item) => item.name === "seya_accueil") ||
+    approved.find((item) => item.name === "seya_accueil_dispo") ||
     approved.find((item) => item.name === "hello_world") ||
     approved[0] ||
     null

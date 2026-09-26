@@ -14,31 +14,43 @@ const defaultBriefs = [
     name: "Épilation Laser",
     brief:
       "Le lead vient pour une épilation définitive. Demande la zone (jambes, maillot, aisselles, visage…). Ne promets pas un tarif. Propose un bilan / première séance, puis un créneau.",
+    opening:
+      "Bonjour, je suis Seya du centre {centre}. Vous avez fait une demande pour {offre}. Quelles zones souhaitez-vous traiter ?",
   },
   {
     name: "Épilation définitive",
     brief:
       "Le lead vient pour une épilation définitive. Demande la zone (jambes, maillot, aisselles, visage…). Ne promets pas un tarif. Propose un bilan / première séance, puis un créneau.",
+    opening:
+      "Bonjour, je suis Seya du centre {centre}. Vous avez fait une demande pour {offre}. Quelles zones souhaitez-vous traiter ?",
   },
   {
     name: "Hydrafacial",
     brief:
       "Le lead vient pour un soin visage. Demande l’objectif peau (éclat, pores, acné). Propose un hydrafacial ou un soin visage, puis un créneau cette semaine.",
+    opening:
+      "Bonjour, je suis Seya du centre {centre}. Vous avez fait une demande pour {offre}. Quel est votre objectif peau ? Quelle zone souhaitez-vous traiter ?",
   },
   {
     name: "Soin visage",
     brief:
       "Le lead vient pour un soin visage. Demande l’objectif peau (éclat, pores, acné, hydratation). Propose un soin ou un bilan peau, puis un créneau.",
+    opening:
+      "Bonjour, je suis Seya du centre {centre}. Vous avez fait une demande pour {offre}. Quel est votre objectif peau ? Quelle zone souhaitez-vous traiter ?",
   },
   {
     name: "Soin minceur",
     brief:
       "Le lead vient pour un minceur. Demande la zone et l’objectif. Propose un bilan minceur, pas une série complète tout de suite, puis un créneau.",
+    opening:
+      "Bonjour, je suis Seya du centre {centre}. Vous avez fait une demande pour {offre}. Que recherchez-vous ? Quelles zones souhaitez-vous traiter ?",
   },
   {
     name: "Cryolipolyse",
     brief:
       "Le lead vient pour un minceur / cryolipolyse. Demande la zone et si un bilan a déjà été fait. Oriente vers un rendez-vous bilan avant de parler prix.",
+    opening:
+      "Bonjour, je suis Seya du centre {centre}. Vous avez fait une demande pour {offre}. Que recherchez-vous ? Quelles zones souhaitez-vous traiter ?",
   },
 ];
 
@@ -183,15 +195,81 @@ function familyFromTreatment(treatment) {
     return "";
   }
   if (aliases[0].keys.some((key) => needle.includes(key))) {
-    return "Épilation définitive";
+    return "epilation";
   }
   if (aliases[1].keys.some((key) => needle.includes(key))) {
-    return "Minceur";
+    return "minceur";
   }
   if (aliases[2].keys.some((key) => needle.includes(key))) {
-    return "Visage";
+    return "visage";
   }
   return "";
+}
+
+function defaultOfferForFamily(family) {
+  if (family === "minceur") return "notre offre découverte minceur";
+  if (family === "visage") return "notre soin visage";
+  if (family === "epilation") return "l’épilation définitive";
+  return "un soin";
+}
+
+function defaultOpeningForFamily(family) {
+  if (family === "minceur") {
+    return "Bonjour, je suis Seya du centre {centre}. Vous avez fait une demande pour {offre}. Que recherchez-vous ? Quelles zones souhaitez-vous traiter ?";
+  }
+  if (family === "visage") {
+    return "Bonjour, je suis Seya du centre {centre}. Vous avez fait une demande pour {offre}. Quel est votre objectif peau ? Quelle zone souhaitez-vous traiter ?";
+  }
+  if (family === "epilation") {
+    return "Bonjour, je suis Seya du centre {centre}. Vous avez fait une demande pour {offre}. Quelles zones souhaitez-vous traiter ?";
+  }
+  return "Bonjour, je suis Seya du centre {centre}. Vous avez fait une demande chez nous. Quel soin vous intéresse : minceur, visage ou épilation définitive ?";
+}
+
+function fillOpening(template, vars) {
+  return String(template || "")
+    .replace(/\{prenom\}/gi, vars.prenom)
+    .replace(/\{firstName\}/gi, vars.prenom)
+    .replace(/\{centre\}/gi, vars.centre)
+    .replace(/\{center\}/gi, vars.centre)
+    .replace(/\{offre\}/gi, vars.offre)
+    .replace(/\{offer\}/gi, vars.offre)
+    .trim();
+}
+
+function findTreatmentBrief(seya, treatment) {
+  const settings = agentSettings(seya);
+  const needle = normalize(treatment);
+  if (!needle) {
+    return null;
+  }
+  const exact = settings.treatmentBriefs.find((item) => normalize(item?.name) === needle);
+  if (exact) return exact;
+  const partial = settings.treatmentBriefs.find((item) => {
+    const name = normalize(item?.name);
+    return name && (needle.includes(name) || name.includes(needle));
+  });
+  if (partial) return partial;
+  const alias = aliases.find((item) => item.keys.some((key) => needle.includes(normalize(key))));
+  if (!alias) return null;
+  return (
+    settings.treatmentBriefs.find((item) => normalize(item?.name) === normalize(alias.name)) ||
+    null
+  );
+}
+
+function buildOpeningMessage(context, centerName, seya) {
+  const hay = `${context.campaign || ""} ${context.treatment || ""}`;
+  const family = familyFromTreatment(hay);
+  const offer =
+    resolveOfferLabel(seya, context.campaign, context.treatment) ||
+    defaultOfferForFamily(family);
+  const brief = findTreatmentBrief(seya, hay);
+  return fillOpening(brief?.opening || defaultOpeningForFamily(family), {
+    prenom: String(context.firstName || "").trim() || "bonjour",
+    centre: String(centerName || "").trim() || "le centre",
+    offre: offer,
+  });
 }
 
 function extractNeed(text) {
@@ -336,16 +414,7 @@ function message(author, text) {
 function startConversation(context, centerName, seya) {
   const treatment = context.treatment || "";
   const offer = resolveOfferLabel(seya, context.campaign, treatment);
-  const shown =
-    offer ||
-    (treatment && !/soin a preciser|lead meta|offre \d+/i.test(normalize(treatment))
-      ? treatment
-      : "");
-  const family = familyFromTreatment(treatment);
-  const brief = resolveTreatmentBrief(seya, treatment);
-  const opening = shown
-    ? `Bonjour ${context.firstName}, merci pour votre inscription chez ${centerName}. Je suis Seya. Vous avez demandé ${shown}${family ? ` (${family})` : ""}. ${brief || "Dites-moi la zone ou l’objectif."}`
-    : `Bonjour ${context.firstName}, merci pour votre message chez ${centerName}. Je suis Seya. Quel soin souhaitez-vous : épilation définitive, minceur ou visage ?`;
+  const opening = buildOpeningMessage(context, centerName, seya);
 
   return {
     id: context.leadId,

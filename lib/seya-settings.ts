@@ -8,6 +8,7 @@ export const SEYA_CONVERSATIONS_UPDATED_EVENT =
 export type SeyaTreatmentBrief = {
   name: string;
   brief: string;
+  opening?: string;
 };
 
 export type SeyaOfferMap = {
@@ -93,31 +94,43 @@ export const defaultTreatmentBriefs: SeyaTreatmentBrief[] = [
     name: "Épilation Laser",
     brief:
       "Le lead vient pour une épilation définitive. Demande la zone (jambes, maillot, aisselles, visage…). Ne promets pas un tarif. Propose un bilan / première séance, puis un créneau.",
+    opening:
+      "Bonjour, je suis Seya du centre {centre}. Vous avez fait une demande pour {offre}. Quelles zones souhaitez-vous traiter ?",
   },
   {
     name: "Épilation définitive",
     brief:
       "Le lead vient pour une épilation définitive. Demande la zone (jambes, maillot, aisselles, visage…). Ne promets pas un tarif. Propose un bilan / première séance, puis un créneau.",
+    opening:
+      "Bonjour, je suis Seya du centre {centre}. Vous avez fait une demande pour {offre}. Quelles zones souhaitez-vous traiter ?",
   },
   {
     name: "Hydrafacial",
     brief:
       "Le lead vient pour un soin visage. Demande l’objectif peau (éclat, pores, acné). Propose un hydrafacial ou un soin visage, puis un créneau cette semaine.",
+    opening:
+      "Bonjour, je suis Seya du centre {centre}. Vous avez fait une demande pour {offre}. Quel est votre objectif peau ? Quelle zone souhaitez-vous traiter ?",
   },
   {
     name: "Soin visage",
     brief:
       "Le lead vient pour un soin visage. Demande l’objectif peau (éclat, pores, acné, hydratation). Propose un soin ou un bilan peau, puis un créneau.",
+    opening:
+      "Bonjour, je suis Seya du centre {centre}. Vous avez fait une demande pour {offre}. Quel est votre objectif peau ? Quelle zone souhaitez-vous traiter ?",
   },
   {
     name: "Soin minceur",
     brief:
       "Le lead vient pour un minceur. Demande la zone et l’objectif. Propose un bilan minceur, pas une série complète tout de suite, puis un créneau.",
+    opening:
+      "Bonjour, je suis Seya du centre {centre}. Vous avez fait une demande pour {offre}. Que recherchez-vous ? Quelles zones souhaitez-vous traiter ?",
   },
   {
     name: "Cryolipolyse",
     brief:
       "Le lead vient pour un minceur / cryolipolyse. Demande la zone et si un bilan a déjà été fait. Oriente vers un rendez-vous bilan avant de parler prix.",
+    opening:
+      "Bonjour, je suis Seya du centre {centre}. Vous avez fait une demande pour {offre}. Que recherchez-vous ? Quelles zones souhaitez-vous traiter ?",
   },
 ];
 
@@ -229,6 +242,129 @@ function seyaConversationsStorageKey(centerId: string) {
   return `bookea-seya-conversations:${centerId}`;
 }
 
+export function resolveSeyaOpening(
+  settings: SeyaAgentSettings,
+  {
+    firstName,
+    centerName,
+    campaign,
+    treatment,
+  }: {
+    firstName?: string | null;
+    centerName?: string | null;
+    campaign?: string | null;
+    treatment?: string | null;
+  },
+) {
+  const hay = `${campaign || ""} ${treatment || ""}`;
+  const family = familyFromTreatment(hay);
+  const offer =
+    resolveOfferLabel(settings, campaign, treatment) || defaultOfferForFamily(family);
+  const brief = findTreatmentBrief(settings, hay);
+  const template =
+    brief?.opening?.trim() ||
+    defaultOpeningForFamily(family);
+  const center = String(centerName || "").trim() || "le centre";
+
+  return fillSeyaTemplate(template, {
+    prenom: String(firstName || "").trim() || "bonjour",
+    centre: center,
+    offre: offer,
+  });
+}
+
+function findTreatmentBrief(settings: SeyaAgentSettings, treatment?: string | null) {
+  const needle = normalizeTreatmentName(treatment || "");
+  if (!needle) {
+    return null;
+  }
+
+  const exact = settings.treatmentBriefs.find(
+    (item) => normalizeTreatmentName(item.name) === needle,
+  );
+  if (exact) {
+    return exact;
+  }
+
+  const partial = settings.treatmentBriefs.find((item) => {
+    const name = normalizeTreatmentName(item.name);
+    return name && (needle.includes(name) || name.includes(needle));
+  });
+  if (partial) {
+    return partial;
+  }
+
+  const alias = treatmentAliases.find((item) =>
+    item.keys.some((key) => needle.includes(normalizeTreatmentName(key))),
+  );
+  if (!alias) {
+    return null;
+  }
+
+  return (
+    settings.treatmentBriefs.find(
+      (item) => normalizeTreatmentName(item.name) === normalizeTreatmentName(alias.name),
+    ) || null
+  );
+}
+
+function familyFromTreatment(treatment?: string | null) {
+  const needle = normalizeTreatmentName(treatment || "");
+  if (!needle) {
+    return "";
+  }
+  if (treatmentAliases[0].keys.some((key) => needle.includes(normalizeTreatmentName(key)))) {
+    return "epilation";
+  }
+  if (treatmentAliases[1].keys.some((key) => needle.includes(normalizeTreatmentName(key)))) {
+    return "minceur";
+  }
+  if (treatmentAliases[2].keys.some((key) => needle.includes(normalizeTreatmentName(key)))) {
+    return "visage";
+  }
+  return "";
+}
+
+function defaultOfferForFamily(family: string) {
+  if (family === "minceur") {
+    return "notre offre découverte minceur";
+  }
+  if (family === "visage") {
+    return "notre soin visage";
+  }
+  if (family === "epilation") {
+    return "l’épilation définitive";
+  }
+  return "un soin";
+}
+
+function defaultOpeningForFamily(family: string) {
+  if (family === "minceur") {
+    return "Bonjour, je suis Seya du centre {centre}. Vous avez fait une demande pour {offre}. Que recherchez-vous ? Quelles zones souhaitez-vous traiter ?";
+  }
+  if (family === "visage") {
+    return "Bonjour, je suis Seya du centre {centre}. Vous avez fait une demande pour {offre}. Quel est votre objectif peau ? Quelle zone souhaitez-vous traiter ?";
+  }
+  if (family === "epilation") {
+    return "Bonjour, je suis Seya du centre {centre}. Vous avez fait une demande pour {offre}. Quelles zones souhaitez-vous traiter ?";
+  }
+  return "Bonjour, je suis Seya du centre {centre}. Vous avez fait une demande chez nous. Quel soin vous intéresse : minceur, visage ou épilation définitive ?";
+}
+
+function fillSeyaTemplate(
+  template: string,
+  vars: { prenom: string; centre: string; offre: string },
+) {
+  return template
+    .replace(/\{prenom\}/gi, vars.prenom)
+    .replace(/\{firstName\}/gi, vars.prenom)
+    .replace(/\{centre\}/gi, vars.centre)
+    .replace(/\{center\}/gi, vars.centre)
+    .replace(/\{offre\}/gi, vars.offre)
+    .replace(/\{offer\}/gi, vars.offre)
+    .trim();
+}
+
 export function resolveOfferLabel(
   settings: SeyaAgentSettings,
   campaign?: string | null,
@@ -329,9 +465,11 @@ function normalizeTreatmentBriefs(value?: SeyaTreatmentBrief[] | null) {
     if (!name) {
       continue;
     }
+    const previous = merged.get(normalizeTreatmentName(name));
     merged.set(normalizeTreatmentName(name), {
       name,
       brief: String(item?.brief || "").trim(),
+      opening: String(item?.opening || previous?.opening || "").trim(),
     });
   }
 

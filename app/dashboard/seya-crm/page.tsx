@@ -855,14 +855,13 @@ export default function SeyaCrmPage() {
             Consignes selon le soin demandé
           </p>
           <p className="mt-1 text-xs font-medium text-slate-400">
-            Seya lit le soin du lead (formulaire, Meta, fiche) et applique la
-            consigne correspondante.
+            Chaque soin a son premier message. Utilise {"{centre}"} et {"{offre}"}.
           </p>
           <div className="mt-3 grid gap-3">
             {agentSettings.treatmentBriefs.map((item, index) => (
               <div
                 key={`${item.name}-${index}`}
-                className="grid gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4 md:grid-cols-[180px_1fr]"
+                className="grid gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4"
               >
                 <input
                   value={item.name}
@@ -878,6 +877,23 @@ export default function SeyaCrmPage() {
                   }
                   onBlur={() => void persistAgentSettings(agentSettings)}
                   className="h-11 rounded-2xl border border-slate-200 bg-white px-3 text-sm font-semibold outline-none focus:border-violet-500"
+                />
+                <textarea
+                  value={item.opening || ""}
+                  onChange={(event) =>
+                    setAgentSettings((current) => ({
+                      ...current,
+                      treatmentBriefs: current.treatmentBriefs.map((brief, briefIndex) =>
+                        briefIndex === index
+                          ? { ...brief, opening: event.target.value }
+                          : brief,
+                      ),
+                    }))
+                  }
+                  onBlur={() => void persistAgentSettings(agentSettings)}
+                  rows={3}
+                  placeholder="Bonjour, je suis Seya du centre {centre}. Vous avez fait une demande pour {offre}…"
+                  className="rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium leading-5 text-slate-700 outline-none focus:border-violet-500"
                 />
                 <textarea
                   value={item.brief}
@@ -905,7 +921,12 @@ export default function SeyaCrmPage() {
                 ...agentSettings,
                 treatmentBriefs: [
                   ...agentSettings.treatmentBriefs,
-                  { name: "Nouveau soin", brief: "" },
+                  {
+                    name: "Nouveau soin",
+                    brief: "",
+                    opening:
+                      "Bonjour, je suis Seya du centre {centre}. Vous avez fait une demande pour {offre}. Que recherchez-vous ?",
+                  },
                 ],
               })
             }

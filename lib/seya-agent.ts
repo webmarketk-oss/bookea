@@ -2,6 +2,7 @@ import { addDaysIso, todayIso } from "@/lib/crm-stats";
 import type { CenterDayHours } from "@/lib/center-hours";
 import {
   resolveOfferLabel,
+  resolveSeyaOpening,
   resolveTreatmentBrief,
   type SeyaAgentMessage,
   type SeyaAgentSettings,
@@ -46,29 +47,12 @@ export function buildOpeningMessage(
   centerName: string,
   settings: SeyaAgentSettings,
 ) {
-  const firstName = lead.firstName.trim() || "bonjour";
-  const treatment = lead.treatment.trim();
-  const center = centerName.trim() || "le centre";
-
-  const treatmentHint = resolveTreatmentBrief(settings, treatment);
-  const offer = resolveOfferLabel(settings, lead.campaign, treatment);
-  const shown = offer || (treatment && !/soin à préciser|lead meta|offre \d+/i.test(treatment)
-    ? treatment
-    : "");
-
-  if (settings.qualifyOnSignup && settings.bookAppointment) {
-    if (shown) {
-      return `Bonjour ${firstName}, merci pour votre inscription chez ${center}. Je suis Seya. Vous avez demandé ${shown}. ${treatmentHint || "Dites-moi la zone ou l’objectif, et quels jours vous iraient cette semaine."} Je vous propose ensuite un vrai créneau.`;
-    }
-
-    return `Bonjour ${firstName}, merci pour votre inscription chez ${center}. Je suis Seya, l’assistante du centre. Quel soin souhaitez-vous, et avez-vous déjà une idée de jour cette semaine ? Je vous propose ensuite un créneau réel.`;
-  }
-
-  if (settings.qualifyOnSignup) {
-    return `Bonjour ${firstName}, merci pour votre message chez ${center}. Je suis Seya. Quel soin vous intéresse, et sur quelle zone ?`;
-  }
-
-  return `Bonjour ${firstName}, merci pour votre inscription chez ${center}. Je suis Seya. Souhaitez-vous que je vous propose un créneau dès maintenant ?`;
+  return resolveSeyaOpening(settings, {
+    firstName: lead.firstName,
+    centerName,
+    campaign: lead.campaign,
+    treatment: lead.treatment,
+  });
 }
 
 export function startSeyaConversation({
