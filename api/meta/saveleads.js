@@ -105,7 +105,14 @@ function mapIncomingLead(payload) {
   const fullName =
     pick(fields, ["full_name", "nom_complet", "name", "prenom_nom"]) || "";
   const nameParts = splitName(fullName);
-  const formName = pick(fields, ["form_name", "form", "campaign", "campagne"]);
+  const formName = pick(fields, [
+    "form_name",
+    "form",
+    "campaign",
+    "campagne",
+    "offre",
+    "offer",
+  ]);
   const pageName = pick(fields, ["page_name", "page"]);
 
   return {
