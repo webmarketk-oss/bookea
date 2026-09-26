@@ -292,6 +292,7 @@ export default function CenterSettingsPage() {
   );
   const [reviewSource, setReviewSource] = useState("Google");
   const [reviewUrl, setReviewUrl] = useState("");
+  const [importingReviews, setImportingReviews] = useState(false);
   const [manualReview, setManualReview] = useState({
     author: "",
     rating: 5,
@@ -763,37 +764,48 @@ export default function CenterSettingsPage() {
     event.target.value = "";
   };
 
-  const importExternalReviews = () => {
-    const nextReviews = [
-      {
-        id: Date.now(),
-        author: "Avis importé",
-        rating: 5,
-        source: reviewSource,
-        date: new Date().toISOString().slice(0, 10),
-        comment:
-          reviewUrl.trim().length > 0
-            ? `Avis importé depuis ${reviewSource} via ${reviewUrl.trim()}.`
-            : `Avis importé depuis ${reviewSource}.`,
-        imported: true,
-      },
-      {
-        id: Date.now() + 1,
-        author: "Cliente vérifiée",
-        rating: 5,
-        source: reviewSource,
-        date: new Date().toISOString().slice(0, 10),
-        comment:
-          "Très bonne expérience, réservation simple et équipe professionnelle.",
-        imported: true,
-      },
-    ];
+  const importExternalReviews = async () => {
+    const url = reviewUrl.trim();
+    if (!url) {
+      setSavedMessage(
+        "Colle le lien Google Maps de la fiche, ou ajoute un avis à la main en dessous.",
+      );
+      window.setTimeout(() => setSavedMessage(""), 3600);
+      return;
+    }
 
-    setExternalReviews((current) => [...nextReviews, ...current]);
-    setSavedMessage(
-      `Avis ${reviewSource} ajoutés. Cliquez sur Enregistrer pour publier.`,
-    );
-    window.setTimeout(() => setSavedMessage(""), 2600);
+    setImportingReviews(true);
+    try {
+      const response = await fetch("/api/reviews/google", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url, source: reviewSource }),
+      });
+      const payload = (await response.json().catch(() => ({}))) as {
+        ok?: boolean;
+        reviews?: CenterExternalReview[];
+        message?: string;
+      };
+
+      if (payload.ok && payload.reviews?.length) {
+        setExternalReviews((current) => [...payload.reviews!, ...current]);
+        setSavedMessage(
+          `${payload.reviews.length} avis Google importés. Cliquez sur Enregistrer pour publier.`,
+        );
+      } else {
+        setSavedMessage(
+          payload.message ||
+            "Google ne laisse pas lire les avis depuis ce lien. Ajoute-les à la main ou en CSV : Nom;5;Commentaire",
+        );
+      }
+    } catch {
+      setSavedMessage(
+        "Import impossible. Ajoute les avis à la main (nom, note, commentaire) ou via CSV.",
+      );
+    } finally {
+      setImportingReviews(false);
+      window.setTimeout(() => setSavedMessage(""), 5000);
+    }
   };
 
   const addManualReview = () => {
@@ -1373,8 +1385,9 @@ export default function CenterSettingsPage() {
                       Importer les avis Google ou autre plateforme
                     </h3>
                     <p className="mt-1 text-sm font-normal text-slate-500">
-                      Version prête pour Google Business Profile, Planity, Facebook ou
-                      import manuel.
+                      Un lien share.google ne donne pas les avis. Colle le lien
+                      Maps de la fiche, ou ajoute-les à la main / en CSV
+                      (Nom;5;Commentaire).
                     </p>
                   </div>
                   <label className="inline-flex cursor-pointer items-center justify-center rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-700 transition hover:bg-white">
@@ -1403,15 +1416,16 @@ export default function CenterSettingsPage() {
                   <input
                     value={reviewUrl}
                     onChange={(event) => setReviewUrl(event.target.value)}
-                    placeholder="Lien fiche Google, Planity ou fichier export..."
+                    placeholder="https://maps.app.goo.gl/… ou lien fiche Maps"
                     className="h-10 rounded-xl border border-slate-200 px-3 text-sm font-medium outline-none focus:border-blue-500"
                   />
                   <button
                     type="button"
-                    onClick={importExternalReviews}
-                    className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow-sm"
+                    onClick={() => void importExternalReviews()}
+                    disabled={importingReviews}
+                    className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow-sm disabled:opacity-60"
                   >
-                    Importer
+                    {importingReviews ? "Import…" : "Importer"}
                   </button>
                 </div>
 
