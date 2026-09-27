@@ -686,9 +686,11 @@ function normalizePricePolicy(
   value?: SeyaPricePolicy | null,
   fallbackPrice?: string,
 ): SeyaPricePolicy {
-  const current = value && typeof value === "object" ? value : {};
+  const current: Partial<SeyaPricePolicy> =
+    value && typeof value === "object" ? value : {};
   const legacy = String(fallbackPrice || "").trim();
   const allowed = ["fixed", "from", "range", "after_bilan", "callback"] as const;
+  const sessionPolicy = current.sessionPolicy;
   return {
     bilan: String(current.bilan || (/bilan/i.test(legacy) && /gratuit|offert/i.test(legacy) ? "offert" : "")).trim(),
     discovery: String(
@@ -701,14 +703,16 @@ function normalizePricePolicy(
     package: String(
       current.package || (/500/.test(legacy) ? "à partir de 500€, payable jusqu’en 10 fois" : ""),
     ).trim(),
-    sessionPolicy: allowed.includes(current.sessionPolicy)
-      ? current.sessionPolicy
-      : "after_bilan",
+    sessionPolicy:
+      sessionPolicy && allowed.includes(sessionPolicy)
+        ? sessionPolicy
+        : "after_bilan",
   };
 }
 
 function normalizeHealthSheet(value?: SeyaHealthSheet | null): SeyaHealthSheet {
-  const current = value && typeof value === "object" ? value : {};
+  const current: Partial<SeyaHealthSheet> =
+    value && typeof value === "object" ? value : {};
   return {
     validated: current.validated === true,
     contraindications: String(current.contraindications || "").trim(),

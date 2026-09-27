@@ -40,6 +40,9 @@ import {
   writeLocalSeyaConversations,
   type SeyaAgentSettings,
   type SeyaConversation,
+  type SeyaHealthSheet,
+  type SeyaPricePolicy,
+  type SeyaTreatmentBrief,
 } from "@/lib/seya-settings";
 import {
   BOOKEA_SHARED_WHATSAPP_NUMBER,
@@ -62,6 +65,38 @@ type SeyaTask = {
   status: TaskStatus;
   suggestion: string;
 };
+
+function patchBriefPricing(
+  brief: SeyaTreatmentBrief,
+  field: keyof Omit<SeyaPricePolicy, "sessionPolicy">,
+  value: string,
+): SeyaTreatmentBrief {
+  const pricing: SeyaPricePolicy = {
+    bilan: brief.pricing?.bilan || "",
+    discovery: brief.pricing?.discovery || "",
+    session: brief.pricing?.session || "",
+    package: brief.pricing?.package || "",
+    sessionPolicy: brief.pricing?.sessionPolicy || "after_bilan",
+  };
+  pricing[field] = value;
+  return { ...brief, pricing };
+}
+
+function patchBriefHealth(
+  brief: SeyaTreatmentBrief,
+  field: keyof Omit<SeyaHealthSheet, "validated">,
+  value: string,
+): SeyaTreatmentBrief {
+  const health: SeyaHealthSheet = {
+    validated: brief.health?.validated === true,
+    contraindications: brief.health?.contraindications || "",
+    precautions: brief.health?.precautions || "",
+    professionalQuestions: brief.health?.professionalQuestions || "",
+    transferTo: brief.health?.transferTo || "",
+  };
+  health[field] = value;
+  return { ...brief, health };
+}
 
 function isBirthdayToday(value?: string | null) {
   if (!value) {
@@ -970,19 +1005,11 @@ export default function SeyaCrmPage() {
                             treatmentBriefs: current.treatmentBriefs.map(
                               (brief, briefIndex) =>
                                 briefIndex === index
-                                  ? {
-                                      ...brief,
-                                      pricing: {
-                                        bilan: brief.pricing?.bilan || "",
-                                        discovery: brief.pricing?.discovery || "",
-                                        session: brief.pricing?.session || "",
-                                        package: brief.pricing?.package || "",
-                                        sessionPolicy:
-                                          brief.pricing?.sessionPolicy ||
-                                          "after_bilan",
-                                        [field]: event.target.value,
-                                      },
-                                    }
+                                  ? patchBriefPricing(
+                                      brief,
+                                      field,
+                                      event.target.value,
+                                    )
                                   : brief,
                             ),
                           }))
@@ -1149,19 +1176,11 @@ export default function SeyaCrmPage() {
                               treatmentBriefs: current.treatmentBriefs.map(
                                 (brief, briefIndex) =>
                                   briefIndex === index
-                                    ? {
-                                        ...brief,
-                                        health: {
-                                          validated: brief.health?.validated === true,
-                                          contraindications:
-                                            brief.health?.contraindications || "",
-                                          precautions: brief.health?.precautions || "",
-                                          professionalQuestions:
-                                            brief.health?.professionalQuestions || "",
-                                          transferTo: brief.health?.transferTo || "",
-                                          [field]: event.target.value,
-                                        },
-                                      }
+                                    ? patchBriefHealth(
+                                        brief,
+                                        field,
+                                        event.target.value,
+                                      )
                                     : brief,
                               ),
                             }))
@@ -1179,19 +1198,11 @@ export default function SeyaCrmPage() {
                               treatmentBriefs: current.treatmentBriefs.map(
                                 (brief, briefIndex) =>
                                   briefIndex === index
-                                    ? {
-                                        ...brief,
-                                        health: {
-                                          validated: brief.health?.validated === true,
-                                          contraindications:
-                                            brief.health?.contraindications || "",
-                                          precautions: brief.health?.precautions || "",
-                                          professionalQuestions:
-                                            brief.health?.professionalQuestions || "",
-                                          transferTo: brief.health?.transferTo || "",
-                                          [field]: event.target.value,
-                                        },
-                                      }
+                                    ? patchBriefHealth(
+                                        brief,
+                                        field,
+                                        event.target.value,
+                                      )
                                     : brief,
                               ),
                             }))
