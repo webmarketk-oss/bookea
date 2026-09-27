@@ -127,10 +127,28 @@ function mapIncomingLead(payload) {
     "form",
     "campaign",
     "campagne",
+    "campaign_name",
     "offre",
     "offer",
   ]);
   const pageName = pick(fields, ["page_name", "page"]);
+  const adName = pick(fields, ["ad_name", "ad", "adset_name", "publicite"]);
+  const treatment = cleanIncomingTreatment(
+    pick(fields, [
+      "treatment",
+      "service",
+      "soin",
+      "prestation",
+      "offre",
+      "offer",
+      "interet",
+      "interesse",
+      "interest",
+    ]) ||
+      formName ||
+      adName,
+    fields,
+  );
 
   return {
     firstName:
@@ -139,14 +157,51 @@ function mapIncomingLead(payload) {
       pick(fields, ["last_name", "nom", "lastname"]) || nameParts.lastName,
     email: pick(fields, ["email", "email_address", "mail"]),
     phone: pick(fields, ["phone", "phone_number", "telephone", "tel", "mobile"]),
-    treatment:
-      pick(fields, ["treatment", "service", "soin", "prestation"]) ||
+    treatment,
+    campaign:
+      pick(fields, ["campaign_name", "campagne", "campaign", "form_name"]) ||
       formName ||
-      "Lead Meta",
-    campaign: formName || pageName || "Meta Lead Ads",
+      pageName ||
+      "Meta Lead Ads",
     formName,
     pageName,
   };
+}
+
+function isJunkIncoming(value) {
+  const needle = String(value || "")
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+  return (
+    !needle ||
+    /lead meta|meta lead|webhook|a preciser|facebook|systeme/.test(needle)
+  );
+}
+
+function inferTreatmentFromBlob(text) {
+  const needle = String(text || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+  if (/minceur|cryo|bilan|decouverte|ventre|poids|cellulite/.test(needle)) {
+    return "Soin minceur";
+  }
+  if (/epilation|laser|definitive/.test(needle)) {
+    return "Épilation définitive";
+  }
+  if (/visage|hydrafacial|peau|acne/.test(needle)) {
+    return "Soin visage";
+  }
+  return "";
+}
+
+function cleanIncomingTreatment(value, fields) {
+  if (!isJunkIncoming(value)) {
+    return inferTreatmentFromBlob(value) || String(value).trim();
+  }
+  return inferTreatmentFromBlob(Object.values(fields || {}).join(" ")) || "";
 }
 
 async function importPostedLead(supabase, centerId, mapped, options = {}) {
@@ -451,9 +506,16 @@ function buildLeadNote(lead) {
 }
 
 function pick(fields, names) {
+  const keys = Object.keys(fields || {});
   for (const name of names) {
     if (fields[name]) {
       return String(fields[name]).trim();
+    }
+    const match = keys.find(
+      (key) => key === name || key.endsWith(`_${name}`) || key.endsWith(`.${name}`),
+    );
+    if (match && fields[match]) {
+      return String(fields[match]).trim();
     }
   }
 

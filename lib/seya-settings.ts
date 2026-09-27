@@ -103,7 +103,8 @@ export const defaultTreatmentBriefs: SeyaTreatmentBrief[] = [
   },
   {
     name: "Soin minceur",
-    price: "",
+    price:
+      "Le bilan permet de faire une analyse corporelle pour vous établir un devis personnalisé. Je peux vous proposer un créneau pour ce bilan — quand seriez-vous disponible ?",
     brief:
       "Parle comme une réceptionniste. Demande la zone. Ne parle de prix que si on te le demande. Pas de liste de créneaux à la place du tarif.",
     opening:
@@ -119,7 +120,8 @@ export const defaultTreatmentBriefs: SeyaTreatmentBrief[] = [
   },
   {
     name: "Cryolipolyse",
-    price: "",
+    price:
+      "Le bilan permet de faire une analyse corporelle pour vous établir un devis personnalisé. Je peux vous proposer un créneau pour ce bilan — quand seriez-vous disponible ?",
     brief:
       "Parle comme une réceptionniste. Ne parle de prix que si on te le demande. Contre-indication : transmets à l’équipe.",
     opening:
@@ -148,7 +150,17 @@ const treatmentAliases: Array<{ keys: string[]; name: string }> = [
     name: "Épilation définitive",
   },
   {
-    keys: ["minceur", "cryo", "cryolipolyse", "cellulite", "ventre", "poids", "graisse"],
+    keys: [
+      "minceur",
+      "cryo",
+      "cryolipolyse",
+      "cellulite",
+      "ventre",
+      "poids",
+      "graisse",
+      "bilan",
+      "decouverte",
+    ],
     name: "Soin minceur",
   },
   {
@@ -294,10 +306,21 @@ export function resolveSeyaOpening(
   },
 ) {
   const hay = `${campaign || ""} ${treatment || ""}`;
-  const family = familyFromTreatment(hay);
+  const family = inferFamilyFromSettings(settings, campaign, treatment);
   const offer =
     resolveOfferLabel(settings, campaign, treatment) || defaultOfferForFamily(family);
-  const brief = findTreatmentBrief(settings, hay);
+  const brief =
+    findTreatmentBrief(settings, hay) ||
+    findTreatmentBrief(
+      settings,
+      family === "minceur"
+        ? "Soin minceur"
+        : family === "visage"
+          ? "Soin visage"
+          : family === "epilation"
+            ? "Épilation définitive"
+            : "",
+    );
   const stored = brief?.opening?.trim() || "";
   const template = looksRoboticOpening(stored)
     ? defaultOpeningForFamily(family)
@@ -345,6 +368,26 @@ function findTreatmentBrief(settings: SeyaAgentSettings, treatment?: string | nu
   );
 }
 
+export function inferFamilyFromSettings(
+  settings: SeyaAgentSettings,
+  campaign?: string | null,
+  treatment?: string | null,
+) {
+  const offer = resolveOfferLabel(settings, campaign, treatment);
+  const direct = familyFromTreatment(`${campaign || ""} ${treatment || ""} ${offer}`);
+  if (direct) {
+    return direct;
+  }
+  const families = [
+    ...new Set(
+      settings.offerMaps
+        .map((item) => familyFromTreatment(`${item.match} ${item.label}`))
+        .filter(Boolean),
+    ),
+  ];
+  return families.length === 1 ? families[0] : "";
+}
+
 function familyFromTreatment(treatment?: string | null) {
   const needle = normalizeTreatmentName(treatment || "");
   if (!needle) {
@@ -364,7 +407,7 @@ function familyFromTreatment(treatment?: string | null) {
 
 function defaultOfferForFamily(family: string) {
   if (family === "minceur") {
-    return "notre offre découverte minceur";
+    return "le minceur";
   }
   if (family === "visage") {
     return "notre soin visage";
@@ -397,7 +440,7 @@ function defaultOpeningForFamily(family: string) {
   if (family === "epilation") {
     return "Bonjour {prenom}, c’est Seya du {centre} :) On vient juste de recevoir votre demande ({offre}) ! Je peux vous proposer un créneau rapidement, vous êtes plutôt dispo en début ou fin de semaine ? Je ne veux pas vous relancer inutilement.";
   }
-  return "Bonjour {prenom}, c’est Seya du {centre} :) On vient juste de recevoir votre demande. C’est pour du minceur, du visage ou de l’épilation ? Je ne veux pas vous relancer inutilement.";
+  return "Bonjour {prenom}, c’est Seya du {centre} :) On vient juste de recevoir votre demande. Je peux vous proposer un créneau rapidement, vous êtes plutôt dispo en début ou fin de semaine ? Je ne veux pas vous relancer inutilement.";
 }
 
 function fillSeyaTemplate(

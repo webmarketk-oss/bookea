@@ -55,7 +55,11 @@ function lastPreview(conversation: SeyaConversation) {
 function factualSummary(conversation: SeyaConversation) {
   return (
     [
-      conversation.offerLabel || conversation.treatment || "",
+      conversation.offerLabel ||
+        (/lead meta|meta lead/i.test(conversation.treatment)
+          ? ""
+          : conversation.treatment) ||
+        "",
       conversation.qualification.zone
         ? `zone ${conversation.qualification.zone}`
         : "",
@@ -385,7 +389,11 @@ export function SeyaInbox({
                   <div className="col-span-2">
                     <dt className="text-[11px] font-medium text-slate-400">Offre</dt>
                     <dd className="font-medium">
-                      {selected.offerLabel || selected.treatment || "—"}
+                      {selected.offerLabel ||
+                        (/lead meta|meta lead/i.test(selected.treatment)
+                          ? "—"
+                          : selected.treatment) ||
+                        "—"}
                     </dd>
                   </div>
                   <div className="col-span-2">

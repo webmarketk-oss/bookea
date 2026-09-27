@@ -523,7 +523,16 @@ export default function SeyaCrmPage() {
           text,
           settings: agentSettings,
           slots: availableSlots,
+          appointments,
+          hours,
           centerName,
+          centerAddress: [
+            readCenterSettings()?.center?.address,
+            readCenterSettings()?.center?.postalCode,
+            readCenterSettings()?.center?.city,
+          ]
+            .filter(Boolean)
+            .join(", "),
         }),
       });
       const payload = (await response.json().catch(() => ({}))) as {

@@ -4,6 +4,7 @@ import {
   asksSeyaPrice,
   isJunkTreatmentName,
   isSeyaOptOut,
+  inferFamilyFromSettings,
   resolveOfferLabel,
   resolveSeyaOpening,
   resolveTreatmentBrief,
@@ -69,7 +70,27 @@ export function startSeyaConversation({
   settings: SeyaAgentSettings;
 }): SeyaConversation {
   const opening = buildOpeningMessage(lead, centerName, settings);
-  const treatment = lead.treatment.trim();
+  const rawTreatment = lead.treatment.trim();
+  const family = inferFamilyFromSettings(settings, lead.campaign, rawTreatment);
+  const treatment =
+    rawTreatment && !/soin à préciser|lead meta|à préciser/i.test(rawTreatment)
+      ? rawTreatment
+      : family === "minceur"
+        ? "Soin minceur"
+        : family === "visage"
+          ? "Soin visage"
+          : family === "epilation"
+            ? "Épilation définitive"
+            : "";
+  const offer =
+    resolveOfferLabel(settings, lead.campaign, rawTreatment) ||
+    (family === "minceur"
+      ? "le minceur"
+      : family === "visage"
+        ? "le soin visage"
+        : family === "epilation"
+          ? "l’épilation définitive"
+          : "");
 
   return {
     id: lead.id,
@@ -79,14 +100,11 @@ export function startSeyaConversation({
     phone: lead.phone,
     treatment,
     campaign: lead.campaign,
-    offerLabel: resolveOfferLabel(settings, lead.campaign, treatment),
+    offerLabel: offer,
     status: "À envoyer",
     qualification: {
       ...emptyQualification(),
-      need:
-        treatment && !/soin à préciser|lead meta|à préciser/i.test(treatment)
-          ? treatment
-          : "",
+      need: treatment,
     },
     proposedSlots: [],
     messages: [createSeyaMessage("seya", opening)],
@@ -427,10 +445,10 @@ function priceReply(
     settings,
     `${qualification.need} ${qualification.zone} ${conversation.treatment}`,
   );
-  if (price) {
+  if (price && /analyse corporelle|devis personnalisé/i.test(price)) {
     return price;
   }
-  return "Le bilan permet de vous dire ça précisément. Vous voulez que je vous propose un créneau bilan, ou qu’une conseillère vous rappelle ?";
+  return "Le bilan permet de faire une analyse corporelle pour vous établir un devis personnalisé. Je peux vous proposer un créneau pour ce bilan — quand seriez-vous disponible ?";
 }
 
 function mergeQualification(current: SeyaQualification, text: string) {
@@ -534,9 +552,12 @@ function matchProposedSlot(text: string, slots: SeyaProposedSlot[]) {
     return null;
   }
 
-  const indexMatch = value.match(/\b([123])\b/);
-  if (indexMatch) {
-    return slots[Number(indexMatch[1]) - 1] ?? null;
+  if (/1er|octobre|novembre|décembre|janvier|février|mars|avril|juin|juillet|août|septembre|mai\b/i.test(value)) {
+    return null;
+  }
+
+  if (/^([123])$/.test(value)) {
+    return slots[Number(value) - 1] ?? null;
   }
 
   if (/^(oui|ok|d['’]?accord|le premier|premier)$/i.test(value)) {

@@ -2,11 +2,14 @@ const OpenAI = require("openai");
 const {
   agentSettings,
   applyLeadReply,
+  asksLocation,
   asksPrice,
   hasMedicalFlag,
   humanSlotReply,
   isJunkTreatment,
   isOptOut,
+  locationReply,
+  pickSlotsForMessage,
   matchProposedSlot,
   mergeQualification,
   message,
@@ -35,8 +38,15 @@ async function generateSeyaReply({
   seya,
   slots,
   centerName,
+  appointments,
+  hours,
+  centerAddress,
 }) {
-  const fallback = applyLeadReply(conversation, text, seya, slots);
+  const resolvedSlots = Array.isArray(appointments)
+    ? pickSlotsForMessage(appointments, hours, conversation, text)
+    : slots || [];
+  const extras = { centerName, centerAddress };
+  const fallback = applyLeadReply(conversation, text, seya, resolvedSlots, extras);
   if (!hasAiKey()) {
     return { ...fallback, via: "rules" };
   }
@@ -46,11 +56,12 @@ async function generateSeyaReply({
       conversation,
       text,
       seya,
-      slots,
+      slots: resolvedSlots,
       centerName,
+      centerAddress,
     });
     return {
-      ...applyAiDecision(conversation, text, seya, slots, decision),
+      ...applyAiDecision(conversation, text, seya, resolvedSlots, decision, extras),
       via: "ai",
     };
   } catch (error) {
@@ -59,7 +70,7 @@ async function generateSeyaReply({
   }
 }
 
-async function askSeyaModel({ conversation, text, seya, slots, centerName }) {
+async function askSeyaModel({ conversation, text, seya, slots, centerName, centerAddress }) {
   const settings = agentSettings(seya);
   const careHint = `${conversation.qualification?.need || ""} ${conversation.qualification?.zone || ""} ${conversation.treatment || ""}`;
   const offer = resolveOfferLabel(
@@ -94,6 +105,7 @@ async function askSeyaModel({ conversation, text, seya, slots, centerName }) {
           offer,
           brief,
           price,
+          centerAddress,
         }),
       },
       ...history,
@@ -113,6 +125,7 @@ function buildSystemPrompt({
   offer,
   brief,
   price,
+  centerAddress,
 }) {
   const slotLines = (slots || [])
     .map((slot, index) => `${index + 1}) ${slot.label}`)
@@ -140,9 +153,12 @@ function buildSystemPrompt({
     `Demander un RDV : ${settings.askForAppointment ? "oui" : "non"}.`,
     `Poser le RDV : ${settings.bookAppointment ? "oui" : "non"}.`,
     `Passer à l’équipe : ${settings.handoffToHuman ? "oui" : "non"}.`,
+    centerAddress
+      ? `Adresse du centre : ${centerAddress}.`
+      : "Adresse du centre inconnue : ne l’invente pas.",
     slotLines
-      ? `Créneaux RÉELS, seuls autorisés :\n${slotLines}\nDis-les en phrase : « je peux vous proposer X ou Y — lequel vous irait ? ».`
-      : "Aucun créneau libre à proposer.",
+      ? `Créneaux RÉELS pour SA demande (jour demandé uniquement) :\n${slotLines}\nDis-les en phrase. N’invente aucun autre jour.`
+      : "Aucun créneau libre pour le jour demandé. Dis-le et demande un autre jour.",
     "Modèle : « Bonjour Alix, c’est Seya du centre :) On vient de recevoir votre demande. Vous êtes plutôt dispo en début ou fin de semaine ? Je ne veux pas vous relancer inutilement. »",
     "Si le créneau voulu n’existe pas : dis-le simplement et propose 2 alternatives réelles.",
     "Réponds UNIQUEMENT en JSON :",
@@ -152,7 +168,10 @@ function buildSystemPrompt({
     "- Pacemaker, grossesse, doute médical : action=handoff. Ne booke pas. L’équipe vérifie.",
     "- S’ils donnent encore un horaire après un doute médical : handoff, « je transmets à l’équipe ».",
     "- Prix : tu n’en parles JAMAIS si elle n’en parle pas. Pas de 500€, pas de 10 fois, pas de « c’est offert », tant qu’elle n’a pas dit prix / tarif / combien.",
-    "- Si elle demande le prix : action=continue, réponds comme à l’oral avec le tarif autorisé. Une ou deux phrases. Pas de liste, pas de créneaux dans la même réponse.",
+    "- Prix / combien : action=continue. Dis exactement : « Le bilan permet de faire une analyse corporelle pour vous établir un devis personnalisé. Je peux vous proposer un créneau pour ce bilan — quand seriez-vous disponible ? » Pas de créneaux chiffrés dans cette réponse.",
+    "- Où / adresse : action=continue, donne l’adresse. Pas de créneaux.",
+    "- Si elle dit jeudi, propose UNIQUEMENT des jeudis. Jamais un lundi à la place.",
+    "- Si elle refuse un jour (« pas lundi », « change de jour »), ne repropose jamais ces mêmes créneaux.",
     "- Si elle dit « arrête les créneaux, parle-moi des prix » : ce n’est pas un stop, réponds au tarif.",
     "- « Arrête de me parler des créneaux » n’est PAS un stop.",
     "- stop seulement si plus de contact (stop, pas intéressé, ne plus écrire).",
@@ -181,7 +200,7 @@ function parseDecision(raw) {
   };
 }
 
-function applyAiDecision(conversation, text, seya, slots, decision) {
+function applyAiDecision(conversation, text, seya, slots, decision, extras = {}) {
   const settings = agentSettings(seya);
   const qualification = {
     ...mergeQualification(conversation.qualification, text, conversation.treatment),
@@ -195,7 +214,10 @@ function applyAiDecision(conversation, text, seya, slots, decision) {
   if (threadHasMedical(conversation, text) || hasMedicalFlag(text)) {
     action = "handoff";
   }
-  if (asksPrice(text) && (action === "stop" || action === "propose_slots" || action === "book")) {
+  if (
+    (asksPrice(text) || asksLocation(text)) &&
+    (action === "stop" || action === "propose_slots" || action === "book")
+  ) {
     action = "continue";
   }
 
@@ -257,11 +279,7 @@ function applyAiDecision(conversation, text, seya, slots, decision) {
   }
 
   if (action === "propose_slots" && settings.bookAppointment && slots?.length) {
-    const reply = /propose|créneau|14h|17h|lundi|mardi|mercredi|jeudi|vendredi/i.test(
-      decision.reply || "",
-    )
-      ? stripSlotList(decision.reply)
-      : humanSlotReply(slots);
+    const reply = humanSlotReply(slots);
     return {
       conversation: {
         ...withMessages(conversation, qualification, "RDV proposé", text, reply),
@@ -271,12 +289,15 @@ function applyAiDecision(conversation, text, seya, slots, decision) {
     };
   }
 
-  const fallbackReply = asksPrice(text)
-    ? priceReply(seya, qualification, conversation)
-    : "Merci. Dites-moi le soin ou la zone, je m’occupe de la suite.";
-  const reply = asksPrice(text) && !/€|euro|tarif|prix/i.test(decision.reply || "")
-    ? fallbackReply
-    : decision.reply || fallbackReply;
+  const fallbackReply = asksLocation(text)
+    ? locationReply(extras.centerAddress, extras.centerName)
+    : asksPrice(text)
+      ? priceReply(seya, qualification, conversation)
+      : "Merci. Dites-moi le soin ou la zone, je m’occupe de la suite.";
+  const reply =
+    asksLocation(text) || asksPrice(text)
+      ? fallbackReply
+      : decision.reply || fallbackReply;
 
   return {
     conversation: withMessages(

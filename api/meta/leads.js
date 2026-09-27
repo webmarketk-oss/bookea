@@ -232,9 +232,10 @@ function mapMetaLead(lead, change) {
     email: pick(fields, ["email", "email_address", "adresse_email"]),
     phone: pick(fields, ["phone_number", "phone", "telephone", "numero_de_telephone"]),
     treatment:
-      pick(fields, ["service", "soin", "prestation", "traitement", "interet"]) ||
+      pick(fields, ["service", "soin", "prestation", "traitement", "interet", "offre", "offer"]) ||
       lead.ad_name ||
-      "Soin à préciser",
+      lead.campaign_name ||
+      "",
     campaign: lead.campaign_name || change.campaignId || "Meta Lead Ads",
     rawFields: fields,
   };

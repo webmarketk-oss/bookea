@@ -58,7 +58,16 @@ const aliases = [
     name: "Épilation définitive",
   },
   {
-    keys: ["minceur", "cryo", "cryolipolyse", "cellulite", "ventre", "poids"],
+    keys: [
+      "minceur",
+      "cryo",
+      "cryolipolyse",
+      "cellulite",
+      "ventre",
+      "poids",
+      "bilan",
+      "decouverte",
+    ],
     name: "Soin minceur",
   },
   { keys: ["visage", "hydrafacial", "peau", "glow", "acne"], name: "Soin visage" },
@@ -104,6 +113,25 @@ function asksPrice(text) {
   return /prix|tarif|combien|co[uû]te|\bcout\b/i.test(String(text || ""));
 }
 
+function asksLocation(text) {
+  return /ou (etes|etes[- ]vous|se trouve)|situ[eé]|adresse|\bc['’]est ou\b|vous etes ou|tu es (ou|situ)/i.test(
+    String(text || ""),
+  );
+}
+
+const BILAN_PRICE_REPLY =
+  "Le bilan permet de faire une analyse corporelle pour vous établir un devis personnalisé. Je peux vous proposer un créneau pour ce bilan — quand seriez-vous disponible ?";
+
+function locationReply(address, centerName) {
+  if (address) {
+    return `Nous sommes au ${address}. Vous voulez que je vous propose un créneau bilan ?`;
+  }
+  return `Nous sommes au centre ${centerName || ""}. L’équipe peut vous confirmer l’adresse exacte si besoin.`.replace(
+    /\s+/g,
+    " ",
+  );
+}
+
 function hasMedicalFlag(text) {
   return /pacemaker|stimulateur|enceinte|grossesse|cancer|chimio|roaccutane|accutane|implant|photo.?sensib|cardiaque|coeur/i.test(
     String(text || ""),
@@ -126,8 +154,23 @@ function formatHumanSlots(slots) {
 }
 
 function humanSlotReply(slots) {
-  const options = formatHumanSlots(slots);
-  return `Je peux vous proposer ${options} — lequel vous irait le mieux ?`;
+  const list = (slots || []).slice(0, 3);
+  if (!list.length) {
+    return "Je n’ai plus de place sur ce jour-là. Quel autre jour vous irait ?";
+  }
+  const sameDay = list.every((slot) => slot.date === list[0].date);
+  if (sameDay) {
+    const day = list[0].label.replace(/\s+à\s+.*/, "");
+    const times = list.map((slot) => String(slot.time || "").replace(":", "h"));
+    const options =
+      times.length === 1
+        ? times[0]
+        : times.length === 2
+          ? `${times[0]} ou ${times[1]}`
+          : `${times[0]}, ${times[1]} ou ${times[2]}`;
+    return `Le ${day} je peux vous proposer ${options} — lequel vous irait le mieux ?`;
+  }
+  return `Je peux vous proposer ${formatHumanSlots(list)} — lequel vous irait le mieux ?`;
 }
 
 function greetingName(value) {
@@ -173,10 +216,10 @@ function priceReply(seya, qualification, conversation) {
     seya,
     `${qualification?.need || ""} ${qualification?.zone || ""} ${conversation?.treatment || ""}`,
   );
-  if (price) {
+  if (price && /analyse corporelle|devis personnalise|devis personnalisé/i.test(price)) {
     return price;
   }
-  return "Le bilan permet de vous dire ça précisément. Vous voulez que je vous propose un créneau bilan, ou qu’une conseillère vous rappelle ?";
+  return BILAN_PRICE_REPLY;
 }
 
 function todayIso() {
@@ -293,6 +336,24 @@ function resolveTreatmentBrief(seya, treatment) {
   ).trim();
 }
 
+function inferFamily(seya, campaign, treatment) {
+  const offer = resolveOfferLabel(seya, campaign, treatment);
+  const hay = `${campaign || ""} ${treatment || ""} ${offer}`;
+  const direct = familyFromTreatment(hay);
+  if (direct) {
+    return direct;
+  }
+  const maps = agentSettings(seya).offerMaps || [];
+  const families = [
+    ...new Set(
+      maps
+        .map((item) => familyFromTreatment(`${item.match} ${item.label}`))
+        .filter(Boolean),
+    ),
+  ];
+  return families.length === 1 ? families[0] : "";
+}
+
 function familyFromTreatment(treatment) {
   const needle = normalize(treatment);
   if (!needle) {
@@ -311,7 +372,7 @@ function familyFromTreatment(treatment) {
 }
 
 function defaultOfferForFamily(family) {
-  if (family === "minceur") return "notre offre découverte minceur";
+  if (family === "minceur") return "le minceur";
   if (family === "visage") return "notre soin visage";
   if (family === "epilation") return "l’épilation définitive";
   return "un soin";
@@ -327,7 +388,7 @@ function defaultOpeningForFamily(family) {
   if (family === "epilation") {
     return "Bonjour {prenom}, c’est Seya du {centre} :) On vient juste de recevoir votre demande ({offre}) ! Je peux vous proposer un créneau rapidement, vous êtes plutôt dispo en début ou fin de semaine ? Je ne veux pas vous relancer inutilement.";
   }
-  return "Bonjour {prenom}, c’est Seya du {centre} :) On vient juste de recevoir votre demande. C’est pour du minceur, du visage ou de l’épilation ? Je ne veux pas vous relancer inutilement.";
+  return "Bonjour {prenom}, c’est Seya du {centre} :) On vient juste de recevoir votre demande. Je peux vous proposer un créneau rapidement, vous êtes plutôt dispo en début ou fin de semaine ? Je ne veux pas vous relancer inutilement.";
 }
 
 function fillOpening(template, vars) {
@@ -367,11 +428,22 @@ function findTreatmentBrief(seya, treatment) {
 
 function buildOpeningMessage(context, centerName, seya) {
   const hay = `${context.campaign || ""} ${context.treatment || ""}`;
-  const family = familyFromTreatment(hay);
+  const family = inferFamily(seya, context.campaign, context.treatment);
   const offer =
     resolveOfferLabel(seya, context.campaign, context.treatment) ||
     defaultOfferForFamily(family);
-  const brief = findTreatmentBrief(seya, hay);
+  const brief =
+    findTreatmentBrief(seya, hay) ||
+    findTreatmentBrief(
+      seya,
+      family === "minceur"
+        ? "Soin minceur"
+        : family === "visage"
+          ? "Soin visage"
+          : family === "epilation"
+            ? "Épilation définitive"
+            : "",
+    );
   const stored = String(brief?.opening || "").trim();
   const template = looksRoboticOpening(stored)
     ? defaultOpeningForFamily(family)
@@ -469,9 +541,11 @@ function matchProposedSlot(text, slots) {
   if (!value || !Array.isArray(slots) || slots.length === 0) {
     return null;
   }
-  const indexMatch = value.match(/\b([123])\b/);
-  if (indexMatch) {
-    return slots[Number(indexMatch[1]) - 1] || null;
+  if (/1er|octobre|novembre|decembre|janvier|fevrier|mars|avril|juin|juillet|aout|septembre|mai\b/i.test(value)) {
+    return null;
+  }
+  if (/^([123])$/.test(value)) {
+    return slots[Number(value) - 1] || null;
   }
   if (/^(oui|ok|d['’]?accord|le premier|premier)$/i.test(value)) {
     return slots[0];
@@ -531,8 +605,12 @@ function message(author, text) {
 }
 
 function startConversation(context, centerName, seya) {
-  const treatment = context.treatment || "";
-  const offer = resolveOfferLabel(seya, context.campaign, treatment);
+  const treatment =
+    isJunkTreatment(context.treatment) ? "" : context.treatment || "";
+  const family = inferFamily(seya, context.campaign, treatment || context.treatment);
+  const offer =
+    resolveOfferLabel(seya, context.campaign, treatment || context.treatment) ||
+    defaultOfferForFamily(family);
   const opening = buildOpeningMessage(context, centerName, seya);
 
   return {
@@ -541,12 +619,28 @@ function startConversation(context, centerName, seya) {
     firstName: context.firstName,
     lastName: context.lastName,
     phone: context.phone,
-    treatment,
+    treatment:
+      treatment ||
+      (family === "minceur"
+        ? "Soin minceur"
+        : family === "visage"
+          ? "Soin visage"
+          : family === "epilation"
+            ? "Épilation définitive"
+            : ""),
     campaign: context.campaign || "",
-    offerLabel: offer,
+    offerLabel: offer === "un soin" ? "" : offer,
     status: "À envoyer",
     qualification: {
-      need: isJunkTreatment(treatment) ? "" : treatment,
+      need:
+        treatment ||
+        (family === "minceur"
+          ? "Soin minceur"
+          : family === "visage"
+            ? "Soin visage"
+            : family === "epilation"
+              ? "Épilation définitive"
+              : ""),
       zone: "",
       delay: "",
       availability: "",
@@ -559,22 +653,164 @@ function startConversation(context, centerName, seya) {
   };
 }
 
-function suggestAvailableSlots(appointments, hours, count = 3, duration = 60) {
+function parseFrenchDate(text) {
+  const value = normalize(text);
+  const months = {
+    janvier: 0,
+    fevrier: 1,
+    mars: 2,
+    avril: 3,
+    mai: 4,
+    juin: 5,
+    juillet: 6,
+    aout: 7,
+    septembre: 8,
+    octobre: 9,
+    novembre: 10,
+    decembre: 11,
+  };
+  const named = value.match(
+    /(\d{1,2})(?:er|e)?\s+(janvier|fevrier|mars|avril|mai|juin|juillet|aout|septembre|octobre|novembre|decembre)/,
+  );
+  if (named) {
+    const now = new Date();
+    const date = new Date(now.getFullYear(), months[named[2]], Number(named[1]));
+    if (date < new Date(now.getFullYear(), now.getMonth(), now.getDate())) {
+      date.setFullYear(date.getFullYear() + 1);
+    }
+    return addDaysIso(
+      `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`,
+      0,
+    );
+  }
+  const slash = value.match(/\b(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?\b/);
+  if (slash) {
+    const year = slash[3]
+      ? Number(slash[3].length === 2 ? `20${slash[3]}` : slash[3])
+      : new Date().getFullYear();
+    return `${year}-${String(slash[2]).padStart(2, "0")}-${String(slash[1]).padStart(2, "0")}`;
+  }
+  return "";
+}
+
+function parseDayRequest(text, conversation) {
+  const value = normalize(text);
+  const proposed = conversation?.proposedSlots || [];
+  const proposedDates = proposed.map((slot) => slot.date);
+  const proposedWeekdays = [
+    ...new Set(
+      proposed.map((slot) => new Date(`${slot.date}T12:00:00`).getDay()),
+    ),
+  ];
+  const weekdays = weekdayNames
+    .map((day, index) => (value.includes(day) ? index : -1))
+    .filter((index) => index >= 0);
+  const excludeWeekdays = [];
+  const excludeDates = [];
+
+  for (const [index, day] of weekdayNames.entries()) {
+    if (
+      new RegExp(`pas (dispo|disponible).*${day}|pas le ${day}|pas ${day}`).test(
+        value,
+      )
+    ) {
+      excludeWeekdays.push(index);
+    }
+  }
+
+  if (
+    /change de jour|un autre jour|autres? horaires|d['’]autres creneaux|pas ce jour/.test(
+      value,
+    )
+  ) {
+    excludeDates.push(...proposedDates);
+    excludeWeekdays.push(...proposedWeekdays);
+  }
+
+  const stored = weekdayNames
+    .map((day, index) =>
+      normalize(conversation?.qualification?.availability || "").includes(day)
+        ? index
+        : -1,
+    )
+    .filter((index) => index >= 0);
+
+  return {
+    weekdays: weekdays.length ? weekdays : stored,
+    date: parseFrenchDate(text),
+    excludeWeekdays: [...new Set(excludeWeekdays)],
+    excludeDates: [...new Set(excludeDates)],
+  };
+}
+
+function pickSlotsForMessage(appointments, hours, conversation, text) {
+  const request = parseDayRequest(text, conversation);
+  const days = request.date || request.weekdays.length ? 45 : 14;
+  const options = {
+    count: 3,
+    days,
+    weekdays: request.weekdays,
+    date: request.date,
+    excludeWeekdays: request.excludeWeekdays,
+    excludeDates: request.excludeDates,
+  };
+  let slots = suggestAvailableSlots(appointments, hours, options);
+  if (!slots.length && request.date) {
+    slots = suggestAvailableSlots(appointments, hours, {
+      ...options,
+      date: "",
+      days: 45,
+    });
+  }
+  if (!slots.length) {
+    slots = suggestAvailableSlots(appointments, hours, {
+      count: 3,
+      days: 21,
+      excludeWeekdays: request.excludeWeekdays,
+      excludeDates: request.excludeDates,
+    });
+  }
+  return slots;
+}
+
+function suggestAvailableSlots(appointments, hours, countOrOptions = 3, duration = 60) {
+  const options =
+    countOrOptions && typeof countOrOptions === "object"
+      ? countOrOptions
+      : { count: countOrOptions, duration };
+  const count = options.count || 3;
+  const slotDuration = options.duration || duration || 60;
+  const maxDays = options.days || 14;
+  const onlyWeekdays = Array.isArray(options.weekdays) ? options.weekdays : [];
+  const onlyDate = String(options.date || "");
+  const excludeWeekdays = Array.isArray(options.excludeWeekdays)
+    ? options.excludeWeekdays
+    : [];
+  const excludeDates = Array.isArray(options.excludeDates) ? options.excludeDates : [];
   const slots = [];
   const today = todayIso();
   const nowMinutes = currentMinutes();
   const week = Array.isArray(hours) && hours.length ? hours : defaultHours();
 
-  for (let offset = 0; offset < 12 && slots.length < count; offset += 1) {
+  for (let offset = 0; offset < maxDays && slots.length < count; offset += 1) {
     const date = addDaysIso(today, offset);
     const weekday = new Date(`${date}T12:00:00`).getDay();
+    if (onlyDate && date !== onlyDate) {
+      continue;
+    }
+    if (onlyWeekdays.length && !onlyWeekdays.includes(weekday)) {
+      continue;
+    }
+    if (excludeWeekdays.includes(weekday) || excludeDates.includes(date)) {
+      continue;
+    }
     const dayHours = week.find((item) => Number(item.weekday) === weekday);
     if (!dayHours || dayHours.closed) {
       continue;
     }
     const start = timeToMinutes(dayHours.startTime || "09:00");
     const end = timeToMinutes(dayHours.endTime || "19:00");
-    for (let minutes = start; minutes + duration <= end; minutes += 30) {
+    for (let minutes = start; minutes + slotDuration <= end; minutes += 30) {
       if (date === today && minutes < nowMinutes + 60) {
         continue;
       }
@@ -585,7 +821,7 @@ function suggestAvailableSlots(appointments, hours, count = 3, duration = 60) {
         if (/annul/i.test(String(appointment.status || ""))) return false;
         return rangesOverlap(
           minutes,
-          minutes + duration,
+          minutes + slotDuration,
           timeToMinutes(appointment.start),
           timeToMinutes(appointment.start) + (appointment.duration || 60),
         );
@@ -611,7 +847,7 @@ function defaultHours() {
   }));
 }
 
-function applyLeadReply(conversation, text, seya, slots) {
+function applyLeadReply(conversation, text, seya, slots, extras = {}) {
   const settings = agentSettings(seya);
   const qualification = mergeQualification(
     conversation.qualification,
@@ -665,6 +901,26 @@ function applyLeadReply(conversation, text, seya, slots) {
             alreadyFlagged
               ? "Je transmets cette préférence à l’équipe, elle reviendra vers vous après vérification."
               : "Il faut que l’équipe vérifie votre situation avant de confirmer. Je leur transmets pour voir si c’est adapté.",
+          ),
+        ],
+        updatedAt: new Date().toISOString(),
+      },
+      shouldBook: null,
+    };
+  }
+
+  if (asksLocation(text)) {
+    return {
+      conversation: {
+        ...conversation,
+        qualification,
+        status: qualification.need ? "Qualifié" : "En cours",
+        messages: [
+          ...(conversation.messages || []),
+          message("lead", text),
+          message(
+            "seya",
+            locationReply(extras.centerAddress, extras.centerName || ""),
           ),
         ],
         updatedAt: new Date().toISOString(),
@@ -734,6 +990,7 @@ function applyLeadReply(conversation, text, seya, slots) {
   const readyToPropose =
     settings.bookAppointment &&
     !asksPrice(text) &&
+    !asksLocation(text) &&
     !threadHasMedical(conversation, text) &&
     Boolean(qualification.need || conversation.treatment) &&
     !isJunkTreatment(qualification.need || conversation.treatment) &&
@@ -742,6 +999,26 @@ function applyLeadReply(conversation, text, seya, slots) {
       /rdv|creneau|créneau|dispo|semaine|lundi|mardi|mercredi|jeudi|vendredi|samedi|demain|aujourd/i.test(
         normalize(text),
       ));
+
+  if (readyToPropose && slots.length === 0) {
+    return {
+      conversation: {
+        ...conversation,
+        qualification,
+        status: "Qualifié",
+        messages: [
+          ...(conversation.messages || []),
+          message("lead", text),
+          message(
+            "seya",
+            "Je n’ai plus de place sur ce jour-là. Quel autre jour vous irait ?",
+          ),
+        ],
+        updatedAt: new Date().toISOString(),
+      },
+      shouldBook: null,
+    };
+  }
 
   if (readyToPropose && slots.length > 0) {
     return {
@@ -843,8 +1120,11 @@ module.exports = {
   mergeQualification,
   readHours,
   relanceCopy,
+  asksLocation,
   asksPrice,
   displayCareLabel,
+  locationReply,
+  pickSlotsForMessage,
   hasMedicalFlag,
   humanSlotReply,
   isJunkTreatment,

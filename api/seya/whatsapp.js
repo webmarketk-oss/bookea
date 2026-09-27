@@ -4,7 +4,7 @@ const { generateSeyaReply, hasAiKey } = require("./ai");
 const {
   readHours,
   startConversation,
-  suggestAvailableSlots,
+  pickSlotsForMessage,
 } = require("./agent");
 
 const GRAPH_VERSION = "v21.0";
@@ -124,6 +124,24 @@ function createServiceClient() {
   });
 }
 
+function readCenterAddress(center) {
+  const settings = center?.settings && typeof center.settings === "object" ? center.settings : {};
+  const publicSettings = settings.public && typeof settings.public === "object" ? settings.public : {};
+  const fromJson = publicSettings.center && typeof publicSettings.center === "object"
+    ? publicSettings.center
+    : settings.center && typeof settings.center === "object"
+      ? settings.center
+      : {};
+  return [
+    center.address_line1 || fromJson.address || fromJson.address_line1,
+    center.postal_code || fromJson.postalCode,
+    center.city || fromJson.city,
+  ]
+    .map((item) => String(item || "").trim())
+    .filter(Boolean)
+    .join(", ");
+}
+
 function last9Phone(value) {
   return String(value || "").replace(/\D/g, "").slice(-9);
 }
@@ -172,7 +190,7 @@ async function handleIncoming(supabase, incoming) {
 
   const { data: center, error } = await supabase
     .from("centers")
-    .select("id,name,settings")
+    .select("id,name,settings,address_line1,city,postal_code")
     .eq("id", context.centerId)
     .maybeSingle();
 
@@ -195,13 +213,16 @@ async function handleIncoming(supabase, incoming) {
     conversations.find((item) => item.leadId === context.leadId) ||
     startConversation(context, center.name, seya);
   const appointments = await loadCenterAppointments(supabase, center.id);
-  const slots = suggestAvailableSlots(appointments, readHours(center.settings));
+  const hours = readHours(center.settings);
   const result = await generateSeyaReply({
     conversation: existing,
     text: incoming.text,
     seya,
-    slots,
+    slots: pickSlotsForMessage(appointments, hours, existing, incoming.text),
+    appointments,
+    hours,
     centerName: center.name,
+    centerAddress: readCenterAddress(center),
   });
   const next = result.conversation;
   const saved = [

@@ -31,7 +31,10 @@ module.exports = async function handler(req, res) {
       text,
       seya: payload.settings || {},
       slots: Array.isArray(payload.slots) ? payload.slots : [],
+      appointments: Array.isArray(payload.appointments) ? payload.appointments : undefined,
+      hours: Array.isArray(payload.hours) ? payload.hours : undefined,
       centerName: payload.centerName || "le centre",
+      centerAddress: payload.centerAddress || "",
     });
 
     return res.status(200).json({
