@@ -127,6 +127,27 @@ function last9Phone(value) {
   return String(value || "").replace(/\D/g, "").slice(-9);
 }
 
+function toWhatsAppIntl(phone) {
+  let digits = String(phone || "").replace(/\D/g, "");
+  if (digits.startsWith("00")) {
+    digits = digits.slice(2);
+  }
+  if (digits.startsWith("66") && digits.length >= 10) {
+    return digits;
+  }
+  if (digits.startsWith("33") && digits.length >= 11) {
+    return digits;
+  }
+  if (/^0[67]\d{8}$/.test(digits)) {
+    return `33${digits.slice(1)}`;
+  }
+  if (digits.length >= 11) {
+    return digits;
+  }
+  const last9 = digits.slice(-9);
+  return last9.length === 9 ? `33${last9}` : digits;
+}
+
 function extractIncomingMessages(body) {
   const entries = Array.isArray(body?.entry) ? body.entry : [];
   return entries.flatMap((entry) =>
@@ -757,8 +778,7 @@ async function sendSharedWhatsApp(phone, text, extras = {}) {
     return { sent: false, reason: "not_connected" };
   }
 
-  const to = last9Phone(phone);
-  const intl = to.length === 9 ? `33${to}` : String(phone).replace(/\D/g, "");
+  const intl = toWhatsAppIntl(phone);
   const vars = {
     firstName: extras.firstName || "bonjour",
     centerName: extras.centerName || "notre centre",
