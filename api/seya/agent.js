@@ -11,55 +11,56 @@ const weekdayShort = ["dim.", "lun.", "mar.", "mer.", "jeu.", "ven.", "sam."];
 
 const defaultBriefs = [
   {
-    name: "Épilation Laser",
-    brief:
-      "Le lead vient pour une épilation définitive. Demande la zone (jambes, maillot, aisselles, visage…). Ne promets pas un tarif. Propose un bilan / première séance, puis un créneau.",
-    opening:
-      "Bonjour, je suis Seya du centre {centre}. Vous avez fait une demande pour {offre}. Quelles zones souhaitez-vous traiter ?",
-  },
-  {
     name: "Épilation définitive",
+    price: "",
     brief:
-      "Le lead vient pour une épilation définitive. Demande la zone (jambes, maillot, aisselles, visage…). Ne promets pas un tarif. Propose un bilan / première séance, puis un créneau.",
+      "Parle comme une réceptionniste. Si on demande le prix, donne le tarif. Contre-indication (pacemaker, grossesse…) : transmets à l’équipe, ne booke pas.",
     opening:
-      "Bonjour, je suis Seya du centre {centre}. Vous avez fait une demande pour {offre}. Quelles zones souhaitez-vous traiter ?",
-  },
-  {
-    name: "Hydrafacial",
-    brief:
-      "Le lead vient pour un soin visage. Demande l’objectif peau (éclat, pores, acné). Propose un hydrafacial ou un soin visage, puis un créneau cette semaine.",
-    opening:
-      "Bonjour, je suis Seya du centre {centre}. Vous avez fait une demande pour {offre}. Quel est votre objectif peau ? Quelle zone souhaitez-vous traiter ?",
-  },
-  {
-    name: "Soin visage",
-    brief:
-      "Le lead vient pour un soin visage. Demande l’objectif peau (éclat, pores, acné, hydratation). Propose un soin ou un bilan peau, puis un créneau.",
-    opening:
-      "Bonjour, je suis Seya du centre {centre}. Vous avez fait une demande pour {offre}. Quel est votre objectif peau ? Quelle zone souhaitez-vous traiter ?",
+      "Bonjour {prenom}, c’est Seya du {centre} :) On vient juste de recevoir votre demande ({offre}) ! Je peux vous proposer un créneau rapidement, vous êtes plutôt dispo en début ou fin de semaine ? Je ne veux pas vous relancer inutilement.",
   },
   {
     name: "Soin minceur",
+    price: "",
     brief:
-      "Le lead vient pour un minceur. Demande la zone et l’objectif. Propose un bilan minceur, pas une série complète tout de suite, puis un créneau.",
+      "Parle comme une réceptionniste. Demande la zone. Si on demande le prix, donne le tarif. Ne balance pas de liste de créneaux à la place.",
     opening:
-      "Bonjour, je suis Seya du centre {centre}. Vous avez fait une demande pour {offre}. Que recherchez-vous ? Quelles zones souhaitez-vous traiter ?",
+      "Bonjour {prenom}, c’est Seya du {centre} :) On vient juste de recevoir votre demande ({offre}) ! C’est plutôt quelle zone ? Je peux ensuite regarder un créneau, je ne veux pas vous relancer inutilement.",
+  },
+  {
+    name: "Soin visage",
+    price: "",
+    brief:
+      "Parle comme une réceptionniste. Si on demande le prix, donne le tarif.",
+    opening:
+      "Bonjour {prenom}, c’est Seya du {centre} :) On vient juste de recevoir votre demande ({offre}) ! Quel est votre objectif peau ? Je ne veux pas vous relancer inutilement.",
   },
   {
     name: "Cryolipolyse",
+    price: "",
     brief:
-      "Le lead vient pour un minceur / cryolipolyse. Demande la zone et si un bilan a déjà été fait. Oriente vers un rendez-vous bilan avant de parler prix.",
+      "Parle comme une réceptionniste. Si on demande le prix, donne le tarif. Contre-indication : transmets à l’équipe.",
     opening:
-      "Bonjour, je suis Seya du centre {centre}. Vous avez fait une demande pour {offre}. Que recherchez-vous ? Quelles zones souhaitez-vous traiter ?",
+      "Bonjour {prenom}, c’est Seya du {centre} :) On vient juste de recevoir votre demande ({offre}) ! Quelle zone souhaitez-vous traiter ? Je ne veux pas vous relancer inutilement.",
+  },
+  {
+    name: "Hydrafacial",
+    price: "",
+    brief:
+      "Parle comme une réceptionniste. Si on demande le prix, donne le tarif.",
+    opening:
+      "Bonjour {prenom}, c’est Seya du {centre} :) On vient juste de recevoir votre demande ({offre}) ! Quel est votre objectif peau ? Je ne veux pas vous relancer inutilement.",
   },
 ];
 
 const aliases = [
   {
     keys: ["epilation", "laser", "definitive", "epil"],
-    name: "Épilation Laser",
+    name: "Épilation définitive",
   },
-  { keys: ["minceur", "cryo", "cryolipolyse", "cellulite"], name: "Soin minceur" },
+  {
+    keys: ["minceur", "cryo", "cryolipolyse", "cellulite", "ventre", "poids"],
+    name: "Soin minceur",
+  },
   { keys: ["visage", "hydrafacial", "peau", "glow", "acne"], name: "Soin visage" },
 ];
 
@@ -73,6 +74,115 @@ function normalize(value) {
     .toLowerCase()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "");
+}
+
+function isJunkTreatment(value) {
+  const needle = normalize(value);
+  return (
+    !needle ||
+    /lead meta|meta lead|webhook|soin a preciser|a preciser/.test(needle) ||
+    /^offre\s*\d+$/.test(needle)
+  );
+}
+
+function isOptOut(text) {
+  const raw = String(text || "").trim();
+  const needle = normalize(raw).replace(/[!?.]+$/g, "");
+  if (/^(stop|stoppez|arrete|arretez|stop svp)$/.test(needle)) {
+    return true;
+  }
+  if (/pas int[eé]ress/.test(raw)) {
+    return true;
+  }
+  if (/ne (me )?(plus )?(e[cç]rire|contacter|d[eé]ranger|appeler)/i.test(raw)) {
+    return true;
+  }
+  return /^(non merci|plus jamais)$/i.test(raw);
+}
+
+function asksPrice(text) {
+  return /prix|tarif|combien|co[uû]te|\bcout\b/i.test(String(text || ""));
+}
+
+function hasMedicalFlag(text) {
+  return /pacemaker|stimulateur|enceinte|grossesse|cancer|chimio|roaccutane|accutane|implant|photo.?sensib|cardiaque|coeur/i.test(
+    String(text || ""),
+  );
+}
+
+function threadHasMedical(conversation, text) {
+  return (
+    hasMedicalFlag(text) ||
+    (conversation.messages || []).some((item) => hasMedicalFlag(item.text))
+  );
+}
+
+function formatHumanSlots(slots) {
+  const labels = (slots || []).slice(0, 3).map((slot) => slot.label);
+  if (labels.length === 0) return "";
+  if (labels.length === 1) return labels[0];
+  if (labels.length === 2) return `${labels[0]} ou ${labels[1]}`;
+  return `${labels[0]}, ${labels[1]} ou ${labels[2]}`;
+}
+
+function humanSlotReply(slots) {
+  const options = formatHumanSlots(slots);
+  return `Je peux vous proposer ${options} — lequel vous irait le mieux ?`;
+}
+
+function greetingName(value) {
+  const name = String(value || "").trim();
+  if (!name || /^(bonjour|hello|hi|bonsoir)$/i.test(name)) {
+    return "";
+  }
+  return name;
+}
+
+function looksRoboticOpening(value) {
+  return /bonjour,?\s+je suis seya/i.test(String(value || ""));
+}
+
+function resolveTreatmentPrice(seya, treatment) {
+  const brief = findTreatmentBrief(seya, treatment);
+  const price = String(brief?.price || "").trim();
+  if (price) {
+    return price;
+  }
+  const offer = resolveOfferLabel(seya, "", treatment);
+  return /€|euro/i.test(offer) ? offer : "";
+}
+
+function displayCareLabel(qualification, conversation) {
+  const zone = String(qualification?.zone || "").trim();
+  const need = String(qualification?.need || "").trim();
+  if (need && !isJunkTreatment(need) && zone) {
+    return `${need} (${zone})`;
+  }
+  if (zone) {
+    return zone;
+  }
+  if (need && !isJunkTreatment(need)) {
+    return need;
+  }
+  const family = familyFromTreatment(
+    `${conversation?.treatment || ""} ${conversation?.campaign || ""} ${zone}`,
+  );
+  if (family === "minceur") return "le minceur";
+  if (family === "visage") return "le soin visage";
+  if (family === "epilation") return "l’épilation définitive";
+  return "votre soin";
+}
+
+function priceReply(seya, qualification, conversation) {
+  const care = displayCareLabel(qualification, conversation);
+  const price = resolveTreatmentPrice(
+    seya,
+    `${qualification?.need || ""} ${qualification?.zone || ""} ${conversation?.treatment || ""}`,
+  );
+  if (price) {
+    return `Pour ${care}, ${price}. Vous voulez le détail du protocole, ou qu’une conseillère vous rappelle ?`;
+  }
+  return `Pour ${care}, le tarif dépend de la zone et du protocole. Une conseillère peut vous le confirmer précisément. Vous voulez qu’on vous rappelle ?`;
 }
 
 function todayIso() {
@@ -215,15 +325,15 @@ function defaultOfferForFamily(family) {
 
 function defaultOpeningForFamily(family) {
   if (family === "minceur") {
-    return "Bonjour, je suis Seya du centre {centre}. Vous avez fait une demande pour {offre}. Que recherchez-vous ? Quelles zones souhaitez-vous traiter ?";
+    return "Bonjour {prenom}, c’est Seya du {centre} :) On vient juste de recevoir votre demande ({offre}) ! C’est plutôt quelle zone ? Je peux ensuite regarder un créneau, je ne veux pas vous relancer inutilement.";
   }
   if (family === "visage") {
-    return "Bonjour, je suis Seya du centre {centre}. Vous avez fait une demande pour {offre}. Quel est votre objectif peau ? Quelle zone souhaitez-vous traiter ?";
+    return "Bonjour {prenom}, c’est Seya du {centre} :) On vient juste de recevoir votre demande ({offre}) ! Quel est votre objectif peau ? Je ne veux pas vous relancer inutilement.";
   }
   if (family === "epilation") {
-    return "Bonjour, je suis Seya du centre {centre}. Vous avez fait une demande pour {offre}. Quelles zones souhaitez-vous traiter ?";
+    return "Bonjour {prenom}, c’est Seya du {centre} :) On vient juste de recevoir votre demande ({offre}) ! Je peux vous proposer un créneau rapidement, vous êtes plutôt dispo en début ou fin de semaine ? Je ne veux pas vous relancer inutilement.";
   }
-  return "Bonjour, je suis Seya du centre {centre}. Vous avez fait une demande chez nous. Quel soin vous intéresse : minceur, visage ou épilation définitive ?";
+  return "Bonjour {prenom}, c’est Seya du {centre} :) On vient juste de recevoir votre demande. C’est pour du minceur, du visage ou de l’épilation ? Je ne veux pas vous relancer inutilement.";
 }
 
 function fillOpening(template, vars) {
@@ -234,6 +344,9 @@ function fillOpening(template, vars) {
     .replace(/\{center\}/gi, vars.centre)
     .replace(/\{offre\}/gi, vars.offre)
     .replace(/\{offer\}/gi, vars.offre)
+    .replace(/Bonjour\s+,/g, "Bonjour,")
+    .replace(/\(\s*\)/g, "")
+    .replace(/  +/g, " ")
     .trim();
 }
 
@@ -265,8 +378,12 @@ function buildOpeningMessage(context, centerName, seya) {
     resolveOfferLabel(seya, context.campaign, context.treatment) ||
     defaultOfferForFamily(family);
   const brief = findTreatmentBrief(seya, hay);
-  return fillOpening(brief?.opening || defaultOpeningForFamily(family), {
-    prenom: String(context.firstName || "").trim() || "bonjour",
+  const stored = String(brief?.opening || "").trim();
+  const template = looksRoboticOpening(stored)
+    ? defaultOpeningForFamily(family)
+    : stored || defaultOpeningForFamily(family);
+  return fillOpening(template, {
+    prenom: greetingName(context.firstName),
     centre: String(centerName || "").trim() || "le centre",
     offre: offer,
   });
@@ -281,6 +398,10 @@ function extractNeed(text) {
     ["definitive", "Épilation laser"],
     ["minceur", "Soin minceur"],
     ["cryo", "Cryolipolyse"],
+    ["ventre", "Soin minceur"],
+    ["poids", "Soin minceur"],
+    ["graisse", "Soin minceur"],
+    ["cellulite", "Soin minceur"],
     ["visage", "Soin visage"],
     ["bilan", "Bilan"],
   ];
@@ -330,8 +451,10 @@ function extractAvailability(text) {
 }
 
 function mergeQualification(current, text, fallbackTreatment) {
+  const currentNeed = isJunkTreatment(current?.need) ? "" : current?.need || "";
+  const fallback = isJunkTreatment(fallbackTreatment) ? "" : fallbackTreatment || "";
   const next = {
-    need: current?.need || fallbackTreatment || "",
+    need: currentNeed || fallback,
     zone: current?.zone || "",
     delay: current?.delay || "",
     availability: current?.availability || "",
@@ -377,29 +500,31 @@ function nextQualificationQuestion(qualification, seya, fallbackTreatment) {
     seya,
     qualification.need || fallbackTreatment,
   );
-  if (settings.qualifyOnSignup && !qualification.need) {
-    return "Merci. Quel soin souhaitez-vous : épilation définitive, minceur ou visage ?";
+  if (settings.qualifyOnSignup && (!qualification.need || isJunkTreatment(qualification.need))) {
+    return "C’est pour du minceur, du visage ou de l’épilation ?";
   }
   if (treatmentBrief && !qualification.zone && !qualification.availability) {
-    return treatmentBrief;
+    return /pacemaker|prix|tarif|créneau|receptionniste|réceptionniste/i.test(treatmentBrief)
+      ? "C’est plutôt quelle zone ?"
+      : treatmentBrief;
   }
   if (
     settings.qualifyOnSignup &&
     !qualification.zone &&
     /laser|minceur|cryo|epilation/i.test(normalize(qualification.need))
   ) {
-    return `Pour ${qualification.need}, quelle zone voulez-vous traiter ?`;
+    return "C’est plutôt quelle zone ?";
   }
   if (settings.bookAppointment && !qualification.availability && !qualification.delay) {
-    return "Très bien. Quels jours ou créneaux vous iraient le mieux cette semaine ?";
+    return "Vous êtes plutôt dispo en début ou fin de semaine ? Je ne veux pas vous relancer inutilement.";
   }
   if (settings.bookAppointment) {
-    return "Parfait, je regarde le planning du centre et je vous propose des créneaux réels.";
+    return "Je regarde le planning et je vous propose ce qui est vraiment libre.";
   }
   if (settings.askForAppointment) {
-    return "Merci. Souhaitez-vous qu’une conseillère vous appelle pour poser un rendez-vous ? Répondez oui ou non.";
+    return "Vous voulez que je fasse passer ça à une conseillère pour caler un créneau ?";
   }
-  return "Merci, je transmets ces informations à l’équipe du centre.";
+  return "Je transmets ça à l’équipe du centre.";
 }
 
 function message(author, text) {
@@ -426,7 +551,12 @@ function startConversation(context, centerName, seya) {
     campaign: context.campaign || "",
     offerLabel: offer,
     status: "À envoyer",
-    qualification: { need: treatment, zone: "", delay: "", availability: "" },
+    qualification: {
+      need: isJunkTreatment(treatment) ? "" : treatment,
+      zone: "",
+      delay: "",
+      availability: "",
+    },
     proposedSlots: [],
     messages: [message("seya", opening)],
     updatedAt: new Date().toISOString(),
@@ -502,7 +632,7 @@ function applyLeadReply(conversation, text, seya, slots) {
       .reverse()
       .find((item) => item.author === "seya")?.text || "";
   const askedForRdv = /conseill|rendez-vous|oui ou non/i.test(lastSeyaText);
-  const refuses = /pas int[eé]ress|non merci|stop|ne plus|arr[eê]te/i.test(text);
+  const refuses = isOptOut(text);
   const wantsRdv =
     settings.askForAppointment &&
     !settings.bookAppointment &&
@@ -519,6 +649,46 @@ function applyLeadReply(conversation, text, seya, slots) {
           ...(conversation.messages || []),
           message("lead", text),
           message("seya", "Très bien, j’arrête ici. Si vous changez d’avis, écrivez-nous."),
+        ],
+        updatedAt: new Date().toISOString(),
+      },
+      shouldBook: null,
+    };
+  }
+
+  if (hasMedicalFlag(text) || (threadHasMedical(conversation, text) && settings.handoffToHuman)) {
+    const alreadyFlagged = conversation.status === "À recontacter" && !hasMedicalFlag(text);
+    return {
+      conversation: {
+        ...conversation,
+        qualification,
+        status: "À recontacter",
+        messages: [
+          ...(conversation.messages || []),
+          message("lead", text),
+          message(
+            "seya",
+            alreadyFlagged
+              ? "Je transmets cette préférence à l’équipe, elle reviendra vers vous après vérification."
+              : "Il faut que l’équipe vérifie votre situation avant de confirmer. Je leur transmets pour voir si c’est adapté.",
+          ),
+        ],
+        updatedAt: new Date().toISOString(),
+      },
+      shouldBook: null,
+    };
+  }
+
+  if (asksPrice(text)) {
+    return {
+      conversation: {
+        ...conversation,
+        qualification,
+        status: qualification.need ? "Qualifié" : "En cours",
+        messages: [
+          ...(conversation.messages || []),
+          message("lead", text),
+          message("seya", priceReply(seya, qualification, conversation)),
         ],
         updatedAt: new Date().toISOString(),
       },
@@ -546,7 +716,7 @@ function applyLeadReply(conversation, text, seya, slots) {
     };
   }
 
-  if (chosenSlot && settings.bookAppointment) {
+  if (chosenSlot && settings.bookAppointment && !threadHasMedical(conversation, text)) {
     return {
       conversation: {
         ...conversation,
@@ -569,18 +739,17 @@ function applyLeadReply(conversation, text, seya, slots) {
 
   const readyToPropose =
     settings.bookAppointment &&
+    !asksPrice(text) &&
+    !threadHasMedical(conversation, text) &&
     Boolean(qualification.need || conversation.treatment) &&
+    !isJunkTreatment(qualification.need || conversation.treatment) &&
     (qualification.delay ||
       qualification.availability ||
       /rdv|creneau|créneau|dispo|semaine|lundi|mardi|mercredi|jeudi|vendredi|samedi|demain|aujourd/i.test(
         normalize(text),
-      ) ||
-      conversation.status === "Qualifié");
+      ));
 
   if (readyToPropose && slots.length > 0) {
-    const list = slots
-      .map((slot, index) => `${index + 1}) ${slot.label}`)
-      .join("\n");
     return {
       conversation: {
         ...conversation,
@@ -590,10 +759,7 @@ function applyLeadReply(conversation, text, seya, slots) {
         messages: [
           ...(conversation.messages || []),
           message("lead", text),
-          message(
-            "seya",
-            `Merci. Pour ${qualification.need || conversation.treatment || "votre soin"}, voici les prochains créneaux libres :\n${list}\nRépondez 1, 2 ou 3, ou dites-moi un autre jour.`,
-          ),
+          message("seya", humanSlotReply(slots)),
         ],
         updatedAt: new Date().toISOString(),
       },
@@ -683,8 +849,17 @@ module.exports = {
   mergeQualification,
   readHours,
   relanceCopy,
+  asksPrice,
+  displayCareLabel,
+  hasMedicalFlag,
+  humanSlotReply,
+  isJunkTreatment,
+  isOptOut,
+  priceReply,
+  threadHasMedical,
   resolveOfferLabel,
   resolveTreatmentBrief,
+  resolveTreatmentPrice,
   startConversation,
   suggestAvailableSlots,
   message,

@@ -1,9 +1,13 @@
 import { addDaysIso, todayIso } from "@/lib/crm-stats";
 import type { CenterDayHours } from "@/lib/center-hours";
 import {
+  asksSeyaPrice,
+  isJunkTreatmentName,
+  isSeyaOptOut,
   resolveOfferLabel,
   resolveSeyaOpening,
   resolveTreatmentBrief,
+  resolveTreatmentPrice,
   type SeyaAgentMessage,
   type SeyaAgentSettings,
   type SeyaConversation,
@@ -172,8 +176,7 @@ export function applyLeadReply(
   const wantsHuman =
     settings.handoffToHuman &&
     /conseill|humain|appeler|appelez|rappel/i.test(text);
-  const refuses =
-    /pas int[eé]ress|non merci|stop|ne plus|arr[eê]te/i.test(text);
+  const refuses = isSeyaOptOut(text);
   const lastSeyaText =
     [...conversation.messages].reverse().find((item) => item.author === "seya")
       ?.text || "";
@@ -204,6 +207,47 @@ export function applyLeadReply(
     };
   }
 
+  if (hasMedicalFlag(text) || threadHasMedical(conversation, text)) {
+    const alreadyFlagged =
+      conversation.status === "À recontacter" && !hasMedicalFlag(text);
+    return {
+      conversation: {
+        ...conversation,
+        qualification,
+        status: "À recontacter",
+        messages: [
+          ...conversation.messages,
+          createSeyaMessage("lead", text),
+          createSeyaMessage(
+            "seya",
+            alreadyFlagged
+              ? "Je transmets cette préférence à l’équipe, elle reviendra vers vous après vérification."
+              : "Il faut que l’équipe vérifie votre situation avant de confirmer. Je leur transmets pour voir si c’est adapté.",
+          ),
+        ],
+        updatedAt: new Date().toISOString(),
+      },
+      shouldBook: null,
+    };
+  }
+
+  if (asksSeyaPrice(text)) {
+    return {
+      conversation: {
+        ...conversation,
+        qualification,
+        status: (qualification.need ? "Qualifié" : "En cours") as SeyaConversationStatus,
+        messages: [
+          ...conversation.messages,
+          createSeyaMessage("lead", text),
+          createSeyaMessage("seya", priceReply(settings, qualification, conversation)),
+        ],
+        updatedAt: new Date().toISOString(),
+      },
+      shouldBook: null,
+    };
+  }
+
   if (wantsHuman || wantsRdv) {
     return {
       conversation: {
@@ -224,7 +268,7 @@ export function applyLeadReply(
     };
   }
 
-  if (chosenSlot && settings.bookAppointment) {
+  if (chosenSlot && settings.bookAppointment && !threadHasMedical(conversation, text)) {
     return {
       conversation: {
         ...conversation,
@@ -248,16 +292,17 @@ export function applyLeadReply(
 
   const readyToPropose =
     settings.bookAppointment &&
+    !asksSeyaPrice(text) &&
+    !threadHasMedical(conversation, text) &&
     Boolean(qualification.need || conversation.treatment) &&
+    !isJunkTreatmentName(qualification.need || conversation.treatment) &&
     (qualification.delay ||
       qualification.availability ||
       /rdv|créneau|creneau|dispo|semaine|lundi|mardi|mercredi|jeudi|vendredi|samedi|demain|aujourd/i.test(
         text,
-      ) ||
-      conversation.status === "Qualifié");
+      ));
 
   if (readyToPropose && slots.length > 0) {
-    const list = slots.map((slot, index) => `${index + 1}) ${slot.label}`).join("\n");
     return {
       conversation: {
         ...conversation,
@@ -267,10 +312,7 @@ export function applyLeadReply(
         messages: [
           ...conversation.messages,
           createSeyaMessage("lead", text),
-          createSeyaMessage(
-            "seya",
-            `Merci. Pour ${qualification.need || conversation.treatment || "votre soin"}, voici les prochains créneaux libres :\n${list}\nRépondez 1, 2 ou 3, ou dites-moi un autre jour.`,
-          ),
+          createSeyaMessage("seya", humanSlotReply(slots)),
         ],
         updatedAt: new Date().toISOString(),
       },
@@ -305,35 +347,98 @@ function nextQualificationQuestion(
     qualification.need || fallbackTreatment,
   );
 
-  if (settings.qualifyOnSignup && !qualification.need) {
-    return "Merci. Quel soin souhaitez-vous (laser, hydrafacial, minceur, bilan…) ?";
+  if (settings.qualifyOnSignup && (!qualification.need || isJunkTreatmentName(qualification.need))) {
+    return "C’est pour du minceur, du visage ou de l’épilation ?";
   }
 
   if (treatmentBrief && !qualification.zone && !qualification.availability) {
-    return treatmentBrief;
+    return /pacemaker|prix|tarif|créneau|receptionniste|réceptionniste/i.test(treatmentBrief)
+      ? "C’est plutôt quelle zone ?"
+      : treatmentBrief;
   }
 
   if (settings.qualifyOnSignup && !qualification.zone && isBodyTreatment(qualification.need)) {
-    return `Pour ${qualification.need}, quelle zone voulez-vous traiter ?`;
+    return "C’est plutôt quelle zone ?";
   }
 
   if (settings.bookAppointment && !qualification.availability && !qualification.delay) {
-    return "Très bien. Quels jours ou créneaux vous iraient le mieux cette semaine ?";
+    return "Vous êtes plutôt dispo en début ou fin de semaine ? Je ne veux pas vous relancer inutilement.";
   }
 
   if (settings.bookAppointment) {
-    return "Parfait, je regarde le planning du centre et je vous propose des créneaux réels.";
+    return "Je regarde le planning et je vous propose ce qui est vraiment libre.";
   }
 
   if (settings.askForAppointment) {
-    return "Merci. Souhaitez-vous qu’une conseillère vous appelle pour poser un rendez-vous ? Répondez oui ou non.";
+    return "Vous voulez que je fasse passer ça à une conseillère pour caler un créneau ?";
   }
 
-  return "Merci, je transmets ces informations à l’équipe du centre.";
+  return "Je transmets ça à l’équipe du centre.";
+}
+
+function hasMedicalFlag(text: string) {
+  return /pacemaker|stimulateur|enceinte|grossesse|cancer|chimio|roaccutane|accutane|implant|photo.?sensib|cardiaque|coeur/i.test(
+    text,
+  );
+}
+
+function threadHasMedical(conversation: SeyaConversation, text: string) {
+  return (
+    hasMedicalFlag(text) ||
+    conversation.messages.some((item) => hasMedicalFlag(item.text))
+  );
+}
+
+function humanSlotReply(slots: SeyaProposedSlot[]) {
+  const labels = slots.slice(0, 3).map((slot) => slot.label);
+  const options =
+    labels.length <= 1
+      ? labels[0] || ""
+      : labels.length === 2
+        ? `${labels[0]} ou ${labels[1]}`
+        : `${labels[0]}, ${labels[1]} ou ${labels[2]}`;
+  return `Je peux vous proposer ${options} — lequel vous irait le mieux ?`;
+}
+
+function displayCareLabel(
+  qualification: SeyaQualification,
+  conversation: SeyaConversation,
+) {
+  const zone = qualification.zone.trim();
+  const need = qualification.need.trim();
+  if (need && !isJunkTreatmentName(need) && zone) {
+    return `${need} (${zone})`;
+  }
+  if (zone) {
+    return zone;
+  }
+  if (need && !isJunkTreatmentName(need)) {
+    return need;
+  }
+  return "votre soin";
+}
+
+function priceReply(
+  settings: SeyaAgentSettings,
+  qualification: SeyaQualification,
+  conversation: SeyaConversation,
+) {
+  const care = displayCareLabel(qualification, conversation);
+  const price = resolveTreatmentPrice(
+    settings,
+    `${qualification.need} ${qualification.zone} ${conversation.treatment}`,
+  );
+  if (price) {
+    return `Pour ${care}, ${price}. Vous voulez le détail du protocole, ou qu’une conseillère vous rappelle ?`;
+  }
+  return `Pour ${care}, le tarif dépend de la zone et du protocole. Une conseillère peut vous le confirmer précisément. Vous voulez qu’on vous rappelle ?`;
 }
 
 function mergeQualification(current: SeyaQualification, text: string) {
-  const next = { ...current };
+  const next = {
+    ...current,
+    need: isJunkTreatmentName(current.need) ? "" : current.need,
+  };
   const need = extractNeed(text);
   const zone = extractZone(text);
   const delay = extractDelay(text);
@@ -359,6 +464,10 @@ function extractNeed(text: string) {
     ["minceur", "Soin minceur"],
     ["cryo", "Cryolipolyse"],
     ["cryolipolyse", "Cryolipolyse"],
+    ["ventre", "Soin minceur"],
+    ["poids", "Soin minceur"],
+    ["graisse", "Soin minceur"],
+    ["cellulite", "Soin minceur"],
     ["visage", "Soin visage"],
     ["bilan", "Bilan"],
     ["massage", "Massage"],

@@ -9,6 +9,7 @@ export type SeyaTreatmentBrief = {
   name: string;
   brief: string;
   opening?: string;
+  price?: string;
 };
 
 export type SeyaOfferMap = {
@@ -93,46 +94,44 @@ export type SeyaConversation = {
 
 export const defaultTreatmentBriefs: SeyaTreatmentBrief[] = [
   {
-    name: "Épilation Laser",
-    brief:
-      "Le lead vient pour une épilation définitive. Demande la zone (jambes, maillot, aisselles, visage…). Ne promets pas un tarif. Propose un bilan / première séance, puis un créneau.",
-    opening:
-      "Bonjour, je suis Seya du centre {centre}. Vous avez fait une demande pour {offre}. Quelles zones souhaitez-vous traiter ?",
-  },
-  {
     name: "Épilation définitive",
+    price: "",
     brief:
-      "Le lead vient pour une épilation définitive. Demande la zone (jambes, maillot, aisselles, visage…). Ne promets pas un tarif. Propose un bilan / première séance, puis un créneau.",
+      "Parle comme une réceptionniste. Si on demande le prix, donne le tarif. Contre-indication (pacemaker, grossesse…) : transmets à l’équipe, ne booke pas.",
     opening:
-      "Bonjour, je suis Seya du centre {centre}. Vous avez fait une demande pour {offre}. Quelles zones souhaitez-vous traiter ?",
-  },
-  {
-    name: "Hydrafacial",
-    brief:
-      "Le lead vient pour un soin visage. Demande l’objectif peau (éclat, pores, acné). Propose un hydrafacial ou un soin visage, puis un créneau cette semaine.",
-    opening:
-      "Bonjour, je suis Seya du centre {centre}. Vous avez fait une demande pour {offre}. Quel est votre objectif peau ? Quelle zone souhaitez-vous traiter ?",
-  },
-  {
-    name: "Soin visage",
-    brief:
-      "Le lead vient pour un soin visage. Demande l’objectif peau (éclat, pores, acné, hydratation). Propose un soin ou un bilan peau, puis un créneau.",
-    opening:
-      "Bonjour, je suis Seya du centre {centre}. Vous avez fait une demande pour {offre}. Quel est votre objectif peau ? Quelle zone souhaitez-vous traiter ?",
+      "Bonjour {prenom}, c’est Seya du {centre} :) On vient juste de recevoir votre demande ({offre}) ! Je peux vous proposer un créneau rapidement, vous êtes plutôt dispo en début ou fin de semaine ? Je ne veux pas vous relancer inutilement.",
   },
   {
     name: "Soin minceur",
+    price: "",
     brief:
-      "Le lead vient pour un minceur. Demande la zone et l’objectif. Propose un bilan minceur, pas une série complète tout de suite, puis un créneau.",
+      "Parle comme une réceptionniste. Demande la zone. Si on demande le prix, donne le tarif. Ne balance pas de liste de créneaux à la place.",
     opening:
-      "Bonjour, je suis Seya du centre {centre}. Vous avez fait une demande pour {offre}. Que recherchez-vous ? Quelles zones souhaitez-vous traiter ?",
+      "Bonjour {prenom}, c’est Seya du {centre} :) On vient juste de recevoir votre demande ({offre}) ! C’est plutôt quelle zone ? Je peux ensuite regarder un créneau, je ne veux pas vous relancer inutilement.",
+  },
+  {
+    name: "Soin visage",
+    price: "",
+    brief:
+      "Parle comme une réceptionniste. Si on demande le prix, donne le tarif.",
+    opening:
+      "Bonjour {prenom}, c’est Seya du {centre} :) On vient juste de recevoir votre demande ({offre}) ! Quel est votre objectif peau ? Je peux ensuite regarder un créneau, je ne veux pas vous relancer inutilement.",
   },
   {
     name: "Cryolipolyse",
+    price: "",
     brief:
-      "Le lead vient pour un minceur / cryolipolyse. Demande la zone et si un bilan a déjà été fait. Oriente vers un rendez-vous bilan avant de parler prix.",
+      "Parle comme une réceptionniste. Si on demande le prix, donne le tarif. Contre-indication : transmets à l’équipe.",
     opening:
-      "Bonjour, je suis Seya du centre {centre}. Vous avez fait une demande pour {offre}. Que recherchez-vous ? Quelles zones souhaitez-vous traiter ?",
+      "Bonjour {prenom}, c’est Seya du {centre} :) On vient juste de recevoir votre demande ({offre}) ! Quelle zone souhaitez-vous traiter ? Je ne veux pas vous relancer inutilement.",
+  },
+  {
+    name: "Hydrafacial",
+    price: "",
+    brief:
+      "Parle comme une réceptionniste. Si on demande le prix, donne le tarif.",
+    opening:
+      "Bonjour {prenom}, c’est Seya du {centre} :) On vient juste de recevoir votre demande ({offre}) ! Quel est votre objectif peau ? Je ne veux pas vous relancer inutilement.",
   },
 ];
 
@@ -146,10 +145,10 @@ const treatmentAliases: Array<{ keys: string[]; name: string }> = [
       "définitive",
       "epil",
     ],
-    name: "Épilation Laser",
+    name: "Épilation définitive",
   },
   {
-    keys: ["minceur", "cryo", "cryolipolyse", "cellulite", "ventre"],
+    keys: ["minceur", "cryo", "cryolipolyse", "cellulite", "ventre", "poids", "graisse"],
     name: "Soin minceur",
   },
   {
@@ -179,10 +178,51 @@ export const defaultSeyaAgentSettings: SeyaAgentSettings = {
   relanceEnabled: true,
   relanceDays: [1, 5, 30],
   brief:
-    "Tu es Seya, l’assistante du centre. Tu qualifies le besoin (soin, zone, délai) avec le vrai nom de l’offre, jamais le code campagne. Tu ne poses un RDV que si le centre l’a autorisé. Sinon tu demandes si la personne veut un rendez-vous et tu transmets à une conseillère.",
+    "Tu parles comme une réceptionniste du centre, pas comme un robot. Prénom, vrai soin, une question simple. Si on demande le prix, tu donnes le tarif. Si quelqu’un signale un pacemaker, une grossesse ou un doute médical, tu transmets à l’équipe et tu ne bookes pas. Tu ne dis jamais Lead Meta. Tu ne coupes pas parce qu’on te dit d’arrêter les créneaux.",
   treatmentBriefs: defaultTreatmentBriefs,
   offerMaps: defaultSeyaOfferMaps,
 };
+
+export function isJunkTreatmentName(value?: string | null) {
+  const needle = normalizeTreatmentName(value || "");
+  return (
+    !needle ||
+    /lead meta|meta lead|webhook|soin a preciser|a preciser/.test(needle) ||
+    /^offre\s*\d+$/.test(needle)
+  );
+}
+
+export function isSeyaOptOut(text: string) {
+  const raw = String(text || "").trim();
+  const needle = normalizeTreatmentName(raw).replace(/[!?.]+$/g, "");
+  if (/^(stop|stoppez|arrete|arretez|stop svp)$/.test(needle)) {
+    return true;
+  }
+  if (/pas int[eé]ress/.test(raw)) {
+    return true;
+  }
+  if (/ne (me )?(plus )?(e[cç]rire|contacter|d[eé]ranger|appeler)/i.test(raw)) {
+    return true;
+  }
+  return /^(non merci|plus jamais)$/i.test(raw);
+}
+
+export function asksSeyaPrice(text: string) {
+  return /prix|tarif|combien|co[uû]te|\bcout\b/i.test(String(text || ""));
+}
+
+export function resolveTreatmentPrice(
+  settings: SeyaAgentSettings,
+  treatment?: string | null,
+) {
+  const brief = findTreatmentBrief(settings, treatment);
+  const price = String(brief?.price || "").trim();
+  if (price) {
+    return price;
+  }
+  const offer = resolveOfferLabel(settings, "", treatment);
+  return /€|euro/i.test(offer) ? offer : "";
+}
 
 export function normalizeTreatmentName(value: string) {
   return value
@@ -263,13 +303,13 @@ export function resolveSeyaOpening(
   const offer =
     resolveOfferLabel(settings, campaign, treatment) || defaultOfferForFamily(family);
   const brief = findTreatmentBrief(settings, hay);
-  const template =
-    brief?.opening?.trim() ||
-    defaultOpeningForFamily(family);
+  const stored = brief?.opening?.trim() || "";
+  const template = looksRoboticOpening(stored)
+    ? defaultOpeningForFamily(family)
+    : stored || defaultOpeningForFamily(family);
   const center = String(centerName || "").trim() || "le centre";
-
   return fillSeyaTemplate(template, {
-    prenom: String(firstName || "").trim() || "bonjour",
+    prenom: greetingName(firstName),
     centre: center,
     offre: offer,
   });
@@ -340,17 +380,29 @@ function defaultOfferForFamily(family: string) {
   return "un soin";
 }
 
+function greetingName(value?: string | null) {
+  const name = String(value || "").trim();
+  if (!name || /^(bonjour|hello|hi|bonsoir)$/i.test(name)) {
+    return "";
+  }
+  return name;
+}
+
+function looksRoboticOpening(value?: string | null) {
+  return /bonjour,?\s+je suis seya/i.test(String(value || ""));
+}
+
 function defaultOpeningForFamily(family: string) {
   if (family === "minceur") {
-    return "Bonjour, je suis Seya du centre {centre}. Vous avez fait une demande pour {offre}. Que recherchez-vous ? Quelles zones souhaitez-vous traiter ?";
+    return "Bonjour {prenom}, c’est Seya du {centre} :) On vient juste de recevoir votre demande ({offre}) ! C’est plutôt quelle zone ? Je peux ensuite regarder un créneau, je ne veux pas vous relancer inutilement.";
   }
   if (family === "visage") {
-    return "Bonjour, je suis Seya du centre {centre}. Vous avez fait une demande pour {offre}. Quel est votre objectif peau ? Quelle zone souhaitez-vous traiter ?";
+    return "Bonjour {prenom}, c’est Seya du {centre} :) On vient juste de recevoir votre demande ({offre}) ! Quel est votre objectif peau ? Je ne veux pas vous relancer inutilement.";
   }
   if (family === "epilation") {
-    return "Bonjour, je suis Seya du centre {centre}. Vous avez fait une demande pour {offre}. Quelles zones souhaitez-vous traiter ?";
+    return "Bonjour {prenom}, c’est Seya du {centre} :) On vient juste de recevoir votre demande ({offre}) ! Je peux vous proposer un créneau rapidement, vous êtes plutôt dispo en début ou fin de semaine ? Je ne veux pas vous relancer inutilement.";
   }
-  return "Bonjour, je suis Seya du centre {centre}. Vous avez fait une demande chez nous. Quel soin vous intéresse : minceur, visage ou épilation définitive ?";
+  return "Bonjour {prenom}, c’est Seya du {centre} :) On vient juste de recevoir votre demande. C’est pour du minceur, du visage ou de l’épilation ? Je ne veux pas vous relancer inutilement.";
 }
 
 function fillSeyaTemplate(
@@ -364,6 +416,9 @@ function fillSeyaTemplate(
     .replace(/\{center\}/gi, vars.centre)
     .replace(/\{offre\}/gi, vars.offre)
     .replace(/\{offer\}/gi, vars.offre)
+    .replace(/Bonjour\s+,/g, "Bonjour,")
+    .replace(/\(\s*\)/g, "")
+    .replace(/  +/g, " ")
     .trim();
 }
 
@@ -472,6 +527,7 @@ function normalizeTreatmentBriefs(value?: SeyaTreatmentBrief[] | null) {
       name,
       brief: String(item?.brief || "").trim(),
       opening: String(item?.opening || previous?.opening || "").trim(),
+      price: String(item?.price || previous?.price || "").trim(),
     });
   }
 

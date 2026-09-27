@@ -690,9 +690,9 @@ export default function SeyaCrmPage() {
           <div>
             <h2 className="text-base font-semibold">Agent WhatsApp Seya</h2>
             <p className="mt-1 max-w-3xl text-sm font-medium text-slate-500">
-              Seya lit le fil avec l’IA, applique les consignes de ce centre, et
-              ne propose que les créneaux de ce planning. Sans clé OpenAI, elle
-              retombe sur les règles.
+              Remplis le prix de chaque soin : c’est ce que Seya dira si on lui
+              demande le tarif. Elle ne coupe plus le fil pour « arrête les
+              créneaux », et elle n’invente jamais un prix.
             </p>
           </div>
         </div>
@@ -792,6 +792,7 @@ export default function SeyaCrmPage() {
             }
             onBlur={() => void persistAgentSettings(agentSettings)}
             rows={3}
+            placeholder="Si on demande le prix, donne le tarif du soin. Ne coupe pas si on dit d’arrêter les créneaux."
             className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm font-medium leading-6 text-slate-700 outline-none focus:border-violet-500"
           />
         </label>
@@ -863,10 +864,11 @@ export default function SeyaCrmPage() {
 
         <div className="mt-5">
           <p className="text-xs font-medium text-slate-500">
-            Consignes selon le soin demandé
+            Prix et discours par soin
           </p>
           <p className="mt-1 text-xs font-medium text-slate-400">
-            Chaque soin a son premier message. Utilise {"{centre}"} et {"{offre}"}.
+            Remplis le prix que Seya a le droit de dire. Sans prix, elle n’invente
+            rien et ne balance plus de créneaux à la place.
           </p>
           <div className="mt-3 grid gap-3">
             {agentSettings.treatmentBriefs.map((item, index) => (
@@ -874,54 +876,103 @@ export default function SeyaCrmPage() {
                 key={`${item.name}-${index}`}
                 className="grid gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4"
               >
-                <input
-                  value={item.name}
-                  onChange={(event) =>
-                    setAgentSettings((current) => ({
-                      ...current,
-                      treatmentBriefs: current.treatmentBriefs.map((brief, briefIndex) =>
-                        briefIndex === index
-                          ? { ...brief, name: event.target.value }
-                          : brief,
-                      ),
-                    }))
-                  }
-                  onBlur={() => void persistAgentSettings(agentSettings)}
-                  className="h-11 rounded-2xl border border-slate-200 bg-white px-3 text-sm font-semibold outline-none focus:border-violet-500"
-                />
-                <textarea
-                  value={item.opening || ""}
-                  onChange={(event) =>
-                    setAgentSettings((current) => ({
-                      ...current,
-                      treatmentBriefs: current.treatmentBriefs.map((brief, briefIndex) =>
-                        briefIndex === index
-                          ? { ...brief, opening: event.target.value }
-                          : brief,
-                      ),
-                    }))
-                  }
-                  onBlur={() => void persistAgentSettings(agentSettings)}
-                  rows={3}
-                  placeholder="Bonjour, je suis Seya du centre {centre}. Vous avez fait une demande pour {offre}…"
-                  className="rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium leading-5 text-slate-700 outline-none focus:border-violet-500"
-                />
-                <textarea
-                  value={item.brief}
-                  onChange={(event) =>
-                    setAgentSettings((current) => ({
-                      ...current,
-                      treatmentBriefs: current.treatmentBriefs.map((brief, briefIndex) =>
-                        briefIndex === index
-                          ? { ...brief, brief: event.target.value }
-                          : brief,
-                      ),
-                    }))
-                  }
-                  onBlur={() => void persistAgentSettings(agentSettings)}
-                  rows={2}
-                  className="rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium leading-5 text-slate-700 outline-none focus:border-violet-500"
-                />
+                <div className="flex items-center justify-between gap-3">
+                  <input
+                    value={item.name}
+                    onChange={(event) =>
+                      setAgentSettings((current) => ({
+                        ...current,
+                        treatmentBriefs: current.treatmentBriefs.map((brief, briefIndex) =>
+                          briefIndex === index
+                            ? { ...brief, name: event.target.value }
+                            : brief,
+                        ),
+                      }))
+                    }
+                    onBlur={() => void persistAgentSettings(agentSettings)}
+                    placeholder="Soin minceur"
+                    className="h-11 flex-1 rounded-2xl border border-slate-200 bg-white px-3 text-sm font-semibold outline-none focus:border-violet-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={() =>
+                      void persistAgentSettings({
+                        ...agentSettings,
+                        treatmentBriefs: agentSettings.treatmentBriefs.filter(
+                          (_, briefIndex) => briefIndex !== index,
+                        ),
+                      })
+                    }
+                    className="text-sm font-semibold text-slate-400"
+                  >
+                    Retirer
+                  </button>
+                </div>
+                <label className="grid gap-1">
+                  <span className="text-xs font-medium text-slate-500">
+                    Prix que Seya peut dire
+                  </span>
+                  <input
+                    value={item.price || ""}
+                    onChange={(event) =>
+                      setAgentSettings((current) => ({
+                        ...current,
+                        treatmentBriefs: current.treatmentBriefs.map((brief, briefIndex) =>
+                          briefIndex === index
+                            ? { ...brief, price: event.target.value }
+                            : brief,
+                        ),
+                      }))
+                    }
+                    onBlur={() => void persistAgentSettings(agentSettings)}
+                    placeholder="à partir de 99€ la séance ventre"
+                    className="h-11 rounded-2xl border border-slate-200 bg-white px-3 text-sm font-medium outline-none focus:border-violet-500"
+                  />
+                </label>
+                <label className="grid gap-1">
+                  <span className="text-xs font-medium text-slate-500">
+                    Premier message — {"{centre}"} {"{offre}"}
+                  </span>
+                  <textarea
+                    value={item.opening || ""}
+                    onChange={(event) =>
+                      setAgentSettings((current) => ({
+                        ...current,
+                        treatmentBriefs: current.treatmentBriefs.map((brief, briefIndex) =>
+                          briefIndex === index
+                            ? { ...brief, opening: event.target.value }
+                            : brief,
+                        ),
+                      }))
+                    }
+                    onBlur={() => void persistAgentSettings(agentSettings)}
+                    rows={2}
+                    placeholder="Bonjour {prenom}, c’est Seya du {centre} :) On vient juste de recevoir votre demande ({offre}) !"
+                    className="rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium leading-5 text-slate-700 outline-none focus:border-violet-500"
+                  />
+                </label>
+                <label className="grid gap-1">
+                  <span className="text-xs font-medium text-slate-500">
+                    Consigne pour ce soin
+                  </span>
+                  <textarea
+                    value={item.brief}
+                    onChange={(event) =>
+                      setAgentSettings((current) => ({
+                        ...current,
+                        treatmentBriefs: current.treatmentBriefs.map((brief, briefIndex) =>
+                          briefIndex === index
+                            ? { ...brief, brief: event.target.value }
+                            : brief,
+                        ),
+                      }))
+                    }
+                    onBlur={() => void persistAgentSettings(agentSettings)}
+                    rows={2}
+                    placeholder="Si on demande le prix, donne le tarif. Ne propose un créneau que si on te le demande."
+                    className="rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium leading-5 text-slate-700 outline-none focus:border-violet-500"
+                  />
+                </label>
               </div>
             ))}
           </div>
@@ -934,9 +985,10 @@ export default function SeyaCrmPage() {
                   ...agentSettings.treatmentBriefs,
                   {
                     name: "Nouveau soin",
-                    brief: "",
+                    price: "",
+                    brief: "Si on demande le prix, donne le tarif paramétré.",
                     opening:
-                      "Bonjour, je suis Seya du centre {centre}. Vous avez fait une demande pour {offre}. Que recherchez-vous ?",
+                      "Bonjour {prenom}, c’est Seya du {centre} :) On vient juste de recevoir votre demande ({offre}) ! Je ne veux pas vous relancer inutilement.",
                   },
                 ],
               })

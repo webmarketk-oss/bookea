@@ -2,11 +2,19 @@ const OpenAI = require("openai");
 const {
   agentSettings,
   applyLeadReply,
+  asksPrice,
+  hasMedicalFlag,
+  humanSlotReply,
+  isJunkTreatment,
+  isOptOut,
   matchProposedSlot,
   mergeQualification,
   message,
+  priceReply,
   resolveOfferLabel,
   resolveTreatmentBrief,
+  resolveTreatmentPrice,
+  threadHasMedical,
 } = require("./agent");
 
 const ALLOWED_ACTIONS = new Set([
@@ -53,15 +61,14 @@ async function generateSeyaReply({
 
 async function askSeyaModel({ conversation, text, seya, slots, centerName }) {
   const settings = agentSettings(seya);
+  const careHint = `${conversation.qualification?.need || ""} ${conversation.qualification?.zone || ""} ${conversation.treatment || ""}`;
   const offer = resolveOfferLabel(
     seya,
     conversation.campaign,
     conversation.qualification?.need || conversation.treatment,
   );
-  const brief = resolveTreatmentBrief(
-    seya,
-    conversation.qualification?.need || conversation.treatment,
-  );
+  const brief = resolveTreatmentBrief(seya, careHint);
+  const price = resolveTreatmentPrice(seya, careHint);
   const client = new OpenAI({
     apiKey: process.env.OPENAI_API_KEY,
     timeout: 8000,
@@ -86,6 +93,7 @@ async function askSeyaModel({ conversation, text, seya, slots, centerName }) {
           centerName,
           offer,
           brief,
+          price,
         }),
       },
       ...history,
@@ -104,42 +112,51 @@ function buildSystemPrompt({
   centerName,
   offer,
   brief,
+  price,
 }) {
   const slotLines = (slots || [])
     .map((slot, index) => `${index + 1}) ${slot.label}`)
     .join("\n");
 
   return [
-    "Tu es Seya, assistante WhatsApp d’un centre esthétique français.",
-    "Tu vouvoies. Tu es chaleureuse, claire, jamais vendeuse agressive.",
+    "Tu es Seya, réceptionniste WhatsApp du centre. Tu parles comme un humain, jamais comme un formulaire.",
+    "Tu vouvoies. Phrases courtes, naturelles. Un smiley max. Pas de liste 1) 2) 3).",
     `Centre : ${centerName || "le centre"}.`,
-    `Prospect : ${conversation.firstName || "le prospect"}.`,
+    `Prospect : ${conversation.firstName || "le prospect"}. Utilise le prénom si tu l’as.`,
     offer
-      ? `Offre à dire : ${offer}. Ne dis jamais le code campagne ni « offre 99 ».`
-      : "N’invente aucune offre, aucun prix, aucune promo.",
-    conversation.treatment
-      ? `Soin indiqué dans le CRM : ${conversation.treatment}.`
-      : "Le soin n’est pas encore clair.",
+      ? `Soin / offre à dire : ${offer}. Jamais « Lead Meta » ni le nom de campagne.`
+      : "Jamais « Lead Meta » ni le nom de campagne. Déduis le soin des messages.",
+    price
+      ? `Tarif autorisé : ${price}. Si on demande le prix, dis ça, sans envoyer de créneaux.`
+      : "Aucun tarif paramétré : ne l’invente pas, propose un rappel ou un bilan.",
+    conversation.treatment && !/lead meta|meta lead/i.test(conversation.treatment)
+      ? `Soin CRM : ${conversation.treatment}.`
+      : "Le CRM est flou (souvent un lead Meta). Ventre / poids = minceur.",
     settings.brief || seya.brief
       ? `Consignes du centre : ${settings.brief || seya.brief}`
       : "",
     brief ? `Consignes pour ce soin : ${brief}` : "",
-    `Qualifier le besoin : ${settings.qualifyOnSignup ? "oui" : "non"}.`,
-    `Demander s’ils veulent un RDV : ${settings.askForAppointment ? "oui" : "non"}.`,
-    `Poser le RDV dans l’agenda : ${settings.bookAppointment ? "oui" : "non"}.`,
-    `Passer à une conseillère : ${settings.handoffToHuman ? "oui" : "non"}.`,
+    `Qualifier : ${settings.qualifyOnSignup ? "oui" : "non"}.`,
+    `Demander un RDV : ${settings.askForAppointment ? "oui" : "non"}.`,
+    `Poser le RDV : ${settings.bookAppointment ? "oui" : "non"}.`,
+    `Passer à l’équipe : ${settings.handoffToHuman ? "oui" : "non"}.`,
     slotLines
-      ? `Créneaux RÉELS, seuls autorisés :\n${slotLines}`
+      ? `Créneaux RÉELS, seuls autorisés :\n${slotLines}\nDis-les en phrase : « je peux vous proposer X ou Y — lequel vous irait ? ».`
       : "Aucun créneau libre à proposer.",
+    "Modèle : « Bonjour Alix, c’est Seya du centre :) On vient de recevoir votre demande. Vous êtes plutôt dispo en début ou fin de semaine ? Je ne veux pas vous relancer inutilement. »",
+    "Si le créneau voulu n’existe pas : dis-le simplement et propose 2 alternatives réelles.",
     "Réponds UNIQUEMENT en JSON :",
-    '{"reply":"texte WhatsApp 1 à 4 phrases","need":"","zone":"","delay":"","availability":"","action":"continue|propose_slots|book|handoff|stop","slotIndex":null}',
+    '{"reply":"texte WhatsApp 1 à 3 phrases","need":"","zone":"","delay":"","availability":"","action":"continue|propose_slots|book|handoff|stop","slotIndex":null}',
     "Règles :",
-    "- Une seule question à la fois.",
-    "- Jamais inventer un prix, un résultat médical, un créneau ou un délai.",
-    "- Si poserRDV est non : action jamais book ni propose_slots. Si le prospect veut un RDV → handoff.",
-    "- book seulement si le prospect choisit un créneau de la liste (slotIndex 1, 2 ou 3).",
-    "- stop si le prospect dit stop, pas intéressé, arrête.",
-    "- propose_slots seulement si poserRDV est oui et qu’il y a des créneaux.",
+    "- Une seule question à la fois. Réponds d’abord à ce qu’ils viennent d’écrire.",
+    "- Pacemaker, grossesse, doute médical : action=handoff. Ne booke pas. L’équipe vérifie.",
+    "- S’ils donnent encore un horaire après un doute médical : handoff, « je transmets à l’équipe ».",
+    "- Prix : tarif autorisé, action=continue. Pas de créneaux à la place.",
+    "- « Arrête de me parler des créneaux » n’est PAS un stop.",
+    "- stop seulement si plus de contact (stop, pas intéressé, ne plus écrire).",
+    "- Jamais inventer un prix, un résultat médical, un créneau.",
+    "- book seulement s’ils choisissent un créneau réel (slotIndex 1, 2 ou 3).",
+    "- propose_slots seulement s’ils parlent dispo / RDV, jamais pour éviter une question.",
   ]
     .filter(Boolean)
     .join("\n");
@@ -166,13 +183,19 @@ function applyAiDecision(conversation, text, seya, slots, decision) {
   const settings = agentSettings(seya);
   const qualification = {
     ...mergeQualification(conversation.qualification, text, conversation.treatment),
-    ...(decision.need ? { need: decision.need } : {}),
+    ...(decision.need && !isJunkTreatment(decision.need) ? { need: decision.need } : {}),
     ...(decision.zone ? { zone: decision.zone } : {}),
     ...(decision.delay ? { delay: decision.delay } : {}),
     ...(decision.availability ? { availability: decision.availability } : {}),
   };
-  const refuses = /pas int[eé]ress|non merci|stop|ne plus|arr[eê]te/i.test(text);
+  const refuses = isOptOut(text);
   let action = refuses ? "stop" : decision.action;
+  if (threadHasMedical(conversation, text) || hasMedicalFlag(text)) {
+    action = "handoff";
+  }
+  if (asksPrice(text) && (action === "stop" || action === "propose_slots" || action === "book")) {
+    action = "continue";
+  }
 
   if ((action === "book" || action === "propose_slots") && !settings.bookAppointment) {
     action = settings.askForAppointment || settings.handoffToHuman ? "handoff" : "continue";
@@ -194,20 +217,26 @@ function applyAiDecision(conversation, text, seya, slots, decision) {
   }
 
   if (action === "handoff") {
+    const medical = threadHasMedical(conversation, text);
+    const alreadyFlagged = conversation.status === "À recontacter" && !hasMedicalFlag(text);
+    const handoffReply = medical
+      ? alreadyFlagged
+        ? "Je transmets cette préférence à l’équipe, elle reviendra vers vous après vérification."
+        : "Il faut que l’équipe vérifie votre situation avant de confirmer. Je leur transmets pour voir si c’est adapté."
+      : "Parfait, je transmets à l’équipe, elle vous recontacte rapidement.";
     return {
       conversation: withMessages(
         conversation,
         qualification,
         "À recontacter",
         text,
-        decision.reply ||
-          "Parfait. Je transmets à une conseillère du centre, elle vous recontacte rapidement.",
+        decision.reply && !medical ? decision.reply : handoffReply,
       ),
       shouldBook: null,
     };
   }
 
-  if (action === "book" && chosenSlot && settings.bookAppointment) {
+  if (action === "book" && chosenSlot && settings.bookAppointment && !threadHasMedical(conversation, text)) {
     return {
       conversation: {
         ...withMessages(
@@ -226,8 +255,11 @@ function applyAiDecision(conversation, text, seya, slots, decision) {
   }
 
   if (action === "propose_slots" && settings.bookAppointment && slots?.length) {
-    const list = slots.map((slot, index) => `${index + 1}) ${slot.label}`).join("\n");
-    const reply = `${stripSlotList(decision.reply || "Voici les prochains créneaux libres.")}\n${list}\nRépondez 1, 2 ou 3, ou dites-moi un autre jour.`;
+    const reply = /propose|créneau|14h|17h|lundi|mardi|mercredi|jeudi|vendredi/i.test(
+      decision.reply || "",
+    )
+      ? stripSlotList(decision.reply)
+      : humanSlotReply(slots);
     return {
       conversation: {
         ...withMessages(conversation, qualification, "RDV proposé", text, reply),
@@ -237,13 +269,20 @@ function applyAiDecision(conversation, text, seya, slots, decision) {
     };
   }
 
+  const fallbackReply = asksPrice(text)
+    ? priceReply(seya, qualification, conversation)
+    : "Merci. Dites-moi le soin ou la zone, je m’occupe de la suite.";
+  const reply = asksPrice(text) && !/€|euro|tarif|prix/i.test(decision.reply || "")
+    ? fallbackReply
+    : decision.reply || fallbackReply;
+
   return {
     conversation: withMessages(
       conversation,
       qualification,
       qualification.need ? "Qualifié" : "En cours",
       text,
-      decision.reply || "Merci. Dites-moi le soin ou la zone, je m’occupe de la suite.",
+      reply,
     ),
     shouldBook: null,
   };
@@ -279,7 +318,7 @@ function stripSlotList(value) {
 
 function cleanField(value) {
   const text = String(value || "").trim();
-  if (!text || /offre\s*\d+/i.test(text)) {
+  if (!text || /offre\s*\d+|lead meta|meta lead/i.test(text)) {
     return "";
   }
   return text.slice(0, 80);
