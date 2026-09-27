@@ -2,6 +2,7 @@
 
 import { CalendarCheck, MessageCircle, Search, Send } from "lucide-react";
 import { memo, useEffect, useMemo, useRef, useState } from "react";
+import { displayPersonName } from "@/lib/seya-person-name";
 import {
   inboxTag,
   inboxTagLabel,
@@ -107,7 +108,8 @@ const ConversationRow = memo(function ConversationRow({
     >
       <div className="flex items-start justify-between gap-2">
         <p className="truncate text-sm font-semibold text-slate-950">
-          {conversation.firstName} {conversation.lastName}
+          {displayPersonName(conversation.firstName, conversation.lastName) ||
+            conversation.phone}
         </p>
         <span className="shrink-0 text-[11px] font-medium text-slate-400">
           {conversation.messages.length}
@@ -179,7 +181,7 @@ export function SeyaInbox({
       if (!needle) {
         return true;
       }
-      const hay = `${conversation.firstName} ${conversation.lastName} ${conversation.phone} ${conversation.treatment} ${conversation.offerLabel || ""}`.toLowerCase();
+      const hay = `${displayPersonName(conversation.firstName, conversation.lastName)} ${conversation.phone} ${conversation.treatment} ${conversation.offerLabel || ""}`.toLowerCase();
       return hay.includes(needle);
     });
   }, [filter, inbox, query]);
@@ -265,7 +267,8 @@ export function SeyaInbox({
                 <div>
                   <div className="flex flex-wrap items-center gap-2">
                     <h2 className="text-base font-semibold">
-                      {selected.firstName} {selected.lastName}
+                      {displayPersonName(selected.firstName, selected.lastName) ||
+                        selected.phone}
                     </h2>
                     <span
                       className={`inline-flex rounded-full px-2 py-1 text-[11px] font-semibold ${statusStyles[selected.status]}`}
@@ -390,7 +393,8 @@ export function SeyaInbox({
                   <div>
                     <dt className="text-[11px] font-medium text-slate-400">Nom</dt>
                     <dd className="font-semibold">
-                      {selected.firstName} {selected.lastName}
+                      {displayPersonName(selected.firstName, selected.lastName) ||
+                        "—"}
                     </dd>
                   </div>
                   <div>

@@ -55,7 +55,7 @@ function applyBookingMessage(state, text, extras = {}) {
   const value = normalize(text);
   const now = extras.now instanceof Date ? extras.now : new Date();
 
-  if (/ventre|poids|minceur|cryo|graisse|cellulite/.test(value)) {
+  if (/ventre|poids|minceur|mincir|maigrir|cryo|graisse|cellulite/.test(value)) {
     next.serviceIntent = "minceur_ventre";
   }
 
@@ -113,9 +113,9 @@ function applyBookingMessage(state, text, extras = {}) {
     next.lastOfferedSlots.forEach((slot) => {
       next.rejectedDates = unique([...next.rejectedDates, slot.date]);
     });
-    if (/non jeudi|pas lundi|jeudi/.test(value) === false) {
-      next.pendingQuestion = "other_day";
-    }
+    next.requestedDate = null;
+    next.requestedWeekday = null;
+    next.pendingQuestion = "other_day";
   }
 
   if (/^non\s+jeudi/.test(value) || /non jeudi/.test(value)) {

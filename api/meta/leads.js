@@ -1,6 +1,8 @@
 /* eslint-disable @typescript-eslint/no-require-imports */
 const { createClient } = require("@supabase/supabase-js");
+const { careLabelForFamily, inferCareFamily } = require("../seya/care-family");
 const { welcomeNewLead } = require("../seya/welcome");
+const { resolvePersonName } = require("../../lib/seya-person-name");
 
 const GRAPH_VERSION = "v26.0";
 
@@ -222,20 +224,22 @@ function mapMetaLead(lead, change) {
     ]),
   );
 
-  const fullName =
-    pick(fields, ["full_name", "nom_complet", "name", "prenom_nom"]) || "Prospect Facebook";
-  const nameParts = splitName(fullName);
+  const person = resolvePersonName(fields, pick);
+  const rawTreatment =
+    pick(fields, ["service", "soin", "prestation", "traitement", "interet", "offre", "offer"]) ||
+    lead.ad_name ||
+    lead.campaign_name ||
+    "";
+  const family = inferCareFamily(
+    `${rawTreatment} ${lead.ad_name || ""} ${lead.campaign_name || ""}`,
+  );
 
   return {
-    firstName: pick(fields, ["first_name", "prenom"]) || nameParts.firstName,
-    lastName: pick(fields, ["last_name", "nom"]) || nameParts.lastName,
+    firstName: person.firstName || "Prospect",
+    lastName: person.lastName,
     email: pick(fields, ["email", "email_address", "adresse_email"]),
     phone: pick(fields, ["phone_number", "phone", "telephone", "numero_de_telephone"]),
-    treatment:
-      pick(fields, ["service", "soin", "prestation", "traitement", "interet", "offre", "offer"]) ||
-      lead.ad_name ||
-      lead.campaign_name ||
-      "",
+    treatment: careLabelForFamily(family) || rawTreatment,
     campaign: lead.campaign_name || change.campaignId || "Meta Lead Ads",
     rawFields: fields,
   };
@@ -306,7 +310,7 @@ async function createClientRecord(supabase, centerId, lead, sourceId, campaignId
     .insert({
       center_id: centerId,
       first_name: lead.firstName || "Prospect",
-      last_name: lead.lastName || "Facebook",
+      last_name: lead.lastName || "",
       phone: lead.phone || null,
       email: lead.email || null,
       source_id: sourceId,

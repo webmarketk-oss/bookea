@@ -1,6 +1,8 @@
 /* eslint-disable @typescript-eslint/no-require-imports */
 const { createClient } = require("@supabase/supabase-js");
 const { generateSeyaReply, hasAiKey } = require("./ai");
+const { inferCareFamily, pickApprovedTemplate } = require("./care-family");
+const { sanitizePersonName } = require("../../lib/seya-person-name");
 const {
   readHours,
   startConversation,
@@ -338,12 +340,13 @@ async function resolveCenterFromPhone(supabase, phone) {
             .maybeSingle()
         : { data: null };
 
+      const person = sanitizePersonName(client.first_name, client.last_name);
       return {
         centerId: client.center_id,
         clientId: client.id,
         leadId: lead.id,
-        firstName: client.first_name || "bonjour",
-        lastName: client.last_name || "",
+        firstName: person.firstName || "bonjour",
+        lastName: person.lastName,
         phone: client.phone || phone,
         treatment: service?.name || "",
         campaign: Array.isArray(lead.campaigns)
@@ -355,12 +358,13 @@ async function resolveCenterFromPhone(supabase, phone) {
   }
 
   const client = matched[0];
+  const person = sanitizePersonName(client.first_name, client.last_name);
   return {
     centerId: client.center_id,
     clientId: client.id,
     leadId: client.id,
-    firstName: client.first_name || "bonjour",
-    lastName: client.last_name || "",
+    firstName: person.firstName || "bonjour",
+    lastName: person.lastName,
     phone: client.phone || phone,
     treatment: "",
     status: "Nouveau",
@@ -789,19 +793,13 @@ function normalizeTemplateLanguage(value) {
   return code || "fr";
 }
 
-function pickApprovedTemplate(templates) {
-  const approved = templates.filter(
-    (item) => String(item.status || "").toUpperCase() === "APPROVED",
-  );
-  return (
-    approved.find((item) => item.name === "seya_accueil_minceur") ||
-    approved.find((item) => item.name === "seya_accueil") ||
-    approved.find((item) => item.name === "seya_accueil_") ||
-    approved.find((item) => item.name === "seya_accueil_dispo") ||
-    approved.find((item) => item.name === "hello_world") ||
-    approved[0] ||
-    null
-  );
+function pickWelcomeTemplate(templates, extras) {
+  const family =
+    extras.family ||
+    inferCareFamily(
+      `${extras.treatment || ""} ${extras.campaign || ""} ${extras.offerLabel || ""}`,
+    );
+  return pickApprovedTemplate(templates, family);
 }
 
 async function sendTemplateMessage(phoneNumberId, token, intl, template, vars) {
@@ -875,7 +873,7 @@ async function sendSharedWhatsApp(phone, text, extras = {}) {
   }
 
   const listed = await listTemplates();
-  let template = pickApprovedTemplate(listed.templates);
+  let template = pickWelcomeTemplate(listed.templates, extras);
   if (!template) {
     const ensured = await ensureSeyaTemplate();
     if (ensured.template && String(ensured.template.status || "").toUpperCase() === "APPROVED") {

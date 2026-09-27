@@ -29,10 +29,13 @@ const {
   conversationalReply,
   isHesitation,
   isIdentityQuestion,
+  isOffTopicComplaint,
   isThanks,
   refusesSlots,
   wantsSlots,
 } = require("./conversation");
+const { inferCareFamily } = require("./care-family");
+const { sanitizePersonName } = require("../../lib/seya-person-name");
 
 const weekdayNames = [
   "dimanche",
@@ -419,37 +422,11 @@ function resolveTreatmentBrief(seya, treatment) {
 
 function inferFamily(seya, campaign, treatment) {
   const offer = resolveOfferLabel(seya, campaign, treatment);
-  const hay = `${campaign || ""} ${treatment || ""} ${offer}`;
-  const direct = familyFromTreatment(hay);
-  if (direct) {
-    return direct;
-  }
-  const maps = agentSettings(seya).offerMaps || [];
-  const families = [
-    ...new Set(
-      maps
-        .map((item) => familyFromTreatment(`${item.match} ${item.label}`))
-        .filter(Boolean),
-    ),
-  ];
-  return families.length === 1 ? families[0] : "";
+  return familyFromTreatment(`${campaign || ""} ${treatment || ""} ${offer}`);
 }
 
 function familyFromTreatment(treatment) {
-  const needle = normalize(treatment);
-  if (!needle) {
-    return "";
-  }
-  if (aliases[0].keys.some((key) => needle.includes(key))) {
-    return "epilation";
-  }
-  if (aliases[1].keys.some((key) => needle.includes(key))) {
-    return "minceur";
-  }
-  if (aliases[2].keys.some((key) => needle.includes(key))) {
-    return "visage";
-  }
-  return "";
+  return inferCareFamily(treatment);
 }
 
 function defaultOfferForFamily(family) {
@@ -544,6 +521,8 @@ function extractNeed(text) {
     ["epilation", "Épilation laser"],
     ["definitive", "Épilation laser"],
     ["minceur", "Soin minceur"],
+    ["mincir", "Soin minceur"],
+    ["maigrir", "Soin minceur"],
     ["cryo", "Cryolipolyse"],
     ["ventre", "Soin minceur"],
     ["poids", "Soin minceur"],
@@ -570,7 +549,8 @@ function extractZone(text) {
     "visage",
     "ventre",
     "dos",
-    "cuisses",
+    "cuisse",
+    "hanche",
     "menton",
     "levre",
   ];
@@ -667,12 +647,13 @@ function startConversation(context, centerName, seya) {
     resolveOfferLabel(seya, context.campaign, treatment || context.treatment) ||
     defaultOfferForFamily(family);
   const opening = buildOpeningMessage(context, centerName, seya);
+  const person = sanitizePersonName(context.firstName, context.lastName);
 
   return {
     id: context.leadId,
     leadId: context.leadId,
-    firstName: context.firstName,
-    lastName: context.lastName,
+    firstName: person.firstName,
+    lastName: person.lastName,
     phone: context.phone,
     treatment:
       treatment ||
@@ -1058,6 +1039,20 @@ function applyLeadReply(conversation, text, seya, slots, extras = {}) {
   }
 
   if (isAwaitingHealthReview(conversation)) {
+    if (isOffTopicComplaint(text)) {
+      return finishLeadReply(
+        conversation,
+        qualification,
+        "Revue santé",
+        text,
+        `Vous avez raison, j’ai répondu à côté. ${awaitingHealthReply()}`,
+        bookingState,
+        {
+          healthReview: conversation.healthReview,
+          healthTask: conversation.healthTask,
+        },
+      );
+    }
     if (asksLocation(text) || asksPrice(text) || classifyPriceQuestion(text) || faqReply(text)) {
       const admin =
         faqReply(text) ||
@@ -1186,14 +1181,7 @@ function applyLeadReply(conversation, text, seya, slots, extras = {}) {
     !faqReply(text) &&
     !threadHasMedical(conversation, text) &&
     Boolean(qualification.need || conversation.treatment) &&
-    !isJunkTreatment(qualification.need || conversation.treatment) &&
-    (qualification.delay ||
-      qualification.availability ||
-      bookingState.requestedDate ||
-      bookingState.requestedWeekday != null ||
-      /rdv|creneau|créneau|dispo|semaine|lundi|mardi|mercredi|jeudi|vendredi|samedi|demain|aujourd/i.test(
-        normalize(text),
-      ));
+    !isJunkTreatment(qualification.need || conversation.treatment);
 
   if (readyToPropose && safeSlots.length === 0) {
     return finishLeadReply(
@@ -1223,13 +1211,60 @@ function applyLeadReply(conversation, text, seya, slots, extras = {}) {
     );
   }
 
-  const nextQuestion = nextQualificationQuestion(
-    qualification,
-    seya,
-    conversation.treatment,
-    conversation,
-    text,
-  );
+  if (isOffTopicComplaint(text)) {
+    const previous = lastOtherLeadText(conversation, text);
+    const previousHealth = classifyHealthMessage(previous);
+    if (previousHealth.personal) {
+      const resolved = resolveHealthSheet(seya, conversation, previous);
+      const review = startHealthReview(conversation, previous, resolved, "personal");
+      return finishLeadReply(
+        conversation,
+        qualification,
+        "Revue santé",
+        text,
+        `Vous avez raison, j’ai répondu à côté. ${personalHealthReply(resolved)}`,
+        { ...bookingState, pendingQuestion: "health" },
+        review,
+      );
+    }
+    if (asksLocation(previous)) {
+      return finishLeadReply(
+        conversation,
+        qualification,
+        qualification.need ? "Qualifié" : "En cours",
+        text,
+        `Vous avez raison. ${locationReply(extras.centerAddress, extras.centerName || "")}`,
+        { ...bookingState, pendingQuestion: "address" },
+      );
+    }
+    if (asksPrice(previous) || classifyPriceQuestion(previous)) {
+      return finishLeadReply(
+        conversation,
+        qualification,
+        qualification.need ? "Qualifié" : "En cours",
+        text,
+        `Vous avez raison. ${priceReply(seya, qualification, conversation, previous)}`,
+        markPriceAnswered({ ...bookingState, pendingQuestion: "price" }),
+      );
+    }
+    return finishLeadReply(
+      conversation,
+      qualification,
+      conversation.status || "En cours",
+      text,
+      "Vous avez raison, j’ai répondu à côté. Reposez votre question, je la prends tout de suite.",
+      bookingState,
+    );
+  }
+
+  const nextQuestion =
+    nextQualificationQuestion(
+      qualification,
+      seya,
+      conversation.treatment,
+      conversation,
+      text,
+    ) || fallbackAfterNote(qualification);
   return finishLeadReply(
     conversation,
     qualification,
@@ -1238,6 +1273,31 @@ function applyLeadReply(conversation, text, seya, slots, extras = {}) {
     nextQuestion,
     bookingState,
   );
+}
+
+function lastOtherLeadText(conversation, current) {
+  return (
+    [...(conversation?.messages || [])]
+      .reverse()
+      .find(
+        (item) =>
+          item.author === "lead" &&
+          String(item.text || "").trim() &&
+          String(item.text || "").trim() !== String(current || "").trim(),
+      )?.text || ""
+  );
+}
+
+function fallbackAfterNote(qualification) {
+  if (qualification?.zone) {
+    const zone = qualification.zone;
+    const label = /cuisse/.test(zone) ? "les cuisses" : `le ${zone}`;
+    return `C’est noté pour ${label}. Vous voulez que je vous propose un créneau ?`;
+  }
+  if (qualification?.need) {
+    return "Vous voulez que je vous propose un créneau, ou vous avez une autre question ?";
+  }
+  return "Vous cherchez plutôt du minceur, du visage ou de l’épilation ?";
 }
 
 function finishLeadReply(
@@ -1376,6 +1436,7 @@ module.exports = {
   resolveTreatmentBrief,
   resolveTreatmentPrice,
   startConversation,
+  inferFamily,
   suggestAvailableSlots,
   message,
 };

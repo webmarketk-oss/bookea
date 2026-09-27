@@ -116,3 +116,45 @@ test("20 questions imprévues : répondre à chacune sans ramener aux créneaux"
   assert.match(lastSeya(conversation), /ven\.|vendredi/i);
   assert.doesNotMatch(lastSeya(conversation), /lun\./i);
 });
+
+test("ne plus dire « je m’en souviens » : zone, créneaux, adresse, diabète", async () => {
+  let conversation = startConversation(
+    {
+      leadId: "lead-catastrophe",
+      centerId: "jfg-clinique-clermont",
+      firstName: "Alex",
+      lastName: "Test",
+      phone: "0611223344",
+      treatment: "",
+    },
+    "JFG Clinique Clermont",
+    seya,
+  );
+
+  conversation = await reply(conversation, "Je veux mincir des cuisses");
+  assert.match(lastSeya(conversation), /cuisses/i);
+  assert.doesNotMatch(lastSeya(conversation), /je m’en souviens|reste sur ce que/i);
+
+  conversation = await reply(conversation, "Alors tu proposes quoi");
+  assert.match(lastSeya(conversation), /09h00|10h00|lun\.|mar\./i);
+  assert.doesNotMatch(lastSeya(conversation), /je m’en souviens|reste sur ce que/i);
+
+  const firstSlots = lastSeya(conversation);
+  conversation = await reply(conversation, "Change de jour");
+  assert.doesNotMatch(lastSeya(conversation), /reste sur ce que/i);
+  if (/lun\. 28\/09/.test(firstSlots)) {
+    assert.doesNotMatch(lastSeya(conversation), /lun\. 28\/09/);
+  }
+
+  conversation = await reply(conversation, "Tu es situé où ?");
+  assert.match(lastSeya(conversation), /12 rue de la République/i);
+  assert.doesNotMatch(lastSeya(conversation), /09h00|lun\./i);
+
+  conversation = await reply(conversation, "J’ai du diabète ça pose pas de problème");
+  assert.match(lastSeya(conversation), /équipe|vérifi|transmet/i);
+  assert.doesNotMatch(lastSeya(conversation), /noté pour le ventre|je m’en souviens/i);
+
+  conversation = await reply(conversation, "C’est quoi le rapport");
+  assert.match(lastSeya(conversation), /équipe|vérifi|transmet|à côté/i);
+  assert.doesNotMatch(lastSeya(conversation), /reste sur ce que vous m’avez déjà dit/i);
+});

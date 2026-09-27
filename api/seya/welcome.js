@@ -1,4 +1,4 @@
-const { startConversation } = require("./agent");
+const { familyFromTreatment, inferFamily, startConversation } = require("./agent");
 const { sendSharedWhatsApp } = require("./whatsapp");
 
 async function welcomeNewLead(supabase, center, context) {
@@ -42,11 +42,22 @@ async function welcomeNewLead(supabase, center, context) {
     [...conversation.messages].reverse().find((item) => item.author === "seya")
       ?.text || "";
 
+  const family =
+    inferFamily(seya, context.campaign, context.treatment) ||
+    familyFromTreatment(
+      `${context.campaign || ""} ${context.treatment || ""} ${conversation.treatment || ""} ${conversation.offerLabel || ""}`,
+    );
   const result = await sendSharedWhatsApp(context.phone, opening, {
     firstName: context.firstName,
     centerName: center.name,
     treatment:
-      conversation.offerLabel || context.treatment || context.campaign || "",
+      conversation.treatment ||
+      conversation.offerLabel ||
+      context.treatment ||
+      "",
+    campaign: context.campaign || conversation.campaign || "",
+    offerLabel: conversation.offerLabel || "",
+    family,
     preferTemplate: true,
   });
 

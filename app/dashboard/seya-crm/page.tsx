@@ -48,6 +48,7 @@ import {
   BOOKEA_SHARED_WHATSAPP_NUMBER,
   formatSharedWhatsAppNumber,
 } from "@/lib/seya-whatsapp";
+import { displayPersonName } from "@/lib/seya-person-name";
 import { SeyaInbox } from "@/components/seya/seya-inbox";
 import type { Appointment } from "@/types/agenda";
 import type { Lead } from "@/types/lead";
@@ -131,7 +132,7 @@ function buildSeyaTasks({
     tasks.push({
       id: nextId++,
       title: "Relancer acompte en attente",
-      client: `${client.firstName} ${client.lastName}`.trim(),
+      client: displayPersonName(client.firstName, client.lastName),
       phone: client.phone,
       channel: "SMS",
       priority: "Haute",
@@ -169,7 +170,7 @@ function buildSeyaTasks({
     tasks.push({
       id: nextId++,
       title: "Relancer le prospect prévu aujourd'hui",
-      client: `${lead.firstName} ${lead.lastName}`.trim(),
+      client: displayPersonName(lead.firstName, lead.lastName),
       phone: lead.phone,
       channel: "WhatsApp",
       priority: "Haute",
@@ -182,7 +183,7 @@ function buildSeyaTasks({
     tasks.push({
       id: nextId++,
       title: "Anniversaire cliente",
-      client: `${client.firstName} ${client.lastName}`.trim(),
+      client: displayPersonName(client.firstName, client.lastName),
       phone: client.phone,
       channel: "Email",
       priority: "Basse",
@@ -610,7 +611,10 @@ export default function SeyaCrmPage() {
     try {
       const created = await createCrmAppointment({
         id: `seya-${Date.now()}`,
-        personName: `${selectedConversation.firstName} ${selectedConversation.lastName}`.trim(),
+        personName: displayPersonName(
+          selectedConversation.firstName,
+          selectedConversation.lastName,
+        ),
         phone: selectedConversation.phone,
         treatment,
         practitionerId: practitioners[0]?.id ?? "samantha",

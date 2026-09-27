@@ -1,0 +1,71 @@
+const test = require("node:test");
+const assert = require("node:assert/strict");
+const {
+  inferCareFamily,
+  pickApprovedTemplate,
+} = require("./care-family");
+const {
+  resolvePersonName,
+  sanitizePersonName,
+} = require("../../lib/seya-person-name");
+
+const templates = [
+  { name: "seya_accueil_minceur", status: "APPROVED" },
+  { name: "seya_accueil_laser", status: "APPROVED" },
+  { name: "seya_accueil_visage", status: "APPROVED" },
+  { name: "seya_accueil_", status: "APPROVED" },
+  { name: "hello_world", status: "APPROVED" },
+];
+
+test("Ferrand JFG n’est pas un nom de famille", () => {
+  const person = sanitizePersonName("malerika", "FERRAND JFG");
+  assert.equal(person.firstName, "malerika");
+  assert.equal(person.lastName, "");
+});
+
+test("un vrai nom de famille est conservé", () => {
+  const person = sanitizePersonName("Cynthia", "Martin");
+  assert.equal(person.lastName, "Martin");
+});
+
+test("le champ nom du centre ne devient pas le nom du lead", () => {
+  const person = resolvePersonName(
+    {
+      first_name: "Samantha",
+      nom: "FERRAND JFG",
+      last_name: "",
+    },
+    (fields, names) => {
+      for (const name of names) {
+        if (fields[name]) return fields[name];
+      }
+      return "";
+    },
+  );
+  assert.equal(person.firstName, "Samantha");
+  assert.equal(person.lastName, "");
+});
+
+test("un lead laser ne prend pas le template minceur", () => {
+  const picked = pickApprovedTemplate(templates, inferCareFamily("Épilation laser JFG"));
+  assert.equal(picked.name, "seya_accueil_laser");
+});
+
+test("un lead minceur prend le template minceur", () => {
+  const picked = pickApprovedTemplate(templates, inferCareFamily("Soin minceur"));
+  assert.equal(picked.name, "seya_accueil_minceur");
+});
+
+test("un lead visage prend le template visage", () => {
+  const picked = pickApprovedTemplate(templates, inferCareFamily("Hydrafacial"));
+  assert.equal(picked.name, "seya_accueil_visage");
+});
+
+test("sans soin connu : template générique, jamais minceur par défaut", () => {
+  const picked = pickApprovedTemplate(templates, inferCareFamily("Meta Lead Ads"));
+  assert.equal(picked.name, "seya_accueil_");
+});
+
+test("bilan laser reste du laser", () => {
+  assert.equal(inferCareFamily("Bilan laser offert FERRAND JFG"), "epilation");
+});

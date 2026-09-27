@@ -9,6 +9,13 @@ function normalize(value) {
     .replace(/['’]/g, "'");
 }
 
+function isOffTopicComplaint(text) {
+  const value = normalize(text);
+  return /c[' ]est quoi le rapport|essaie de comprendre|comprendre mes questions|tu (n[' ]as pas |n[' ]a pas )?compris|hors sujet|rien a voir/.test(
+    value,
+  );
+}
+
 function isIdentityQuestion(text) {
   const value = normalize(text);
   return /tu es (une )?ia|t[' ]es une ia|vous etes (une )?ia|c[' ]est une ia|je parle (a|à) un robot|assistante virtuelle|chatbot|intelligence artificielle/.test(
@@ -44,7 +51,8 @@ function wantsSlots(text) {
     isHesitation(text) ||
     refusesSlots(text) ||
     classifyPriceQuestion(text) ||
-    isPriceRepeatComplaint(text)
+    isPriceRepeatComplaint(text) ||
+    isOffTopicComplaint(text)
   ) {
     return false;
   }
@@ -59,8 +67,11 @@ function wantsSlots(text) {
   }
   const namesDay = /\b(lundi|mardi|mercredi|jeudi|vendredi|samedi|demain|aujourd)\b/.test(value);
   const refusedDay = /pas (dispo|disponible) le |pas le |je ne suis pas disponible/.test(value);
+  if (/change de jour|un autre jour|autres? horaires|pas ce jour|d[' ]autres creneaux/.test(value)) {
+    return true;
+  }
   const asksAgenda =
-    /dispo|creneau|horaire|rendez-vous|\brdv\b|de la place|voir les (heures|horaires)|quand (puis-je|je peux) (venir|passer)|un creneau/.test(
+    /dispo|creneau|horaire|rendez-vous|\brdv\b|de la place|voir les (heures|horaires)|quand (puis-je|je peux) (venir|passer)|un creneau|(tu|vous) (me )?proposes?|propose quoi|t[' ]as quoi/.test(
       value,
     );
   return asksAgenda || (namesDay && !refusedDay);
@@ -131,28 +142,35 @@ function conversationalReply(text, conversation, qualification) {
   if (/je me suis trompe|je voulais (plutot |le )?(lundi|mardi|mercredi|jeudi|vendredi|samedi)/.test(value)) {
     return "";
   }
+  if (
+    /c[' ]est quoi le rapport|essaie de comprendre|tu (n[' ]as pas |n[' ]a pas )?compris|hors sujet|rien a voir/.test(
+      value,
+    )
+  ) {
+    return "";
+  }
+  if (wantsSlots(text)) {
+    return "";
+  }
 
   const zone = qualification?.zone;
   const need = qualification?.need;
   if (!need) {
     return "Vous cherchez plutôt du minceur, du visage ou de l’épilation ?";
   }
+  if (zone && /cuisse|ventre|jambe|bras|dos|maillot|aisselle|hanche/.test(value)) {
+    const label = zone.startsWith("cuisse") ? "les cuisses" : `le ${zone}`;
+    return `C’est noté pour ${label}. Vous voulez que je vous propose un créneau ?`;
+  }
   if (!zone && /minceur|cryo|epilation|laser/i.test(need)) {
     return "C’est noté. Quelle zone souhaitez-vous travailler ?";
   }
-  if (/bonjour|hello|salut/.test(value) && /ventre|poids|minceur/.test(value)) {
+  if (/bonjour|hello|salut/.test(value) && /ventre|poids|minceur|mincir/.test(value)) {
     return zone
       ? `C’est noté pour le ${zone}.`
       : "C’est noté pour le ventre.";
   }
-  return pickFresh(
-    [
-      zone ? `C’est noté pour le ${zone}.` : "D’accord, je m’en souviens.",
-      "Oui, je reste sur ce que vous m’avez déjà dit.",
-      "Très bien.",
-    ],
-    conversation,
-  );
+  return "";
 }
 
 function composeReplies(parts) {
@@ -164,6 +182,7 @@ module.exports = {
   composeReplies,
   conversationalReply,
   identityReply,
+  isOffTopicComplaint,
   isHesitation,
   isIdentityQuestion,
   isThanks,

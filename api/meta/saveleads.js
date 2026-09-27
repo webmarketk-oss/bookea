@@ -1,6 +1,8 @@
 /* eslint-disable @typescript-eslint/no-require-imports */
 const { createClient } = require("@supabase/supabase-js");
+const { careLabelForFamily, inferCareFamily } = require("../seya/care-family");
 const { welcomeNewLead } = require("../seya/welcome");
+const { resolvePersonName } = require("../../lib/seya-person-name");
 
 module.exports = async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
@@ -117,19 +119,24 @@ function parsePayload(body) {
   return body;
 }
 
+function pickExact(fields, names) {
+  for (const name of names) {
+    if (fields[name]) {
+      return String(fields[name]).trim();
+    }
+  }
+  return "";
+}
+
 function mapIncomingLead(payload) {
   const fields = flattenFields(payload);
-  const fullName =
-    pick(fields, ["full_name", "nom_complet", "name", "prenom_nom"]) || "";
-  const nameParts = splitName(fullName);
+  const person = resolvePersonName(fields, pickExact);
   const formName = pick(fields, [
     "form_name",
     "form",
     "campaign",
     "campagne",
     "campaign_name",
-    "offre",
-    "offer",
   ]);
   const pageName = pick(fields, ["page_name", "page"]);
   const adName = pick(fields, ["ad_name", "ad", "adset_name", "publicite"]);
@@ -151,10 +158,8 @@ function mapIncomingLead(payload) {
   );
 
   return {
-    firstName:
-      pick(fields, ["first_name", "prenom", "firstname"]) || nameParts.firstName,
-    lastName:
-      pick(fields, ["last_name", "nom", "lastname"]) || nameParts.lastName,
+    firstName: person.firstName || "Prospect",
+    lastName: person.lastName,
     email: pick(fields, ["email", "email_address", "mail"]),
     phone: pick(fields, ["phone", "phone_number", "telephone", "tel", "mobile"]),
     treatment,
@@ -181,20 +186,7 @@ function isJunkIncoming(value) {
 }
 
 function inferTreatmentFromBlob(text) {
-  const needle = String(text || "")
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "");
-  if (/minceur|cryo|bilan|decouverte|ventre|poids|cellulite/.test(needle)) {
-    return "Soin minceur";
-  }
-  if (/epilation|laser|definitive/.test(needle)) {
-    return "Épilation définitive";
-  }
-  if (/visage|hydrafacial|peau|acne/.test(needle)) {
-    return "Soin visage";
-  }
-  return "";
+  return careLabelForFamily(inferCareFamily(text));
 }
 
 function cleanIncomingTreatment(value, fields) {
@@ -336,7 +328,7 @@ async function createClientRecord(supabase, centerId, lead, sourceId, campaignId
     .insert({
       center_id: centerId,
       first_name: lead.firstName || "Prospect",
-      last_name: lead.lastName || "Meta",
+      last_name: lead.lastName || "",
       phone: lead.phone || null,
       email: lead.email || null,
       source_id: sourceId,

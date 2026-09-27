@@ -1,5 +1,6 @@
 import { getActiveCenterContext } from "@/lib/center-access";
 import { toDateOnlyIso, toLocalIsoDate } from "@/lib/crm-stats";
+import { sanitizePersonName } from "@/lib/seya-person-name";
 import { createClient } from "@/lib/supabase";
 import { normalizeLeadStatus } from "@/lib/lead-statuses";
 import type { Lead, LeadActivity, LeadStatus } from "@/types/lead";
@@ -1370,10 +1371,11 @@ function toLead(row: LeadRow): Lead {
     });
   }
 
+  const person = sanitizePersonName(client?.first_name, client?.last_name);
   return {
     id: row.id,
-    firstName: client?.first_name || "Prospect",
-    lastName: client?.last_name || "",
+    firstName: person.firstName || "Prospect",
+    lastName: person.lastName,
     phone: client?.phone || "",
     email: client?.email || "",
     birthDate: client?.birthdate ? client.birthdate.slice(0, 10) : "",
@@ -1456,10 +1458,11 @@ function toCrmClient(row: ClientRow): CrmClient {
     relationObject(latestLead?.services)?.name ??
     "À compléter";
 
+  const person = sanitizePersonName(row.first_name, row.last_name);
   return {
     id: row.id,
-    firstName: row.first_name || "Cliente",
-    lastName: row.last_name || "",
+    firstName: person.firstName || "Cliente",
+    lastName: person.lastName,
     phone: row.phone || "",
     email: row.email || "",
     birthDate: row.birthdate ? formatDisplayDateForCrm(row.birthdate) : "À compléter",

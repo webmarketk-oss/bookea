@@ -30,7 +30,7 @@ const {
 } = require("./booking-state");
 const { classifyHealthMessage, isAwaitingHealthReview } = require("./health");
 const { classifyPriceQuestion, isPriceRepeatComplaint } = require("./price");
-const { isHesitation, isIdentityQuestion, isThanks, refusesSlots, wantsSlots } = require("./conversation");
+const { isHesitation, isIdentityQuestion, isOffTopicComplaint, isThanks, refusesSlots, wantsSlots } = require("./conversation");
 
 const ALLOWED_ACTIONS = new Set([
   "continue",
@@ -103,7 +103,10 @@ async function generateSeyaReply({
     isIdentityQuestion(text) ||
     isThanks(text) ||
     isHesitation(text) ||
-    refusesSlots(text)
+    refusesSlots(text) ||
+    wantsSlots(text) ||
+    asksLocation(text) ||
+    isOffTopicComplaint(text)
   ) {
     return { ...fallback, via: "rules" };
   }

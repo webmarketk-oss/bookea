@@ -1,4 +1,5 @@
 import { getActiveCenterContext } from "@/lib/center-access";
+import { sanitizePersonName } from "@/lib/seya-person-name";
 import { createClient } from "@/lib/supabase";
 
 export const SEYA_SETTINGS_UPDATED_EVENT = "bookea-seya-settings-updated";
@@ -448,18 +449,7 @@ export function inferFamilyFromSettings(
   treatment?: string | null,
 ) {
   const offer = resolveOfferLabel(settings, campaign, treatment);
-  const direct = familyFromTreatment(`${campaign || ""} ${treatment || ""} ${offer}`);
-  if (direct) {
-    return direct;
-  }
-  const families = [
-    ...new Set(
-      settings.offerMaps
-        .map((item) => familyFromTreatment(`${item.match} ${item.label}`))
-        .filter(Boolean),
-    ),
-  ];
-  return families.length === 1 ? families[0] : "";
+  return familyFromTreatment(`${campaign || ""} ${treatment || ""} ${offer}`);
 }
 
 function familyFromTreatment(treatment?: string | null) {
@@ -854,7 +844,12 @@ export function mergeSeyaConversations(
       }
       const current = merged.get(item.leadId);
       if (!current || String(item.updatedAt || "") >= String(current.updatedAt || "")) {
-        merged.set(item.leadId, item);
+        const person = sanitizePersonName(item.firstName, item.lastName);
+        merged.set(item.leadId, {
+          ...item,
+          firstName: person.firstName,
+          lastName: person.lastName,
+        });
       }
     }
   }

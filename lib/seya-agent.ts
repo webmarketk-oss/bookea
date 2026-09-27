@@ -1,5 +1,6 @@
 import { addDaysIso, todayIso } from "@/lib/crm-stats";
 import type { CenterDayHours } from "@/lib/center-hours";
+import { sanitizePersonName } from "@/lib/seya-person-name";
 import {
   asksSeyaPrice,
   isJunkTreatmentName,
@@ -92,11 +93,12 @@ export function startSeyaConversation({
           ? "l’épilation définitive"
           : "");
 
+  const person = sanitizePersonName(lead.firstName, lead.lastName);
   return {
     id: lead.id,
     leadId: lead.id,
-    firstName: lead.firstName,
-    lastName: lead.lastName,
+    firstName: person.firstName,
+    lastName: person.lastName,
     phone: lead.phone,
     treatment,
     campaign: lead.campaign,

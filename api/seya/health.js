@@ -74,14 +74,17 @@ function isPersonalHealthSituation(value) {
       value,
     );
   const namedCondition =
-    /pacemaker|stimulateur|enceinte|grossesse|cancer|chimio|roaccutane|accutane|implant|cardiaque|\bcoeur\b|maladie|traitement|medicament/.test(
+    /pacemaker|stimulateur|enceinte|grossesse|cancer|chimio|roaccutane|accutane|implant|cardiaque|\bcoeur\b|maladie|traitement|medicament|diabete|insuline|thyroide|tension/.test(
       value,
     );
   const asksIfPossible =
-    /je (peux|puis)|c[' ]est possible|est-ce possible|puis-je|je peux faire/.test(
+    /je (peux|puis)|c[' ]est possible|est-ce possible|puis-je|je peux faire|pose (pas )?de probleme|pas de probleme/.test(
       value,
     );
-  if (ownSituation && (namedCondition || asksIfPossible || /cryo|seance|soin|bilan/.test(value))) {
+  if (ownSituation && namedCondition) {
+    return true;
+  }
+  if (ownSituation && (asksIfPossible || /cryo|seance|soin|bilan/.test(value))) {
     return true;
   }
   if (ownSituation && /sante|traitement|enceinte|grossesse/.test(value)) {
