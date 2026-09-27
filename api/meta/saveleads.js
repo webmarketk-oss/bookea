@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/no-require-imports */
 const { createClient } = require("@supabase/supabase-js");
+const { welcomeNewLead } = require("../seya/welcome");
 
 module.exports = async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
@@ -62,12 +63,28 @@ module.exports = async function handler(req, res) {
       possibleDuplicate: Boolean(existingId),
     });
 
+    let whatsapp = { sent: false, skipped: "no_phone" };
+    if (mapped.phone) {
+      whatsapp = await welcomeNewLead(supabase, center, {
+        leadId,
+        firstName: mapped.firstName,
+        lastName: mapped.lastName,
+        phone: mapped.phone,
+        treatment: mapped.treatment,
+        campaign: mapped.campaign,
+      }).catch((error) => {
+        console.error("[meta/saveleads] seya welcome", error);
+        return { sent: false, skipped: "welcome_failed" };
+      });
+    }
+
     return res.status(200).json({
       ok: true,
       duplicate: Boolean(existingId),
       id: leadId,
       center: center.slug,
       center_name: center.name,
+      whatsapp,
     });
   } catch (error) {
     console.error("[meta/saveleads]", error);
@@ -189,7 +206,7 @@ async function importPostedLead(supabase, centerId, mapped, options = {}) {
 async function findCenter(supabase, slug) {
   const { data, error } = await supabase
     .from("centers")
-    .select("id,name,slug")
+    .select("id,name,slug,settings")
     .eq("slug", String(slug).trim().toLowerCase())
     .maybeSingle();
 

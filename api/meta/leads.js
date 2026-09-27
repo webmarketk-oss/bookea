@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/no-require-imports */
 const { createClient } = require("@supabase/supabase-js");
+const { welcomeNewLead } = require("../seya/welcome");
 
 const GRAPH_VERSION = "v26.0";
 
@@ -148,6 +149,26 @@ async function importMetaLead(supabase, change) {
     event_type: "system",
     note,
   });
+
+  if (mapped.phone) {
+    const { data: center } = await supabase
+      .from("centers")
+      .select("id,name,slug,settings")
+      .eq("id", centerId)
+      .maybeSingle();
+    if (center) {
+      await welcomeNewLead(supabase, center, {
+        leadId: crmLead.id,
+        firstName: mapped.firstName,
+        lastName: mapped.lastName,
+        phone: mapped.phone,
+        treatment: mapped.treatment,
+        campaign: mapped.campaign,
+      }).catch((error) => {
+        console.error("[meta/leads] seya welcome", error);
+      });
+    }
+  }
 }
 
 async function resolveMetaPageAccessToken(supabase, pageId) {
