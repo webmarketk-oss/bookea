@@ -110,7 +110,33 @@ function isOptOut(text) {
 }
 
 function asksPrice(text) {
-  return /prix|tarif|combien|co[uû]te|\bcout\b/i.test(String(text || ""));
+  const raw = String(text || "");
+  if (/combien de (temps|seance|seances|rdv|fois|jours)/i.test(raw)) {
+    return false;
+  }
+  return /prix|tarif|co[uû]te|\bcout\b|donne le prix|c['’ ]?est combien|combien (coute|le bilan)/i.test(
+    raw,
+  );
+}
+
+function faqReply(text) {
+  const value = normalize(text);
+  if (/^\?+$/.test(String(text || "").trim())) {
+    return "Dites-moi ce que vous voulez savoir : le bilan (il est gratuit), un créneau, ou autre chose ?";
+  }
+  if (/gratuit|offert/.test(value) && /bilan|decouverte|seance/.test(value)) {
+    return "Oui, le bilan et la séance découverte sont offerts, c’est gratuit. On y fait une analyse corporelle pour établir un devis personnalisé. Quand seriez-vous disponible ?";
+  }
+  if (/resultat/.test(value) || /combien de temps.*result/.test(value)) {
+    return "Les résultats dépendent de la zone et du protocole. On vous les explique au bilan, qui est gratuit. Quand seriez-vous disponible ?";
+  }
+  if (/combien de temps dure|duree|dure (le )?(rdv|bilan|rendez-vous)/.test(value)) {
+    return "Le bilan dure environ 30 à 45 minutes, et il est gratuit. Quel jour vous irait ?";
+  }
+  if (/fait mal|douloureux|douleur/.test(value)) {
+    return "Le bilan est indolore. Pour une séance, ça dépend de la zone, on vous l’explique sur place. Vous voulez un créneau bilan ?";
+  }
+  return "";
 }
 
 function asksLocation(text) {
@@ -120,7 +146,7 @@ function asksLocation(text) {
 }
 
 const BILAN_PRICE_REPLY =
-  "Le bilan permet de faire une analyse corporelle pour vous établir un devis personnalisé. Je peux vous proposer un créneau pour ce bilan — quand seriez-vous disponible ?";
+  "Le bilan et la séance découverte sont offerts, c’est gratuit. On y fait une analyse corporelle pour établir un devis personnalisé. Quand seriez-vous disponible ?";
 
 function locationReply(address, centerName) {
   if (address) {
@@ -653,6 +679,18 @@ function startConversation(context, centerName, seya) {
   };
 }
 
+function upcomingDatesForWeekday(weekday, days = 45) {
+  const dates = [];
+  const today = todayIso();
+  for (let offset = 0; offset < days; offset += 1) {
+    const date = addDaysIso(today, offset);
+    if (new Date(`${date}T12:00:00`).getDay() === weekday) {
+      dates.push(date);
+    }
+  }
+  return dates;
+}
+
 function parseFrenchDate(text) {
   const value = normalize(text);
   const months = {
@@ -707,14 +745,41 @@ function parseDayRequest(text, conversation) {
     .filter((index) => index >= 0);
   const excludeWeekdays = [];
   const excludeDates = [];
+  const wantsAnother =
+    /suivant|prochain|un autre (lundi|mardi|mercredi|jeudi|vendredi|samedi)|autre lundi|lundi suivant/.test(
+      value,
+    );
 
   for (const [index, day] of weekdayNames.entries()) {
+    const numbered = value.match(
+      new RegExp(`(?:pas (?:dispo|disponible) )?le ${day}\\s*(\\d{1,2})`),
+    );
+    if (numbered) {
+      const dayNum = Number(numbered[1]);
+      excludeDates.push(
+        ...upcomingDatesForWeekday(index, 45).filter(
+          (date) => Number(date.slice(-2)) === dayNum,
+        ),
+      );
+      continue;
+    }
     if (
-      new RegExp(`pas (dispo|disponible).*${day}|pas le ${day}|pas ${day}`).test(
+      !wantsAnother &&
+      new RegExp(`pas (dispo|disponible).*${day}(?!\\s*\\d)|pas le ${day}(?!\\s*\\d)`).test(
         value,
       )
     ) {
       excludeWeekdays.push(index);
+    }
+  }
+
+  if (wantsAnother) {
+    excludeDates.push(...proposedDates);
+    for (const weekday of weekdays.length ? weekdays : proposedWeekdays) {
+      const first = upcomingDatesForWeekday(weekday, 14)[0];
+      if (first) {
+        excludeDates.push(first);
+      }
     }
   }
 
@@ -724,7 +789,9 @@ function parseDayRequest(text, conversation) {
     )
   ) {
     excludeDates.push(...proposedDates);
-    excludeWeekdays.push(...proposedWeekdays);
+    if (!wantsAnother) {
+      excludeWeekdays.push(...proposedWeekdays);
+    }
   }
 
   const stored = weekdayNames
@@ -909,6 +976,24 @@ function applyLeadReply(conversation, text, seya, slots, extras = {}) {
     };
   }
 
+  const faq = faqReply(text);
+  if (faq) {
+    return {
+      conversation: {
+        ...conversation,
+        qualification,
+        status: qualification.need ? "Qualifié" : "En cours",
+        messages: [
+          ...(conversation.messages || []),
+          message("lead", text),
+          message("seya", faq),
+        ],
+        updatedAt: new Date().toISOString(),
+      },
+      shouldBook: null,
+    };
+  }
+
   if (asksLocation(text)) {
     return {
       conversation: {
@@ -991,6 +1076,7 @@ function applyLeadReply(conversation, text, seya, slots, extras = {}) {
     settings.bookAppointment &&
     !asksPrice(text) &&
     !asksLocation(text) &&
+    !faqReply(text) &&
     !threadHasMedical(conversation, text) &&
     Boolean(qualification.need || conversation.treatment) &&
     !isJunkTreatment(qualification.need || conversation.treatment) &&
@@ -1122,6 +1208,7 @@ module.exports = {
   relanceCopy,
   asksLocation,
   asksPrice,
+  faqReply,
   displayCareLabel,
   locationReply,
   pickSlotsForMessage,

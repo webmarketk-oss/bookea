@@ -448,7 +448,7 @@ function priceReply(
   if (price && /analyse corporelle|devis personnalisé/i.test(price)) {
     return price;
   }
-  return "Le bilan permet de faire une analyse corporelle pour vous établir un devis personnalisé. Je peux vous proposer un créneau pour ce bilan — quand seriez-vous disponible ?";
+  return "Le bilan et la séance découverte sont offerts, c’est gratuit. On y fait une analyse corporelle pour établir un devis personnalisé. Quand seriez-vous disponible ?";
 }
 
 function mergeQualification(current: SeyaQualification, text: string) {

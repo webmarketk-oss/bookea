@@ -104,7 +104,7 @@ export const defaultTreatmentBriefs: SeyaTreatmentBrief[] = [
   {
     name: "Soin minceur",
     price:
-      "Le bilan permet de faire une analyse corporelle pour vous établir un devis personnalisé. Je peux vous proposer un créneau pour ce bilan — quand seriez-vous disponible ?",
+      "Le bilan et la séance découverte sont offerts, c’est gratuit. On y fait une analyse corporelle pour établir un devis personnalisé. Quand seriez-vous disponible ?",
     brief:
       "Parle comme une réceptionniste. Demande la zone. Ne parle de prix que si on te le demande. Pas de liste de créneaux à la place du tarif.",
     opening:
@@ -121,7 +121,7 @@ export const defaultTreatmentBriefs: SeyaTreatmentBrief[] = [
   {
     name: "Cryolipolyse",
     price:
-      "Le bilan permet de faire une analyse corporelle pour vous établir un devis personnalisé. Je peux vous proposer un créneau pour ce bilan — quand seriez-vous disponible ?",
+      "Le bilan et la séance découverte sont offerts, c’est gratuit. On y fait une analyse corporelle pour établir un devis personnalisé. Quand seriez-vous disponible ?",
     brief:
       "Parle comme une réceptionniste. Ne parle de prix que si on te le demande. Contre-indication : transmets à l’équipe.",
     opening:

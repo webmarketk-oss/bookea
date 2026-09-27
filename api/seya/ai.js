@@ -4,6 +4,7 @@ const {
   applyLeadReply,
   asksLocation,
   asksPrice,
+  faqReply,
   hasMedicalFlag,
   humanSlotReply,
   isJunkTreatment,
@@ -167,8 +168,11 @@ function buildSystemPrompt({
     "- Une seule question à la fois. Réponds d’abord à ce qu’ils viennent d’écrire.",
     "- Pacemaker, grossesse, doute médical : action=handoff. Ne booke pas. L’équipe vérifie.",
     "- S’ils donnent encore un horaire après un doute médical : handoff, « je transmets à l’équipe ».",
-    "- Prix : tu n’en parles JAMAIS si elle n’en parle pas. Pas de 500€, pas de 10 fois, pas de « c’est offert », tant qu’elle n’a pas dit prix / tarif / combien.",
-    "- Prix / combien : action=continue. Dis exactement : « Le bilan permet de faire une analyse corporelle pour vous établir un devis personnalisé. Je peux vous proposer un créneau pour ce bilan — quand seriez-vous disponible ? » Pas de créneaux chiffrés dans cette réponse.",
+    "- Prix : tu n’en parles JAMAIS si elle n’en parle pas.",
+    "- « Combien de temps » n’est PAS une question prix. Réponds à la durée ou aux résultats.",
+    "- Si elle demande le prix / si le bilan est gratuit : action=continue. Dis : « Le bilan et la séance découverte sont offerts, c’est gratuit. On y fait une analyse corporelle pour un devis personnalisé. Quand seriez-vous disponible ? »",
+    "- Douleur : le bilan est indolore. Durée : 30 à 45 min. Résultats : expliqués au bilan.",
+    "- « Lundi suivant » / « pas le 28, un autre lundi » : un autre lundi, jamais le même.",
     "- Où / adresse : action=continue, donne l’adresse. Pas de créneaux.",
     "- Si elle dit jeudi, propose UNIQUEMENT des jeudis. Jamais un lundi à la place.",
     "- Si elle refuse un jour (« pas lundi », « change de jour »), ne repropose jamais ces mêmes créneaux.",
@@ -215,7 +219,7 @@ function applyAiDecision(conversation, text, seya, slots, decision, extras = {})
     action = "handoff";
   }
   if (
-    (asksPrice(text) || asksLocation(text)) &&
+    (asksPrice(text) || asksLocation(text) || faqReply(text)) &&
     (action === "stop" || action === "propose_slots" || action === "book")
   ) {
     action = "continue";
@@ -289,13 +293,15 @@ function applyAiDecision(conversation, text, seya, slots, decision, extras = {})
     };
   }
 
-  const fallbackReply = asksLocation(text)
-    ? locationReply(extras.centerAddress, extras.centerName)
-    : asksPrice(text)
-      ? priceReply(seya, qualification, conversation)
-      : "Merci. Dites-moi le soin ou la zone, je m’occupe de la suite.";
+  const fallbackReply =
+    faqReply(text) ||
+    (asksLocation(text)
+      ? locationReply(extras.centerAddress, extras.centerName)
+      : asksPrice(text)
+        ? priceReply(seya, qualification, conversation)
+        : "Merci. Dites-moi le soin ou la zone, je m’occupe de la suite.");
   const reply =
-    asksLocation(text) || asksPrice(text)
+    faqReply(text) || asksLocation(text) || asksPrice(text)
       ? fallbackReply
       : decision.reply || fallbackReply;
 
