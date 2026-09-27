@@ -430,6 +430,10 @@ export default function SeyaCrmPage() {
             centerName,
             treatment:
               conversation.qualification?.need || conversation.treatment || "",
+            preferTemplate:
+              conversation.status === "À envoyer" ||
+              Boolean(conversation.sendError) ||
+              !conversation.messages.some((item) => item.author === "lead"),
           }),
         });
         const payload = (await response.json().catch(() => ({}))) as {
@@ -438,6 +442,11 @@ export default function SeyaCrmPage() {
           error?: string;
         };
         if (!payload.sent) {
+          updateConversation({
+            ...conversation,
+            sendError: payload.error || payload.reason || "échec WhatsApp",
+            updatedAt: new Date().toISOString(),
+          });
           if (payload.reason === "template_required") {
             setAgentFeedback(
               "Meta exige un modèle pour le premier message. On le crée ensuite dans le Gestionnaire WhatsApp.",
@@ -463,6 +472,8 @@ export default function SeyaCrmPage() {
     const next: SeyaConversation = {
       ...conversation,
       status: conversation.status === "À envoyer" ? "En cours" : conversation.status,
+      sendError: null,
+      sentVia: "whatsapp",
       updatedAt: new Date().toISOString(),
     };
     updateConversation(next);

@@ -425,7 +425,7 @@ function startConversation(context, centerName, seya) {
     treatment,
     campaign: context.campaign || "",
     offerLabel: offer,
-    status: "En cours",
+    status: "À envoyer",
     qualification: { need: treatment, zone: "", delay: "", availability: "" },
     proposedSlots: [],
     messages: [message("seya", opening)],

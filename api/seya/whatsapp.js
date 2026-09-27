@@ -63,6 +63,7 @@ async function handler(req, res) {
         firstName: payload.firstName,
         centerName: payload.centerName,
         treatment: payload.treatment,
+        preferTemplate: Boolean(payload.preferTemplate),
       });
       return res.status(result.sent ? 200 : 409).json(result);
     }
@@ -585,7 +586,14 @@ function templateVarCount(template) {
   const body = (template.components || []).find(
     (item) => String(item.type || "").toUpperCase() === "BODY",
   );
-  return ((body?.text || "").match(/\{\{\d+\}\}/g) || []).length;
+  const counted = ((body?.text || "").match(/\{\{\d+\}\}/g) || []).length;
+  if (counted > 0) {
+    return counted;
+  }
+  if (/^seya_accueil/i.test(String(template.name || ""))) {
+    return 3;
+  }
+  return 0;
 }
 
 function isTemplateRequired(error) {
@@ -615,6 +623,9 @@ function frenchSendError(error, fallback) {
   }
   if (code === 131030) {
     return "Ce numéro destinataire n’est pas autorisé (mode test Meta).";
+  }
+  if (code === 131026) {
+    return "Ce numéro n’a pas WhatsApp, ou le format est invalide.";
   }
   if (isTemplateRequired(error)) {
     return "Meta bloque le premier message tant qu’un modèle WhatsApp n’est pas approuvé.";
@@ -724,13 +735,24 @@ async function ensureSeyaTemplate() {
   };
 }
 
+function normalizeTemplateLanguage(value) {
+  const code = String(value || "fr").trim().toLowerCase();
+  if (code === "fr" || code.startsWith("fr_")) {
+    return code === "fr" ? "fr" : code;
+  }
+  if (code.startsWith("en")) {
+    return code === "en" ? "en_US" : code;
+  }
+  return code || "fr";
+}
+
 function pickApprovedTemplate(templates) {
   const approved = templates.filter(
     (item) => String(item.status || "").toUpperCase() === "APPROVED",
   );
   return (
-    approved.find((item) => item.name === "seya_accueil") ||
     approved.find((item) => item.name === "seya_accueil_minceur") ||
+    approved.find((item) => item.name === "seya_accueil") ||
     approved.find((item) => item.name === "seya_accueil_") ||
     approved.find((item) => item.name === "seya_accueil_dispo") ||
     approved.find((item) => item.name === "hello_world") ||
@@ -756,7 +778,7 @@ async function sendTemplateMessage(phoneNumberId, token, intl, template, vars) {
     type: "template",
     template: {
       name: template.name,
-      language: { code: template.language || "fr" },
+      language: { code: normalizeTemplateLanguage(template.language) },
     },
   };
   if (count > 0) {
@@ -785,24 +807,28 @@ async function sendSharedWhatsApp(phone, text, extras = {}) {
     treatment: extras.treatment || "votre soin",
   };
 
-  const textResult = await sendGraphMessage(phoneNumberId, token, {
-    messaging_product: "whatsapp",
-    to: intl,
-    type: "text",
-    text: { body: String(text || "").trim() },
-  });
-  if (textResult.ok) {
-    return { sent: true, id: textResult.data?.messages?.[0]?.id || null, via: "text" };
-  }
+  let textError = {};
+  if (!extras.preferTemplate) {
+    const textResult = await sendGraphMessage(phoneNumberId, token, {
+      messaging_product: "whatsapp",
+      to: intl,
+      type: "text",
+      text: { body: String(text || "").trim() },
+    });
+    if (textResult.ok) {
+      return { sent: true, id: textResult.data?.messages?.[0]?.id || null, via: "text" };
+    }
 
-  const textError = textResult.data?.error || {};
-  if (!isTemplateRequired(textError)) {
-    return {
-      sent: false,
-      reason: "send_failed",
-      code: textError.code || null,
-      error: frenchSendError(textError),
-    };
+    textError = textResult.data?.error || {};
+    if (!isTemplateRequired(textError)) {
+      return {
+        sent: false,
+        reason: "send_failed",
+        code: textError.code || null,
+        error: frenchSendError(textError),
+        to: intl,
+      };
+    }
   }
 
   const listed = await listTemplates();
@@ -821,6 +847,7 @@ async function sendSharedWhatsApp(phone, text, extras = {}) {
             ? "Le modèle seya_accueil est envoyé à Meta. Dès qu’il est Approuvé, le premier message partira."
             : frenchSendError(ensured.error || textError),
         templateStatus: ensured.template?.status || null,
+        to: intl,
       };
     }
   }
@@ -838,6 +865,7 @@ async function sendSharedWhatsApp(phone, text, extras = {}) {
       id: templateResult.data?.messages?.[0]?.id || null,
       via: "template",
       template: template.name,
+      to: intl,
     };
   }
 
@@ -847,6 +875,7 @@ async function sendSharedWhatsApp(phone, text, extras = {}) {
     code: templateResult.data?.error?.code || null,
     error: frenchSendError(templateResult.data?.error, textError.message),
     template: template.name,
+    to: intl,
   };
 }
 

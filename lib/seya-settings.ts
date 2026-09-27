@@ -87,6 +87,8 @@ export type SeyaConversation = {
   updatedAt: string;
   lastRelanceAt?: string | null;
   relanceCount?: number;
+  sendError?: string | null;
+  sentVia?: string | null;
 };
 
 export const defaultTreatmentBriefs: SeyaTreatmentBrief[] = [

@@ -47,11 +47,14 @@ async function welcomeNewLead(supabase, center, context) {
     centerName: center.name,
     treatment:
       conversation.offerLabel || context.treatment || context.campaign || "",
+    preferTemplate: true,
   });
 
   const next = {
     ...conversation,
     status: result.sent ? "En cours" : conversation.status,
+    sendError: result.sent ? null : result.error || result.reason || "échec WhatsApp",
+    sentVia: result.via || null,
     updatedAt: new Date().toISOString(),
   };
 

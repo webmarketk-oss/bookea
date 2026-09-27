@@ -276,6 +276,11 @@ export function SeyaInbox({
                   WhatsApp
                 </button>
               </div>
+              {selected.sendError ? (
+                <p className="bg-rose-50 px-5 py-2 text-sm font-medium text-rose-800">
+                  WhatsApp pas parti : {selected.sendError}
+                </p>
+              ) : null}
               {feedback ? (
                 <p className="bg-amber-50 px-5 py-2 text-sm font-medium text-amber-800">
                   {feedback}
