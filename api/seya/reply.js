@@ -35,6 +35,7 @@ module.exports = async function handler(req, res) {
       hours: Array.isArray(payload.hours) ? payload.hours : undefined,
       centerName: payload.centerName || "le centre",
       centerAddress: payload.centerAddress || "",
+      centerId: payload.centerId || conversation.centerId,
     });
 
     return res.status(200).json({

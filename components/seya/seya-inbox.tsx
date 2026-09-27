@@ -29,6 +29,7 @@ const statusStyles: Record<SeyaConversation["status"], string> = {
   "RDV confirmé": "bg-violet-500 text-white",
   Chaud: "bg-orange-100 text-orange-800",
   "À recontacter": "bg-amber-200 text-amber-900",
+  "Revue santé": "bg-amber-300 text-amber-950",
   "Pas intéressé": "bg-red-600 text-white",
   Terminé: "bg-slate-100 text-slate-600",
 };
@@ -68,6 +69,9 @@ function factualSummary(conversation: SeyaConversation) {
         "",
       conversation.status === "À recontacter"
         ? "Une conseillère doit recontacter."
+        : "",
+      conversation.healthReview?.status === "awaiting_human_health_review"
+        ? "Vérification santé en attente."
         : "",
       conversation.status === "Pas intéressé"
         ? "A demandé l’arrêt des messages."
@@ -139,6 +143,7 @@ export function SeyaInbox({
   onSendReply,
   onSendWhatsApp,
   onPickSlot,
+  onMarkHealthReviewed,
 }: {
   inbox: SeyaConversation[];
   selected: SeyaConversation | null;
@@ -152,6 +157,7 @@ export function SeyaInbox({
   onSendReply: () => void;
   onSendWhatsApp: () => void;
   onPickSlot: (index: string) => void;
+  onMarkHealthReviewed?: () => void;
 }) {
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<FilterId>("toutes");
@@ -293,6 +299,7 @@ export function SeyaInbox({
               <div ref={threadRef} className="min-h-0 flex-1 space-y-3 overflow-y-auto px-5 py-4">
                 {selected.messages.map((message) => {
                   const fromLead = message.author === "lead";
+                  const fromCentre = message.author === "centre";
                   return (
                     <div
                       key={message.id}
@@ -302,11 +309,13 @@ export function SeyaInbox({
                         className={`max-w-[80%] rounded-2xl px-4 py-3 text-sm font-medium leading-6 shadow-sm ${
                           fromLead
                             ? "bg-white text-slate-800"
-                            : "bg-violet-500 text-white"
+                            : fromCentre
+                              ? "bg-amber-100 text-amber-950"
+                              : "bg-violet-500 text-white"
                         }`}
                       >
                         <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide opacity-70">
-                          {fromLead ? "WhatsApp" : "Seya"}
+                          {fromLead ? "WhatsApp" : fromCentre ? "Centre" : "Seya"}
                         </p>
                         <p className="whitespace-pre-wrap">{message.text}</p>
                         <p className="mt-2 text-[10px] opacity-70">
@@ -317,7 +326,9 @@ export function SeyaInbox({
                   );
                 })}
               </div>
-              {selected.proposedSlots.length > 0 && settings.bookAppointment ? (
+              {selected.proposedSlots.length > 0 &&
+              settings.bookAppointment &&
+              selected.healthReview?.status !== "awaiting_human_health_review" ? (
                 <div className="grid gap-2 border-t border-slate-200 bg-white px-5 py-3 md:grid-cols-3">
                   {selected.proposedSlots.map((slot, index) => (
                     <button
@@ -414,14 +425,41 @@ export function SeyaInbox({
                   </div>
                 </dl>
               </section>
+              {selected.healthReview?.status === "awaiting_human_health_review" ? (
+                <section className="rounded-2xl border border-amber-200 bg-amber-50 p-4">
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-amber-700">
+                    Vérification santé
+                  </p>
+                  <p className="mt-2 text-sm font-medium leading-6 text-amber-950">
+                    Conversation en attente : une personne qualifiée doit vérifier
+                    avant toute séance.
+                  </p>
+                  <p className="mt-2 text-sm font-medium text-amber-900">
+                    Transférer à : {selected.healthTask?.transferTo || selected.healthReview.transferTo || "l’équipe soignante"}
+                  </p>
+                  {selected.healthTask?.context ? (
+                    <pre className="mt-3 whitespace-pre-wrap rounded-2xl bg-white/80 px-3 py-2 text-xs font-medium leading-5 text-slate-700">
+                      {selected.healthTask.context}
+                    </pre>
+                  ) : null}
+                  <button
+                    type="button"
+                    onClick={onMarkHealthReviewed}
+                    className="mt-3 w-full rounded-2xl bg-amber-900 px-3 py-2 text-sm font-semibold text-white"
+                  >
+                    Marquer la vérification comme faite
+                  </button>
+                </section>
+              ) : null}
               <section className="rounded-2xl border border-slate-200 p-4">
                 <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
                   Rendez-vous
                 </p>
                 <p className="mt-2 text-sm font-medium text-slate-700">
                   {selected.bookedSlot?.label ||
-                    (selected.status === "À recontacter"
-                      ? "À poser par une conseillère"
+                    (selected.status === "À recontacter" ||
+                    selected.status === "Revue santé"
+                      ? "À poser après vérification"
                       : "Aucun RDV")}
                 </p>
               </section>

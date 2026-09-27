@@ -35,6 +35,7 @@ import {
   readLocalSeyaConversations,
   saveSeyaAgentSettings,
   saveSeyaConversations,
+  markSeyaHealthReviewed,
   sortSeyaInbox,
   writeLocalSeyaConversations,
   type SeyaAgentSettings,
@@ -687,6 +688,13 @@ export default function SeyaCrmPage() {
             }
           }}
           onPickSlot={(index) => void submitLeadReply(index)}
+          onMarkHealthReviewed={() => {
+            if (!selectedConversation) {
+              return;
+            }
+            updateConversation(markSeyaHealthReviewed(selectedConversation));
+            setAgentFeedback("Vérification santé marquée comme faite.");
+          }}
         />
       ) : null}
 
@@ -932,27 +940,108 @@ export default function SeyaCrmPage() {
                     Retirer
                   </button>
                 </div>
-                <label className="grid gap-1">
-                  <span className="text-xs font-medium text-slate-500">
-                    Prix que Seya peut dire
-                  </span>
-                  <input
-                    value={item.price || ""}
-                    onChange={(event) =>
-                      setAgentSettings((current) => ({
-                        ...current,
-                        treatmentBriefs: current.treatmentBriefs.map((brief, briefIndex) =>
-                          briefIndex === index
-                            ? { ...brief, price: event.target.value }
-                            : brief,
-                        ),
-                      }))
-                    }
-                    onBlur={() => void persistAgentSettings(agentSettings)}
-                    placeholder="à partir de 99€ la séance ventre"
-                    className="h-11 rounded-2xl border border-slate-200 bg-white px-3 text-sm font-medium outline-none focus:border-violet-500"
-                  />
-                </label>
+                <div className="grid gap-3 rounded-2xl border border-violet-100 bg-white p-3">
+                  <p className="text-xs font-semibold text-violet-900">
+                    Politique de prix — {item.name}
+                  </p>
+                  <p className="text-[11px] font-medium leading-4 text-slate-400">
+                    Même si le devis final est personnalisé, dites à Seya ce
+                    qu’elle a le droit d’annoncer : tarif à la séance,
+                    fourchette, « à partir de », ou seulement un rappel
+                    conseillère.
+                  </p>
+                  {(
+                    [
+                      ["bilan", "Prix du bilan"],
+                      ["discovery", "Prix de la séance découverte"],
+                      ["session", "Prix d’une séance suivante"],
+                      ["package", "Prix d’un forfait / d’une cure"],
+                    ] as const
+                  ).map(([field, label]) => (
+                    <label key={field} className="grid gap-1">
+                      <span className="text-xs font-medium text-slate-500">
+                        {label}
+                      </span>
+                      <input
+                        value={item.pricing?.[field] || ""}
+                        onChange={(event) =>
+                          setAgentSettings((current) => ({
+                            ...current,
+                            treatmentBriefs: current.treatmentBriefs.map(
+                              (brief, briefIndex) =>
+                                briefIndex === index
+                                  ? {
+                                      ...brief,
+                                      pricing: {
+                                        bilan: brief.pricing?.bilan || "",
+                                        discovery: brief.pricing?.discovery || "",
+                                        session: brief.pricing?.session || "",
+                                        package: brief.pricing?.package || "",
+                                        sessionPolicy:
+                                          brief.pricing?.sessionPolicy ||
+                                          "after_bilan",
+                                        [field]: event.target.value,
+                                      },
+                                    }
+                                  : brief,
+                            ),
+                          }))
+                        }
+                        onBlur={() => void persistAgentSettings(agentSettings)}
+                        placeholder={
+                          field === "package"
+                            ? "à partir de 500€, jusqu’en 10 fois"
+                            : field === "session"
+                              ? "à partir de 90€"
+                              : "offert"
+                        }
+                        className="h-11 rounded-2xl border border-slate-200 bg-white px-3 text-sm font-medium outline-none focus:border-violet-500"
+                      />
+                    </label>
+                  ))}
+                  <label className="grid gap-1">
+                    <span className="text-xs font-medium text-slate-500">
+                      Ce que Seya peut dire sur les séances suivantes
+                    </span>
+                    <select
+                      value={item.pricing?.sessionPolicy || "after_bilan"}
+                      onChange={(event) =>
+                        setAgentSettings((current) => ({
+                          ...current,
+                          treatmentBriefs: current.treatmentBriefs.map(
+                            (brief, briefIndex) =>
+                              briefIndex === index
+                                ? {
+                                    ...brief,
+                                    pricing: {
+                                      bilan: brief.pricing?.bilan || "",
+                                      discovery: brief.pricing?.discovery || "",
+                                      session: brief.pricing?.session || "",
+                                      package: brief.pricing?.package || "",
+                                      sessionPolicy: event.target.value as NonNullable<
+                                        typeof brief.pricing
+                                      >["sessionPolicy"],
+                                    },
+                                  }
+                                : brief,
+                          ),
+                        }))
+                      }
+                      onBlur={() => void persistAgentSettings(agentSettings)}
+                      className="h-11 rounded-2xl border border-slate-200 bg-white px-3 text-sm font-medium outline-none focus:border-violet-500"
+                    >
+                      <option value="after_bilan">
+                        Dépend du protocole après le bilan
+                      </option>
+                      <option value="fixed">Tarif à la séance</option>
+                      <option value="from">« À partir de »</option>
+                      <option value="range">Fourchette</option>
+                      <option value="callback">
+                        Une conseillère rappelle
+                      </option>
+                    </select>
+                  </label>
+                </div>
                 <label className="grid gap-1">
                   <span className="text-xs font-medium text-slate-500">
                     Premier message — {"{centre}"} {"{offre}"}
@@ -997,6 +1086,124 @@ export default function SeyaCrmPage() {
                     className="rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium leading-5 text-slate-700 outline-none focus:border-violet-500"
                   />
                 </label>
+                <div className="grid gap-3 rounded-2xl border border-amber-100 bg-white p-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="text-xs font-semibold text-amber-900">
+                      Fiche santé — {item.name}
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        void persistAgentSettings({
+                          ...agentSettings,
+                          treatmentBriefs: agentSettings.treatmentBriefs.map(
+                            (brief, briefIndex) =>
+                              briefIndex === index
+                                ? {
+                                    ...brief,
+                                    health: {
+                                      validated: !(brief.health?.validated === true),
+                                      contraindications:
+                                        brief.health?.contraindications || "",
+                                      precautions: brief.health?.precautions || "",
+                                      professionalQuestions:
+                                        brief.health?.professionalQuestions || "",
+                                      transferTo: brief.health?.transferTo || "",
+                                    },
+                                  }
+                                : brief,
+                          ),
+                        })
+                      }
+                      className={`rounded-full px-3 py-1 text-[11px] font-semibold ${
+                        item.health?.validated
+                          ? "bg-amber-900 text-white"
+                          : "bg-slate-100 text-slate-500"
+                      }`}
+                    >
+                      {item.health?.validated ? "Validée" : "Non validée"}
+                    </button>
+                  </div>
+                  <p className="text-[11px] font-medium leading-4 text-slate-400">
+                    Seya ne lit que la fiche de ce soin, jamais celle d’un autre
+                    centre ou d’une autre technologie.
+                  </p>
+                  {(
+                    [
+                      ["contraindications", "Contre-indications générales"],
+                      ["precautions", "Précautions avant séance"],
+                      ["professionalQuestions", "Questions à faire valider"],
+                      ["transferTo", "Transférer à"],
+                    ] as const
+                  ).map(([field, label]) => (
+                    <label key={field} className="grid gap-1">
+                      <span className="text-xs font-medium text-slate-500">
+                        {label}
+                      </span>
+                      {field === "transferTo" ? (
+                        <input
+                          value={item.health?.[field] || ""}
+                          onChange={(event) =>
+                            setAgentSettings((current) => ({
+                              ...current,
+                              treatmentBriefs: current.treatmentBriefs.map(
+                                (brief, briefIndex) =>
+                                  briefIndex === index
+                                    ? {
+                                        ...brief,
+                                        health: {
+                                          validated: brief.health?.validated === true,
+                                          contraindications:
+                                            brief.health?.contraindications || "",
+                                          precautions: brief.health?.precautions || "",
+                                          professionalQuestions:
+                                            brief.health?.professionalQuestions || "",
+                                          transferTo: brief.health?.transferTo || "",
+                                          [field]: event.target.value,
+                                        },
+                                      }
+                                    : brief,
+                              ),
+                            }))
+                          }
+                          onBlur={() => void persistAgentSettings(agentSettings)}
+                          placeholder="l’esthéticienne cryolipolyse"
+                          className="h-11 rounded-2xl border border-slate-200 bg-white px-3 text-sm font-medium outline-none focus:border-violet-500"
+                        />
+                      ) : (
+                        <textarea
+                          value={item.health?.[field] || ""}
+                          onChange={(event) =>
+                            setAgentSettings((current) => ({
+                              ...current,
+                              treatmentBriefs: current.treatmentBriefs.map(
+                                (brief, briefIndex) =>
+                                  briefIndex === index
+                                    ? {
+                                        ...brief,
+                                        health: {
+                                          validated: brief.health?.validated === true,
+                                          contraindications:
+                                            brief.health?.contraindications || "",
+                                          precautions: brief.health?.precautions || "",
+                                          professionalQuestions:
+                                            brief.health?.professionalQuestions || "",
+                                          transferTo: brief.health?.transferTo || "",
+                                          [field]: event.target.value,
+                                        },
+                                      }
+                                    : brief,
+                              ),
+                            }))
+                          }
+                          onBlur={() => void persistAgentSettings(agentSettings)}
+                          rows={2}
+                          className="rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium leading-5 text-slate-700 outline-none focus:border-violet-500"
+                        />
+                      )}
+                    </label>
+                  ))}
+                </div>
               </div>
             ))}
           </div>
@@ -1012,7 +1219,14 @@ export default function SeyaCrmPage() {
                     price: "",
                     brief: "Si on demande le prix, donne le tarif paramétré.",
                     opening:
-                      "Bonjour {prenom}, c’est Seya du {centre} :) On vient juste de recevoir votre demande ({offre}) ! Je ne veux pas vous relancer inutilement.",
+                      "Bonjour {prenom}, c’est Seya du {centre} :) On vient juste de recevoir votre demande ({offre}) !",
+                    health: {
+                      validated: false,
+                      contraindications: "",
+                      precautions: "",
+                      professionalQuestions: "",
+                      transferTo: "",
+                    },
                   },
                 ],
               })

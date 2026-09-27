@@ -1,3 +1,39 @@
+const {
+  applyBookingMessage,
+  emptyBookingState,
+  emptySlotFallback,
+  enforceOutgoingText,
+  guardSlots,
+  markPriceAnswered,
+  shouldSearchSlots,
+  slotAllowed,
+} = require("./booking-state");
+const {
+  buildPriceReply,
+  classifyPriceQuestion,
+  enforcePriceReply,
+  isPriceRepeatComplaint,
+} = require("./price");
+const {
+  awaitingHealthReply,
+  classifyHealthMessage,
+  generalHealthReply,
+  isAwaitingHealthReview,
+  markHealthReviewed,
+  personalHealthReply,
+  resolveHealthSheet,
+  startHealthReview,
+  stripBookingCta,
+} = require("./health");
+const {
+  conversationalReply,
+  isHesitation,
+  isIdentityQuestion,
+  isThanks,
+  refusesSlots,
+  wantsSlots,
+} = require("./conversation");
+
 const weekdayNames = [
   "dimanche",
   "lundi",
@@ -16,15 +52,22 @@ const defaultBriefs = [
     brief:
       "Parle comme une réceptionniste. Ne parle de prix que si on te le demande. Contre-indication (pacemaker, grossesse…) : transmets à l’équipe, ne booke pas.",
     opening:
-      "Bonjour {prenom}, c’est Seya du {centre} :) On vient juste de recevoir votre demande ({offre}) ! Je peux vous proposer un créneau rapidement, vous êtes plutôt dispo en début ou fin de semaine ? Je ne veux pas vous relancer inutilement.",
+      "Bonjour {prenom}, c’est Seya du {centre} :) On vient juste de recevoir votre demande ({offre}) ! Je peux vous proposer un créneau rapidement, vous êtes plutôt dispo en début ou fin de semaine ?",
   },
   {
     name: "Soin minceur",
+    pricing: {
+      bilan: "offert",
+      discovery: "offerte",
+      session: "",
+      package: "à partir de 500€, payable jusqu’en 10 fois",
+      sessionPolicy: "after_bilan",
+    },
     price: "",
     brief:
       "Parle comme une réceptionniste. Demande la zone. Ne parle de prix que si on te le demande. Pas de liste de créneaux à la place du tarif.",
     opening:
-      "Bonjour {prenom}, c’est Seya du {centre} :) On vient juste de recevoir votre demande ({offre}) ! C’est plutôt quelle zone ? Je peux ensuite regarder un créneau, je ne veux pas vous relancer inutilement.",
+      "Bonjour {prenom}, c’est Seya du {centre} :) On vient juste de recevoir votre demande ({offre}) ! C’est plutôt quelle zone ? Je peux ensuite regarder un créneau.",
   },
   {
     name: "Soin visage",
@@ -32,15 +75,22 @@ const defaultBriefs = [
     brief:
       "Parle comme une réceptionniste. Ne parle de prix que si on te le demande.",
     opening:
-      "Bonjour {prenom}, c’est Seya du {centre} :) On vient juste de recevoir votre demande ({offre}) ! Quel est votre objectif peau ? Je ne veux pas vous relancer inutilement.",
+      "Bonjour {prenom}, c’est Seya du {centre} :) On vient juste de recevoir votre demande ({offre}) ! Quel est votre objectif peau ?",
   },
   {
     name: "Cryolipolyse",
+    pricing: {
+      bilan: "offert",
+      discovery: "offerte",
+      session: "",
+      package: "à partir de 500€, payable jusqu’en 10 fois",
+      sessionPolicy: "after_bilan",
+    },
     price: "",
     brief:
       "Parle comme une réceptionniste. Ne parle de prix que si on te le demande. Contre-indication : transmets à l’équipe.",
     opening:
-      "Bonjour {prenom}, c’est Seya du {centre} :) On vient juste de recevoir votre demande ({offre}) ! Quelle zone souhaitez-vous traiter ? Je ne veux pas vous relancer inutilement.",
+      "Bonjour {prenom}, c’est Seya du {centre} :) On vient juste de recevoir votre demande ({offre}) ! Quelle zone souhaitez-vous traiter ?"
   },
   {
     name: "Hydrafacial",
@@ -48,7 +98,7 @@ const defaultBriefs = [
     brief:
       "Parle comme une réceptionniste. Ne parle de prix que si on te le demande.",
     opening:
-      "Bonjour {prenom}, c’est Seya du {centre} :) On vient juste de recevoir votre demande ({offre}) ! Quel est votre objectif peau ? Je ne veux pas vous relancer inutilement.",
+      "Bonjour {prenom}, c’est Seya du {centre} :) On vient juste de recevoir votre demande ({offre}) ! Quel est votre objectif peau ?",
   },
 ];
 
@@ -125,16 +175,16 @@ function faqReply(text) {
     return "Dites-moi ce que vous voulez savoir : le bilan (il est gratuit), un créneau, ou autre chose ?";
   }
   if (/gratuit|offert/.test(value) && /bilan|decouverte|seance/.test(value)) {
-    return "Oui, le bilan et la séance découverte sont offerts, c’est gratuit. On y fait une analyse corporelle pour établir un devis personnalisé. Quand seriez-vous disponible ?";
+    return "";
   }
   if (/resultat/.test(value) || /combien de temps.*result/.test(value)) {
-    return "Les résultats dépendent de la zone et du protocole. On vous les explique au bilan, qui est gratuit. Quand seriez-vous disponible ?";
+    return "Les résultats dépendent de la zone et du protocole. On vous les explique au bilan.";
   }
-  if (/combien de temps dure|duree|dure (le )?(rdv|bilan|rendez-vous)/.test(value)) {
-    return "Le bilan dure environ 30 à 45 minutes, et il est gratuit. Quel jour vous irait ?";
+  if (/combien de temps|ca dure|duree|dure (le )?(rdv|bilan|rendez-vous)/.test(value)) {
+    return "Le bilan dure environ 30 à 45 minutes.";
   }
   if (/fait mal|douloureux|douleur/.test(value)) {
-    return "Le bilan est indolore. Pour une séance, ça dépend de la zone, on vous l’explique sur place. Vous voulez un créneau bilan ?";
+    return "Le bilan est indolore. Pour une séance, ça dépend de la zone, on vous l’explique sur place.";
   }
   return "";
 }
@@ -146,28 +196,25 @@ function asksLocation(text) {
 }
 
 const BILAN_PRICE_REPLY =
-  "Le bilan et la séance découverte sont offerts, c’est gratuit. On y fait une analyse corporelle pour établir un devis personnalisé. Quand seriez-vous disponible ?";
+  "Le bilan et la séance découverte sont offerts. Le protocole ensuite se précise après l’analyse corporelle.";
 
 function locationReply(address, centerName) {
   if (address) {
-    return `Nous sommes au ${address}. Vous voulez que je vous propose un créneau bilan ?`;
+    return `Nous sommes au ${address}.`;
   }
-  return `Nous sommes au centre ${centerName || ""}. L’équipe peut vous confirmer l’adresse exacte si besoin.`.replace(
+  return `Je vérifie l’adresse exacte avec l’équipe${centerName ? ` du ${centerName}` : ""}. Je vous la confirme dès que je l’ai.`.replace(
     /\s+/g,
     " ",
   );
 }
 
 function hasMedicalFlag(text) {
-  return /pacemaker|stimulateur|enceinte|grossesse|cancer|chimio|roaccutane|accutane|implant|photo.?sensib|cardiaque|coeur/i.test(
-    String(text || ""),
-  );
+  return classifyHealthMessage(text).personal;
 }
 
 function threadHasMedical(conversation, text) {
   return (
-    hasMedicalFlag(text) ||
-    (conversation.messages || []).some((item) => hasMedicalFlag(item.text))
+    classifyHealthMessage(text).personal || isAwaitingHealthReview(conversation)
   );
 }
 
@@ -237,7 +284,15 @@ function displayCareLabel(qualification, conversation) {
   return "votre soin";
 }
 
-function priceReply(seya, qualification, conversation) {
+function priceReply(seya, qualification, conversation, text) {
+  const built = buildPriceReply(
+    text || conversation?.bookingState?.lastLeadPriceText || "c’est combien",
+    seya,
+    { ...conversation, qualification },
+  );
+  if (built) {
+    return built;
+  }
   const price = resolveTreatmentPrice(
     seya,
     `${qualification?.need || ""} ${qualification?.zone || ""} ${conversation?.treatment || ""}`,
@@ -248,10 +303,10 @@ function priceReply(seya, qualification, conversation) {
   return BILAN_PRICE_REPLY;
 }
 
-function todayIso() {
-  const now = new Date();
-  const offset = now.getTimezoneOffset();
-  const local = new Date(now.getTime() - offset * 60000);
+function todayIso(now) {
+  const date = now instanceof Date ? now : new Date();
+  const offset = date.getTimezoneOffset();
+  const local = new Date(date.getTime() - offset * 60000);
   return local.toISOString().slice(0, 10);
 }
 
@@ -277,9 +332,9 @@ function minutesToTime(value) {
   return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
 }
 
-function currentMinutes() {
-  const now = new Date();
-  return now.getHours() * 60 + now.getMinutes();
+function currentMinutes(now) {
+  const date = now instanceof Date ? now : new Date();
+  return date.getHours() * 60 + date.getMinutes();
 }
 
 function rangesOverlap(startA, endA, startB, endB) {
@@ -406,15 +461,15 @@ function defaultOfferForFamily(family) {
 
 function defaultOpeningForFamily(family) {
   if (family === "minceur") {
-    return "Bonjour {prenom}, c’est Seya du {centre} :) On vient juste de recevoir votre demande ({offre}) ! C’est plutôt quelle zone ? Je peux ensuite regarder un créneau, je ne veux pas vous relancer inutilement.";
+    return "Bonjour {prenom}, c’est Seya du {centre} :) On vient juste de recevoir votre demande ({offre}) ! C’est plutôt quelle zone ? Je peux ensuite regarder un créneau.";
   }
   if (family === "visage") {
-    return "Bonjour {prenom}, c’est Seya du {centre} :) On vient juste de recevoir votre demande ({offre}) ! Quel est votre objectif peau ? Je ne veux pas vous relancer inutilement.";
+    return "Bonjour {prenom}, c’est Seya du {centre} :) On vient juste de recevoir votre demande ({offre}) ! Quel est votre objectif peau ?";
   }
   if (family === "epilation") {
-    return "Bonjour {prenom}, c’est Seya du {centre} :) On vient juste de recevoir votre demande ({offre}) ! Je peux vous proposer un créneau rapidement, vous êtes plutôt dispo en début ou fin de semaine ? Je ne veux pas vous relancer inutilement.";
+    return "Bonjour {prenom}, c’est Seya du {centre} :) On vient juste de recevoir votre demande ({offre}) ! Je peux vous proposer un créneau rapidement, vous êtes plutôt dispo en début ou fin de semaine ?";
   }
-  return "Bonjour {prenom}, c’est Seya du {centre} :) On vient juste de recevoir votre demande. Je peux vous proposer un créneau rapidement, vous êtes plutôt dispo en début ou fin de semaine ? Je ne veux pas vous relancer inutilement.";
+  return "Bonjour {prenom}, c’est Seya du {centre} :) On vient juste de recevoir votre demande. Je peux vous proposer un créneau rapidement, vous êtes plutôt dispo en début ou fin de semaine ?";
 }
 
 function fillOpening(template, vars) {
@@ -588,37 +643,11 @@ function matchProposedSlot(text, slots) {
   );
 }
 
-function nextQualificationQuestion(qualification, seya, fallbackTreatment) {
-  const settings = agentSettings(seya);
-  const treatmentBrief = resolveTreatmentBrief(
-    seya,
-    qualification.need || fallbackTreatment,
-  );
-  if (settings.qualifyOnSignup && (!qualification.need || isJunkTreatment(qualification.need))) {
-    return "C’est pour du minceur, du visage ou de l’épilation ?";
-  }
-  if (treatmentBrief && !qualification.zone && !qualification.availability) {
-    return /pacemaker|prix|tarif|créneau|receptionniste|réceptionniste/i.test(treatmentBrief)
-      ? "C’est plutôt quelle zone ?"
-      : treatmentBrief;
-  }
-  if (
-    settings.qualifyOnSignup &&
-    !qualification.zone &&
-    /laser|minceur|cryo|epilation/i.test(normalize(qualification.need))
-  ) {
-    return "C’est plutôt quelle zone ?";
-  }
-  if (settings.bookAppointment && !qualification.availability && !qualification.delay) {
-    return "Vous êtes plutôt dispo en début ou fin de semaine ? Je ne veux pas vous relancer inutilement.";
-  }
-  if (settings.bookAppointment) {
-    return "Je regarde le planning et je vous propose ce qui est vraiment libre.";
-  }
-  if (settings.askForAppointment) {
-    return "Vous voulez que je fasse passer ça à une conseillère pour caler un créneau ?";
-  }
-  return "Je transmets ça à l’équipe du centre.";
+function nextQualificationQuestion(qualification, seya, fallbackTreatment, conversation, text) {
+  return conversationalReply(text, conversation, {
+    ...qualification,
+    need: qualification.need || fallbackTreatment,
+  });
 }
 
 function message(author, text) {
@@ -671,7 +700,9 @@ function startConversation(context, centerName, seya) {
       delay: "",
       availability: "",
     },
+    centerId: context.centerId || null,
     proposedSlots: [],
+    bookingState: emptyBookingState(context.centerId),
     messages: [message("seya", opening)],
     updatedAt: new Date().toISOString(),
     lastRelanceAt: null,
@@ -810,34 +841,36 @@ function parseDayRequest(text, conversation) {
   };
 }
 
-function pickSlotsForMessage(appointments, hours, conversation, text) {
-  const request = parseDayRequest(text, conversation);
-  const days = request.date || request.weekdays.length ? 45 : 14;
+function pickSlotsForState(appointments, hours, state, now) {
+  const today = todayIso(now);
+  const untilRequested = state.requestedDate
+    ? Math.round(
+        (new Date(`${state.requestedDate}T12:00:00`).getTime() -
+          new Date(`${today}T12:00:00`).getTime()) /
+          86400000,
+      )
+    : 0;
   const options = {
     count: 3,
-    days,
-    weekdays: request.weekdays,
-    date: request.date,
-    excludeWeekdays: request.excludeWeekdays,
-    excludeDates: request.excludeDates,
+    days: Math.max(45, untilRequested + 2),
+    date: state.requestedDate || "",
+    weekdays:
+      state.requestedDate || state.requestedWeekday == null
+        ? []
+        : [state.requestedWeekday],
+    excludeWeekdays: state.rejectedWeekdays,
+    excludeDates: state.rejectedDates,
+    now,
   };
-  let slots = suggestAvailableSlots(appointments, hours, options);
-  if (!slots.length && request.date) {
-    slots = suggestAvailableSlots(appointments, hours, {
-      ...options,
-      date: "",
-      days: 45,
-    });
-  }
-  if (!slots.length) {
-    slots = suggestAvailableSlots(appointments, hours, {
-      count: 3,
-      days: 21,
-      excludeWeekdays: request.excludeWeekdays,
-      excludeDates: request.excludeDates,
-    });
-  }
-  return slots;
+  return suggestAvailableSlots(appointments, hours, options);
+}
+
+function pickSlotsForMessage(appointments, hours, conversation, text, now) {
+  const state = applyBookingMessage(conversation.bookingState, text, {
+    centerId: conversation.centerId,
+    now,
+  });
+  return pickSlotsForState(appointments, hours, state, now);
 }
 
 function suggestAvailableSlots(appointments, hours, countOrOptions = 3, duration = 60) {
@@ -855,8 +888,9 @@ function suggestAvailableSlots(appointments, hours, countOrOptions = 3, duration
     : [];
   const excludeDates = Array.isArray(options.excludeDates) ? options.excludeDates : [];
   const slots = [];
-  const today = todayIso();
-  const nowMinutes = currentMinutes();
+  const clock = options.now instanceof Date ? options.now : new Date();
+  const today = todayIso(clock);
+  const nowMinutes = currentMinutes(clock);
   const week = Array.isArray(hours) && hours.length ? hours : defaultHours();
 
   for (let offset = 0; offset < maxDays && slots.length < count; offset += 1) {
@@ -916,6 +950,26 @@ function defaultHours() {
 
 function applyLeadReply(conversation, text, seya, slots, extras = {}) {
   const settings = agentSettings(seya);
+  const bookingState = extras.bookingState
+    ? extras.bookingState
+    : applyBookingMessage(conversation.bookingState, text, {
+        centerId: extras.centerId || conversation.centerId,
+        now: extras.now,
+      });
+  conversation = {
+    ...conversation,
+    centerId: extras.centerId || conversation.centerId || bookingState.centerId,
+    bookingState,
+    _seya: seya,
+  };
+  const allowRepeat = /lundi|mardi|mercredi|jeudi|vendredi|samedi|dispo|creneau|créneau|1er|octobre|\d{1,2}\/\d{1,2}/i.test(
+    String(text || ""),
+  );
+  const guarded = extras.guarded || guardSlots(slots, bookingState, {
+    centerId: conversation.centerId,
+    allowRepeat,
+  });
+  const safeSlots = shouldSearchSlots(bookingState, text) ? guarded.slots : [];
   const qualification = mergeQualification(
     conversation.qualification,
     text,
@@ -937,144 +991,197 @@ function applyLeadReply(conversation, text, seya, slots, extras = {}) {
       /je (veux|souhaite).*rdv|prendre (un )?(rdv|rendez-vous)/i.test(text));
 
   if (refuses) {
-    return {
-      conversation: {
-        ...conversation,
-        qualification,
-        status: "Pas intéressé",
-        messages: [
-          ...(conversation.messages || []),
-          message("lead", text),
-          message("seya", "Très bien, j’arrête ici. Si vous changez d’avis, écrivez-nous."),
-        ],
-        updatedAt: new Date().toISOString(),
-      },
-      shouldBook: null,
-    };
+    return finishLeadReply(conversation, qualification, "Pas intéressé", text, "Très bien, j’arrête ici. Si vous changez d’avis, écrivez-nous.", bookingState);
   }
 
-  if (hasMedicalFlag(text) || (threadHasMedical(conversation, text) && settings.handoffToHuman)) {
-    const alreadyFlagged = conversation.status === "À recontacter" && !hasMedicalFlag(text);
-    return {
-      conversation: {
-        ...conversation,
+  if (isIdentityQuestion(text)) {
+    return finishLeadReply(
+      conversation,
+      qualification,
+      qualification.need ? "Qualifié" : "En cours",
+      text,
+      conversationalReply(text, conversation, qualification),
+      bookingState,
+    );
+  }
+
+  if (isThanks(text) || isHesitation(text) || refusesSlots(text)) {
+    return finishLeadReply(
+      conversation,
+      qualification,
+      qualification.need ? "Qualifié" : conversation.status || "En cours",
+      text,
+      conversationalReply(text, conversation, qualification),
+      { ...bookingState, pendingQuestion: refusesSlots(text) || isHesitation(text) ? "no_slots" : bookingState.pendingQuestion },
+    );
+  }
+
+  const health = classifyHealthMessage(text);
+  const resolvedHealth = resolveHealthSheet(seya, conversation, text);
+  if (health.personal) {
+    const parts = [];
+    if (asksPrice(text) || classifyPriceQuestion(text)) {
+      parts.push(
+        stripBookingCta(priceReply(seya, qualification, conversation, text)),
+      );
+    }
+    if (asksLocation(text)) {
+      parts.push(locationReply(extras.centerAddress, extras.centerName || ""));
+    }
+    parts.push(personalHealthReply(resolvedHealth));
+    const review = startHealthReview(
+      conversation,
+      text,
+      resolvedHealth,
+      health.mixed ? "mixed" : "personal",
+    );
+    return finishLeadReply(
+      conversation,
+      qualification,
+      "Revue santé",
+      text,
+      parts.filter(Boolean).join(" "),
+      { ...bookingState, pendingQuestion: health.mixed ? "price" : "health" },
+      review,
+    );
+  }
+
+  if (health.general) {
+    return finishLeadReply(
+      conversation,
+      qualification,
+      qualification.need ? "Qualifié" : conversation.status || "En cours",
+      text,
+      generalHealthReply(resolvedHealth),
+      { ...bookingState, pendingQuestion: "health" },
+    );
+  }
+
+  if (isAwaitingHealthReview(conversation)) {
+    if (asksLocation(text) || asksPrice(text) || classifyPriceQuestion(text) || faqReply(text)) {
+      const admin =
+        faqReply(text) ||
+        (asksLocation(text)
+          ? locationReply(extras.centerAddress, extras.centerName || "")
+          : priceReply(seya, qualification, conversation, text));
+      return finishLeadReply(
+        conversation,
         qualification,
-        status: "À recontacter",
-        messages: [
-          ...(conversation.messages || []),
-          message("lead", text),
-          message(
-            "seya",
-            alreadyFlagged
-              ? "Je transmets cette préférence à l’équipe, elle reviendra vers vous après vérification."
-              : "Il faut que l’équipe vérifie votre situation avant de confirmer. Je leur transmets pour voir si c’est adapté.",
-          ),
-        ],
-        updatedAt: new Date().toISOString(),
+        "Revue santé",
+        text,
+        admin,
+        bookingState,
+        {
+          healthReview: conversation.healthReview,
+          healthTask: conversation.healthTask,
+        },
+      );
+    }
+    return finishLeadReply(
+      conversation,
+      qualification,
+      "Revue santé",
+      text,
+      awaitingHealthReply(),
+      bookingState,
+      {
+        healthReview: conversation.healthReview,
+        healthTask: conversation.healthTask,
       },
-      shouldBook: null,
-    };
+    );
+  }
+
+  if (asksPrice(text) || classifyPriceQuestion(text) || isPriceRepeatComplaint(text)) {
+    const reply = priceReply(seya, qualification, conversation, text);
+    return finishLeadReply(
+      conversation,
+      qualification,
+      qualification.need ? "Qualifié" : "En cours",
+      text,
+      reply,
+      markPriceAnswered({ ...bookingState, pendingQuestion: "price" }),
+    );
   }
 
   const faq = faqReply(text);
   if (faq) {
-    return {
-      conversation: {
-        ...conversation,
-        qualification,
-        status: qualification.need ? "Qualifié" : "En cours",
-        messages: [
-          ...(conversation.messages || []),
-          message("lead", text),
-          message("seya", faq),
-        ],
-        updatedAt: new Date().toISOString(),
-      },
-      shouldBook: null,
-    };
+    return finishLeadReply(
+      conversation,
+      qualification,
+      qualification.need ? "Qualifié" : "En cours",
+      text,
+      faq,
+      { ...bookingState, pendingQuestion: null },
+    );
   }
 
   if (asksLocation(text)) {
-    return {
-      conversation: {
-        ...conversation,
-        qualification,
-        status: qualification.need ? "Qualifié" : "En cours",
-        messages: [
-          ...(conversation.messages || []),
-          message("lead", text),
-          message(
-            "seya",
-            locationReply(extras.centerAddress, extras.centerName || ""),
-          ),
-        ],
-        updatedAt: new Date().toISOString(),
-      },
-      shouldBook: null,
-    };
-  }
-
-  if (asksPrice(text)) {
-    return {
-      conversation: {
-        ...conversation,
-        qualification,
-        status: qualification.need ? "Qualifié" : "En cours",
-        messages: [
-          ...(conversation.messages || []),
-          message("lead", text),
-          message("seya", priceReply(seya, qualification, conversation)),
-        ],
-        updatedAt: new Date().toISOString(),
-      },
-      shouldBook: null,
-    };
+    return finishLeadReply(
+      conversation,
+      qualification,
+      qualification.need ? "Qualifié" : "En cours",
+      text,
+      locationReply(extras.centerAddress, extras.centerName || ""),
+      { ...bookingState, pendingQuestion: "address" },
+    );
   }
 
   if (wantsRdv || (settings.handoffToHuman && /conseill|humain|appeler|rappel/i.test(text))) {
-    return {
-      conversation: {
-        ...conversation,
-        qualification,
-        status: "À recontacter",
-        messages: [
-          ...(conversation.messages || []),
-          message("lead", text),
-          message(
-            "seya",
-            "Parfait. Je transmets à une conseillère du centre, elle vous recontacte rapidement.",
-          ),
-        ],
-        updatedAt: new Date().toISOString(),
-      },
-      shouldBook: null,
-    };
+    return finishLeadReply(
+      conversation,
+      qualification,
+      "À recontacter",
+      text,
+      "Parfait. Je transmets à une conseillère du centre, elle vous recontacte rapidement.",
+      bookingState,
+    );
   }
 
-  if (chosenSlot && settings.bookAppointment && !threadHasMedical(conversation, text)) {
-    return {
-      conversation: {
-        ...conversation,
-        qualification,
-        bookedSlot: chosenSlot,
-        status: "RDV pris",
-        messages: [
-          ...(conversation.messages || []),
-          message("lead", text),
-          message(
-            "seya",
-            `Parfait, je bloque ${chosenSlot.label} pour ${qualification.need || conversation.treatment || "votre soin"}. Vous recevrez la confirmation du centre.`,
-          ),
-        ],
-        updatedAt: new Date().toISOString(),
-      },
-      shouldBook: chosenSlot,
-    };
+  if (
+    chosenSlot &&
+    settings.bookAppointment &&
+    !threadHasMedical(conversation, text) &&
+    slotAllowed(chosenSlot, bookingState)
+  ) {
+    return finishLeadReply(
+      conversation,
+      qualification,
+      "RDV pris",
+      text,
+      `Je vérifie le planning et je vous confirme ${chosenSlot.label} pour ${qualification.need || conversation.treatment || "votre soin"}.`,
+      { ...bookingState, appointmentStatus: "proposed" },
+      { bookedSlot: chosenSlot, shouldBook: chosenSlot },
+    );
+  }
+
+  if (
+    /pas (dispo|disponible) le |pas le /.test(normalize(text)) &&
+    bookingState.lastOfferedSlots.length &&
+    bookingState.requestedDate &&
+    bookingState.lastOfferedSlots.every((slot) => slot.date === bookingState.requestedDate)
+  ) {
+    const refused = /lundi/.test(normalize(text))
+      ? "le lundi"
+      : "ce jour-là";
+    return finishLeadReply(
+      conversation,
+      qualification,
+      "RDV proposé",
+      text,
+      `D’accord, pas ${refused}. On reste sur le jour demandé — quel horaire vous irait ?`,
+      bookingState,
+      { proposedSlots: bookingState.lastOfferedSlots },
+    );
   }
 
   const readyToPropose =
     settings.bookAppointment &&
+    wantsSlots(text) &&
+    shouldSearchSlots(bookingState, text) &&
     !asksPrice(text) &&
+    !classifyPriceQuestion(text) &&
+    !isPriceRepeatComplaint(text) &&
+    !bookingState.unansweredPriceIntent &&
     !asksLocation(text) &&
     !faqReply(text) &&
     !threadHasMedical(conversation, text) &&
@@ -1082,66 +1189,106 @@ function applyLeadReply(conversation, text, seya, slots, extras = {}) {
     !isJunkTreatment(qualification.need || conversation.treatment) &&
     (qualification.delay ||
       qualification.availability ||
+      bookingState.requestedDate ||
+      bookingState.requestedWeekday != null ||
       /rdv|creneau|créneau|dispo|semaine|lundi|mardi|mercredi|jeudi|vendredi|samedi|demain|aujourd/i.test(
         normalize(text),
       ));
 
-  if (readyToPropose && slots.length === 0) {
-    return {
-      conversation: {
-        ...conversation,
-        qualification,
-        status: "Qualifié",
-        messages: [
-          ...(conversation.messages || []),
-          message("lead", text),
-          message(
-            "seya",
-            "Je n’ai plus de place sur ce jour-là. Quel autre jour vous irait ?",
-          ),
-        ],
-        updatedAt: new Date().toISOString(),
-      },
-      shouldBook: null,
-    };
+  if (readyToPropose && safeSlots.length === 0) {
+    return finishLeadReply(
+      conversation,
+      qualification,
+      "Qualifié",
+      text,
+      guarded.fallback || emptySlotFallback(bookingState),
+      { ...bookingState, lastOfferedSlots: [], appointmentStatus: "none" },
+    );
   }
 
-  if (readyToPropose && slots.length > 0) {
-    return {
-      conversation: {
-        ...conversation,
-        qualification,
-        proposedSlots: slots,
-        status: "RDV proposé",
-        messages: [
-          ...(conversation.messages || []),
-          message("lead", text),
-          message("seya", humanSlotReply(slots)),
-        ],
-        updatedAt: new Date().toISOString(),
+  if (readyToPropose && safeSlots.length > 0) {
+    return finishLeadReply(
+      conversation,
+      qualification,
+      "RDV proposé",
+      text,
+      humanSlotReply(safeSlots),
+      {
+        ...bookingState,
+        lastOfferedSlots: safeSlots,
+        appointmentStatus: "proposed",
+        pendingQuestion: null,
       },
-      shouldBook: null,
-    };
+      { proposedSlots: safeSlots },
+    );
   }
 
   const nextQuestion = nextQualificationQuestion(
     qualification,
     seya,
     conversation.treatment,
+    conversation,
+    text,
   );
+  return finishLeadReply(
+    conversation,
+    qualification,
+    qualification.need ? "Qualifié" : "En cours",
+    text,
+    nextQuestion,
+    bookingState,
+  );
+}
+
+function finishLeadReply(
+  conversation,
+  qualification,
+  status,
+  leadText,
+  seyaText,
+  bookingState,
+  extra = {},
+) {
+  const slotSafe = enforceOutgoingText(seyaText, bookingState);
+  const checked = enforcePriceReply(slotSafe, leadText, extra.seya || conversation._seya, {
+    ...conversation,
+    qualification,
+    bookingState,
+  });
+  const reply = checked.text;
+  const blockedProposal = reply !== seyaText;
   return {
     conversation: {
       ...conversation,
       qualification,
-      status: qualification.need ? "Qualifié" : "En cours",
+      status: blockedProposal && status === "RDV proposé" ? "Qualifié" : status,
+      bookingState: blockedProposal
+        ? { ...bookingState, lastOfferedSlots: [], appointmentStatus: "none" }
+        : bookingState,
+      proposedSlots: (extra.proposedSlots || conversation.proposedSlots || []).filter((slot) => {
+        if ((bookingState.rejectedDates || []).includes(slot.date)) return false;
+        if ((bookingState.rejectedWeekdays || []).includes(new Date(`${slot.date}T12:00:00`).getDay())) {
+          return false;
+        }
+        if (bookingState.requestedDate && slot.date !== bookingState.requestedDate) {
+          return extra.shouldBook?.date === slot.date;
+        }
+        return true;
+      }),
+      bookedSlot: extra.bookedSlot || conversation.bookedSlot,
+      healthReview: extra.healthReview || conversation.healthReview,
+      healthTask: extra.healthTask || conversation.healthTask,
       messages: [
         ...(conversation.messages || []),
-        message("lead", text),
-        message("seya", nextQuestion),
+        message("lead", leadText),
+        message("seya", reply),
       ],
       updatedAt: new Date().toISOString(),
     },
-    shouldBook: null,
+    shouldBook:
+      extra.shouldBook && slotAllowed(extra.shouldBook, bookingState)
+        ? extra.shouldBook
+        : null,
   };
 }
 
@@ -1175,9 +1322,9 @@ function relanceCopy(conversation, days) {
   const treatment =
     conversation.qualification?.need || conversation.treatment || "votre soin";
   if (days >= 28) {
-    return `Bonjour ${firstName}, c’est Seya. Je reviens vers vous pour ${treatment}. Souhaitez-vous que je vous propose un créneau cette semaine, ou préférez-vous que l’on arrête les messages ?`;
+    return `Bonjour ${firstName}, c’est Seya. Je reviens vers vous pour ${treatment}. Souhaitez-vous que je vous propose un créneau cette semaine, ou préférez-vous que l’on arrête les messages ? Je ne veux pas vous relancer inutilement.`;
   }
-  return `Bonjour ${firstName}, c’est Seya. Je voulais juste reprendre pour ${treatment}. Quel jour vous irait le mieux ?`;
+  return `Bonjour ${firstName}, c’est Seya. Je voulais juste reprendre pour ${treatment}. Quel jour vous irait le mieux ? Je ne veux pas vous relancer inutilement.`;
 }
 
 function readHours(settings) {
@@ -1197,8 +1344,14 @@ function readHours(settings) {
 
 module.exports = {
   agentSettings,
+  applyBookingMessage,
   applyLeadReply,
+  classifyHealthMessage,
+  isAwaitingHealthReview,
+  markHealthReviewed,
+  emptySlotFallback,
   familyFromTreatment,
+  guardSlots,
   lastLeadAt,
   lastSeyaAt,
   daysSince,
@@ -1212,6 +1365,7 @@ module.exports = {
   displayCareLabel,
   locationReply,
   pickSlotsForMessage,
+  pickSlotsForState,
   hasMedicalFlag,
   humanSlotReply,
   isJunkTreatment,

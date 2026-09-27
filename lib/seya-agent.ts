@@ -226,21 +226,34 @@ export function applyLeadReply(
   }
 
   if (hasMedicalFlag(text) || threadHasMedical(conversation, text)) {
-    const alreadyFlagged =
-      conversation.status === "À recontacter" && !hasMedicalFlag(text);
+    const personal = /je (prends|suis|ai)|j['’]ai|avec mon|probleme de sante/i.test(
+      text,
+    );
     return {
       conversation: {
         ...conversation,
         qualification,
-        status: "À recontacter",
+        status: (personal ? "Revue santé" : conversation.status) as SeyaConversationStatus,
+        healthReview: personal
+          ? {
+              status: "awaiting_human_health_review",
+              kind: "personal",
+              note: text,
+              transferTo: "l’équipe soignante du centre",
+              treatmentName: qualification.need || conversation.treatment || "",
+              createdAt: new Date().toISOString(),
+              reviewedAt: null,
+              reviewedBy: null,
+            }
+          : conversation.healthReview,
         messages: [
           ...conversation.messages,
           createSeyaMessage("lead", text),
           createSeyaMessage(
             "seya",
-            alreadyFlagged
-              ? "Je transmets cette préférence à l’équipe, elle reviendra vers vous après vérification."
-              : "Il faut que l’équipe vérifie votre situation avant de confirmer. Je leur transmets pour voir si c’est adapté.",
+            personal
+              ? "Merci de me l’avoir précisé. Pour vous répondre correctement, il faut que la personne qui réalise le soin vérifie votre situation avant de confirmer si ce soin vous convient. Je peux lui transmettre votre question et vous faire rappeler."
+              : "Je n’ai pas de liste validée par le centre pour cette prestation. Je peux demander à l’équipe de vous confirmer ça.",
           ),
         ],
         updatedAt: new Date().toISOString(),
@@ -380,7 +393,7 @@ function nextQualificationQuestion(
   }
 
   if (settings.bookAppointment && !qualification.availability && !qualification.delay) {
-    return "Vous êtes plutôt dispo en début ou fin de semaine ? Je ne veux pas vous relancer inutilement.";
+    return "Vous êtes plutôt dispo en début ou fin de semaine ?";
   }
 
   if (settings.bookAppointment) {
@@ -440,7 +453,24 @@ function priceReply(
   settings: SeyaAgentSettings,
   qualification: SeyaQualification,
   conversation: SeyaConversation,
+  text = "",
 ) {
+  const needle = `${text} ${conversation.bookingState?.lastLeadPriceText || ""}`.toLowerCase();
+  if (/continuer|ensuite|les séances|seances suivantes/i.test(needle)) {
+    const session = settings.treatmentBriefs.find((item) =>
+      /minceur|cryo/i.test(`${item.name} ${qualification.need} ${conversation.treatment}`),
+    )?.pricing;
+    if (session?.session) {
+      return `Les séances suivantes sont ${session.session}. Le protocole exact se précise après l’analyse corporelle.`;
+    }
+    return "Je comprends, vous souhaitez connaître le prix des séances si vous poursuivez après la découverte. Je n’ai pas de tarif fixe à vous annoncer : il dépend du protocole proposé après l’analyse corporelle. Je peux demander au centre s’il peut déjà vous donner une fourchette.";
+  }
+  if (/cure|forfait/i.test(needle)) {
+    const pack = settings.treatmentBriefs.find((item) => item.pricing?.package)?.pricing?.package;
+    if (pack) {
+      return `Nos cures commencent ${pack}. Le devis précis se fait après le bilan.`;
+    }
+  }
   const price = resolveTreatmentPrice(
     settings,
     `${qualification.need} ${qualification.zone} ${conversation.treatment}`,
@@ -448,7 +478,7 @@ function priceReply(
   if (price && /analyse corporelle|devis personnalisé/i.test(price)) {
     return price;
   }
-  return "Le bilan et la séance découverte sont offerts, c’est gratuit. On y fait une analyse corporelle pour établir un devis personnalisé. Quand seriez-vous disponible ?";
+  return "Le bilan et la séance découverte sont offerts, c’est gratuit. On y fait une analyse corporelle pour établir un devis personnalisé.";
 }
 
 function mergeQualification(current: SeyaQualification, text: string) {

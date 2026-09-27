@@ -75,7 +75,7 @@ async function relanceCenter(supabase, center) {
   for (const conversation of conversations) {
     const updated = { ...conversation };
     const status = String(conversation.status || "");
-    if (/rdv pris|rdv confirm|terminé|termine|pas int[eé]ress|recontacter/i.test(status)) {
+    if (shouldSkipRelance(conversation)) {
       nextConversations.push(updated);
       continue;
     }
@@ -132,6 +132,16 @@ async function relanceCenter(supabase, center) {
   return sent;
 }
 
+function shouldSkipRelance(conversation) {
+  const status = String(conversation?.status || "");
+  return (
+    conversation?.healthReview?.status === "awaiting_human_health_review" ||
+    /rdv pris|rdv confirm|terminé|termine|pas int[eé]ress|recontacter|revue santé/i.test(
+      status,
+    )
+  );
+}
+
 function relanceIndex(days) {
   if (days >= 28) {
     return 3;
@@ -141,3 +151,5 @@ function relanceIndex(days) {
   }
   return 1;
 }
+
+module.exports.shouldSkipRelance = shouldSkipRelance;

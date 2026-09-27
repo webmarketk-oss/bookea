@@ -5,11 +5,29 @@ export const SEYA_SETTINGS_UPDATED_EVENT = "bookea-seya-settings-updated";
 export const SEYA_CONVERSATIONS_UPDATED_EVENT =
   "bookea-seya-conversations-updated";
 
+export type SeyaHealthSheet = {
+  validated: boolean;
+  contraindications: string;
+  precautions: string;
+  professionalQuestions: string;
+  transferTo: string;
+};
+
+export type SeyaPricePolicy = {
+  bilan: string;
+  discovery: string;
+  session: string;
+  package: string;
+  sessionPolicy: "fixed" | "from" | "range" | "after_bilan" | "callback";
+};
+
 export type SeyaTreatmentBrief = {
   name: string;
   brief: string;
   opening?: string;
   price?: string;
+  pricing?: SeyaPricePolicy;
+  health?: SeyaHealthSheet;
 };
 
 export type SeyaOfferMap = {
@@ -40,6 +58,7 @@ export type SeyaConversationStatus =
   | "RDV confirmé"
   | "Chaud"
   | "À recontacter"
+  | "Revue santé"
   | "Pas intéressé"
   | "Terminé";
 
@@ -71,6 +90,43 @@ export type SeyaQualification = {
   availability: string;
 };
 
+export type SeyaBookingState = {
+  centerId: string | null;
+  serviceIntent: string;
+  requestedDate: string | null;
+  requestedWeekday: number | null;
+  rejectedDates: string[];
+  rejectedWeekdays: number[];
+  lastOfferedSlots: SeyaProposedSlot[];
+  pendingQuestion: string | null;
+  appointmentStatus: "none" | "proposed" | "confirmed";
+  priceAskCount: number;
+  lastPriceIntent?: string | null;
+  unansweredPriceIntent?: string | null;
+  lastLeadPriceText?: string;
+};
+
+export type SeyaHealthReview = {
+  status: "none" | "awaiting_human_health_review" | "reviewed";
+  kind: "general" | "personal" | "mixed" | null;
+  note: string;
+  transferTo: string;
+  treatmentName: string;
+  createdAt: string | null;
+  reviewedAt: string | null;
+  reviewedBy: string | null;
+};
+
+export type SeyaHealthTask = {
+  id: string;
+  title: string;
+  context: string;
+  transferTo: string;
+  status: "open" | "done";
+  createdAt: string;
+  kind?: string;
+};
+
 export type SeyaConversation = {
   id: string;
   leadId: string;
@@ -84,6 +140,10 @@ export type SeyaConversation = {
   bookedSlot?: SeyaProposedSlot;
   campaign?: string;
   offerLabel?: string;
+  centerId?: string;
+  bookingState?: SeyaBookingState;
+  healthReview?: SeyaHealthReview;
+  healthTask?: SeyaHealthTask;
   messages: SeyaAgentMessage[];
   updatedAt: string;
   lastRelanceAt?: string | null;
@@ -99,16 +159,23 @@ export const defaultTreatmentBriefs: SeyaTreatmentBrief[] = [
     brief:
       "Parle comme une réceptionniste. Ne parle de prix que si on te le demande. Contre-indication (pacemaker, grossesse…) : transmets à l’équipe, ne booke pas.",
     opening:
-      "Bonjour {prenom}, c’est Seya du {centre} :) On vient juste de recevoir votre demande ({offre}) ! Je peux vous proposer un créneau rapidement, vous êtes plutôt dispo en début ou fin de semaine ? Je ne veux pas vous relancer inutilement.",
+      "Bonjour {prenom}, c’est Seya du {centre} :) On vient juste de recevoir votre demande ({offre}) ! Je peux vous proposer un créneau rapidement, vous êtes plutôt dispo en début ou fin de semaine ?",
   },
   {
     name: "Soin minceur",
+    pricing: {
+      bilan: "offert",
+      discovery: "offerte",
+      session: "",
+      package: "à partir de 500€, payable jusqu’en 10 fois",
+      sessionPolicy: "after_bilan",
+    },
     price:
       "Le bilan et la séance découverte sont offerts, c’est gratuit. On y fait une analyse corporelle pour établir un devis personnalisé. Quand seriez-vous disponible ?",
     brief:
       "Parle comme une réceptionniste. Demande la zone. Ne parle de prix que si on te le demande. Pas de liste de créneaux à la place du tarif.",
     opening:
-      "Bonjour {prenom}, c’est Seya du {centre} :) On vient juste de recevoir votre demande ({offre}) ! C’est plutôt quelle zone ? Je peux ensuite regarder un créneau, je ne veux pas vous relancer inutilement.",
+      "Bonjour {prenom}, c’est Seya du {centre} :) On vient juste de recevoir votre demande ({offre}) ! C’est plutôt quelle zone ? Je peux ensuite regarder un créneau.",
   },
   {
     name: "Soin visage",
@@ -116,16 +183,23 @@ export const defaultTreatmentBriefs: SeyaTreatmentBrief[] = [
     brief:
       "Parle comme une réceptionniste. Ne parle de prix que si on te le demande.",
     opening:
-      "Bonjour {prenom}, c’est Seya du {centre} :) On vient juste de recevoir votre demande ({offre}) ! Quel est votre objectif peau ? Je peux ensuite regarder un créneau, je ne veux pas vous relancer inutilement.",
+      "Bonjour {prenom}, c’est Seya du {centre} :) On vient juste de recevoir votre demande ({offre}) ! Quel est votre objectif peau ? Je peux ensuite regarder un créneau.",
   },
   {
     name: "Cryolipolyse",
+    pricing: {
+      bilan: "offert",
+      discovery: "offerte",
+      session: "",
+      package: "à partir de 500€, payable jusqu’en 10 fois",
+      sessionPolicy: "after_bilan",
+    },
     price:
       "Le bilan et la séance découverte sont offerts, c’est gratuit. On y fait une analyse corporelle pour établir un devis personnalisé. Quand seriez-vous disponible ?",
     brief:
       "Parle comme une réceptionniste. Ne parle de prix que si on te le demande. Contre-indication : transmets à l’équipe.",
     opening:
-      "Bonjour {prenom}, c’est Seya du {centre} :) On vient juste de recevoir votre demande ({offre}) ! Quelle zone souhaitez-vous traiter ? Je ne veux pas vous relancer inutilement.",
+      "Bonjour {prenom}, c’est Seya du {centre} :) On vient juste de recevoir votre demande ({offre}) ! Quelle zone souhaitez-vous traiter ?"
   },
   {
     name: "Hydrafacial",
@@ -133,7 +207,7 @@ export const defaultTreatmentBriefs: SeyaTreatmentBrief[] = [
     brief:
       "Parle comme une réceptionniste. Ne parle de prix que si on te le demande.",
     opening:
-      "Bonjour {prenom}, c’est Seya du {centre} :) On vient juste de recevoir votre demande ({offre}) ! Quel est votre objectif peau ? Je ne veux pas vous relancer inutilement.",
+      "Bonjour {prenom}, c’est Seya du {centre} :) On vient juste de recevoir votre demande ({offre}) ! Quel est votre objectif peau ?"
   },
 ];
 
@@ -432,15 +506,15 @@ function looksRoboticOpening(value?: string | null) {
 
 function defaultOpeningForFamily(family: string) {
   if (family === "minceur") {
-    return "Bonjour {prenom}, c’est Seya du {centre} :) On vient juste de recevoir votre demande ({offre}) ! C’est plutôt quelle zone ? Je peux ensuite regarder un créneau, je ne veux pas vous relancer inutilement.";
+    return "Bonjour {prenom}, c’est Seya du {centre} :) On vient juste de recevoir votre demande ({offre}) ! C’est plutôt quelle zone ? Je peux ensuite regarder un créneau.";
   }
   if (family === "visage") {
-    return "Bonjour {prenom}, c’est Seya du {centre} :) On vient juste de recevoir votre demande ({offre}) ! Quel est votre objectif peau ? Je ne veux pas vous relancer inutilement.";
+    return "Bonjour {prenom}, c’est Seya du {centre} :) On vient juste de recevoir votre demande ({offre}) ! Quel est votre objectif peau ?";
   }
   if (family === "epilation") {
-    return "Bonjour {prenom}, c’est Seya du {centre} :) On vient juste de recevoir votre demande ({offre}) ! Je peux vous proposer un créneau rapidement, vous êtes plutôt dispo en début ou fin de semaine ? Je ne veux pas vous relancer inutilement.";
+    return "Bonjour {prenom}, c’est Seya du {centre} :) On vient juste de recevoir votre demande ({offre}) ! Je peux vous proposer un créneau rapidement, vous êtes plutôt dispo en début ou fin de semaine ?";
   }
-  return "Bonjour {prenom}, c’est Seya du {centre} :) On vient juste de recevoir votre demande. Je peux vous proposer un créneau rapidement, vous êtes plutôt dispo en début ou fin de semaine ? Je ne veux pas vous relancer inutilement.";
+  return "Bonjour {prenom}, c’est Seya du {centre} :) On vient juste de recevoir votre demande. Je peux vous proposer un créneau rapidement, vous êtes plutôt dispo en début ou fin de semaine ?";
 }
 
 function fillSeyaTemplate(
@@ -486,7 +560,7 @@ export function inboxTag(conversation: SeyaConversation): SeyaInboxTag {
   if (status === "RDV pris" || status === "RDV confirmé") {
     return "rdv";
   }
-  if (status === "À recontacter") {
+  if (status === "À recontacter" || status === "Revue santé") {
     return "humain";
   }
   if (status === "Chaud" || status === "RDV proposé") {
@@ -518,6 +592,40 @@ export function sortSeyaInbox(conversations: SeyaConversation[]) {
     }
     return a.messages.length - b.messages.length;
   });
+}
+
+export function markSeyaHealthReviewed(
+  conversation: SeyaConversation,
+  reviewedBy = "équipe du centre",
+): SeyaConversation {
+  const current = conversation.healthReview;
+  return {
+    ...conversation,
+    status: conversation.qualification?.need ? "Qualifié" : "En cours",
+    healthReview: {
+      status: "reviewed",
+      kind: current?.kind || "personal",
+      note: current?.note || "",
+      transferTo: current?.transferTo || "",
+      treatmentName: current?.treatmentName || conversation.treatment || "",
+      createdAt: current?.createdAt || null,
+      reviewedAt: new Date().toISOString(),
+      reviewedBy,
+    },
+    healthTask: conversation.healthTask
+      ? { ...conversation.healthTask, status: "done" }
+      : conversation.healthTask,
+    messages: [
+      ...conversation.messages,
+      {
+        id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        author: "centre",
+        text: "Vérification santé faite. Seya peut reprendre la conversation.",
+        at: new Date().toISOString(),
+      },
+    ],
+    updatedAt: new Date().toISOString(),
+  };
 }
 
 export function inboxTagLabel(tag: SeyaInboxTag) {
@@ -566,10 +674,48 @@ function normalizeTreatmentBriefs(value?: SeyaTreatmentBrief[] | null) {
       brief: String(item?.brief || "").trim(),
       opening: String(item?.opening || previous?.opening || "").trim(),
       price: String(item?.price || previous?.price || "").trim(),
+      pricing: normalizePricePolicy(item?.pricing || previous?.pricing, item?.price || previous?.price),
+      health: normalizeHealthSheet(item?.health || previous?.health),
     });
   }
 
   return [...merged.values()];
+}
+
+function normalizePricePolicy(
+  value?: SeyaPricePolicy | null,
+  fallbackPrice?: string,
+): SeyaPricePolicy {
+  const current = value && typeof value === "object" ? value : {};
+  const legacy = String(fallbackPrice || "").trim();
+  const allowed = ["fixed", "from", "range", "after_bilan", "callback"] as const;
+  return {
+    bilan: String(current.bilan || (/bilan/i.test(legacy) && /gratuit|offert/i.test(legacy) ? "offert" : "")).trim(),
+    discovery: String(
+      current.discovery ||
+        (/découverte|decouverte/i.test(legacy) && /gratuit|offert/i.test(legacy)
+          ? "offerte"
+          : ""),
+    ).trim(),
+    session: String(current.session || "").trim(),
+    package: String(
+      current.package || (/500/.test(legacy) ? "à partir de 500€, payable jusqu’en 10 fois" : ""),
+    ).trim(),
+    sessionPolicy: allowed.includes(current.sessionPolicy)
+      ? current.sessionPolicy
+      : "after_bilan",
+  };
+}
+
+function normalizeHealthSheet(value?: SeyaHealthSheet | null): SeyaHealthSheet {
+  const current = value && typeof value === "object" ? value : {};
+  return {
+    validated: current.validated === true,
+    contraindications: String(current.contraindications || "").trim(),
+    precautions: String(current.precautions || "").trim(),
+    professionalQuestions: String(current.professionalQuestions || "").trim(),
+    transferTo: String(current.transferTo || "").trim(),
+  };
 }
 
 function normalizeOfferMaps(value?: SeyaOfferMap[] | null) {

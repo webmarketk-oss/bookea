@@ -1,16 +1,19 @@
 const OpenAI = require("openai");
 const {
   agentSettings,
+  applyBookingMessage,
   applyLeadReply,
   asksLocation,
   asksPrice,
+  emptySlotFallback,
   faqReply,
+  guardSlots,
   hasMedicalFlag,
   humanSlotReply,
   isJunkTreatment,
   isOptOut,
   locationReply,
-  pickSlotsForMessage,
+  pickSlotsForState,
   matchProposedSlot,
   mergeQualification,
   message,
@@ -20,6 +23,14 @@ const {
   resolveTreatmentPrice,
   threadHasMedical,
 } = require("./agent");
+const {
+  enforceOutgoingText,
+  shouldSearchSlots,
+  slotAllowed,
+} = require("./booking-state");
+const { classifyHealthMessage, isAwaitingHealthReview } = require("./health");
+const { classifyPriceQuestion, isPriceRepeatComplaint } = require("./price");
+const { isHesitation, isIdentityQuestion, isThanks, refusesSlots, wantsSlots } = require("./conversation");
 
 const ALLOWED_ACTIONS = new Set([
   "continue",
@@ -42,27 +53,73 @@ async function generateSeyaReply({
   appointments,
   hours,
   centerAddress,
+  centerId,
+  now,
 }) {
-  const resolvedSlots = Array.isArray(appointments)
-    ? pickSlotsForMessage(appointments, hours, conversation, text)
-    : slots || [];
-  const extras = { centerName, centerAddress };
-  const fallback = applyLeadReply(conversation, text, seya, resolvedSlots, extras);
-  if (!hasAiKey()) {
+  const bookingState = applyBookingMessage(conversation.bookingState, text, {
+    centerId: centerId || conversation.centerId,
+    now,
+  });
+  const conversationWithState = {
+    ...conversation,
+    centerId: centerId || conversation.centerId || bookingState.centerId,
+    bookingState,
+  };
+  const allowRepeat = /lundi|mardi|mercredi|jeudi|vendredi|samedi|dispo|creneau|créneau|1er|octobre|\d{1,2}\/\d{1,2}/i.test(
+    String(text || ""),
+  );
+  const health = classifyHealthMessage(text);
+  const rawSlots =
+    shouldSearchSlots(bookingState, text) &&
+    !health.personal &&
+    !health.general &&
+    !isAwaitingHealthReview(conversationWithState)
+      ? Array.isArray(appointments)
+        ? pickSlotsForState(appointments, hours, bookingState, now)
+        : slots || []
+      : [];
+  const guarded = guardSlots(rawSlots, bookingState, {
+    centerId: conversationWithState.centerId,
+    allowRepeat,
+  });
+  const resolvedSlots = guarded.slots;
+  const extras = {
+    centerName,
+    centerAddress,
+    centerId: conversationWithState.centerId,
+    now,
+    bookingState,
+    guarded,
+  };
+  const fallback = applyLeadReply(conversationWithState, text, seya, resolvedSlots, extras);
+  const priceIntent = classifyPriceQuestion(text);
+  if (
+    !hasAiKey() ||
+    health.personal ||
+    health.general ||
+    isAwaitingHealthReview(conversation) ||
+    priceIntent ||
+    isPriceRepeatComplaint(text) ||
+    isIdentityQuestion(text) ||
+    isThanks(text) ||
+    isHesitation(text) ||
+    refusesSlots(text)
+  ) {
     return { ...fallback, via: "rules" };
   }
 
   try {
     const decision = await askSeyaModel({
-      conversation,
+      conversation: conversationWithState,
       text,
       seya,
       slots: resolvedSlots,
       centerName,
       centerAddress,
+      bookingState,
     });
     return {
-      ...applyAiDecision(conversation, text, seya, resolvedSlots, decision, extras),
+      ...applyAiDecision(conversationWithState, text, seya, resolvedSlots, decision, extras),
       via: "ai",
     };
   } catch (error) {
@@ -71,7 +128,7 @@ async function generateSeyaReply({
   }
 }
 
-async function askSeyaModel({ conversation, text, seya, slots, centerName, centerAddress }) {
+async function askSeyaModel({ conversation, text, seya, slots, centerName, centerAddress, bookingState }) {
   const settings = agentSettings(seya);
   const careHint = `${conversation.qualification?.need || ""} ${conversation.qualification?.zone || ""} ${conversation.treatment || ""}`;
   const offer = resolveOfferLabel(
@@ -107,6 +164,7 @@ async function askSeyaModel({ conversation, text, seya, slots, centerName, cente
           brief,
           price,
           centerAddress,
+          bookingState,
         }),
       },
       ...history,
@@ -127,6 +185,7 @@ function buildSystemPrompt({
   brief,
   price,
   centerAddress,
+  bookingState,
 }) {
   const slotLines = (slots || [])
     .map((slot, index) => `${index + 1}) ${slot.label}`)
@@ -160,17 +219,33 @@ function buildSystemPrompt({
     slotLines
       ? `Créneaux RÉELS pour SA demande (jour demandé uniquement) :\n${slotLines}\nDis-les en phrase. N’invente aucun autre jour.`
       : "Aucun créneau libre pour le jour demandé. Dis-le et demande un autre jour.",
-    "Modèle : « Bonjour Alix, c’est Seya du centre :) On vient de recevoir votre demande. Vous êtes plutôt dispo en début ou fin de semaine ? Je ne veux pas vous relancer inutilement. »",
-    "Si le créneau voulu n’existe pas : dis-le simplement et propose 2 alternatives réelles.",
+    bookingState?.requestedDate
+      ? `Date demandée (obligatoire) : ${bookingState.requestedDate}. Interdit de proposer un autre jour.`
+      : "",
+    bookingState?.requestedWeekday != null
+      ? `Jour demandé : ${["dimanche","lundi","mardi","mercredi","jeudi","vendredi","samedi"][bookingState.requestedWeekday]}.`
+      : "",
+    bookingState?.rejectedDates?.length
+      ? `Jours refusés : ${bookingState.rejectedDates.join(", ")}.`
+      : "",
+    "Tu n’imposes pas un tunnel bilan → créneaux. Tu réponds d’abord au message actuel.",
+    "« Je ne veux pas vous relancer inutilement » uniquement dans une relance, jamais dans le premier échange.",
+    "Si le créneau voulu n’existe pas : dis-le simplement et demande le jour suivant ou une autre journée. N’invente pas un lundi.",
     "Réponds UNIQUEMENT en JSON :",
     '{"reply":"texte WhatsApp 1 à 3 phrases","need":"","zone":"","delay":"","availability":"","action":"continue|propose_slots|book|handoff|stop","slotIndex":null}',
     "Règles :",
     "- Une seule question à la fois. Réponds d’abord à ce qu’ils viennent d’écrire.",
+    "- Question générale sur les contre-indications : donne uniquement la fiche validée du soin demandé, jamais celle d’un autre soin.",
+    "- Situation santé personnelle : ne dis jamais si le soin est possible ou impossible. Transmets à l’équipe. Ne demande pas plus de détails médicaux.",
     "- Pacemaker, grossesse, doute médical : action=handoff. Ne booke pas. L’équipe vérifie.",
     "- S’ils donnent encore un horaire après un doute médical : handoff, « je transmets à l’équipe ».",
+    "- Prix : distingue bilan, séance découverte, séances suivantes et cure. « Continuer / ensuite / les séances » = séances après la découverte, pas le bilan.",
+    "- Ne répète jamais mot pour mot ta dernière réponse. Si elle dit que tu répètes, reconnais l’erreur et réponds à la question restée sans réponse.",
     "- Prix : tu n’en parles JAMAIS si elle n’en parle pas.",
     "- « Combien de temps » n’est PAS une question prix. Réponds à la durée ou aux résultats.",
-    "- Si elle demande le prix / si le bilan est gratuit : action=continue. Dis : « Le bilan et la séance découverte sont offerts, c’est gratuit. On y fait une analyse corporelle pour un devis personnalisé. Quand seriez-vous disponible ? »",
+    "- « Le bilan est-il gratuit ? » ≠ « Combien les séances ensuite ? ». Réponds seulement à la partie demandée. Pas de créneau tant qu’elle n’en demande pas.",
+    "- Si elle demande si tu es une IA : « Je suis SEYA, l’assistante virtuelle du centre. Je peux vous renseigner et organiser votre rendez-vous, et l’équipe peut reprendre la conversation si vous préférez. »",
+    "- Ne termine pas chaque message par une question. Pas d’émoji à chaque tour.",
     "- Douleur : le bilan est indolore. Durée : 30 à 45 min. Résultats : expliqués au bilan.",
     "- « Lundi suivant » / « pas le 28, un autre lundi » : un autre lundi, jamais le même.",
     "- Où / adresse : action=continue, donne l’adresse. Pas de créneaux.",
@@ -206,6 +281,18 @@ function parseDecision(raw) {
 
 function applyAiDecision(conversation, text, seya, slots, decision, extras = {}) {
   const settings = agentSettings(seya);
+  const bookingState = extras.bookingState || applyBookingMessage(conversation.bookingState, text, {
+    centerId: extras.centerId || conversation.centerId,
+    now: extras.now,
+  });
+  const allowRepeat = /lundi|mardi|mercredi|jeudi|vendredi|samedi|dispo|creneau|créneau|1er|octobre|\d{1,2}\/\d{1,2}/i.test(
+    String(text || ""),
+  );
+  const guarded = extras.guarded || guardSlots(slots, bookingState, {
+    centerId: extras.centerId || conversation.centerId,
+    allowRepeat,
+  });
+  const safeSlots = shouldSearchSlots(bookingState, text) ? guarded.slots : [];
   const qualification = {
     ...mergeQualification(conversation.qualification, text, conversation.treatment),
     ...(decision.need && !isJunkTreatment(decision.need) ? { need: decision.need } : {}),
@@ -219,7 +306,7 @@ function applyAiDecision(conversation, text, seya, slots, decision, extras = {})
     action = "handoff";
   }
   if (
-    (asksPrice(text) || asksLocation(text) || faqReply(text)) &&
+    (asksPrice(text) || classifyPriceQuestion(text) || isPriceRepeatComplaint(text) || asksLocation(text) || faqReply(text)) &&
     (action === "stop" || action === "propose_slots" || action === "book")
   ) {
     action = "continue";
@@ -232,16 +319,16 @@ function applyAiDecision(conversation, text, seya, slots, decision, extras = {})
   const chosenSlot =
     (action === "book" && decision.slotIndex
       ? conversation.proposedSlots?.[decision.slotIndex - 1] ||
-        slots?.[decision.slotIndex - 1]
+        safeSlots?.[decision.slotIndex - 1]
       : null) ||
     matchProposedSlot(text, conversation.proposedSlots) ||
-    matchProposedSlot(text, slots);
+    matchProposedSlot(text, safeSlots);
 
   if (action === "stop") {
-    return {
-      conversation: withMessages(conversation, qualification, "Pas intéressé", text, decision.reply || "Très bien, j’arrête ici. Si vous changez d’avis, écrivez-nous."),
-      shouldBook: null,
-    };
+    return sealAiResult(
+      withMessages(conversation, qualification, "Pas intéressé", text, decision.reply || "Très bien, j’arrête ici. Si vous changez d’avis, écrivez-nous."),
+      bookingState,
+    );
   }
 
   if (action === "handoff") {
@@ -252,69 +339,91 @@ function applyAiDecision(conversation, text, seya, slots, decision, extras = {})
         ? "Je transmets cette préférence à l’équipe, elle reviendra vers vous après vérification."
         : "Il faut que l’équipe vérifie votre situation avant de confirmer. Je leur transmets pour voir si c’est adapté."
       : "Parfait, je transmets à l’équipe, elle vous recontacte rapidement.";
-    return {
-      conversation: withMessages(
+    return sealAiResult(
+      withMessages(
         conversation,
         qualification,
         "À recontacter",
         text,
         decision.reply && !medical ? decision.reply : handoffReply,
       ),
-      shouldBook: null,
-    };
+      bookingState,
+    );
   }
 
-  if (action === "book" && chosenSlot && settings.bookAppointment && !threadHasMedical(conversation, text)) {
-    return {
-      conversation: {
+  if (
+    action === "book" &&
+    chosenSlot &&
+    settings.bookAppointment &&
+    !threadHasMedical(conversation, text) &&
+    slotAllowed(chosenSlot, bookingState)
+  ) {
+    return sealAiResult(
+      {
         ...withMessages(
           conversation,
           qualification,
           "RDV pris",
           text,
-          decision.reply ||
-            `Parfait, je bloque ${chosenSlot.label}. Vous recevrez la confirmation du centre.`,
+          `Je vérifie le planning et je vous confirme ${chosenSlot.label}.`,
         ),
         bookedSlot: chosenSlot,
-        proposedSlots: conversation.proposedSlots || slots || [],
+        proposedSlots: conversation.proposedSlots || safeSlots || [],
       },
-      shouldBook: chosenSlot,
-    };
+      { ...bookingState, appointmentStatus: "proposed" },
+      chosenSlot,
+    );
   }
 
-  if (action === "propose_slots" && settings.bookAppointment && slots?.length) {
-    const reply = humanSlotReply(slots);
-    return {
-      conversation: {
-        ...withMessages(conversation, qualification, "RDV proposé", text, reply),
-        proposedSlots: slots,
+  if (action === "propose_slots" && settings.bookAppointment && wantsSlots(text)) {
+    if (!safeSlots.length) {
+      return sealAiResult(
+        withMessages(
+          conversation,
+          qualification,
+          "Qualifié",
+          text,
+          guarded.fallback || emptySlotFallback(bookingState),
+        ),
+        { ...bookingState, lastOfferedSlots: [], appointmentStatus: "none" },
+      );
+    }
+    return sealAiResult(
+      {
+        ...withMessages(conversation, qualification, "RDV proposé", text, humanSlotReply(safeSlots)),
+        proposedSlots: safeSlots,
       },
-      shouldBook: null,
-    };
+      {
+        ...bookingState,
+        lastOfferedSlots: safeSlots,
+        appointmentStatus: "proposed",
+        pendingQuestion: null,
+      },
+    );
   }
 
   const fallbackReply =
     faqReply(text) ||
     (asksLocation(text)
       ? locationReply(extras.centerAddress, extras.centerName)
-      : asksPrice(text)
-        ? priceReply(seya, qualification, conversation)
+      : asksPrice(text) || classifyPriceQuestion(text) || isPriceRepeatComplaint(text)
+        ? priceReply(seya, qualification, { ...conversation, bookingState }, text)
         : "Merci. Dites-moi le soin ou la zone, je m’occupe de la suite.");
   const reply =
-    faqReply(text) || asksLocation(text) || asksPrice(text)
+    faqReply(text) || asksLocation(text) || asksPrice(text) || classifyPriceQuestion(text) || isPriceRepeatComplaint(text)
       ? fallbackReply
       : decision.reply || fallbackReply;
 
-  return {
-    conversation: withMessages(
+  return sealAiResult(
+    withMessages(
       conversation,
       qualification,
       qualification.need ? "Qualifié" : "En cours",
       text,
       reply,
     ),
-    shouldBook: null,
-  };
+    bookingState,
+  );
 }
 
 function withMessages(conversation, qualification, status, leadText, seyaText) {
@@ -328,6 +437,38 @@ function withMessages(conversation, qualification, status, leadText, seyaText) {
       message("seya", seyaText),
     ],
     updatedAt: new Date().toISOString(),
+  };
+}
+
+function sealAiResult(conversationOrResult, bookingState, shouldBook = null) {
+  const conversation = conversationOrResult.messages
+    ? conversationOrResult
+    : conversationOrResult.conversation;
+  const messages = [...(conversation.messages || [])];
+  const last = messages[messages.length - 1];
+  if (last?.author === "seya") {
+    const safe = enforceOutgoingText(last.text, bookingState);
+    if (safe !== last.text) {
+      messages[messages.length - 1] = { ...last, text: safe };
+      return {
+        conversation: {
+          ...conversation,
+          messages,
+          status: conversation.status === "RDV proposé" ? "Qualifié" : conversation.status,
+          proposedSlots: [],
+          bookingState: { ...bookingState, lastOfferedSlots: [], appointmentStatus: "none" },
+        },
+        shouldBook: null,
+      };
+    }
+  }
+  return {
+    conversation: {
+      ...conversation,
+      messages,
+      bookingState,
+    },
+    shouldBook: shouldBook && slotAllowed(shouldBook, bookingState) ? shouldBook : null,
   };
 }
 
@@ -354,6 +495,7 @@ function cleanField(value) {
 }
 
 module.exports = {
+  applyAiDecision,
   generateSeyaReply,
   hasAiKey,
 };

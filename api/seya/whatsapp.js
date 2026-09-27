@@ -211,7 +211,8 @@ async function handleIncoming(supabase, incoming) {
   const conversations = Array.isArray(seya.conversations) ? seya.conversations : [];
   const existing =
     conversations.find((item) => item.leadId === context.leadId) ||
-    startConversation(context, center.name, seya);
+    startConversation({ ...context, centerId: center.id }, center.name, seya);
+  existing.centerId = existing.centerId || center.id;
   const appointments = await loadCenterAppointments(supabase, center.id);
   const hours = readHours(center.settings);
   const result = await generateSeyaReply({
@@ -223,8 +224,37 @@ async function handleIncoming(supabase, incoming) {
     hours,
     centerName: center.name,
     centerAddress: readCenterAddress(center),
+    centerId: center.id,
   });
   const next = result.conversation;
+
+  if (result.shouldBook) {
+    try {
+      await bookSeyaAppointment(supabase, center.id, context, next, result.shouldBook);
+      if (next.bookingState) {
+        next.bookingState.appointmentStatus = "confirmed";
+      }
+      next.status = "RDV confirmé";
+      const last = [...(next.messages || [])].reverse().find((item) => item.author === "seya");
+      if (last) {
+        last.text = `C’est noté, ${result.shouldBook.label} est bien bloqué pour ${next.qualification?.need || "votre soin"}. Vous recevrez la confirmation du centre.`;
+      }
+    } catch (bookError) {
+      console.error("[seya/whatsapp] book failed", bookError);
+      result.shouldBook = null;
+      next.status = "RDV proposé";
+      next.bookedSlot = undefined;
+      if (next.bookingState) {
+        next.bookingState.appointmentStatus = "proposed";
+      }
+      const last = [...(next.messages || [])].reverse().find((item) => item.author === "seya");
+      if (last) {
+        last.text =
+          "Je n’ai pas pu bloquer ce créneau dans l’agenda. Quel autre horaire vous irait ?";
+      }
+    }
+  }
+
   const saved = [
     next,
     ...conversations.filter((item) => item.leadId !== next.leadId),
@@ -242,14 +272,6 @@ async function handleIncoming(supabase, incoming) {
       },
     })
     .eq("id", center.id);
-
-  if (result.shouldBook) {
-    await bookSeyaAppointment(supabase, center.id, context, next, result.shouldBook).catch(
-      (bookError) => {
-        console.error("[seya/whatsapp] book failed", bookError);
-      },
-    );
-  }
 
   const reply = [...next.messages].reverse().find((item) => item.author === "seya");
   if (reply?.text) {
