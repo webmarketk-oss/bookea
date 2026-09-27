@@ -127,8 +127,8 @@ function buildSystemPrompt({
       ? `Soin / offre à dire : ${offer}. Jamais « Lead Meta » ni le nom de campagne.`
       : "Jamais « Lead Meta » ni le nom de campagne. Déduis le soin des messages.",
     price
-      ? `Tarif autorisé : ${price}. Si on demande le prix, dis ça, sans envoyer de créneaux.`
-      : "Aucun tarif paramétré : ne l’invente pas, propose un rappel ou un bilan.",
+      ? `Tarif à dire UNIQUEMENT si elle demande le prix : ${price}`
+      : "Aucun tarif paramétré. Si elle demande le prix : ne l’invente pas, propose le bilan ou un rappel.",
     conversation.treatment && !/lead meta|meta lead/i.test(conversation.treatment)
       ? `Soin CRM : ${conversation.treatment}.`
       : "Le CRM est flou (souvent un lead Meta). Ventre / poids = minceur.",
@@ -151,7 +151,9 @@ function buildSystemPrompt({
     "- Une seule question à la fois. Réponds d’abord à ce qu’ils viennent d’écrire.",
     "- Pacemaker, grossesse, doute médical : action=handoff. Ne booke pas. L’équipe vérifie.",
     "- S’ils donnent encore un horaire après un doute médical : handoff, « je transmets à l’équipe ».",
-    "- Prix : tarif autorisé, action=continue. Pas de créneaux à la place.",
+    "- Prix : tu n’en parles JAMAIS si elle n’en parle pas. Pas de 500€, pas de 10 fois, pas de « c’est offert », tant qu’elle n’a pas dit prix / tarif / combien.",
+    "- Si elle demande le prix : action=continue, réponds comme à l’oral avec le tarif autorisé. Une ou deux phrases. Pas de liste, pas de créneaux dans la même réponse.",
+    "- Si elle dit « arrête les créneaux, parle-moi des prix » : ce n’est pas un stop, réponds au tarif.",
     "- « Arrête de me parler des créneaux » n’est PAS un stop.",
     "- stop seulement si plus de contact (stop, pas intéressé, ne plus écrire).",
     "- Jamais inventer un prix, un résultat médical, un créneau.",

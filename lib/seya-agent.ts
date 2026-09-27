@@ -423,15 +423,14 @@ function priceReply(
   qualification: SeyaQualification,
   conversation: SeyaConversation,
 ) {
-  const care = displayCareLabel(qualification, conversation);
   const price = resolveTreatmentPrice(
     settings,
     `${qualification.need} ${qualification.zone} ${conversation.treatment}`,
   );
   if (price) {
-    return `Pour ${care}, ${price}. Vous voulez le détail du protocole, ou qu’une conseillère vous rappelle ?`;
+    return price;
   }
-  return `Pour ${care}, le tarif dépend de la zone et du protocole. Une conseillère peut vous le confirmer précisément. Vous voulez qu’on vous rappelle ?`;
+  return "Le bilan permet de vous dire ça précisément. Vous voulez que je vous propose un créneau bilan, ou qu’une conseillère vous rappelle ?";
 }
 
 function mergeQualification(current: SeyaQualification, text: string) {

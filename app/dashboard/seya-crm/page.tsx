@@ -792,7 +792,7 @@ export default function SeyaCrmPage() {
             }
             onBlur={() => void persistAgentSettings(agentSettings)}
             rows={3}
-            placeholder="Si on demande le prix, donne le tarif du soin. Ne coupe pas si on dit d’arrêter les créneaux."
+            placeholder="Ne parle jamais de prix si la cliente n’en parle pas. Si elle demande le tarif, réponds naturellement avec le texte du champ Prix."
             className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm font-medium leading-6 text-slate-700 outline-none focus:border-violet-500"
           />
         </label>
@@ -802,13 +802,14 @@ export default function SeyaCrmPage() {
             Offres campagne → texte WhatsApp
           </p>
           <p className="mt-1 text-xs font-medium text-slate-400">
-            Si le CRM a « offre 99 », Seya dit « séance découverte à 99€ », jamais le code.
+            Laisse 1 ligne par code campagne. Ne clique pas « Ajouter une offre »
+            pour le prix : ça va plus bas.
           </p>
           <div className="mt-3 grid gap-3">
             {agentSettings.offerMaps.map((item, index) => (
               <div
                 key={`${item.match}-${index}`}
-                className="grid gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4 md:grid-cols-[180px_1fr]"
+                className="grid gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4 md:grid-cols-[180px_1fr_auto]"
               >
                 <input
                   value={item.match}
@@ -823,7 +824,7 @@ export default function SeyaCrmPage() {
                     }))
                   }
                   onBlur={() => void persistAgentSettings(agentSettings)}
-                  placeholder="offre 99"
+                  placeholder="cryo 99"
                   className="h-11 rounded-2xl border border-slate-200 bg-white px-3 text-sm font-semibold outline-none focus:border-violet-500"
                 />
                 <input
@@ -839,9 +840,23 @@ export default function SeyaCrmPage() {
                     }))
                   }
                   onBlur={() => void persistAgentSettings(agentSettings)}
-                  placeholder="une séance découverte cryo à 99€"
+                  placeholder="bilan + séance découverte offerte"
                   className="h-11 rounded-2xl border border-slate-200 bg-white px-3 text-sm font-medium outline-none focus:border-violet-500"
                 />
+                <button
+                  type="button"
+                  onClick={() =>
+                    void persistAgentSettings({
+                      ...agentSettings,
+                      offerMaps: agentSettings.offerMaps.filter(
+                        (_, offerIndex) => offerIndex !== index,
+                      ),
+                    })
+                  }
+                  className="text-sm font-semibold text-slate-400"
+                >
+                  Retirer
+                </button>
               </div>
             ))}
           </div>
@@ -867,8 +882,8 @@ export default function SeyaCrmPage() {
             Prix et discours par soin
           </p>
           <p className="mt-1 text-xs font-medium text-slate-400">
-            Remplis le prix que Seya a le droit de dire. Sans prix, elle n’invente
-            rien et ne balance plus de créneaux à la place.
+            Ce texte, Seya ne le dit que si on lui demande le prix. Elle ne le
+            sort jamais toute seule.
           </p>
           <div className="mt-3 grid gap-3">
             {agentSettings.treatmentBriefs.map((item, index) => (

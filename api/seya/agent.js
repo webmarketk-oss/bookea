@@ -14,7 +14,7 @@ const defaultBriefs = [
     name: "Épilation définitive",
     price: "",
     brief:
-      "Parle comme une réceptionniste. Si on demande le prix, donne le tarif. Contre-indication (pacemaker, grossesse…) : transmets à l’équipe, ne booke pas.",
+      "Parle comme une réceptionniste. Ne parle de prix que si on te le demande. Contre-indication (pacemaker, grossesse…) : transmets à l’équipe, ne booke pas.",
     opening:
       "Bonjour {prenom}, c’est Seya du {centre} :) On vient juste de recevoir votre demande ({offre}) ! Je peux vous proposer un créneau rapidement, vous êtes plutôt dispo en début ou fin de semaine ? Je ne veux pas vous relancer inutilement.",
   },
@@ -22,7 +22,7 @@ const defaultBriefs = [
     name: "Soin minceur",
     price: "",
     brief:
-      "Parle comme une réceptionniste. Demande la zone. Si on demande le prix, donne le tarif. Ne balance pas de liste de créneaux à la place.",
+      "Parle comme une réceptionniste. Demande la zone. Ne parle de prix que si on te le demande. Pas de liste de créneaux à la place du tarif.",
     opening:
       "Bonjour {prenom}, c’est Seya du {centre} :) On vient juste de recevoir votre demande ({offre}) ! C’est plutôt quelle zone ? Je peux ensuite regarder un créneau, je ne veux pas vous relancer inutilement.",
   },
@@ -30,7 +30,7 @@ const defaultBriefs = [
     name: "Soin visage",
     price: "",
     brief:
-      "Parle comme une réceptionniste. Si on demande le prix, donne le tarif.",
+      "Parle comme une réceptionniste. Ne parle de prix que si on te le demande.",
     opening:
       "Bonjour {prenom}, c’est Seya du {centre} :) On vient juste de recevoir votre demande ({offre}) ! Quel est votre objectif peau ? Je ne veux pas vous relancer inutilement.",
   },
@@ -38,7 +38,7 @@ const defaultBriefs = [
     name: "Cryolipolyse",
     price: "",
     brief:
-      "Parle comme une réceptionniste. Si on demande le prix, donne le tarif. Contre-indication : transmets à l’équipe.",
+      "Parle comme une réceptionniste. Ne parle de prix que si on te le demande. Contre-indication : transmets à l’équipe.",
     opening:
       "Bonjour {prenom}, c’est Seya du {centre} :) On vient juste de recevoir votre demande ({offre}) ! Quelle zone souhaitez-vous traiter ? Je ne veux pas vous relancer inutilement.",
   },
@@ -46,7 +46,7 @@ const defaultBriefs = [
     name: "Hydrafacial",
     price: "",
     brief:
-      "Parle comme une réceptionniste. Si on demande le prix, donne le tarif.",
+      "Parle comme une réceptionniste. Ne parle de prix que si on te le demande.",
     opening:
       "Bonjour {prenom}, c’est Seya du {centre} :) On vient juste de recevoir votre demande ({offre}) ! Quel est votre objectif peau ? Je ne veux pas vous relancer inutilement.",
   },
@@ -144,12 +144,7 @@ function looksRoboticOpening(value) {
 
 function resolveTreatmentPrice(seya, treatment) {
   const brief = findTreatmentBrief(seya, treatment);
-  const price = String(brief?.price || "").trim();
-  if (price) {
-    return price;
-  }
-  const offer = resolveOfferLabel(seya, "", treatment);
-  return /€|euro/i.test(offer) ? offer : "";
+  return String(brief?.price || "").trim();
 }
 
 function displayCareLabel(qualification, conversation) {
@@ -174,15 +169,14 @@ function displayCareLabel(qualification, conversation) {
 }
 
 function priceReply(seya, qualification, conversation) {
-  const care = displayCareLabel(qualification, conversation);
   const price = resolveTreatmentPrice(
     seya,
     `${qualification?.need || ""} ${qualification?.zone || ""} ${conversation?.treatment || ""}`,
   );
   if (price) {
-    return `Pour ${care}, ${price}. Vous voulez le détail du protocole, ou qu’une conseillère vous rappelle ?`;
+    return price;
   }
-  return `Pour ${care}, le tarif dépend de la zone et du protocole. Une conseillère peut vous le confirmer précisément. Vous voulez qu’on vous rappelle ?`;
+  return "Le bilan permet de vous dire ça précisément. Vous voulez que je vous propose un créneau bilan, ou qu’une conseillère vous rappelle ?";
 }
 
 function todayIso() {
