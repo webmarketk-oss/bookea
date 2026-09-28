@@ -119,7 +119,12 @@ export async function loadAccessibleCenters(
 export async function getActiveCenterContext(
   supabase: SupabaseClient = createClient(),
 ): Promise<ActiveCenterContext> {
-  const centers = await loadAccessibleCenters(supabase);
+  let centers: AccessibleCenter[] = [];
+  try {
+    centers = await loadAccessibleCenters(supabase);
+  } catch {
+    centers = [];
+  }
   const savedCenterId = readActiveCenterId();
   const activeCenter =
     centers.find((center) => center.id === savedCenterId) ?? centers[0];

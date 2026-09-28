@@ -319,7 +319,12 @@ export default function SeyaCrmPage() {
             loadCrmLeads().catch(() => ({ leads: [] as Lead[] })),
             loadCrmAppointments().catch(() => [] as Appointment[]),
             loadCrmClients().catch(() => ({ clients: [] })),
-            loadSeyaAgentSettings(),
+            loadSeyaAgentSettings().catch(() => ({
+              centerId: "",
+              centerName: "le centre",
+              settings: defaultSeyaAgentSettings,
+              conversations: [] as SeyaConversation[],
+            })),
             loadCenterHours().catch(() => defaultCenterDayHours),
           ]);
 

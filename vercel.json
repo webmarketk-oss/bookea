@@ -9,6 +9,11 @@
       "schedule": "0 9 * * *"
     }
   ],
+  "functions": {
+    "api/health/repair-seya.js": {
+      "maxDuration": 60
+    }
+  },
   "rewrites": [
     {
       "source": "/r/:token",

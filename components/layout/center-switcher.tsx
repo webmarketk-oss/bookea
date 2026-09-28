@@ -49,10 +49,14 @@ export function CenterSwitcher({ collapsed, onExpand }: CenterSwitcherProps) {
 
         setCenters([]);
         setActiveCenterId("");
-        setError(
+        const raw =
           loadError instanceof Error
             ? loadError.message
-            : "Impossible de charger les centres.",
+            : "Impossible de charger les centres.";
+        setError(
+          /timeout|statement/i.test(raw)
+            ? "Le centre met trop longtemps à charger. Recharge la page, ou reconnecte-toi."
+            : raw,
         );
       })
       .finally(() => {

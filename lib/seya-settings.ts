@@ -832,12 +832,22 @@ export function writeLocalSeyaConversations(
 export async function loadSeyaAgentSettings() {
   const context = await getActiveCenterContext();
   const localSettings = readLocalSeyaSettings(context.centerId);
+  const localConversations = readLocalSeyaConversations(context.centerId);
   const supabase = createClient();
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from("centers")
     .select("settings")
     .eq("id", context.centerId)
     .maybeSingle();
+
+  if (error) {
+    return {
+      centerId: context.centerId,
+      centerName: context.centerName,
+      settings: normalizeSeyaAgentSettings(localSettings ?? {}),
+      conversations: localConversations,
+    };
+  }
 
   const remote = asRecord(asRecord(data?.settings).seya);
   const hasRemote = Boolean(asRecord(data?.settings).seya);
