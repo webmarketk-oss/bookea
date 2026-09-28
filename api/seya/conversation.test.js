@@ -185,3 +185,37 @@ test("je reviendrai : plus de créneaux ni « noté pour le ventre »", async ()
   assert.doesNotMatch(lastSeya(conversation), /09h00|lun\.|bloque|confirm/i);
   assert.doesNotMatch(lastSeya(conversation), /noté pour le ventre/i);
 });
+
+test("demande de rendez-vous : elle reste dans le fil, elle ne clôt pas", async () => {
+  const noBook = { ...seya, bookAppointment: false, askForAppointment: true };
+  let conversation = startConversation(
+    {
+      leadId: "lead-rdv",
+      centerId: "jfg-clinique-clermont",
+      firstName: "Léa",
+      lastName: "Test",
+      phone: "0611223344",
+      treatment: "Soin minceur",
+    },
+    "JFG Clinique Clermont",
+    noBook,
+  );
+  const result = await generateSeyaReply({
+    conversation,
+    text: "Je veux un rendez-vous",
+    seya: noBook,
+    appointments: [],
+    hours: hours(),
+    centerName: "JFG Clinique Clermont",
+    centerAddress: "12 rue de la République, 63000 Clermont-Ferrand",
+    centerId: "jfg-clinique-clermont",
+    now: NOW,
+  });
+  conversation = result.conversation;
+  assert.match(lastSeya(conversation), /jour|rendez-vous/i);
+  assert.doesNotMatch(
+    lastSeya(conversation),
+    /recontacte|reviendrai|conseillère du centre, elle/i,
+  );
+  assert.notEqual(conversation.status, "À recontacter");
+});

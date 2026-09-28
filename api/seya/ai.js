@@ -204,6 +204,8 @@ function polishPrompt({
     "Tu es Seya, au standard WhatsApp. Tu parles comme une réceptionniste au téléphone : naturelle, posée, vouvoiement, 1 à 3 phrases.",
     "Le texte Bookea est une fiche de faits autorisés, pas un script. Tu réponds d’abord au dernier message de la cliente.",
     "Si Bookea propose un créneau ou pose une question alors que la cliente n’a pas demandé ça, tu ne le recopies pas.",
+    "Tu ne mets jamais fin à la conversation. Tu ne dis pas que tu reviendras plus tard, ni qu’une conseillère rappellera, sauf si elle demande clairement à parler à quelqu’un.",
+    "Si elle veut un rendez-vous, tu restes avec elle : tu demandes un jour ou tu proposes uniquement les créneaux autorisés.",
     "Tu ne changes aucun fait. Tu n’inventes ni jour, ni heure, ni prix, ni adresse, ni résultat médical.",
     "Pas de liste 1) 2) 3). Pas de « Lead Meta ». Un smiley au plus, pas à chaque message. Tu ne termines pas chaque phrase par une question.",
     `Centre : ${centerName || "le centre"}.`,
@@ -252,7 +254,16 @@ function pickSafeReply(draft, polished, bookingState) {
     });
     return draft;
   }
+  if (replyClosesThread(candidate) && !replyClosesThread(draft)) {
+    return draft;
+  }
   return candidate;
+}
+
+function replyClosesThread(text) {
+  return /reviendrai vers vous|vous recontacte|je vous laisse|je clos le sujet|une conseill[eè]re du centre, elle/i.test(
+    String(text || ""),
+  );
 }
 
 function withPolishedText(result, polished, bookingState) {

@@ -193,17 +193,10 @@ export function applyLeadReply(
 
   const wantsHuman =
     settings.handoffToHuman &&
-    /conseill|humain|appeler|appelez|rappel/i.test(text);
+    /conseill|parler (a|à) (un |une )?(humain|quelqu|personne)/i.test(text) &&
+    !/rendez-vous|\brdv\b|creneau|dispo/i.test(text);
   const refuses = isSeyaOptOut(text);
-  const lastSeyaText =
-    [...conversation.messages].reverse().find((item) => item.author === "seya")
-      ?.text || "";
-  const askedForRdv = /conseill[eè]re|rendez-vous|oui ou non/i.test(lastSeyaText);
-  const wantsRdv =
-    settings.askForAppointment &&
-    !settings.bookAppointment &&
-    ((askedForRdv && /^(oui|ok|d['’]?accord)$/i.test(text.trim())) ||
-      /je (veux|souhaite).*rdv|prendre (un )?(rdv|rendez-vous)/i.test(text));
+  const asksRdv = /rendez-vous|\brdv\b|prendre rendez|un creneau/i.test(text);
 
   if (refuses) {
     return {
@@ -279,7 +272,7 @@ export function applyLeadReply(
     };
   }
 
-  if (wantsHuman || wantsRdv) {
+  if (wantsHuman) {
     return {
       conversation: {
         ...conversation,
@@ -290,7 +283,27 @@ export function applyLeadReply(
           createSeyaMessage("lead", text),
           createSeyaMessage(
             "seya",
-            "Parfait. Je transmets à une conseillère du centre, elle vous recontacte rapidement.",
+            "Bien sûr, je transmets à une conseillère du centre. Elle reprendra avec vous.",
+          ),
+        ],
+        updatedAt: new Date().toISOString(),
+      },
+      shouldBook: null,
+    };
+  }
+
+  if (asksRdv && !settings.bookAppointment) {
+    return {
+      conversation: {
+        ...conversation,
+        qualification,
+        status: (qualification.need ? "Qualifié" : "En cours") as SeyaConversationStatus,
+        messages: [
+          ...conversation.messages,
+          createSeyaMessage("lead", text),
+          createSeyaMessage(
+            "seya",
+            "Oui, on peut regarder un rendez-vous. Quel jour vous irait le mieux ?",
           ),
         ],
         updatedAt: new Date().toISOString(),

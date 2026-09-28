@@ -256,6 +256,14 @@ test("gpt-4o peut reformuler, mais un lundi fuité est jeté au profit du brouil
     pickSafeReply(draft, "Je vous propose jeu. 01/10 à 09h00, ça vous irait ?", state),
     /jeu\. 01\/10 à 09h00/i,
   );
+  assert.equal(
+    pickSafeReply(
+      "Oui, on peut regarder un rendez-vous. Quel jour vous irait le mieux ?",
+      "D’accord, dans ce cas je reviendrai vers vous.",
+      state,
+    ),
+    "Oui, on peut regarder un rendez-vous. Quel jour vous irait le mieux ?",
+  );
 });
 
 test("suggestAvailableSlots sans filtre propose encore le lundi : le garde-fou reste obligatoire", () => {

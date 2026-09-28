@@ -204,7 +204,15 @@ function shouldStartConversation(
     return false;
   }
 
-  if (conversations.some((item) => item.leadId === lead.id)) {
+  const phoneKey = lead.phone.replace(/\D/g, "").slice(-9);
+  if (
+    conversations.some(
+      (item) =>
+        item.leadId === lead.id ||
+        (phoneKey.length === 9 &&
+          item.phone.replace(/\D/g, "").slice(-9) === phoneKey),
+    )
+  ) {
     return false;
   }
 
@@ -221,6 +229,18 @@ function shouldStartConversation(
   }
 
   return lead.status === "Nouveau" || lead.nextAction === "À contacter";
+}
+
+function hoursSinceLastLead(conversation: SeyaConversation) {
+  const last = [...(conversation.messages || [])]
+    .reverse()
+    .find((item) => item.author === "lead");
+  const at = last?.at || conversation.updatedAt;
+  if (!at) {
+    return 999;
+  }
+  const hours = (Date.now() - new Date(at).getTime()) / 3600000;
+  return Number.isFinite(hours) ? hours : 999;
 }
 
 export default function SeyaCrmPage() {
@@ -511,7 +531,8 @@ export default function SeyaCrmPage() {
             preferTemplate:
               conversation.status === "À envoyer" ||
               Boolean(conversation.sendError) ||
-              !conversation.messages.some((item) => item.author === "lead"),
+              !conversation.messages.some((item) => item.author === "lead") ||
+              hoursSinceLastLead(conversation) >= 24,
           }),
         });
         const payload = (await response.json().catch(() => ({}))) as {

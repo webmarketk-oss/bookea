@@ -973,17 +973,7 @@ function applyLeadReply(conversation, text, seya, slots, extras = {}) {
       ? null
       : matchProposedSlot(text, conversation.proposedSlots) ||
         matchProposedSlot(text, slots);
-  const lastSeyaText =
-    [...(conversation.messages || [])]
-      .reverse()
-      .find((item) => item.author === "seya")?.text || "";
-  const askedForRdv = /conseill|rendez-vous|oui ou non/i.test(lastSeyaText);
   const refuses = isOptOut(text);
-  const wantsRdv =
-    settings.askForAppointment &&
-    !settings.bookAppointment &&
-    ((askedForRdv && /^(oui|ok|d['’]?accord)$/i.test(String(text).trim())) ||
-      /je (veux|souhaite).*rdv|prendre (un )?(rdv|rendez-vous)/i.test(text));
 
   if (refuses) {
     return finishLeadReply(conversation, qualification, "Pas intéressé", text, "Très bien, j’arrête ici. Si vous changez d’avis, écrivez-nous.", bookingState);
@@ -1137,13 +1127,28 @@ function applyLeadReply(conversation, text, seya, slots, extras = {}) {
     );
   }
 
-  if (wantsRdv || (settings.handoffToHuman && /conseill|humain|appeler|rappel/i.test(text))) {
+  if (
+    settings.handoffToHuman &&
+    /conseill|parler (a|à) (un |une )?(humain|quelqu|personne)/i.test(text) &&
+    !wantsSlots(text)
+  ) {
     return finishLeadReply(
       conversation,
       qualification,
       "À recontacter",
       text,
-      "Parfait. Je transmets à une conseillère du centre, elle vous recontacte rapidement.",
+      "Bien sûr, je transmets à une conseillère du centre. Elle reprendra avec vous.",
+      bookingState,
+    );
+  }
+
+  if (wantsSlots(text) && !settings.bookAppointment) {
+    return finishLeadReply(
+      conversation,
+      qualification,
+      qualification.need ? "Qualifié" : "En cours",
+      text,
+      "Oui, on peut regarder un rendez-vous. Quel jour vous irait le mieux ?",
       bookingState,
     );
   }
