@@ -1,4 +1,4 @@
-const { familyFromTreatment, inferFamily, startConversation } = require("./agent");
+const { familyFromTreatment, inferFamily, persistableConversations, startConversation } = require("./agent");
 const { sendSharedWhatsApp } = require("./whatsapp");
 
 async function welcomeNewLead(supabase, center, context) {
@@ -76,9 +76,8 @@ async function welcomeNewLead(supabase, center, context) {
         ...settings,
         seya: {
           ...seya,
-          conversations: [next, ...conversations.filter((item) => item.leadId !== next.leadId)].slice(
-            0,
-            80,
+          conversations: persistableConversations(
+            [next, ...conversations.filter((item) => item.leadId !== next.leadId)],
           ),
         },
       },

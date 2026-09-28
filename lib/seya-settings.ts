@@ -558,12 +558,12 @@ export function inboxTag(conversation: SeyaConversation): SeyaInboxTag {
     return "chaud";
   }
 
-  const leadReplied = conversation.messages.some((item) => item.author === "lead");
+  const leadReplied = (conversation.messages || []).some((item) => item.author === "lead");
   if (!leadReplied) {
     return "sans_reponse";
   }
 
-  return conversation.messages.length <= 4 ? "court" : "chaud";
+  return (conversation.messages || []).length <= 4 ? "court" : "chaud";
 }
 
 export function sortSeyaInbox(conversations: SeyaConversation[]) {
@@ -783,11 +783,15 @@ export function writeLocalSeyaSettings(
     return;
   }
 
-  window.localStorage.setItem(
-    seyaSettingsStorageKey(centerId),
-    JSON.stringify(normalizeSeyaAgentSettings(settings)),
-  );
-  window.dispatchEvent(new Event(SEYA_SETTINGS_UPDATED_EVENT));
+  try {
+    window.localStorage.setItem(
+      seyaSettingsStorageKey(centerId),
+      JSON.stringify(normalizeSeyaAgentSettings(settings)),
+    );
+    window.dispatchEvent(new Event(SEYA_SETTINGS_UPDATED_EVENT));
+  } catch (error) {
+    console.error("[seya] local settings cache skipped", error);
+  }
 }
 
 export function readLocalSeyaConversations(centerId: string): SeyaConversation[] {
@@ -814,11 +818,15 @@ export function writeLocalSeyaConversations(
     return;
   }
 
-  window.localStorage.setItem(
-    seyaConversationsStorageKey(centerId),
-    JSON.stringify(conversations),
-  );
-  window.dispatchEvent(new Event(SEYA_CONVERSATIONS_UPDATED_EVENT));
+  try {
+    window.localStorage.setItem(
+      seyaConversationsStorageKey(centerId),
+      JSON.stringify(conversations),
+    );
+    window.dispatchEvent(new Event(SEYA_CONVERSATIONS_UPDATED_EVENT));
+  } catch (error) {
+    console.error("[seya] local conversations too large, skipped cache", error);
+  }
 }
 
 export async function loadSeyaAgentSettings() {
@@ -879,8 +887,9 @@ export function mergeSeyaConversations(
       const current = merged.get(item.leadId);
       if (!current || String(item.updatedAt || "") >= String(current.updatedAt || "")) {
         const person = sanitizePersonName(item.firstName, item.lastName);
+        const { _seya, ...rest } = item as SeyaConversation & { _seya?: unknown };
         merged.set(item.leadId, {
-          ...item,
+          ...rest,
           firstName: person.firstName,
           lastName: person.lastName,
         });
@@ -907,6 +916,12 @@ export async function saveSeyaConversations(conversations: SeyaConversation[]) {
 
   const currentSettings = asRecord(data?.settings);
   const currentSeya = asRecord(currentSettings.seya);
+  const remoteConversations = Array.isArray(currentSeya.conversations)
+    ? (currentSeya.conversations as SeyaConversation[])
+    : [];
+  if (next.length === 0 && remoteConversations.length > 0) {
+    return mergeSeyaConversations(remoteConversations);
+  }
   const { error } = await supabase
     .from("centers")
     .update({
@@ -944,10 +959,11 @@ export async function saveSeyaAgentSettings(settings: SeyaAgentSettings) {
   const { error } = await supabase.from("centers").update({
     settings: {
       ...currentSettings,
-      seya: {
-        ...currentSeya,
-        ...nextSettings,
-      },
+        seya: {
+          ...currentSeya,
+          ...nextSettings,
+          conversations: currentSeya.conversations,
+        },
     },
   }).eq("id", context.centerId);
 

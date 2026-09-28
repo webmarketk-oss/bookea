@@ -316,15 +316,10 @@ export default function SeyaCrmPage() {
       try {
         const [leadData, appointmentData, clientData, seya, centerHours] =
           await Promise.all([
-            loadCrmLeads(),
-            loadCrmAppointments(),
-            loadCrmClients(),
-            loadSeyaAgentSettings().catch(() => ({
-              centerId: "",
-              centerName: "le centre",
-              settings: defaultSeyaAgentSettings,
-              conversations: [],
-            })),
+            loadCrmLeads().catch(() => ({ leads: [] as Lead[] })),
+            loadCrmAppointments().catch(() => [] as Appointment[]),
+            loadCrmClients().catch(() => ({ clients: [] })),
+            loadSeyaAgentSettings(),
             loadCenterHours().catch(() => defaultCenterDayHours),
           ]);
 
@@ -348,13 +343,19 @@ export default function SeyaCrmPage() {
                     seya.settings.autoMessageOnNewLead,
                   ),
                 )
-                .map((lead) =>
-                  startSeyaConversation({
-                    lead,
-                    centerName: seya.centerName,
-                    settings: seya.settings,
-                  }),
-                ),
+                .map((lead) => {
+                  try {
+                    return startSeyaConversation({
+                      lead,
+                      centerName: seya.centerName,
+                      settings: seya.settings,
+                    });
+                  } catch (error) {
+                    console.error("[seya] start conversation failed", error);
+                    return null;
+                  }
+                })
+                .filter((item): item is SeyaConversation => Boolean(item)),
             ]
           : storedConversations;
 

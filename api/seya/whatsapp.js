@@ -5,6 +5,7 @@ const { inferCareFamily, pickApprovedTemplate } = require("./care-family");
 const { isNearDuplicate } = require("./price");
 const { sanitizePersonName } = require("../../lib/seya-person-name");
 const {
+  persistableConversations,
   readHours,
   startConversation,
   pickSlotsForMessage,
@@ -287,10 +288,10 @@ async function handleIncoming(supabase, incoming) {
     }
   }
 
-  const saved = [
+  const saved = persistableConversations([
     next,
     ...conversations.filter((item) => item.leadId !== next.leadId),
-  ].slice(0, 80);
+  ]);
 
   await supabase
     .from("centers")

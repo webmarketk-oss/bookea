@@ -192,7 +192,7 @@ export function SeyaInbox({
       return;
     }
     node.scrollTop = node.scrollHeight;
-  }, [selected?.id, selected?.messages.length]);
+  }, [selected?.id, selected?.messages?.length]);
 
   const lead = selected
     ? leads.find((item) => item.id === selected.leadId)

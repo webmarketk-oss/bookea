@@ -5,6 +5,7 @@ const {
   lastLeadAt,
   lastSeyaAt,
   message,
+  persistableConversations,
   relanceCopy,
 } = require("./agent");
 const { sendSharedWhatsApp } = require("./whatsapp");
@@ -122,7 +123,7 @@ async function relanceCenter(supabase, center) {
           ...settings,
           seya: {
             ...seya,
-            conversations: nextConversations,
+            conversations: persistableConversations(nextConversations),
           },
         },
       })

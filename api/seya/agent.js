@@ -1318,6 +1318,18 @@ function fallbackAfterNote(qualification, conversation) {
   return "Vous cherchez plutôt un soin minceur, un soin visage ou une épilation ?";
 }
 
+function persistableConversation(item) {
+  if (!item || typeof item !== "object") {
+    return item;
+  }
+  const { _seya, ...rest } = item;
+  return rest;
+}
+
+function persistableConversations(list) {
+  return (Array.isArray(list) ? list : []).map(persistableConversation).slice(0, 80);
+}
+
 function finishLeadReply(
   conversation,
   qualification,
@@ -1328,8 +1340,9 @@ function finishLeadReply(
   extra = {},
 ) {
   const slotSafe = enforceOutgoingText(seyaText, bookingState);
-  const checked = enforcePriceReply(slotSafe, leadText, extra.seya || conversation._seya, {
-    ...conversation,
+  const { _seya, ...cleanConversation } = conversation;
+  const checked = enforcePriceReply(slotSafe, leadText, extra.seya || _seya, {
+    ...cleanConversation,
     qualification,
     bookingState,
   });
@@ -1337,7 +1350,7 @@ function finishLeadReply(
   const blockedProposal = reply !== seyaText;
   return {
     conversation: {
-      ...conversation,
+      ...cleanConversation,
       qualification,
       status: blockedProposal && status === "RDV proposé" ? "Qualifié" : status,
       bookingState: blockedProposal
@@ -1432,6 +1445,8 @@ module.exports = {
   guardSlots,
   lastLeadAt,
   lastSeyaAt,
+  persistableConversation,
+  persistableConversations,
   daysSince,
   matchProposedSlot,
   mergeQualification,
