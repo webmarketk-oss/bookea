@@ -69,3 +69,14 @@ test("sans soin connu : template générique, jamais minceur par défaut", () =>
 test("bilan laser reste du laser", () => {
   assert.equal(inferCareFamily("Bilan laser offert FERRAND JFG"), "epilation");
 });
+
+test("l’offre se dit naturellement, jamais « le minceur »", () => {
+  const { humanizeOfferTitle, naturalOfferPhrase } = require("./care-family");
+  assert.equal(naturalOfferPhrase("minceur", ""), "un soin minceur");
+  assert.equal(humanizeOfferTitle("le minceur"), "un soin minceur");
+  assert.match(
+    humanizeOfferTitle("Bilan minceur + séance découverte offerte"),
+    /un bilan minceur et une séance découverte offerte/i,
+  );
+  assert.doesNotMatch(naturalOfferPhrase("minceur", "le minceur"), /le minceur/);
+});

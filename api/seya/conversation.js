@@ -156,7 +156,7 @@ function conversationalReply(text, conversation, qualification) {
   const zone = qualification?.zone;
   const need = qualification?.need;
   if (!need) {
-    return "Vous cherchez plutôt du minceur, du visage ou de l’épilation ?";
+    return "Vous cherchez plutôt un soin minceur, un soin visage ou une épilation ?";
   }
   if (zone && /cuisse|ventre|jambe|bras|dos|maillot|aisselle|hanche/.test(value)) {
     const label = zone.startsWith("cuisse") ? "les cuisses" : `le ${zone}`;

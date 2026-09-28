@@ -26,6 +26,60 @@ function inferCareFamily(text) {
   return "";
 }
 
+function humanizeOfferTitle(value) {
+  let text = String(value || "")
+    .replace(/\+/g, " et ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!text) {
+    return "";
+  }
+  const needle = normalizeCare(text);
+  if (/^(le )?minceur$/.test(needle)) {
+    return "un soin minceur";
+  }
+  if (/^(notre |le )?soin visage$/.test(needle)) {
+    return "un soin visage";
+  }
+  if (/^l['’]?epilation( definitive)?$/.test(needle)) {
+    return "une épilation définitive";
+  }
+  text = text.charAt(0).toLowerCase() + text.slice(1);
+  text = text
+    .replace(/^bilan\b/i, "un bilan")
+    .replace(/\bet seance\b/gi, "et une séance")
+    .replace(/\bet séance\b/gi, "et une séance");
+  if (!/^(un|une|le|la|les|l['’]|votre|notre)\b/i.test(text)) {
+    if (/minceur|cryo/.test(needle)) {
+      return /bilan|soin/.test(needle) ? `un ${text}` : "un soin minceur";
+    }
+    if (/visage|hydra/.test(needle)) {
+      return "un soin visage";
+    }
+    if (/epilation|laser/.test(needle)) {
+      return "une épilation définitive";
+    }
+  }
+  return text;
+}
+
+function naturalOfferPhrase(family, rawOffer) {
+  const humanized = humanizeOfferTitle(rawOffer);
+  if (humanized) {
+    return humanized;
+  }
+  if (family === "minceur") {
+    return "un soin minceur";
+  }
+  if (family === "visage") {
+    return "un soin visage";
+  }
+  if (family === "epilation") {
+    return "une épilation définitive";
+  }
+  return "";
+}
+
 function careLabelForFamily(family) {
   if (family === "minceur") {
     return "Soin minceur";
@@ -98,8 +152,10 @@ function pickApprovedTemplate(templates, family) {
 
 module.exports = {
   careLabelForFamily,
+  humanizeOfferTitle,
   inferCareFamily,
   isGenericWelcomeTemplate,
+  naturalOfferPhrase,
   pickApprovedTemplate,
   templateFitsFamily,
   welcomeTemplateNames,

@@ -1091,7 +1091,7 @@ export default function SeyaCrmPage() {
                     }
                     onBlur={() => void persistAgentSettings(agentSettings)}
                     rows={2}
-                    placeholder="Bonjour {prenom}, c’est Seya du {centre} :) On vient juste de recevoir votre demande ({offre}) !"
+                    placeholder="Bonjour {prenom}, c’est Seya du {centre}. On vient de recevoir votre demande pour {offre}."
                     className="rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium leading-5 text-slate-700 outline-none focus:border-violet-500"
                   />
                 </label>
@@ -1234,7 +1234,7 @@ export default function SeyaCrmPage() {
                     price: "",
                     brief: "Si on demande le prix, donne le tarif paramétré.",
                     opening:
-                      "Bonjour {prenom}, c’est Seya du {centre} :) On vient juste de recevoir votre demande ({offre}) !",
+                      "Bonjour {prenom}, c’est Seya du {centre}. On vient de recevoir votre demande pour {offre}.",
                     health: {
                       validated: false,
                       contraindications: "",

@@ -34,7 +34,7 @@ const {
   refusesSlots,
   wantsSlots,
 } = require("./conversation");
-const { inferCareFamily } = require("./care-family");
+const { inferCareFamily, naturalOfferPhrase } = require("./care-family");
 const { sanitizePersonName } = require("../../lib/seya-person-name");
 
 const weekdayNames = [
@@ -55,7 +55,7 @@ const defaultBriefs = [
     brief:
       "Parle comme une réceptionniste. Ne parle de prix que si on te le demande. Contre-indication (pacemaker, grossesse…) : transmets à l’équipe, ne booke pas.",
     opening:
-      "Bonjour {prenom}, c’est Seya du {centre} :) On vient juste de recevoir votre demande ({offre}) ! Je peux vous proposer un créneau rapidement, vous êtes plutôt dispo en début ou fin de semaine ?",
+      "Bonjour {prenom}, c’est Seya du {centre}. On vient de recevoir votre demande pour {offre}. Je peux regarder un créneau avec vous, si vous le souhaitez.",
   },
   {
     name: "Soin minceur",
@@ -70,7 +70,7 @@ const defaultBriefs = [
     brief:
       "Parle comme une réceptionniste. Demande la zone. Ne parle de prix que si on te le demande. Pas de liste de créneaux à la place du tarif.",
     opening:
-      "Bonjour {prenom}, c’est Seya du {centre} :) On vient juste de recevoir votre demande ({offre}) ! C’est plutôt quelle zone ? Je peux ensuite regarder un créneau.",
+      "Bonjour {prenom}, c’est Seya du {centre}. On vient de recevoir votre demande pour {offre}. Sur quelle zone souhaitez-vous que l’on regarde ?",
   },
   {
     name: "Soin visage",
@@ -78,7 +78,7 @@ const defaultBriefs = [
     brief:
       "Parle comme une réceptionniste. Ne parle de prix que si on te le demande.",
     opening:
-      "Bonjour {prenom}, c’est Seya du {centre} :) On vient juste de recevoir votre demande ({offre}) ! Quel est votre objectif peau ?",
+      "Bonjour {prenom}, c’est Seya du {centre}. On vient de recevoir votre demande pour {offre}. Quel est votre objectif pour la peau ?",
   },
   {
     name: "Cryolipolyse",
@@ -93,7 +93,7 @@ const defaultBriefs = [
     brief:
       "Parle comme une réceptionniste. Ne parle de prix que si on te le demande. Contre-indication : transmets à l’équipe.",
     opening:
-      "Bonjour {prenom}, c’est Seya du {centre} :) On vient juste de recevoir votre demande ({offre}) ! Quelle zone souhaitez-vous traiter ?"
+      "Bonjour {prenom}, c’est Seya du {centre}. On vient de recevoir votre demande pour {offre}. Quelle zone souhaitez-vous traiter ?"
   },
   {
     name: "Hydrafacial",
@@ -101,7 +101,7 @@ const defaultBriefs = [
     brief:
       "Parle comme une réceptionniste. Ne parle de prix que si on te le demande.",
     opening:
-      "Bonjour {prenom}, c’est Seya du {centre} :) On vient juste de recevoir votre demande ({offre}) ! Quel est votre objectif peau ?",
+      "Bonjour {prenom}, c’est Seya du {centre}. On vient de recevoir votre demande pour {offre}. Quel est votre objectif pour la peau ?",
   },
 ];
 
@@ -258,7 +258,12 @@ function greetingName(value) {
 }
 
 function looksRoboticOpening(value) {
-  return /bonjour,?\s+je suis seya/i.test(String(value || ""));
+  const text = String(value || "");
+  return (
+    /bonjour,?\s+je suis seya/i.test(text) ||
+    /votre demande\s*\(/i.test(text) ||
+    /le minceur/i.test(text)
+  );
 }
 
 function resolveTreatmentPrice(seya, treatment) {
@@ -281,9 +286,9 @@ function displayCareLabel(qualification, conversation) {
   const family = familyFromTreatment(
     `${conversation?.treatment || ""} ${conversation?.campaign || ""} ${zone}`,
   );
-  if (family === "minceur") return "le minceur";
-  if (family === "visage") return "le soin visage";
-  if (family === "epilation") return "l’épilation définitive";
+  if (family === "minceur") return "un soin minceur";
+  if (family === "visage") return "un soin visage";
+  if (family === "epilation") return "une épilation définitive";
   return "votre soin";
 }
 
@@ -429,24 +434,21 @@ function familyFromTreatment(treatment) {
   return inferCareFamily(treatment);
 }
 
-function defaultOfferForFamily(family) {
-  if (family === "minceur") return "le minceur";
-  if (family === "visage") return "notre soin visage";
-  if (family === "epilation") return "l’épilation définitive";
-  return "un soin";
+function defaultOfferForFamily(family, rawOffer) {
+  return naturalOfferPhrase(family, rawOffer) || "";
 }
 
 function defaultOpeningForFamily(family) {
   if (family === "minceur") {
-    return "Bonjour {prenom}, c’est Seya du {centre} :) On vient juste de recevoir votre demande ({offre}) ! C’est plutôt quelle zone ? Je peux ensuite regarder un créneau.";
+    return "Bonjour {prenom}, c’est Seya du {centre}. On vient de recevoir votre demande pour {offre}. Sur quelle zone souhaitez-vous que l’on regarde ?";
   }
   if (family === "visage") {
-    return "Bonjour {prenom}, c’est Seya du {centre} :) On vient juste de recevoir votre demande ({offre}) ! Quel est votre objectif peau ?";
+    return "Bonjour {prenom}, c’est Seya du {centre}. On vient de recevoir votre demande pour {offre}. Quel est votre objectif pour la peau ?";
   }
   if (family === "epilation") {
-    return "Bonjour {prenom}, c’est Seya du {centre} :) On vient juste de recevoir votre demande ({offre}) ! Je peux vous proposer un créneau rapidement, vous êtes plutôt dispo en début ou fin de semaine ?";
+    return "Bonjour {prenom}, c’est Seya du {centre}. On vient de recevoir votre demande pour {offre}. Je peux regarder un créneau avec vous, si vous le souhaitez.";
   }
-  return "Bonjour {prenom}, c’est Seya du {centre} :) On vient juste de recevoir votre demande. Je peux vous proposer un créneau rapidement, vous êtes plutôt dispo en début ou fin de semaine ?";
+  return "Bonjour {prenom}, c’est Seya du {centre}. On vient de recevoir votre demande. Je peux regarder un créneau avec vous, si vous le souhaitez.";
 }
 
 function fillOpening(template, vars) {
@@ -455,10 +457,12 @@ function fillOpening(template, vars) {
     .replace(/\{firstName\}/gi, vars.prenom)
     .replace(/\{centre\}/gi, vars.centre)
     .replace(/\{center\}/gi, vars.centre)
-    .replace(/\{offre\}/gi, vars.offre)
-    .replace(/\{offer\}/gi, vars.offre)
+    .replace(/\{offre\}/gi, vars.offre || "")
+    .replace(/\{offer\}/gi, vars.offre || "")
     .replace(/Bonjour\s+,/g, "Bonjour,")
     .replace(/\(\s*\)/g, "")
+    .replace(/ pour \./g, ".")
+    .replace(/demande pour\s+\./gi, "demande.")
     .replace(/  +/g, " ")
     .trim();
 }
@@ -487,9 +491,12 @@ function findTreatmentBrief(seya, treatment) {
 function buildOpeningMessage(context, centerName, seya) {
   const hay = `${context.campaign || ""} ${context.treatment || ""}`;
   const family = inferFamily(seya, context.campaign, context.treatment);
-  const offer =
+  const offer = naturalOfferPhrase(
+    family,
     resolveOfferLabel(seya, context.campaign, context.treatment) ||
-    defaultOfferForFamily(family);
+      context.campaign ||
+      context.treatment,
+  );
   const brief =
     findTreatmentBrief(seya, hay) ||
     findTreatmentBrief(
@@ -643,9 +650,12 @@ function startConversation(context, centerName, seya) {
   const treatment =
     isJunkTreatment(context.treatment) ? "" : context.treatment || "";
   const family = inferFamily(seya, context.campaign, treatment || context.treatment);
-  const offer =
+  const offer = naturalOfferPhrase(
+    family,
     resolveOfferLabel(seya, context.campaign, treatment || context.treatment) ||
-    defaultOfferForFamily(family);
+      context.campaign ||
+      treatment,
+  );
   const opening = buildOpeningMessage(context, centerName, seya);
   const person = sanitizePersonName(context.firstName, context.lastName);
 
@@ -1297,7 +1307,7 @@ function fallbackAfterNote(qualification) {
   if (qualification?.need) {
     return "Vous voulez que je vous propose un créneau, ou vous avez une autre question ?";
   }
-  return "Vous cherchez plutôt du minceur, du visage ou de l’épilation ?";
+  return "Vous cherchez plutôt un soin minceur, un soin visage ou une épilation ?";
 }
 
 function finishLeadReply(

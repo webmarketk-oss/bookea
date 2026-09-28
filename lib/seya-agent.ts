@@ -1,3 +1,4 @@
+import { naturalOfferPhrase } from "@/api/seya/care-family";
 import { addDaysIso, todayIso } from "@/lib/crm-stats";
 import type { CenterDayHours } from "@/lib/center-hours";
 import { sanitizePersonName } from "@/lib/seya-person-name";
@@ -83,15 +84,12 @@ export function startSeyaConversation({
           : family === "epilation"
             ? "Épilation définitive"
             : "";
-  const offer =
+  const offer = naturalOfferPhrase(
+    family,
     resolveOfferLabel(settings, lead.campaign, rawTreatment) ||
-    (family === "minceur"
-      ? "le minceur"
-      : family === "visage"
-        ? "le soin visage"
-        : family === "epilation"
-          ? "l’épilation définitive"
-          : "");
+      lead.campaign ||
+      rawTreatment,
+  );
 
   const person = sanitizePersonName(lead.firstName, lead.lastName);
   return {
@@ -381,7 +379,7 @@ function nextQualificationQuestion(
   );
 
   if (settings.qualifyOnSignup && (!qualification.need || isJunkTreatmentName(qualification.need))) {
-    return "C’est pour du minceur, du visage ou de l’épilation ?";
+    return "C’est pour un soin minceur, un soin visage ou une épilation ?";
   }
 
   if (treatmentBrief && !qualification.zone && !qualification.availability) {

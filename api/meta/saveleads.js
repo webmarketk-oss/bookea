@@ -140,18 +140,25 @@ function mapIncomingLead(payload) {
   ]);
   const pageName = pick(fields, ["page_name", "page"]);
   const adName = pick(fields, ["ad_name", "ad", "adset_name", "publicite"]);
+  const offer = pick(fields, [
+    "offre",
+    "offer_title",
+    "payload_offer_title",
+    "offer_name",
+    "titre_offre",
+    "offer",
+  ]);
   const treatment = cleanIncomingTreatment(
-    pick(fields, [
-      "treatment",
-      "service",
-      "soin",
-      "prestation",
-      "offre",
-      "offer",
-      "interet",
-      "interesse",
-      "interest",
-    ]) ||
+    offer ||
+      pick(fields, [
+        "treatment",
+        "service",
+        "soin",
+        "prestation",
+        "interet",
+        "interesse",
+        "interest",
+      ]) ||
       formName ||
       adName,
     fields,
@@ -164,6 +171,7 @@ function mapIncomingLead(payload) {
     phone: pick(fields, ["phone", "phone_number", "telephone", "tel", "mobile"]),
     treatment,
     campaign:
+      offer ||
       pick(fields, ["campaign_name", "campagne", "campaign", "form_name"]) ||
       formName ||
       pageName ||
