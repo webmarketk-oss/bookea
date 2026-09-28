@@ -12,6 +12,7 @@ const {
   buildPriceReply,
   classifyPriceQuestion,
   enforcePriceReply,
+  isNearDuplicate,
   isPriceRepeatComplaint,
 } = require("./price");
 const {
@@ -54,7 +55,7 @@ const defaultBriefs = [
     name: "Épilation définitive",
     price: "",
     brief:
-      "Tu accueilles pour l’épilation, comme au standard. Prix seulement si on te le demande. Pacemaker, grossesse ou doute santé : tu transmets à l’équipe, tu ne poses pas de rendez-vous.",
+      "Tu accueilles pour l’épilation, comme au standard. Prix seulement si on te le demande. Pacemaker, grossesse en cours ou doute santé : tu transmets à l’équipe, tu ne poses pas de rendez-vous.",
     opening:
       "Bonjour {prenom}, c’est Seya du {centre}. On vient de recevoir votre demande pour {offre}. Je peux regarder un créneau avec vous, si vous le souhaitez.",
   },
@@ -1408,14 +1409,89 @@ function daysSince(iso) {
   return Math.floor((Date.now() - then) / 86400000);
 }
 
-function relanceCopy(conversation, days) {
-  const firstName = conversation.firstName || "bonjour";
-  const treatment =
-    conversation.qualification?.need || conversation.treatment || "votre soin";
-  if (days >= 28) {
-    return `Bonjour ${firstName}, c’est Seya. Je reviens vers vous pour ${treatment}. Souhaitez-vous que je vous propose un créneau cette semaine, ou préférez-vous que l’on arrête les messages ? Je ne veux pas vous relancer inutilement.`;
+function relanceCopy(conversation, round = 1, centerName = "") {
+  const firstName = String(conversation.firstName || "").trim();
+  const hello = firstName ? `Bonjour ${firstName}` : "Bonjour";
+  const centre = String(centerName || "").trim() || "le centre";
+  const care = relanceCareLabel(conversation);
+  const lastLead = lastLeadText(conversation);
+  const candidates =
+    Number(round) >= 3
+      ? [
+          `${hello}, je reviens une dernière fois pour ${care} chez ${centre}. Dites-moi si vous voulez que je regarde un créneau, sinon je vous laisse tranquille.`,
+          `${hello}, je clos le sujet de mon côté. Revenez vers moi si vous voulez avancer pour ${care}.`,
+        ]
+      : Number(round) === 2
+        ? [
+            `${hello}, je reviens vers vous pour ${care} chez ${centre}. Vous voulez que je regarde un horaire, ou on arrête là ?`,
+            `${hello}, toujours là pour ${care} chez ${centre}. Dites-moi simplement si je dois regarder un créneau.`,
+          ]
+        : relanceFirstCandidates(hello, care, centre, lastLead, conversation);
+  const previous = (conversation.messages || [])
+    .filter((item) => item.author === "seya")
+    .map((item) => String(item.text || ""));
+  return (
+    candidates.find(
+      (text) => !previous.some((item) => isNearDuplicate(text, item)),
+    ) || candidates[candidates.length - 1]
+  );
+}
+
+function relanceFirstCandidates(hello, care, centre, lastLead, conversation) {
+  const lead = String(lastLead || "");
+  if (/prix|tarif|combien/i.test(lead)) {
+    return [
+      `${hello}, je reviens vers vous pour ${care} chez ${centre}. Vous voulez que je précise le tarif, ou que je regarde un créneau ?`,
+      `${hello}, je reviens vers vous pour ${care}. Le point tarif est noté, je peux aussi regarder un horaire si vous voulez.`,
+    ];
   }
-  return `Bonjour ${firstName}, c’est Seya. Je voulais juste reprendre pour ${treatment}. Quel jour vous irait le mieux ? Je ne veux pas vous relancer inutilement.`;
+  if (
+    Array.isArray(conversation.proposedSlots) &&
+    conversation.proposedSlots.length > 0
+  ) {
+    return [
+      `${hello}, je reviens vers vous pour ${care} chez ${centre} 😊 L’horaire vu ensemble vous convient toujours, ou je regarde autre chose ?`,
+      `${hello}, je reviens vers vous pour ${care} chez ${centre}. Vous souhaitez que je regarde d’autres disponibilités ?`,
+    ];
+  }
+  return [
+    `${hello}, je reviens vers vous pour ${care} chez ${centre} 😊 Vous souhaitez que je regarde les disponibilités pour vous ?`,
+    `${hello}, je reviens vers vous au sujet de ${care} chez ${centre}. Je peux regarder un horaire avec vous, si vous le souhaitez.`,
+  ];
+}
+
+function relanceCareLabel(conversation) {
+  const offer = String(conversation.offerLabel || "").trim();
+  if (offer && !isJunkTreatment(offer) && !/^offre\s*\d+/i.test(offer)) {
+    return offer;
+  }
+  const need = String(
+    conversation.qualification?.need || conversation.treatment || "",
+  ).trim();
+  if (need && !isJunkTreatment(need)) {
+    return need;
+  }
+  const family = familyFromTreatment(
+    `${conversation.treatment || ""} ${conversation.campaign || ""}`,
+  );
+  if (family === "minceur") {
+    return "votre bilan minceur";
+  }
+  if (family === "visage") {
+    return "votre soin visage";
+  }
+  if (family === "epilation") {
+    return "votre épilation";
+  }
+  return "votre soin";
+}
+
+function lastLeadText(conversation) {
+  return (
+    [...(conversation?.messages || [])]
+      .reverse()
+      .find((item) => item.author === "lead")?.text || ""
+  );
 }
 
 function readHours(settings) {

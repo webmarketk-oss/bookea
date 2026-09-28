@@ -1,7 +1,7 @@
 const { createClient } = require("@supabase/supabase-js");
 const {
   agentSettings,
-  daysSince,
+  isOptOut,
   lastLeadAt,
   lastSeyaAt,
   message,
@@ -9,6 +9,13 @@ const {
   relanceCopy,
 } = require("./agent");
 const { sendSharedWhatsApp } = require("./whatsapp");
+
+const FIRST_RELANCE_HOURS = 15;
+const FIRST_RELANCE_UNTIL_HOURS = 27;
+const SECOND_RELANCE_HOURS = 24;
+const SECOND_RELANCE_UNTIL_HOURS = 36;
+const THIRD_RELANCE_HOURS = 5 * 24;
+const THIRD_RELANCE_UNTIL_HOURS = 6 * 24;
 
 module.exports = async function handler(req, res) {
   if (req.method !== "GET" && req.method !== "POST") {
@@ -72,27 +79,17 @@ async function relanceCenter(supabase, center) {
   const conversations = Array.isArray(seya.conversations) ? seya.conversations : [];
   const nextConversations = [];
   const sent = [];
+  const now = new Date();
 
   for (const conversation of conversations) {
     const updated = { ...conversation };
-    const status = String(conversation.status || "");
-    if (shouldSkipRelance(conversation)) {
+    const round = pickRelanceRound(conversation, now);
+    if (!round) {
       nextConversations.push(updated);
       continue;
     }
 
-    const idleDays = Math.min(
-      daysSince(lastLeadAt(conversation) || lastSeyaAt(conversation)),
-      daysSince(lastSeyaAt(conversation)),
-    );
-    const already = Number(conversation.relanceCount || 0);
-    const wanted = agent.relanceDays.find((days) => idleDays >= days && already < relanceIndex(days));
-    if (!wanted) {
-      nextConversations.push(updated);
-      continue;
-    }
-
-    const text = relanceCopy(conversation, wanted);
+    const text = relanceCopy(conversation, round, center.name);
     const result = await sendSharedWhatsApp(conversation.phone, text, {
       firstName: conversation.firstName,
       centerName: center.name,
@@ -101,13 +98,13 @@ async function relanceCenter(supabase, center) {
 
     if (result.sent) {
       updated.messages = [...(updated.messages || []), message("seya", text)];
-      updated.lastRelanceAt = new Date().toISOString();
-      updated.relanceCount = already + 1;
+      updated.lastRelanceAt = now.toISOString();
+      updated.relanceCount = round;
       updated.updatedAt = updated.lastRelanceAt;
       sent.push({
         centerId: center.id,
         leadId: conversation.leadId,
-        days: wanted,
+        round,
         via: result.via || "whatsapp",
       });
     }
@@ -135,6 +132,12 @@ async function relanceCenter(supabase, center) {
 
 function shouldSkipRelance(conversation) {
   const status = String(conversation?.status || "");
+  const lastLead = [...(conversation?.messages || [])]
+    .reverse()
+    .find((item) => item.author === "lead");
+  if (lastLead && isOptOut(lastLead.text || "")) {
+    return true;
+  }
   return (
     conversation?.healthReview?.status === "awaiting_human_health_review" ||
     conversation?.bookingState?.pendingQuestion === "no_slots" ||
@@ -144,14 +147,65 @@ function shouldSkipRelance(conversation) {
   );
 }
 
-function relanceIndex(days) {
-  if (days >= 28) {
+function hoursSince(iso, now = new Date()) {
+  if (!iso) {
+    return 9999;
+  }
+  const then = new Date(iso).getTime();
+  if (!Number.isFinite(then)) {
+    return 9999;
+  }
+  return (now.getTime() - then) / 3600000;
+}
+
+function inWindow(hours, start, end) {
+  return hours >= start && hours < end;
+}
+
+function pickRelanceRound(conversation, now = new Date()) {
+  if (shouldSkipRelance(conversation)) {
+    return 0;
+  }
+
+  const lastLead = lastLeadAt(conversation);
+  const lastRelance = conversation.lastRelanceAt;
+  const repliedAfterRelance =
+    lastLead && lastRelance && new Date(lastLead).getTime() > new Date(lastRelance).getTime();
+  const already = repliedAfterRelance ? 0 : Number(conversation.relanceCount || 0);
+  const anchor = lastLead || lastSeyaAt(conversation);
+  const idle = hoursSince(anchor, now);
+  const sinceRelance = hoursSince(lastRelance, now);
+
+  if (already >= 3) {
+    return 0;
+  }
+
+  if (already === 0) {
+    if (inWindow(idle, FIRST_RELANCE_HOURS, FIRST_RELANCE_UNTIL_HOURS)) {
+      return 1;
+    }
+    if (inWindow(idle, THIRD_RELANCE_HOURS, THIRD_RELANCE_UNTIL_HOURS)) {
+      return 3;
+    }
+    return 0;
+  }
+
+  if (already === 1) {
+    if (inWindow(sinceRelance, SECOND_RELANCE_HOURS, SECOND_RELANCE_UNTIL_HOURS)) {
+      return 2;
+    }
+    if (inWindow(idle, THIRD_RELANCE_HOURS, THIRD_RELANCE_UNTIL_HOURS)) {
+      return 3;
+    }
+    return 0;
+  }
+
+  if (inWindow(idle, THIRD_RELANCE_HOURS, THIRD_RELANCE_UNTIL_HOURS)) {
     return 3;
   }
-  if (days >= 5) {
-    return 2;
-  }
-  return 1;
+  return 0;
 }
 
 module.exports.shouldSkipRelance = shouldSkipRelance;
+module.exports.pickRelanceRound = pickRelanceRound;
+module.exports.hoursSince = hoursSince;

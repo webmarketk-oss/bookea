@@ -69,31 +69,50 @@ function isGeneralHealthQuestion(value) {
 }
 
 function isPersonalHealthSituation(value) {
+  const current = withoutPastPregnancy(value);
   const ownSituation =
     /\bje (prends|suis|ai|fais)\b|\bj[' ]ai\b|\bmon (traitement|probleme|medecin|pacemaker)\b|\bavec mon\b|\bprobleme de sante\b|\bmes (traitements|medicaments)\b/.test(
-      value,
+      current,
     );
   const namedCondition =
     /pacemaker|stimulateur|enceinte|grossesse|cancer|chimio|roaccutane|accutane|implant|cardiaque|\bcoeur\b|maladie|traitement|medicament|diabete|insuline|thyroide|tension/.test(
-      value,
+      current,
     );
   const asksIfPossible =
     /je (peux|puis)|c[' ]est possible|est-ce possible|puis-je|je peux faire|pose (pas )?de probleme|pas de probleme/.test(
-      value,
+      current,
     );
   if (ownSituation && namedCondition) {
     return true;
   }
-  if (ownSituation && (asksIfPossible || /cryo|seance|soin|bilan/.test(value))) {
+  if (ownSituation && (asksIfPossible || /cryo|seance|soin|bilan/.test(current))) {
     return true;
   }
-  if (ownSituation && /sante|traitement|enceinte|grossesse/.test(value)) {
+  if (ownSituation && /sante|traitement|enceinte|grossesse/.test(current)) {
     return true;
   }
   if (namedCondition && asksIfPossible) {
     return true;
   }
   return false;
+}
+
+function withoutPastPregnancy(value) {
+  return String(value || "")
+    .replace(
+      /apres[- ]?(la |le |l |ma |mes |ses |votre |un |une )?(deux |2 |plusieurs )?(grossesses?|accouchements?)/g,
+      " ",
+    )
+    .replace(
+      /suite a (ma |mes |ses |votre |une |deux |2 )?(grossesses?|accouchements?)/g,
+      " ",
+    )
+    .replace(/post[- ]?partum/g, " ")
+    .replace(/j[' ]ai eu (une |des |deux |2 )?(grossesses?|enfants?)/g, " ")
+    .replace(/mes (deux |2 )?grossesses?( passees| precedentes)?/g, " ")
+    .replace(/apres (avoir )?(accouche|eu (un |des |deux |2 )?enfants?)/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function asksPrice(text) {

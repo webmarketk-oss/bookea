@@ -195,6 +195,27 @@ test("message mixte : prix + santé, date retenue, pas de créneau confirmé", a
   assert.equal((result.conversation.proposedSlots || []).length, 0);
 });
 
+test("après grossesse / ventre post-partum : ce n’est pas une contre-indication", async () => {
+  for (const text of [
+    "Je veux perdre du ventre après mes deux grossesses",
+    "Suite à mes deux grossesses j’aimerais travailler le ventre",
+    "J’ai eu deux grossesses, je voudrais un bilan minceur",
+  ]) {
+    const kind = classifyHealthMessage(text);
+    assert.equal(kind.personal, false, text);
+    const result = await reply(startCryo(), text);
+    assert.notEqual(result.conversation.status, "Revue santé", text);
+    assert.doesNotMatch(
+      lastSeya(result.conversation),
+      /vérifie votre situation|vous faire rappeler/i,
+      text,
+    );
+  }
+
+  const pregnant = classifyHealthMessage("Je suis enceinte, je peux faire la cryo ?");
+  assert.equal(pregnant.personal, true);
+});
+
 test("en attente : questions admin OK, pas de réservation ni relance", async () => {
   const first = await reply(
     startCryo(),

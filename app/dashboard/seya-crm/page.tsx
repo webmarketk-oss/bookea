@@ -863,8 +863,8 @@ export default function SeyaCrmPage() {
             }
           />
           <ToggleRow
-            title="Relances J+1, J+5, J+30"
-            hint="Si le lead est encore en attente, Seya relance le lendemain, à 5 jours, puis une dernière fois à 30 jours."
+            title="Relances 15 h, +24 h, puis 5 j"
+            hint="Uniquement trois relances : ~15 h après le dernier message, 24 h plus tard, puis à 5 jours. Rien d’autre. Stop si refus, stop, ou RDV confirmé."
             enabled={agentSettings.relanceEnabled}
             onToggle={() =>
               void persistAgentSettings({
