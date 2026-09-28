@@ -141,7 +141,7 @@ export async function getActiveCenterContext(
     };
   }
 
-  const slug = process.env.NEXT_PUBLIC_DEFAULT_CENTER_SLUG ?? "jfg-clinique-clermont";
+  const slug = process.env.NEXT_PUBLIC_DEFAULT_CENTER_SLUG ?? "jfg-clinic-clermont";
   const { data: center, error } = await supabase
     .from("centers")
     .select("id,name,slug")

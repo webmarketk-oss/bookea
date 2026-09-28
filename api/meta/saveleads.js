@@ -3,6 +3,7 @@ const { createClient } = require("@supabase/supabase-js");
 const { careLabelForFamily, inferCareFamily } = require("../seya/care-family");
 const { welcomeNewLead } = require("../seya/welcome");
 const { resolvePersonName } = require("../../lib/seya-person-name");
+const { findCenterBySlug } = require("./center-slug");
 
 module.exports = async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
@@ -259,17 +260,7 @@ async function importPostedLead(supabase, centerId, mapped, options = {}) {
 }
 
 async function findCenter(supabase, slug) {
-  const { data, error } = await supabase
-    .from("centers")
-    .select("id,name,slug,settings")
-    .eq("slug", String(slug).trim().toLowerCase())
-    .maybeSingle();
-
-  if (error) {
-    throw new Error(error.message);
-  }
-
-  return data;
+  return findCenterBySlug(supabase, slug);
 }
 
 async function findExistingLeadByPhone(supabase, centerId, phone) {

@@ -3,6 +3,7 @@ const { createClient } = require("@supabase/supabase-js");
 const { careLabelForFamily, inferCareFamily } = require("../seya/care-family");
 const { welcomeNewLead } = require("../seya/welcome");
 const { resolvePersonName } = require("../../lib/seya-person-name");
+const { findCenterBySlug } = require("./center-slug");
 
 const GRAPH_VERSION = "v26.0";
 
@@ -287,15 +288,7 @@ async function resolveCenterId(supabase, change) {
     throw new Error("Missing META_DEFAULT_CENTER_SLUG");
   }
 
-  const { data: center, error } = await supabase
-    .from("centers")
-    .select("id")
-    .eq("slug", slug)
-    .maybeSingle();
-
-  if (error) {
-    throw new Error(error.message);
-  }
+  const center = await findCenterBySlug(supabase, slug, "id");
 
   if (!center?.id) {
     throw new Error(`Center not found for slug ${slug}`);

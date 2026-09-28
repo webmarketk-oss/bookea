@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/no-require-imports */
 const { createClient } = require("@supabase/supabase-js");
+const { findCenterBySlug } = require("./center-slug");
 
 const GRAPH_VERSION = "v26.0";
 
@@ -146,21 +147,11 @@ async function fetchManagedPages(userToken) {
 }
 
 async function resolveCenterId(supabase, centerSlug) {
-  const { data, error } = await supabase
-    .from("centers")
-    .select("id")
-    .eq("slug", centerSlug)
-    .maybeSingle();
-
-  if (error) {
-    throw new Error(error.message);
-  }
-
-  if (!data?.id) {
+  const center = await findCenterBySlug(supabase, centerSlug, "id");
+  if (!center?.id) {
     throw new Error(`Centre introuvable pour le slug ${centerSlug}.`);
   }
-
-  return data.id;
+  return center.id;
 }
 
 async function savePageConnection(supabase, page) {

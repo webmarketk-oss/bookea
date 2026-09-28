@@ -684,7 +684,7 @@ async function storeIncomingSms(supabase, incoming) {
   let centerId = client?.center_id || null;
 
   if (!centerId) {
-    const slug = process.env.NEXT_PUBLIC_DEFAULT_CENTER_SLUG || "jfg-clinique-clermont";
+    const slug = process.env.NEXT_PUBLIC_DEFAULT_CENTER_SLUG || "jfg-clinic-clermont";
     const { data: center } = await supabase
       .from("centers")
       .select("id")

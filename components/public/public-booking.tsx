@@ -537,7 +537,7 @@ export function PublicBooking() {
     window.addEventListener("storage", refreshSettings);
 
     const slug =
-      readCenterSettings()?.center?.slug || "jfg-clinique-clermont";
+      readCenterSettings()?.center?.slug || "jfg-clinic-clermont";
 
     void loadPublishedCenterProfile(slug).then((remote) => {
       if (remote) {

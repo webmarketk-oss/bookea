@@ -300,7 +300,7 @@ export default function CenterSettingsPage() {
   });
   const [center, setCenter] = useState<CenterProfile>({
     name: "JFG Clinique Clermont-Ferrand",
-    slug: "jfg-clinique-clermont",
+    slug: "jfg-clinic-clermont",
     city: "Clermont-Ferrand",
     address: "12 avenue des Volcans, 63000 Clermont-Ferrand",
     postalCode: "63000",
