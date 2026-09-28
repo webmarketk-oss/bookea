@@ -6,6 +6,11 @@ module.exports = async function handler(req, res) {
     return res.status(405).json({ error: "Method not allowed" });
   }
 
+  const secret = process.env.CRON_SECRET;
+  if (secret && String(req.headers.authorization || "") !== `Bearer ${secret}`) {
+    return res.status(401).json({ error: "unauthorized" });
+  }
+
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !key) {
