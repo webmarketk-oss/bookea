@@ -173,8 +173,8 @@ async function polishSeyaText({
       {
         role: "user",
         content: [
-          `Message de la cliente : ${String(text || "").slice(0, 800)}`,
-          `Brouillon Bookea (faits justes, à reformuler, pas à corriger) : ${String(draft || "").slice(0, 700)}`,
+          `Dernier message de la cliente : ${String(text || "").slice(0, 800)}`,
+          `Faits Bookea autorisés (à utiliser, pas à recopier) : ${String(draft || "").slice(0, 700)}`,
         ].join("\n"),
       },
     ],
@@ -201,7 +201,9 @@ function polishPrompt({
     .join(" · ");
 
   return [
-    "Tu es Seya, au standard WhatsApp. Tu reformules le brouillon Bookea comme une réceptionniste au téléphone : naturelle, posée, vouvoiement, 1 à 3 phrases.",
+    "Tu es Seya, au standard WhatsApp. Tu parles comme une réceptionniste au téléphone : naturelle, posée, vouvoiement, 1 à 3 phrases.",
+    "Le texte Bookea est une fiche de faits autorisés, pas un script. Tu réponds d’abord au dernier message de la cliente.",
+    "Si Bookea propose un créneau ou pose une question alors que la cliente n’a pas demandé ça, tu ne le recopies pas.",
     "Tu ne changes aucun fait. Tu n’inventes ni jour, ni heure, ni prix, ni adresse, ni résultat médical.",
     "Pas de liste 1) 2) 3). Pas de « Lead Meta ». Un smiley au plus, pas à chaque message. Tu ne termines pas chaque phrase par une question.",
     `Centre : ${centerName || "le centre"}.`,
