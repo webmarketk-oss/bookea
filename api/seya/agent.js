@@ -26,6 +26,7 @@ const {
   stripBookingCta,
 } = require("./health");
 const {
+  alreadyTold,
   conversationalReply,
   isHesitation,
   isIdentityQuestion,
@@ -967,8 +968,10 @@ function applyLeadReply(conversation, text, seya, slots, extras = {}) {
     conversation.treatment,
   );
   const chosenSlot =
-    matchProposedSlot(text, conversation.proposedSlots) ||
-    matchProposedSlot(text, slots);
+    bookingState.pendingQuestion === "no_slots"
+      ? null
+      : matchProposedSlot(text, conversation.proposedSlots) ||
+        matchProposedSlot(text, slots);
   const lastSeyaText =
     [...(conversation.messages || [])]
       .reverse()
@@ -997,13 +1000,15 @@ function applyLeadReply(conversation, text, seya, slots, extras = {}) {
   }
 
   if (isThanks(text) || isHesitation(text) || refusesSlots(text)) {
+    const pause = refusesSlots(text) || isHesitation(text);
     return finishLeadReply(
       conversation,
       qualification,
       qualification.need ? "Qualifié" : conversation.status || "En cours",
       text,
       conversationalReply(text, conversation, qualification),
-      { ...bookingState, pendingQuestion: refusesSlots(text) || isHesitation(text) ? "no_slots" : bookingState.pendingQuestion },
+      { ...bookingState, pendingQuestion: pause ? "no_slots" : bookingState.pendingQuestion },
+      { proposedSlots: pause ? [] : conversation.proposedSlots },
     );
   }
 
@@ -1274,7 +1279,7 @@ function applyLeadReply(conversation, text, seya, slots, extras = {}) {
       conversation.treatment,
       conversation,
       text,
-    ) || fallbackAfterNote(qualification);
+    ) || fallbackAfterNote(qualification, conversation);
   return finishLeadReply(
     conversation,
     qualification,
@@ -1298,7 +1303,10 @@ function lastOtherLeadText(conversation, current) {
   );
 }
 
-function fallbackAfterNote(qualification) {
+function fallbackAfterNote(qualification, conversation) {
+  if (alreadyTold(conversation, "c['’]est note pour|propose un creneau")) {
+    return "Je reste disponible. Écrivez-moi quand vous voulez reprendre.";
+  }
   if (qualification?.zone) {
     const zone = qualification.zone;
     const label = /cuisse/.test(zone) ? "les cuisses" : `le ${zone}`;

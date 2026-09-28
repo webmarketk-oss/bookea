@@ -31,7 +31,7 @@ function isThanks(text) {
 
 function isHesitation(text) {
   const value = normalize(text);
-  return /je (reflechis|vais reflechir)|pas maintenant|on verra|je sais pas encore|je ne sais pas encore|pas sure|pas certain|plus tard|je vais voir|laisse[- ]moi/.test(
+  return /je (reflechis|vais reflechir)|pas maintenant|on verra|je sais pas encore|je ne sais pas encore|pas sure|pas certain|plus tard|je vais voir|laisse[- ]moi|je (reviendrai|reviens) vers|je (te|vous) (recontacte|reviendrai)|on se reparle|je te (dis|tiens)/.test(
     value,
   );
 }
@@ -71,7 +71,7 @@ function wantsSlots(text) {
     return true;
   }
   const asksAgenda =
-    /dispo|creneau|horaire|rendez-vous|\brdv\b|de la place|voir les (heures|horaires)|quand (puis-je|je peux) (venir|passer)|un creneau|(tu|vous) (me )?proposes?|propose quoi|t[' ]as quoi/.test(
+    /dispo|creneau|horaire|rendez-vous|\brdv\b|de la place|voir les (heures|horaires)|quand (puis-je|je peux) (venir|passer)|un creneau|(tu|vous) (me )?(proposes? quoi|proposes? comme)|propose quoi|t[' ]as (quoi|comme)/.test(
       value,
     );
   return asksAgenda || (namesDay && !refusedDay);
@@ -97,7 +97,7 @@ function pickFresh(options, conversation) {
 function alreadyTold(conversation, needle) {
   const pattern = new RegExp(needle, "i");
   return (conversation?.messages || []).some(
-    (item) => item.author === "seya" && pattern.test(item.text || ""),
+    (item) => item.author === "seya" && pattern.test(normalize(item.text || "")),
   );
 }
 
@@ -159,6 +159,9 @@ function conversationalReply(text, conversation, qualification) {
     return "Vous cherchez plutôt un soin minceur, un soin visage ou une épilation ?";
   }
   if (zone && /cuisse|ventre|jambe|bras|dos|maillot|aisselle|hanche/.test(value)) {
+    if (alreadyTold(conversation, "c['’]est note pour")) {
+      return "";
+    }
     const label = zone.startsWith("cuisse") ? "les cuisses" : `le ${zone}`;
     return `C’est noté pour ${label}. Vous voulez que je vous propose un créneau ?`;
   }

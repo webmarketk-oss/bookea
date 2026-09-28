@@ -158,3 +158,30 @@ test("ne plus dire « je m’en souviens » : zone, créneaux, adresse, diabète
   assert.match(lastSeya(conversation), /équipe|vérifi|transmet|à côté/i);
   assert.doesNotMatch(lastSeya(conversation), /reste sur ce que vous m’avez déjà dit/i);
 });
+
+test("je reviendrai : plus de créneaux ni « noté pour le ventre »", async () => {
+  let conversation = startConversation(
+    {
+      leadId: "lead-harcelement",
+      centerId: "jfg-clinique-clermont",
+      firstName: "Alex",
+      lastName: "Test",
+      phone: "0611223344",
+      treatment: "Soin minceur",
+    },
+    "JFG Clinique Clermont",
+    seya,
+  );
+
+  conversation = await reply(conversation, "Je veux mincir des cuisses");
+  conversation = await reply(conversation, "Alors tu proposes quoi");
+  assert.match(lastSeya(conversation), /09h00|lun\.|mar\./i);
+
+  conversation = await reply(conversation, "Je reviendrai vers toi");
+  assert.match(lastSeya(conversation), /temps|disponible|d’accord|reprendre/i);
+  assert.doesNotMatch(lastSeya(conversation), /09h00|lun\.|noté pour le ventre/i);
+
+  conversation = await reply(conversation, "ok");
+  assert.doesNotMatch(lastSeya(conversation), /09h00|lun\.|bloque|confirm/i);
+  assert.doesNotMatch(lastSeya(conversation), /noté pour le ventre/i);
+});

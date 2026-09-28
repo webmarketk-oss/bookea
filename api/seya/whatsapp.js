@@ -2,6 +2,7 @@
 const { createClient } = require("@supabase/supabase-js");
 const { generateSeyaReply, hasAiKey } = require("./ai");
 const { inferCareFamily, pickApprovedTemplate } = require("./care-family");
+const { isNearDuplicate } = require("./price");
 const { sanitizePersonName } = require("../../lib/seya-person-name");
 const {
   readHours,
@@ -169,6 +170,21 @@ function toWhatsAppIntl(phone) {
   return last9.length === 9 ? `33${last9}` : digits;
 }
 
+function alreadyHandledInbound(conversation, incoming) {
+  const ids = conversation?.lastInboundIds || [];
+  if (incoming.messageId && ids.includes(incoming.messageId)) {
+    return true;
+  }
+  const lastLead = [...(conversation?.messages || [])]
+    .reverse()
+    .find((item) => item.author === "lead");
+  if (!lastLead || String(lastLead.text || "").trim() !== String(incoming.text || "").trim()) {
+    return false;
+  }
+  const at = Date.parse(lastLead.at || "");
+  return Number.isFinite(at) && Date.now() - at < 120000;
+}
+
 function extractIncomingMessages(body) {
   const entries = Array.isArray(body?.entry) ? body.entry : [];
   return entries.flatMap((entry) =>
@@ -215,6 +231,20 @@ async function handleIncoming(supabase, incoming) {
     conversations.find((item) => item.leadId === context.leadId) ||
     startConversation({ ...context, centerId: center.id }, center.name, seya);
   existing.centerId = existing.centerId || center.id;
+  if (alreadyHandledInbound(existing, incoming)) {
+    return {
+      phone: incoming.phone,
+      routed: true,
+      centerId: center.id,
+      skipped: "duplicate",
+    };
+  }
+  existing.lastInboundIds = [
+    ...(existing.lastInboundIds || []),
+    incoming.messageId,
+  ]
+    .filter(Boolean)
+    .slice(-40);
   const appointments = await loadCenterAppointments(supabase, center.id);
   const hours = readHours(center.settings);
   const result = await generateSeyaReply({
@@ -276,7 +306,10 @@ async function handleIncoming(supabase, incoming) {
     .eq("id", center.id);
 
   const reply = [...next.messages].reverse().find((item) => item.author === "seya");
-  if (reply?.text) {
+  const previousSeya = [...(existing.messages || [])]
+    .reverse()
+    .find((item) => item.author === "seya");
+  if (reply?.text && !isNearDuplicate(reply.text, previousSeya?.text || "")) {
     await sendSharedWhatsApp(incoming.phone, reply.text, {
       firstName: context.firstName,
       centerName: center.name,

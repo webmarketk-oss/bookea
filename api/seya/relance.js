@@ -136,6 +136,7 @@ function shouldSkipRelance(conversation) {
   const status = String(conversation?.status || "");
   return (
     conversation?.healthReview?.status === "awaiting_human_health_review" ||
+    conversation?.bookingState?.pendingQuestion === "no_slots" ||
     /rdv pris|rdv confirm|terminé|termine|pas int[eé]ress|recontacter|revue santé/i.test(
       status,
     )

@@ -168,7 +168,8 @@ function shouldSearchSlots(state, text) {
     classifyPriceQuestion(text) ||
     isPriceRepeatComplaint(text) ||
     state.unansweredPriceIntent ||
-    refusesSlots(text)
+    refusesSlots(text) ||
+    isHesitation(text)
   ) {
     return false;
   }
@@ -180,7 +181,17 @@ function shouldSearchSlots(state, text) {
       return false;
     }
   }
+  if ((state.lastOfferedSlots || []).length && !asksForOtherSlots(text)) {
+    return false;
+  }
   return wantsSlots(text);
+}
+
+function asksForOtherSlots(text) {
+  const value = normalize(text);
+  return /change de jour|un autre jour|autres? horaires|d[' ]autres creneaux|propose quoi|suivant|prochain/.test(
+    value,
+  ) || /\b(lundi|mardi|mercredi|jeudi|vendredi|samedi|demain)\b/.test(value);
 }
 
 function guardSlots(slots, state, extras = {}) {
