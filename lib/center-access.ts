@@ -74,7 +74,7 @@ export async function loadAccessibleCenters(
   if (isAdmin) {
     const { data, error } = await supabase
       .from("centers")
-      .select("id,name,slug,city,settings")
+      .select("id,name,slug,city")
       .order("name", { ascending: true });
 
     if (error) {
@@ -88,7 +88,7 @@ export async function loadAccessibleCenters(
 
   const { data, error } = await supabase
     .from("center_members")
-    .select("center_id,role,centers(id,name,slug,city,settings)")
+    .select("center_id,role,centers(id,name,slug,city)")
     .eq("profile_id", user.id)
     .eq("is_active", true)
     .order("created_at", { ascending: true });

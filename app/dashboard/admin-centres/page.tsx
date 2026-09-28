@@ -129,7 +129,7 @@ export default function AdminCentresPage() {
     try {
       const { data: centerRows, error: centersError } = await supabase
         .from("centers")
-        .select("id,name,slug,city,email,public_profile_enabled,owner_profile_id,created_at,settings")
+        .select("id,name,slug,city,email,public_profile_enabled,owner_profile_id,created_at,sms:settings->sms,admin:settings->admin")
         .order("created_at", { ascending: false });
 
       if (centersError) throw new Error(centersError.message);
@@ -148,8 +148,8 @@ export default function AdminCentresPage() {
       }
 
       setCenters(
-        ((centerRows ?? []) as CenterRow[]).map((center) => {
-          const quota = normalizeSmsQuota(center.settings?.sms?.quota);
+        ((centerRows ?? []) as Array<CenterRow & { sms?: { quota?: SmsQuotaRecord } | null; admin?: { isActive?: boolean } | null }>).map((center) => {
+          const quota = normalizeSmsQuota(center.settings?.sms?.quota ?? center.sms?.quota);
 
           return {
             id: center.id,
@@ -160,7 +160,7 @@ export default function AdminCentresPage() {
             public_profile_enabled: center.public_profile_enabled,
             owner_profile_id: center.owner_profile_id,
             created_at: center.created_at,
-            isActive: isCenterActive(center.settings),
+            isActive: isCenterActive(center.settings ?? { admin: center.admin }),
             members: memberRows
               .filter(
                 (member) =>
