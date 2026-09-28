@@ -9,7 +9,7 @@ const {
   enforceOutgoingText,
   guardSlots,
 } = require("./booking-state");
-const { generateSeyaReply, applyAiDecision } = require("./ai");
+const { generateSeyaReply, applyAiDecision, pickSafeReply } = require("./ai");
 const { startConversation, suggestAvailableSlots } = require("./agent");
 
 const NOW = new Date("2026-09-27T12:00:00");
@@ -240,6 +240,22 @@ test("même si l’IA propose le lundi, Bookea n’envoie pas ces créneaux", ()
   assert.equal(result.conversation.proposedSlots.length, 0);
   assert.doesNotMatch(lastSeya(result.conversation), /lun\. 28\/09/i);
   assert.match(lastSeya(result.conversation), /pas de disponibilité/i);
+});
+
+test("gpt-4o peut reformuler, mais un lundi fuité est jeté au profit du brouillon Bookea", () => {
+  const state = applyBookingMessage(emptyBookingState(CENTER_ID), "Jeudi 1er octobre", {
+    centerId: CENTER_ID,
+    now: NOW,
+  });
+  const draft = "Je peux vous proposer jeu. 01/10 à 09h00 ou 09h30.";
+  assert.equal(
+    pickSafeReply(draft, "Je peux aussi lundi 28/09 à 09h00 si vous préférez.", state),
+    draft,
+  );
+  assert.match(
+    pickSafeReply(draft, "Je vous propose jeu. 01/10 à 09h00, ça vous irait ?", state),
+    /jeu\. 01\/10 à 09h00/i,
+  );
 });
 
 test("suggestAvailableSlots sans filtre propose encore le lundi : le garde-fou reste obligatoire", () => {

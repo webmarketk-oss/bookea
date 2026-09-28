@@ -1,7 +1,7 @@
 "use client";
 
 import { Bot } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { cabins, practitioners } from "@/lib/agenda-data";
 import {
   createCrmAppointment,
@@ -242,6 +242,9 @@ export default function SeyaCrmPage() {
   const [agentSettings, setAgentSettings] = useState<SeyaAgentSettings>(
     defaultSeyaAgentSettings,
   );
+  const agentSettingsRef = useRef(agentSettings);
+  agentSettingsRef.current = agentSettings;
+  const persistSeqRef = useRef(0);
   const [conversations, setConversations] = useState<SeyaConversation[]>([]);
   const [selectedConversationId, setSelectedConversationId] = useState<string | null>(
     null,
@@ -434,16 +437,48 @@ export default function SeyaCrmPage() {
   }
 
   async function persistAgentSettings(next: SeyaAgentSettings) {
+    agentSettingsRef.current = next;
     setAgentSettings(next);
+    const seq = ++persistSeqRef.current;
     setSavingAgent(true);
     try {
       await saveSeyaAgentSettings(next);
+      if (seq !== persistSeqRef.current) {
+        return;
+      }
       setAgentFeedback("Réglages de l’agent enregistrés pour ce centre.");
     } catch {
+      if (seq !== persistSeqRef.current) {
+        return;
+      }
       setAgentFeedback("Impossible d’enregistrer les réglages de l’agent.");
     } finally {
-      setSavingAgent(false);
+      if (seq === persistSeqRef.current) {
+        setSavingAgent(false);
+      }
     }
+  }
+
+  function persistCurrentAgentSettings() {
+    void persistAgentSettings(agentSettingsRef.current);
+  }
+
+  function removeOfferMap(index: number) {
+    const current = agentSettingsRef.current;
+    void persistAgentSettings({
+      ...current,
+      offerMaps: current.offerMaps.filter((_, offerIndex) => offerIndex !== index),
+    });
+  }
+
+  function removeTreatmentBrief(index: number) {
+    const current = agentSettingsRef.current;
+    void persistAgentSettings({
+      ...current,
+      treatmentBriefs: current.treatmentBriefs.filter(
+        (_, briefIndex) => briefIndex !== index,
+      ),
+    });
   }
 
   async function sendWhatsApp(conversation: SeyaConversation) {
@@ -838,6 +873,10 @@ export default function SeyaCrmPage() {
           <span className="mb-2 block text-xs font-medium text-slate-500">
             Consignes générales
           </span>
+          <p className="mb-2 text-xs font-medium leading-4 text-slate-400">
+            Écris comme si tu briefais la réceptionniste du centre, pas une
+            liste d’interdits. C’est ce que Seya lit avant de répondre.
+          </p>
           <textarea
             value={agentSettings.brief}
             onChange={(event) =>
@@ -846,9 +885,9 @@ export default function SeyaCrmPage() {
                 brief: event.target.value,
               }))
             }
-            onBlur={() => void persistAgentSettings(agentSettings)}
-            rows={3}
-            placeholder="Ne parle jamais de prix si la cliente n’en parle pas. Si elle demande le tarif, réponds naturellement avec le texte du champ Prix."
+            onBlur={persistCurrentAgentSettings}
+            rows={5}
+            placeholder="Tu es Seya, au standard. Tu vouvoies. Tu parles comme au téléphone : simple, posée, sans script. Tu réponds d’abord au message. Prix seulement si on te le demande."
             className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm font-medium leading-6 text-slate-700 outline-none focus:border-violet-500"
           />
         </label>
@@ -879,9 +918,9 @@ export default function SeyaCrmPage() {
                       ),
                     }))
                   }
-                  onBlur={() => void persistAgentSettings(agentSettings)}
+                  onBlur={persistCurrentAgentSettings}
                   placeholder="cryo 99"
-                  className="h-11 rounded-2xl border border-slate-200 bg-white px-3 text-sm font-semibold outline-none focus:border-violet-500"
+                  className="h-11 min-w-0 rounded-2xl border border-slate-200 bg-white px-3 text-sm font-semibold outline-none focus:border-violet-500"
                 />
                 <input
                   value={item.label}
@@ -895,21 +934,15 @@ export default function SeyaCrmPage() {
                       ),
                     }))
                   }
-                  onBlur={() => void persistAgentSettings(agentSettings)}
+                  onBlur={persistCurrentAgentSettings}
                   placeholder="bilan + séance découverte offerte"
-                  className="h-11 rounded-2xl border border-slate-200 bg-white px-3 text-sm font-medium outline-none focus:border-violet-500"
+                  className="h-11 min-w-0 rounded-2xl border border-slate-200 bg-white px-3 text-sm font-medium outline-none focus:border-violet-500"
                 />
                 <button
                   type="button"
-                  onClick={() =>
-                    void persistAgentSettings({
-                      ...agentSettings,
-                      offerMaps: agentSettings.offerMaps.filter(
-                        (_, offerIndex) => offerIndex !== index,
-                      ),
-                    })
-                  }
-                  className="text-sm font-semibold text-slate-400"
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => removeOfferMap(index)}
+                  className="h-11 shrink-0 cursor-pointer px-2 text-sm font-semibold text-rose-500 hover:text-rose-700"
                 >
                   Retirer
                 </button>
@@ -918,16 +951,14 @@ export default function SeyaCrmPage() {
           </div>
           <button
             type="button"
-            onClick={() =>
+            onClick={() => {
+              const current = agentSettingsRef.current;
               void persistAgentSettings({
-                ...agentSettings,
-                offerMaps: [
-                  ...agentSettings.offerMaps,
-                  { match: "", label: "" },
-                ],
-              })
-            }
-            className="mt-3 rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700"
+                ...current,
+                offerMaps: [...current.offerMaps, { match: "", label: "" }],
+              });
+            }}
+            className="mt-3 cursor-pointer rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700"
           >
             Ajouter une offre
           </button>
@@ -960,21 +991,15 @@ export default function SeyaCrmPage() {
                         ),
                       }))
                     }
-                    onBlur={() => void persistAgentSettings(agentSettings)}
+                    onBlur={persistCurrentAgentSettings}
                     placeholder="Soin minceur"
-                    className="h-11 flex-1 rounded-2xl border border-slate-200 bg-white px-3 text-sm font-semibold outline-none focus:border-violet-500"
+                    className="h-11 min-w-0 flex-1 rounded-2xl border border-slate-200 bg-white px-3 text-sm font-semibold outline-none focus:border-violet-500"
                   />
                   <button
                     type="button"
-                    onClick={() =>
-                      void persistAgentSettings({
-                        ...agentSettings,
-                        treatmentBriefs: agentSettings.treatmentBriefs.filter(
-                          (_, briefIndex) => briefIndex !== index,
-                        ),
-                      })
-                    }
-                    className="text-sm font-semibold text-slate-400"
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={() => removeTreatmentBrief(index)}
+                    className="h-11 shrink-0 cursor-pointer px-2 text-sm font-semibold text-rose-500 hover:text-rose-700"
                   >
                     Retirer
                   </button>
@@ -1018,7 +1043,7 @@ export default function SeyaCrmPage() {
                             ),
                           }))
                         }
-                        onBlur={() => void persistAgentSettings(agentSettings)}
+                        onBlur={persistCurrentAgentSettings}
                         placeholder={
                           field === "package"
                             ? "à partir de 500€, jusqu’en 10 fois"
@@ -1058,7 +1083,7 @@ export default function SeyaCrmPage() {
                           ),
                         }))
                       }
-                      onBlur={() => void persistAgentSettings(agentSettings)}
+                      onBlur={persistCurrentAgentSettings}
                       className="h-11 rounded-2xl border border-slate-200 bg-white px-3 text-sm font-medium outline-none focus:border-violet-500"
                     >
                       <option value="after_bilan">
@@ -1089,7 +1114,7 @@ export default function SeyaCrmPage() {
                         ),
                       }))
                     }
-                    onBlur={() => void persistAgentSettings(agentSettings)}
+                    onBlur={persistCurrentAgentSettings}
                     rows={2}
                     placeholder="Bonjour {prenom}, c’est Seya du {centre}. On vient de recevoir votre demande pour {offre}."
                     className="rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium leading-5 text-slate-700 outline-none focus:border-violet-500"
@@ -1111,9 +1136,9 @@ export default function SeyaCrmPage() {
                         ),
                       }))
                     }
-                    onBlur={() => void persistAgentSettings(agentSettings)}
+                    onBlur={persistCurrentAgentSettings}
                     rows={2}
-                    placeholder="Si on demande le prix, donne le tarif. Ne propose un créneau que si on te le demande."
+                    placeholder="Tu parles comme au téléphone. Prix seulement si on te le demande. Si on te le demande, tu le dis, tu n’enchaînes pas avec des créneaux."
                     className="rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium leading-5 text-slate-700 outline-none focus:border-violet-500"
                   />
                 </label>
@@ -1189,7 +1214,7 @@ export default function SeyaCrmPage() {
                               ),
                             }))
                           }
-                          onBlur={() => void persistAgentSettings(agentSettings)}
+                          onBlur={persistCurrentAgentSettings}
                           placeholder="l’esthéticienne cryolipolyse"
                           className="h-11 rounded-2xl border border-slate-200 bg-white px-3 text-sm font-medium outline-none focus:border-violet-500"
                         />
@@ -1211,7 +1236,7 @@ export default function SeyaCrmPage() {
                               ),
                             }))
                           }
-                          onBlur={() => void persistAgentSettings(agentSettings)}
+                          onBlur={persistCurrentAgentSettings}
                           rows={2}
                           className="rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium leading-5 text-slate-700 outline-none focus:border-violet-500"
                         />
@@ -1224,15 +1249,17 @@ export default function SeyaCrmPage() {
           </div>
           <button
             type="button"
-            onClick={() =>
+            onClick={() => {
+              const current = agentSettingsRef.current;
               void persistAgentSettings({
-                ...agentSettings,
+                ...current,
                 treatmentBriefs: [
-                  ...agentSettings.treatmentBriefs,
+                  ...current.treatmentBriefs,
                   {
                     name: "Nouveau soin",
                     price: "",
-                    brief: "Si on demande le prix, donne le tarif paramétré.",
+                    brief:
+                      "Prix seulement si on te le demande. Si on te le demande, tu dis le tarif comme au comptoir.",
                     opening:
                       "Bonjour {prenom}, c’est Seya du {centre}. On vient de recevoir votre demande pour {offre}.",
                     health: {
@@ -1244,9 +1271,9 @@ export default function SeyaCrmPage() {
                     },
                   },
                 ],
-              })
-            }
-            className="mt-3 rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700"
+              });
+            }}
+            className="mt-3 cursor-pointer rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700"
           >
             Ajouter un soin
           </button>

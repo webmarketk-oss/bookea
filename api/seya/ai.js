@@ -25,20 +25,21 @@ const {
 } = require("./agent");
 const {
   enforceOutgoingText,
+  replyHasForbiddenSlots,
   shouldSearchSlots,
   slotAllowed,
 } = require("./booking-state");
 const { classifyHealthMessage, isAwaitingHealthReview } = require("./health");
 const { classifyPriceQuestion, isPriceRepeatComplaint } = require("./price");
-const { isHesitation, isIdentityQuestion, isOffTopicComplaint, isThanks, refusesSlots, wantsSlots } = require("./conversation");
+const { wantsSlots } = require("./conversation");
 
-const ALLOWED_ACTIONS = new Set([
-  "continue",
-  "propose_slots",
-  "book",
-  "handoff",
-  "stop",
-]);
+function seyaModel() {
+  const requested = String(process.env.OPENAI_MODEL || "").trim();
+  if (!requested || requested === "gpt-4o-mini") {
+    return "gpt-4o";
+  }
+  return requested;
+}
 
 function hasAiKey() {
   return Boolean(String(process.env.OPENAI_API_KEY || "").trim());
@@ -92,37 +93,24 @@ async function generateSeyaReply({
     guarded,
   };
   const fallback = applyLeadReply(conversationWithState, text, seya, resolvedSlots, extras);
-  const priceIntent = classifyPriceQuestion(text);
-  if (
-    !hasAiKey() ||
-    health.personal ||
-    health.general ||
-    isAwaitingHealthReview(conversation) ||
-    priceIntent ||
-    isPriceRepeatComplaint(text) ||
-    isIdentityQuestion(text) ||
-    isThanks(text) ||
-    isHesitation(text) ||
-    refusesSlots(text) ||
-    wantsSlots(text) ||
-    asksLocation(text) ||
-    isOffTopicComplaint(text)
-  ) {
+  if (!hasAiKey() || health.personal) {
     return { ...fallback, via: "rules" };
   }
 
   try {
-    const decision = await askSeyaModel({
-      conversation: conversationWithState,
+    const draft = lastSeyaText(fallback.conversation);
+    const polished = await polishSeyaText({
+      conversation: fallback.conversation,
       text,
       seya,
       slots: resolvedSlots,
       centerName,
       centerAddress,
       bookingState,
+      draft,
     });
     return {
-      ...applyAiDecision(conversationWithState, text, seya, resolvedSlots, decision, extras),
+      ...withPolishedText(fallback, polished, bookingState),
       via: "ai",
     };
   } catch (error) {
@@ -131,7 +119,16 @@ async function generateSeyaReply({
   }
 }
 
-async function askSeyaModel({ conversation, text, seya, slots, centerName, centerAddress, bookingState }) {
+async function polishSeyaText({
+  conversation,
+  text,
+  seya,
+  slots,
+  centerName,
+  centerAddress,
+  bookingState,
+  draft,
+}) {
   const settings = agentSettings(seya);
   const careHint = `${conversation.qualification?.need || ""} ${conversation.qualification?.zone || ""} ${conversation.treatment || ""}`;
   const offer = resolveOfferLabel(
@@ -143,21 +140,23 @@ async function askSeyaModel({ conversation, text, seya, slots, centerName, cente
   const price = resolveTreatmentPrice(seya, careHint);
   const client = new OpenAI({
     apiKey: process.env.OPENAI_API_KEY,
-    timeout: 8000,
+    timeout: 12000,
   });
-  const history = (conversation.messages || []).slice(-12).map((item) => ({
-    role: item.author === "lead" ? "user" : "assistant",
-    content: String(item.text || "").slice(0, 500),
-  }));
+  const history = (conversation.messages || [])
+    .filter((item, index, list) => !(index === list.length - 1 && item.author === "seya"))
+    .slice(-8)
+    .map((item) => ({
+      role: item.author === "lead" ? "user" : "assistant",
+      content: String(item.text || "").slice(0, 400),
+    }));
 
   const response = await client.chat.completions.create({
-    model: process.env.OPENAI_MODEL || "gpt-4o-mini",
-    temperature: 0.4,
-    response_format: { type: "json_object" },
+    model: seyaModel(),
+    temperature: 0.6,
     messages: [
       {
         role: "system",
-        content: buildSystemPrompt({
+        content: polishPrompt({
           conversation,
           settings,
           seya,
@@ -171,14 +170,20 @@ async function askSeyaModel({ conversation, text, seya, slots, centerName, cente
         }),
       },
       ...history,
-      { role: "user", content: String(text || "").slice(0, 800) },
+      {
+        role: "user",
+        content: [
+          `Message de la cliente : ${String(text || "").slice(0, 800)}`,
+          `Brouillon Bookea (faits justes, à reformuler, pas à corriger) : ${String(draft || "").slice(0, 700)}`,
+        ].join("\n"),
+      },
     ],
   });
 
-  return parseDecision(response.choices?.[0]?.message?.content);
+  return sanitizeReply(response.choices?.[0]?.message?.content);
 }
 
-function buildSystemPrompt({
+function polishPrompt({
   conversation,
   settings,
   seya,
@@ -190,95 +195,80 @@ function buildSystemPrompt({
   centerAddress,
   bookingState,
 }) {
-  const slotLines = (slots || [])
-    .map((slot, index) => `${index + 1}) ${slot.label}`)
-    .join("\n");
+  const allowedSlots = (slots || [])
+    .map((slot) => slot.label)
+    .filter(Boolean)
+    .join(" · ");
 
   return [
-    "Tu es Seya, réceptionniste WhatsApp du centre. Tu parles comme un humain, jamais comme un formulaire.",
-    "Tu vouvoies. Phrases courtes, naturelles. Un smiley max. Pas de liste 1) 2) 3).",
+    "Tu es Seya, au standard WhatsApp. Tu reformules le brouillon Bookea comme une réceptionniste au téléphone : naturelle, posée, vouvoiement, 1 à 3 phrases.",
+    "Tu ne changes aucun fait. Tu n’inventes ni jour, ni heure, ni prix, ni adresse, ni résultat médical.",
+    "Pas de liste 1) 2) 3). Pas de « Lead Meta ». Un smiley au plus, pas à chaque message. Tu ne termines pas chaque phrase par une question.",
     `Centre : ${centerName || "le centre"}.`,
-    `Prospect : ${conversation.firstName || "le prospect"}. Utilise le prénom si tu l’as.`,
-    offer
-      ? `Soin / offre à dire : ${offer}. Jamais « Lead Meta » ni le nom de campagne.`
-      : "Jamais « Lead Meta » ni le nom de campagne. Déduis le soin des messages.",
-    price
-      ? `Tarif à dire UNIQUEMENT si elle demande le prix : ${price}`
-      : "Aucun tarif paramétré. Si elle demande le prix : ne l’invente pas, propose le bilan ou un rappel.",
-    conversation.treatment && !/lead meta|meta lead/i.test(conversation.treatment)
-      ? `Soin CRM : ${conversation.treatment}.`
-      : "Le CRM est flou (souvent un lead Meta). Ventre / poids = minceur.",
-    settings.brief || seya.brief
-      ? `Consignes du centre : ${settings.brief || seya.brief}`
-      : "",
+    `Prospect : ${conversation.firstName || "le prospect"}.`,
+    offer ? `Offre à nommer : ${offer}.` : "Ne nomme pas une offre inventée.",
+    settings.brief || seya.brief ? `Consignes du centre : ${settings.brief || seya.brief}` : "",
     brief ? `Consignes pour ce soin : ${brief}` : "",
-    `Qualifier : ${settings.qualifyOnSignup ? "oui" : "non"}.`,
-    `Demander un RDV : ${settings.askForAppointment ? "oui" : "non"}.`,
-    `Poser le RDV : ${settings.bookAppointment ? "oui" : "non"}.`,
-    `Passer à l’équipe : ${settings.handoffToHuman ? "oui" : "non"}.`,
+    price ? `Tarif autorisé (seulement si le brouillon en parle) : ${price}` : "Aucun tarif. N’en invente pas.",
     centerAddress
-      ? `Adresse du centre : ${centerAddress}.`
-      : "Adresse du centre inconnue : ne l’invente pas.",
-    slotLines
-      ? `Créneaux RÉELS pour SA demande (jour demandé uniquement) :\n${slotLines}\nDis-les en phrase. N’invente aucun autre jour.`
-      : "Aucun créneau libre pour le jour demandé. Dis-le et demande un autre jour.",
+      ? `Adresse autorisée (seulement si le brouillon en parle) : ${centerAddress}.`
+      : "Adresse inconnue : ne l’invente pas.",
+    allowedSlots
+      ? `Seuls créneaux citables : ${allowedSlots}. Aucun autre jour ni aucune autre heure.`
+      : "Aucun créneau à proposer. N’invente pas d’horaire.",
     bookingState?.requestedDate
-      ? `Date demandée (obligatoire) : ${bookingState.requestedDate}. Interdit de proposer un autre jour.`
-      : "",
-    bookingState?.requestedWeekday != null
-      ? `Jour demandé : ${["dimanche","lundi","mardi","mercredi","jeudi","vendredi","samedi"][bookingState.requestedWeekday]}.`
+      ? `Jour demandé : ${bookingState.requestedDate}. Interdit d’en proposer un autre.`
       : "",
     bookingState?.rejectedDates?.length
       ? `Jours refusés : ${bookingState.rejectedDates.join(", ")}.`
       : "",
-    "Tu n’imposes pas un tunnel bilan → créneaux. Tu réponds d’abord au message actuel.",
-    "« Je ne veux pas vous relancer inutilement » uniquement dans une relance, jamais dans le premier échange.",
-    "Si le créneau voulu n’existe pas : dis-le simplement et demande le jour suivant ou une autre journée. N’invente pas un lundi.",
-    "Réponds UNIQUEMENT en JSON :",
-    '{"reply":"texte WhatsApp 1 à 3 phrases","need":"","zone":"","delay":"","availability":"","action":"continue|propose_slots|book|handoff|stop","slotIndex":null}',
-    "Règles :",
-    "- Une seule question à la fois. Réponds d’abord à ce qu’ils viennent d’écrire.",
-    "- Question générale sur les contre-indications : donne uniquement la fiche validée du soin demandé, jamais celle d’un autre soin.",
-    "- Situation santé personnelle : ne dis jamais si le soin est possible ou impossible. Transmets à l’équipe. Ne demande pas plus de détails médicaux.",
-    "- Pacemaker, grossesse, doute médical : action=handoff. Ne booke pas. L’équipe vérifie.",
-    "- S’ils donnent encore un horaire après un doute médical : handoff, « je transmets à l’équipe ».",
-    "- Prix : distingue bilan, séance découverte, séances suivantes et cure. « Continuer / ensuite / les séances » = séances après la découverte, pas le bilan.",
-    "- Ne répète jamais mot pour mot ta dernière réponse. Si elle dit que tu répètes, reconnais l’erreur et réponds à la question restée sans réponse.",
-    "- Prix : tu n’en parles JAMAIS si elle n’en parle pas.",
-    "- « Combien de temps » n’est PAS une question prix. Réponds à la durée ou aux résultats.",
-    "- « Le bilan est-il gratuit ? » ≠ « Combien les séances ensuite ? ». Réponds seulement à la partie demandée. Pas de créneau tant qu’elle n’en demande pas.",
-    "- Si elle demande si tu es une IA : « Je suis SEYA, l’assistante virtuelle du centre. Je peux vous renseigner et organiser votre rendez-vous, et l’équipe peut reprendre la conversation si vous préférez. »",
-    "- Ne termine pas chaque message par une question. Pas d’émoji à chaque tour.",
-    "- Douleur : le bilan est indolore. Durée : 30 à 45 min. Résultats : expliqués au bilan.",
-    "- « Lundi suivant » / « pas le 28, un autre lundi » : un autre lundi, jamais le même.",
-    "- Où / adresse : action=continue, donne l’adresse. Pas de créneaux.",
-    "- Si elle dit jeudi, propose UNIQUEMENT des jeudis. Jamais un lundi à la place.",
-    "- Si elle refuse un jour (« pas lundi », « change de jour »), ne repropose jamais ces mêmes créneaux.",
-    "- Si elle dit « arrête les créneaux, parle-moi des prix » : ce n’est pas un stop, réponds au tarif.",
-    "- « Arrête de me parler des créneaux » n’est PAS un stop.",
-    "- stop seulement si plus de contact (stop, pas intéressé, ne plus écrire).",
-    "- Jamais inventer un prix, un résultat médical, un créneau.",
-    "- book seulement s’ils choisissent un créneau réel (slotIndex 1, 2 ou 3).",
-    "- propose_slots seulement s’ils parlent dispo / RDV, jamais pour éviter une question.",
+    "Si le brouillon ne cite pas de créneau, tu n’en cites pas non plus.",
+    "Réponds uniquement avec le texte WhatsApp, sans guillemets ni JSON.",
   ]
     .filter(Boolean)
     .join("\n");
 }
 
-function parseDecision(raw) {
-  const parsed = JSON.parse(String(raw || "{}"));
-  const action = ALLOWED_ACTIONS.has(parsed.action) ? parsed.action : "continue";
-  const slotIndex = Number(parsed.slotIndex);
+function lastSeyaText(conversation) {
+  return (
+    [...(conversation?.messages || [])]
+      .reverse()
+      .find((item) => item.author === "seya")?.text || ""
+  );
+}
+
+function pickSafeReply(draft, polished, bookingState) {
+  const candidate = sanitizeReply(polished);
+  if (!candidate || candidate.length < 8) {
+    return draft;
+  }
+  if (replyHasForbiddenSlots(candidate, bookingState)) {
+    console.error("[seya/ai] polish_blocked", {
+      centerId: bookingState?.centerId,
+      requestedDate: bookingState?.requestedDate,
+      preview: candidate.slice(0, 160),
+    });
+    return draft;
+  }
+  return candidate;
+}
+
+function withPolishedText(result, polished, bookingState) {
+  const conversation = result.conversation;
+  const messages = [...(conversation.messages || [])];
+  const index = [...messages].map((item) => item.author).lastIndexOf("seya");
+  if (index < 0) {
+    return result;
+  }
+  const draft = messages[index].text;
+  const safe = pickSafeReply(draft, polished, bookingState);
+  if (safe === draft) {
+    return result;
+  }
+  messages[index] = { ...messages[index], text: safe };
   return {
-    reply: sanitizeReply(parsed.reply),
-    need: cleanField(parsed.need),
-    zone: cleanField(parsed.zone),
-    delay: cleanField(parsed.delay),
-    availability: cleanField(parsed.availability),
-    action,
-    slotIndex: Number.isInteger(slotIndex) && slotIndex >= 1 && slotIndex <= 3
-      ? slotIndex
-      : null,
+    ...result,
+    conversation: { ...conversation, messages },
   };
 }
 
@@ -477,16 +467,11 @@ function sealAiResult(conversationOrResult, bookingState, shouldBook = null) {
 
 function sanitizeReply(value) {
   return String(value || "")
+    .replace(/^["«\s]+|["»\s]+$/g, "")
     .replace(/offre\s*\d+/gi, "")
     .replace(/\s+/g, " ")
     .trim()
     .slice(0, 700);
-}
-
-function stripSlotList(value) {
-  return String(value || "")
-    .replace(/(?:^|\n)\s*[123]\)[^\n]*/g, "")
-    .trim();
 }
 
 function cleanField(value) {
@@ -501,4 +486,5 @@ module.exports = {
   applyAiDecision,
   generateSeyaReply,
   hasAiKey,
+  pickSafeReply,
 };

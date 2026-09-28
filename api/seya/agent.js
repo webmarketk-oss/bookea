@@ -54,7 +54,7 @@ const defaultBriefs = [
     name: "Épilation définitive",
     price: "",
     brief:
-      "Parle comme une réceptionniste. Ne parle de prix que si on te le demande. Contre-indication (pacemaker, grossesse…) : transmets à l’équipe, ne booke pas.",
+      "Tu accueilles pour l’épilation, comme au standard. Prix seulement si on te le demande. Pacemaker, grossesse ou doute santé : tu transmets à l’équipe, tu ne poses pas de rendez-vous.",
     opening:
       "Bonjour {prenom}, c’est Seya du {centre}. On vient de recevoir votre demande pour {offre}. Je peux regarder un créneau avec vous, si vous le souhaitez.",
   },
@@ -69,7 +69,7 @@ const defaultBriefs = [
     },
     price: "",
     brief:
-      "Parle comme une réceptionniste. Demande la zone. Ne parle de prix que si on te le demande. Pas de liste de créneaux à la place du tarif.",
+      "Tu commences par la zone, comme tu le ferais au téléphone. Prix seulement si on te le demande. Si on te demande le tarif, tu le dis en une ou deux phrases, tu n’enchaînes pas avec des créneaux.",
     opening:
       "Bonjour {prenom}, c’est Seya du {centre}. On vient de recevoir votre demande pour {offre}. Sur quelle zone souhaitez-vous que l’on regarde ?",
   },
@@ -77,7 +77,7 @@ const defaultBriefs = [
     name: "Soin visage",
     price: "",
     brief:
-      "Parle comme une réceptionniste. Ne parle de prix que si on te le demande.",
+      "Tu t’intéresses à l’objectif pour la peau. Prix seulement si on te le demande.",
     opening:
       "Bonjour {prenom}, c’est Seya du {centre}. On vient de recevoir votre demande pour {offre}. Quel est votre objectif pour la peau ?",
   },
@@ -92,15 +92,15 @@ const defaultBriefs = [
     },
     price: "",
     brief:
-      "Parle comme une réceptionniste. Ne parle de prix que si on te le demande. Contre-indication : transmets à l’équipe.",
+      "Tu demandes la zone, simplement. Prix seulement si on te le demande. Doute santé : tu transmets à l’équipe.",
     opening:
-      "Bonjour {prenom}, c’est Seya du {centre}. On vient de recevoir votre demande pour {offre}. Quelle zone souhaitez-vous traiter ?"
+      "Bonjour {prenom}, c’est Seya du {centre}. On vient de recevoir votre demande pour {offre}. Quelle zone souhaitez-vous traiter ?",
   },
   {
     name: "Hydrafacial",
     price: "",
     brief:
-      "Parle comme une réceptionniste. Ne parle de prix que si on te le demande.",
+      "Tu t’intéresses à l’objectif pour la peau. Prix seulement si on te le demande.",
     opening:
       "Bonjour {prenom}, c’est Seya du {centre}. On vient de recevoir votre demande pour {offre}. Quel est votre objectif pour la peau ?",
   },

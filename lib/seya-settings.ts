@@ -159,7 +159,7 @@ export const defaultTreatmentBriefs: SeyaTreatmentBrief[] = [
     name: "Épilation définitive",
     price: "",
     brief:
-      "Parle comme une réceptionniste. Ne parle de prix que si on te le demande. Contre-indication (pacemaker, grossesse…) : transmets à l’équipe, ne booke pas.",
+      "Tu accueilles pour l’épilation, comme au standard. Prix seulement si on te le demande. Pacemaker, grossesse ou doute santé : tu transmets à l’équipe, tu ne poses pas de rendez-vous.",
     opening:
       "Bonjour {prenom}, c’est Seya du {centre}. On vient de recevoir votre demande pour {offre}. Je peux regarder un créneau avec vous, si vous le souhaitez.",
   },
@@ -173,9 +173,9 @@ export const defaultTreatmentBriefs: SeyaTreatmentBrief[] = [
       sessionPolicy: "after_bilan",
     },
     price:
-      "Le bilan et la séance découverte sont offerts, c’est gratuit. On y fait une analyse corporelle pour établir un devis personnalisé. Quand seriez-vous disponible ?",
+      "Le bilan et la séance découverte sont offerts. On y fait une analyse pour établir un devis. Si vous voulez, on peut regarder un créneau.",
     brief:
-      "Parle comme une réceptionniste. Demande la zone. Ne parle de prix que si on te le demande. Pas de liste de créneaux à la place du tarif.",
+      "Tu commences par la zone, comme tu le ferais au téléphone. Prix seulement si on te le demande. Si on te demande le tarif, tu le dis en une ou deux phrases, tu n’enchaînes pas avec des créneaux.",
     opening:
       "Bonjour {prenom}, c’est Seya du {centre}. On vient de recevoir votre demande pour {offre}. Sur quelle zone souhaitez-vous que l’on regarde ?",
   },
@@ -183,7 +183,7 @@ export const defaultTreatmentBriefs: SeyaTreatmentBrief[] = [
     name: "Soin visage",
     price: "",
     brief:
-      "Parle comme une réceptionniste. Ne parle de prix que si on te le demande.",
+      "Tu t’intéresses à l’objectif pour la peau. Prix seulement si on te le demande.",
     opening:
       "Bonjour {prenom}, c’est Seya du {centre}. On vient de recevoir votre demande pour {offre}. Quel est votre objectif pour la peau ?",
   },
@@ -197,19 +197,19 @@ export const defaultTreatmentBriefs: SeyaTreatmentBrief[] = [
       sessionPolicy: "after_bilan",
     },
     price:
-      "Le bilan et la séance découverte sont offerts, c’est gratuit. On y fait une analyse corporelle pour établir un devis personnalisé. Quand seriez-vous disponible ?",
+      "Le bilan et la séance découverte sont offerts. On y fait une analyse pour établir un devis. Si vous voulez, on peut regarder un créneau.",
     brief:
-      "Parle comme une réceptionniste. Ne parle de prix que si on te le demande. Contre-indication : transmets à l’équipe.",
+      "Tu demandes la zone, simplement. Prix seulement si on te le demande. Doute santé : tu transmets à l’équipe.",
     opening:
-      "Bonjour {prenom}, c’est Seya du {centre}. On vient de recevoir votre demande pour {offre}. Quelle zone souhaitez-vous traiter ?"
+      "Bonjour {prenom}, c’est Seya du {centre}. On vient de recevoir votre demande pour {offre}. Quelle zone souhaitez-vous traiter ?",
   },
   {
     name: "Hydrafacial",
     price: "",
     brief:
-      "Parle comme une réceptionniste. Ne parle de prix que si on te le demande.",
+      "Tu t’intéresses à l’objectif pour la peau. Prix seulement si on te le demande.",
     opening:
-      "Bonjour {prenom}, c’est Seya du {centre}. On vient de recevoir votre demande pour {offre}. Quel est votre objectif pour la peau ?"
+      "Bonjour {prenom}, c’est Seya du {centre}. On vient de recevoir votre demande pour {offre}. Quel est votre objectif pour la peau ?",
   },
 ];
 
@@ -266,7 +266,7 @@ export const defaultSeyaAgentSettings: SeyaAgentSettings = {
   relanceEnabled: true,
   relanceDays: [1, 5, 30],
   brief:
-    "Tu parles comme une réceptionniste, pas comme un robot. Une question à la fois. Tu ne parles jamais de prix, de cure, de 500€ ou de paiement tant que la cliente n’a pas demandé le tarif. Si elle demande le prix, tu donnes le tarif paramétré naturellement. Pacemaker ou grossesse : tu transmets à l’équipe, tu ne bookes pas. Jamais Lead Meta.",
+    "Tu es Seya, au standard du centre. Tu vouvoies. Tu parles comme au téléphone : simple, posée, sans script. Tu réponds d’abord à ce qu’on vient de te dire, une chose à la fois, tu n’enchaînes pas sur le planning si on ne te le demande pas. Prix, cure ou paiement : seulement si on te le demande, et alors tu dis le tarif paramétré en une ou deux phrases. Pacemaker, grossesse ou doute santé : tu transmets à l’équipe, tu ne poses pas de rendez-vous. Jamais « Lead Meta ».",
   treatmentBriefs: defaultTreatmentBriefs,
   offerMaps: defaultSeyaOfferMaps,
 };
@@ -628,6 +628,34 @@ export function inboxTagLabel(tag: SeyaInboxTag) {
   return "Fermé";
 }
 
+const LEGACY_GENERAL_BRIEF =
+  "Tu parles comme une réceptionniste, pas comme un robot. Une question à la fois. Tu ne parles jamais de prix, de cure, de 500€ ou de paiement tant que la cliente n’a pas demandé le tarif. Si elle demande le prix, tu donnes le tarif paramétré naturellement. Pacemaker ou grossesse : tu transmets à l’équipe, tu ne bookes pas. Jamais Lead Meta.";
+
+const LEGACY_TREATMENT_BRIEFS = new Set([
+  "Parle comme une réceptionniste. Ne parle de prix que si on te le demande. Contre-indication (pacemaker, grossesse…) : transmets à l’équipe, ne booke pas.",
+  "Parle comme une réceptionniste. Demande la zone. Ne parle de prix que si on te le demande. Pas de liste de créneaux à la place du tarif.",
+  "Parle comme une réceptionniste. Ne parle de prix que si on te le demande.",
+  "Parle comme une réceptionniste. Ne parle de prix que si on te le demande. Contre-indication : transmets à l’équipe.",
+]);
+
+function normalizeGeneralBrief(value?: string | null) {
+  const current = String(value || "").trim();
+  if (!current || current === LEGACY_GENERAL_BRIEF) {
+    return defaultSeyaAgentSettings.brief;
+  }
+  return current;
+}
+
+function refreshLegacyTreatmentBrief(name: string, brief: string) {
+  if (!LEGACY_TREATMENT_BRIEFS.has(brief)) {
+    return brief;
+  }
+  const fresh = defaultTreatmentBriefs.find(
+    (item) => normalizeTreatmentName(item.name) === normalizeTreatmentName(name),
+  );
+  return fresh?.brief || brief;
+}
+
 export function normalizeSeyaAgentSettings(
   value?: Partial<SeyaAgentSettings> | null,
 ): SeyaAgentSettings {
@@ -644,17 +672,17 @@ export function normalizeSeyaAgentSettings(
     handoffToHuman: value?.handoffToHuman !== false,
     relanceEnabled: value?.relanceEnabled !== false,
     relanceDays: days.length ? days : [1, 5, 30],
-    brief: String(value?.brief || "").trim() || defaultSeyaAgentSettings.brief,
+    brief: normalizeGeneralBrief(value?.brief),
     treatmentBriefs: normalizeTreatmentBriefs(value?.treatmentBriefs),
     offerMaps: normalizeOfferMaps(value?.offerMaps),
   };
 }
 
 function normalizeTreatmentBriefs(value?: SeyaTreatmentBrief[] | null) {
-  const incoming = Array.isArray(value) ? value : [];
+  const incoming = Array.isArray(value) ? value : defaultTreatmentBriefs;
   const merged = new Map<string, SeyaTreatmentBrief>();
 
-  for (const item of [...defaultTreatmentBriefs, ...incoming]) {
+  for (const item of incoming) {
     const name = String(item?.name || "").trim();
     if (!name) {
       continue;
@@ -662,7 +690,7 @@ function normalizeTreatmentBriefs(value?: SeyaTreatmentBrief[] | null) {
     const previous = merged.get(normalizeTreatmentName(name));
     merged.set(normalizeTreatmentName(name), {
       name,
-      brief: String(item?.brief || "").trim(),
+      brief: refreshLegacyTreatmentBrief(name, String(item?.brief || "").trim()),
       opening: String(item?.opening || previous?.opening || "").trim(),
       price: String(item?.price || previous?.price || "").trim(),
       pricing: normalizePricePolicy(item?.pricing || previous?.pricing, item?.price || previous?.price),
@@ -714,17 +742,22 @@ function normalizeHealthSheet(value?: SeyaHealthSheet | null): SeyaHealthSheet {
 }
 
 function normalizeOfferMaps(value?: SeyaOfferMap[] | null) {
-  const incoming = Array.isArray(value) ? value : defaultSeyaOfferMaps;
+  if (!Array.isArray(value)) {
+    return defaultSeyaOfferMaps.map((item) => ({ ...item }));
+  }
+
   const merged = new Map<string, SeyaOfferMap>();
-  for (const item of incoming) {
+  const emptyRows: SeyaOfferMap[] = [];
+  for (const item of value) {
     const match = String(item?.match || "").trim();
     const label = String(item?.label || "").trim();
-    if (!match || !label) {
+    if (!match) {
+      emptyRows.push({ match: "", label });
       continue;
     }
     merged.set(normalizeTreatmentName(match), { match, label });
   }
-  return [...merged.values()];
+  return [...merged.values(), ...emptyRows];
 }
 
 export function readLocalSeyaSettings(centerId: string) {
@@ -808,10 +841,10 @@ export async function loadSeyaAgentSettings() {
       localSettings?.brief,
     treatmentBriefs: Array.isArray(remote.treatmentBriefs)
       ? (remote.treatmentBriefs as SeyaTreatmentBrief[])
-      : (localSettings?.treatmentBriefs ?? []),
+      : localSettings?.treatmentBriefs,
     offerMaps: Array.isArray(remote.offerMaps)
       ? (remote.offerMaps as SeyaOfferMap[])
-      : (localSettings?.offerMaps ?? []),
+      : localSettings?.offerMaps,
   });
 
   writeLocalSeyaSettings(context.centerId, settings);
