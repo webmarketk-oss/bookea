@@ -31,16 +31,25 @@ const {
 const {
   alreadyTold,
   conversationalReply,
+  isBookingThread,
   isHesitation,
   isIdentityQuestion,
   isOffTopicComplaint,
+  isRereadAsk,
+  isConfirmingOfferedTime,
   isShortYes,
   isThanks,
+  checkingSlotReply,
+  lastSeyaOfferedToBook,
+  offeredSlots,
+  parseClockMinutes,
   refusesSlots,
   wantsSlots,
 } = require("./conversation");
 const { inferCareFamily, naturalOfferPhrase } = require("./care-family");
 const { sanitizePersonName } = require("../../lib/seya-person-name");
+
+const BILAN_DURATION_MINUTES = 75;
 
 const weekdayNames = [
   "dimanche",
@@ -619,18 +628,42 @@ function mergeQualification(current, text, fallbackTreatment) {
   return next;
 }
 
-function matchProposedSlot(text, slots) {
+function matchProposedSlot(text, slots, options = {}) {
   const value = String(text || "").toLowerCase().trim();
   if (!value || !Array.isArray(slots) || slots.length === 0) {
     return null;
   }
-  if (/1er|octobre|novembre|decembre|janvier|fevrier|mars|avril|juin|juillet|aout|septembre|mai\b/i.test(value)) {
+  const clocks = parseClockMinutes(text);
+  if (
+    /1er|octobre|novembre|decembre|janvier|fevrier|mars|avril|juin|juillet|aout|septembre|mai\b/i.test(
+      value,
+    ) &&
+    !clocks.length
+  ) {
     return null;
   }
   if (/^([123])$/.test(value)) {
     return slots[Number(value) - 1] || null;
   }
-  if (/^(oui|ok|d['’]?accord|le premier|premier)$/i.test(value) || isShortYes(text)) {
+  if (clocks.length) {
+    const exact = slots.find((slot) => clocks.includes(timeToMinutes(slot.time)));
+    if (exact) {
+      return exact;
+    }
+    const hourOnly = clocks.find((item) => item % 60 === 0);
+    if (hourOnly != null) {
+      const sameHour = slots.find(
+        (slot) => Math.floor(timeToMinutes(slot.time) / 60) === hourOnly / 60,
+      );
+      if (sameHour) {
+        return sameHour;
+      }
+    }
+  }
+  if (
+    /^(le premier|premier)$/i.test(value) ||
+    (options.confirmYes && isShortYes(text))
+  ) {
     return slots[0];
   }
   return (
@@ -876,6 +909,7 @@ function pickSlotsForState(appointments, hours, state, now) {
             : [],
     excludeWeekdays: state.rejectedWeekdays,
     excludeDates: state.rejectedDates,
+    duration: BILAN_DURATION_MINUTES,
     now,
   };
   return suggestAvailableSlots(appointments, hours, options);
@@ -889,13 +923,13 @@ function pickSlotsForMessage(appointments, hours, conversation, text, now) {
   return pickSlotsForState(appointments, hours, state, now);
 }
 
-function suggestAvailableSlots(appointments, hours, countOrOptions = 3, duration = 60) {
+function suggestAvailableSlots(appointments, hours, countOrOptions = 3, duration = BILAN_DURATION_MINUTES) {
   const options =
     countOrOptions && typeof countOrOptions === "object"
       ? countOrOptions
       : { count: countOrOptions, duration };
   const count = options.count || 3;
-  const slotDuration = options.duration || duration || 60;
+  const slotDuration = options.duration || duration || BILAN_DURATION_MINUTES;
   const maxDays = options.days || 14;
   const onlyWeekdays = Array.isArray(options.weekdays) ? options.weekdays : [];
   const onlyDate = String(options.date || "");
@@ -966,12 +1000,18 @@ function defaultHours() {
 
 function applyLeadReply(conversation, text, seya, slots, extras = {}) {
   const settings = agentSettings(seya);
-  const bookingState = extras.bookingState
-    ? extras.bookingState
-    : applyBookingMessage(conversation.bookingState, text, {
-        centerId: extras.centerId || conversation.centerId,
-        now: extras.now,
-      });
+  const previousLead = lastOtherLeadText(conversation, text);
+  const reread =
+    isRereadAsk(text) ||
+    (isOffTopicComplaint(text) && isBookingThread(conversation));
+  const intentText = reread && previousLead ? previousLead : text;
+  const bookingState =
+    extras.bookingState && !reread
+      ? extras.bookingState
+      : applyBookingMessage(conversation.bookingState, intentText, {
+          centerId: extras.centerId || conversation.centerId,
+          now: extras.now,
+        });
   conversation = {
     ...conversation,
     centerId: extras.centerId || conversation.centerId || bookingState.centerId,
@@ -979,23 +1019,33 @@ function applyLeadReply(conversation, text, seya, slots, extras = {}) {
     _seya: seya,
   };
   const allowRepeat = /lundi|mardi|mercredi|jeudi|vendredi|samedi|debut de semaine|fin de semaine|dispo|creneau|créneau|1er|octobre|\d{1,2}\/\d{1,2}/i.test(
-    String(text || ""),
+    String(intentText || ""),
   );
-  const guarded = extras.guarded || guardSlots(slots, bookingState, {
-    centerId: conversation.centerId,
-    allowRepeat,
-  });
-  const safeSlots = shouldSearchSlots(bookingState, text, conversation) ? guarded.slots : [];
+  const guarded = extras.guarded && !reread
+    ? extras.guarded
+    : guardSlots(slots, bookingState, {
+        centerId: conversation.centerId,
+        allowRepeat,
+      });
+  const safeSlots = shouldSearchSlots(bookingState, intentText, conversation)
+    ? guarded.slots
+    : [];
   const qualification = mergeQualification(
     conversation.qualification,
-    text,
+    intentText,
     conversation.treatment,
   );
+  const pool = offeredSlots(conversation, slots);
   const chosenSlot =
-    bookingState.pendingQuestion === "no_slots"
+    bookingState.pendingQuestion === "no_slots" && !lastSeyaOfferedToBook(conversation)
       ? null
-      : matchProposedSlot(text, conversation.proposedSlots) ||
-        matchProposedSlot(text, slots);
+      : matchProposedSlot(intentText, conversation.proposedSlots, {
+          confirmYes: true,
+        }) ||
+        matchProposedSlot(intentText, conversation.bookingState?.lastOfferedSlots, {
+          confirmYes: true,
+        }) ||
+        matchProposedSlot(intentText, pool);
   const refuses = isOptOut(text);
 
   if (refuses) {
@@ -1153,7 +1203,7 @@ function applyLeadReply(conversation, text, seya, slots, extras = {}) {
   if (
     settings.handoffToHuman &&
     /conseill|parler (a|à) (un |une )?(humain|quelqu|personne)/i.test(text) &&
-    !wantsSlots(text, conversation)
+    !wantsSlots(intentText, conversation)
   ) {
     return finishLeadReply(
       conversation,
@@ -1165,7 +1215,7 @@ function applyLeadReply(conversation, text, seya, slots, extras = {}) {
     );
   }
 
-  if (wantsSlots(text, conversation) && !settings.bookAppointment) {
+  if (wantsSlots(intentText, conversation) && !settings.bookAppointment) {
     return finishLeadReply(
       conversation,
       qualification,
@@ -1187,7 +1237,12 @@ function applyLeadReply(conversation, text, seya, slots, extras = {}) {
       qualification,
       "RDV pris",
       text,
-      `Je vérifie le planning et je vous confirme ${chosenSlot.label} pour ${qualification.need || conversation.treatment || "votre soin"}.`,
+      withRereadPrefix(
+        reread,
+        isConfirmingOfferedTime(intentText, conversation)
+          ? checkingSlotReply()
+          : `Parfait, je vérifie le créneau dont nous avions parlé et je reviens vers vous tout de suite 😊`,
+      ),
       { ...bookingState, appointmentStatus: "proposed" },
       { bookedSlot: chosenSlot, shouldBook: chosenSlot },
     );
@@ -1215,8 +1270,8 @@ function applyLeadReply(conversation, text, seya, slots, extras = {}) {
 
   const readyToPropose =
     settings.bookAppointment &&
-    wantsSlots(text, conversation) &&
-    shouldSearchSlots(bookingState, text, conversation) &&
+    wantsSlots(intentText, conversation) &&
+    shouldSearchSlots(bookingState, intentText, conversation) &&
     !asksPrice(text) &&
     !classifyPriceQuestion(text) &&
     !isPriceRepeatComplaint(text) &&
@@ -1228,13 +1283,25 @@ function applyLeadReply(conversation, text, seya, slots, extras = {}) {
     !isJunkTreatment(qualification.need || conversation.treatment);
 
   if (readyToPropose && safeSlots.length === 0) {
+    const rejected = bookingState.requestedDate
+      ? [...new Set([...(bookingState.rejectedDates || []), bookingState.requestedDate])]
+      : bookingState.rejectedDates;
     return finishLeadReply(
       conversation,
       qualification,
       "Qualifié",
       text,
-      guarded.fallback || emptySlotFallback(bookingState),
-      { ...bookingState, lastOfferedSlots: [], appointmentStatus: "none" },
+      withRereadPrefix(
+        reread,
+        guarded.fallback || emptySlotFallback(bookingState),
+      ),
+      {
+        ...bookingState,
+        lastOfferedSlots: [],
+        appointmentStatus: "none",
+        pendingQuestion: "offer_slots",
+        rejectedDates: rejected,
+      },
     );
   }
 
@@ -1244,7 +1311,7 @@ function applyLeadReply(conversation, text, seya, slots, extras = {}) {
       qualification,
       "RDV proposé",
       text,
-      humanSlotReply(safeSlots),
+      withRereadPrefix(reread, humanSlotReply(safeSlots)),
       {
         ...bookingState,
         lastOfferedSlots: safeSlots,
@@ -1333,11 +1400,25 @@ function lastOtherLeadText(conversation, current) {
   );
 }
 
+function withRereadPrefix(reread, text) {
+  const reply = String(text || "").trim();
+  if (!reread || !reply) {
+    return reply;
+  }
+  if (/vous avez raison/i.test(reply)) {
+    return reply;
+  }
+  return `Vous avez raison, je reprends votre demande. ${reply}`;
+}
+
 function fallbackAfterNote(qualification, conversation) {
-  if (conversation?.bookingState?.pendingQuestion === "no_slots") {
+  if (
+    conversation?.bookingState?.pendingQuestion === "no_slots" &&
+    !isBookingThread(conversation)
+  ) {
     return "Très bien. Je reste là si une question vous vient.";
   }
-  if (alreadyTold(conversation, "c['’]est note pour|propose un creneau")) {
+  if (isBookingThread(conversation) || alreadyTold(conversation, "c['’]est note pour|propose un creneau")) {
     return "Parfait. Vous êtes plutôt disponible en début de semaine, ou plutôt en fin de semaine ?";
   }
   if (qualification?.zone) {
@@ -1478,7 +1559,7 @@ function relanceCopy(conversation, round = 1, centerName = "") {
   return (
     candidates.find(
       (text) => !previous.some((item) => isNearDuplicate(text, item)),
-    ) || candidates[candidates.length - 1]
+    ) || ""
   );
 }
 
@@ -1568,6 +1649,7 @@ module.exports = {
   lastSeyaAt,
   persistableConversation,
   persistableConversations,
+  BILAN_DURATION_MINUTES,
   daysSince,
   matchProposedSlot,
   mergeQualification,

@@ -5,7 +5,11 @@ const { inferCareFamily, pickApprovedTemplate } = require("./care-family");
 const { isNearDuplicate } = require("./price");
 const { sanitizePersonName } = require("../../lib/seya-person-name");
 const {
+  BILAN_DURATION_MINUTES,
+  humanSlotReply,
+  message,
   persistableConversations,
+  pickSlotsForState,
   readHours,
   startConversation,
   pickSlotsForMessage,
@@ -261,18 +265,21 @@ async function handleIncoming(supabase, incoming) {
     centerId: center.id,
   });
   const next = result.conversation;
+  next.lastRelanceAt = next.lastRelanceAt || existing.lastRelanceAt;
+  next.relanceCount = 0;
 
-  if (result.shouldBook) {
+  const followUps = [];
+  const wantedSlot = result.shouldBook;
+  if (wantedSlot) {
     try {
-      await bookSeyaAppointment(supabase, center.id, context, next, result.shouldBook);
+      await bookSeyaAppointment(supabase, center.id, context, next, wantedSlot);
       if (next.bookingState) {
         next.bookingState.appointmentStatus = "confirmed";
       }
       next.status = "RDV confirmé";
-      const last = [...(next.messages || [])].reverse().find((item) => item.author === "seya");
-      if (last) {
-        last.text = `C’est noté, ${result.shouldBook.label} est bien bloqué pour ${next.qualification?.need || "votre soin"}. Vous recevrez la confirmation du centre.`;
-      }
+      followUps.push(
+        `C’est noté, ${wantedSlot.label} est bien bloqué pour ${next.qualification?.need || "votre soin"}. Vous recevrez la confirmation du centre.`,
+      );
     } catch (bookError) {
       console.error("[seya/whatsapp] book failed", bookError);
       result.shouldBook = null;
@@ -280,13 +287,42 @@ async function handleIncoming(supabase, incoming) {
       next.bookedSlot = undefined;
       if (next.bookingState) {
         next.bookingState.appointmentStatus = "proposed";
+        next.bookingState.lastOfferedSlots = [];
       }
-      const last = [...(next.messages || [])].reverse().find((item) => item.author === "seya");
-      if (last) {
-        last.text =
-          "Je n’ai pas pu bloquer ce créneau dans l’agenda. Quel autre horaire vous irait ?";
+      const alternatives = pickSlotsForState(
+        [
+          ...appointments,
+          {
+            date: wantedSlot.date,
+            start: wantedSlot.time,
+            duration: BILAN_DURATION_MINUTES,
+          },
+        ],
+        hours,
+        {
+          ...(next.bookingState || {}),
+          lastOfferedSlots: [],
+          requestedDate: null,
+        },
+        new Date(),
+      );
+      next.proposedSlots = alternatives;
+      if (next.bookingState) {
+        next.bookingState.lastOfferedSlots = alternatives;
       }
+      followUps.push(
+        alternatives.length
+          ? `Ce créneau n’est plus disponible. ${humanSlotReply(alternatives)}`
+          : "Ce créneau n’est plus disponible. Souhaitez-vous que je regarde un autre horaire ?",
+      );
     }
+  }
+
+  if (followUps.length) {
+    next.messages = [
+      ...(next.messages || []),
+      ...followUps.map((text) => message("seya", text)),
+    ];
   }
 
   const saved = persistableConversations([
@@ -296,12 +332,25 @@ async function handleIncoming(supabase, incoming) {
 
   await writeSeyaConversations(supabase, center.id, saved);
 
-  const reply = [...next.messages].reverse().find((item) => item.author === "seya");
-  const previousSeya = [...(existing.messages || [])]
+  const outgoing = [];
+  const reply = [...(result.conversation.messages || [])]
     .reverse()
     .find((item) => item.author === "seya");
-  if (reply?.text && !isNearDuplicate(reply.text, previousSeya?.text || "")) {
-    await sendSharedWhatsApp(incoming.phone, reply.text, {
+  if (reply?.text) {
+    outgoing.push(reply.text);
+  }
+  outgoing.push(...followUps);
+  const previousSeya = [...(existing.messages || [])]
+    .reverse()
+    .find((item) => item.author === "seya")?.text || "";
+  const uniqueOutgoing = outgoing.filter(
+    (text, index) =>
+      text &&
+      !isNearDuplicate(text, previousSeya) &&
+      outgoing.findIndex((item) => isNearDuplicate(item, text)) === index,
+  );
+  for (const text of uniqueOutgoing) {
+    await sendSharedWhatsApp(incoming.phone, text, {
       firstName: context.firstName,
       centerName: center.name,
       treatment: next.qualification?.need || context.treatment || "",
@@ -420,7 +469,7 @@ async function loadCenterAppointments(supabase, centerId) {
   return (data || []).map((row) => ({
     date: row.appointment_date,
     start: String(row.starts_at || "").slice(0, 5),
-    duration: row.duration_minutes || 60,
+    duration: row.duration_minutes || BILAN_DURATION_MINUTES,
     status: row.status || "",
   }));
 }
@@ -433,8 +482,30 @@ async function bookSeyaAppointment(supabase, centerId, context, conversation, sl
 
   const start = slot.time;
   const [hours, minutes] = start.split(":").map(Number);
-  const endMinutes = hours * 60 + minutes + 60;
+  const startMinutes = hours * 60 + minutes;
+  const endMinutes = startMinutes + BILAN_DURATION_MINUTES;
   const endsAt = `${String(Math.floor(endMinutes / 60)).padStart(2, "0")}:${String(endMinutes % 60).padStart(2, "0")}`;
+
+  const { data: existing } = await supabase
+    .from("appointments")
+    .select("starts_at,duration_minutes,status")
+    .eq("center_id", centerId)
+    .eq("appointment_date", slot.date);
+  const taken = (existing || []).some((row) => {
+    if (/annul/i.test(String(row.status || ""))) {
+      return false;
+    }
+    const otherStart = String(row.starts_at || "")
+      .slice(0, 5)
+      .split(":")
+      .map(Number);
+    const otherFrom = (otherStart[0] || 0) * 60 + (otherStart[1] || 0);
+    const otherTo = otherFrom + (row.duration_minutes || BILAN_DURATION_MINUTES);
+    return startMinutes < otherTo && endMinutes > otherFrom;
+  });
+  if (taken) {
+    throw new Error("slot_taken");
+  }
 
   const { error } = await supabase.from("appointments").insert({
     center_id: centerId,
@@ -445,7 +516,7 @@ async function bookSeyaAppointment(supabase, centerId, context, conversation, sl
     appointment_date: slot.date,
     starts_at: start,
     ends_at: endsAt,
-    duration_minutes: 60,
+    duration_minutes: BILAN_DURATION_MINUTES,
     status: "to_confirm",
     origin: "seya",
     notes: `RDV Seya WhatsApp · ${conversation.qualification?.need || context.treatment || "soin"}`,

@@ -31,7 +31,7 @@ const {
 } = require("./booking-state");
 const { classifyHealthMessage, isAwaitingHealthReview } = require("./health");
 const { classifyPriceQuestion, isPriceRepeatComplaint } = require("./price");
-const { wantsSlots } = require("./conversation");
+const { isRereadAsk, offeredSlots, wantsSlots } = require("./conversation");
 
 function seyaModel() {
   const requested = String(process.env.OPENAI_MODEL || "").trim();
@@ -57,7 +57,12 @@ async function generateSeyaReply({
   centerId,
   now,
 }) {
-  const bookingState = applyBookingMessage(conversation.bookingState, text, {
+  const previousLead = [...(conversation.messages || [])]
+    .reverse()
+    .find((item) => item.author === "lead")?.text;
+  const intentText =
+    isRereadAsk(text) && previousLead ? previousLead : text;
+  const bookingState = applyBookingMessage(conversation.bookingState, intentText, {
     centerId: centerId || conversation.centerId,
     now,
   });
@@ -67,11 +72,11 @@ async function generateSeyaReply({
     bookingState,
   };
   const allowRepeat = /lundi|mardi|mercredi|jeudi|vendredi|samedi|debut de semaine|fin de semaine|dispo|creneau|créneau|1er|octobre|\d{1,2}\/\d{1,2}/i.test(
-    String(text || ""),
+    String(intentText || ""),
   );
-  const health = classifyHealthMessage(text);
+  const health = classifyHealthMessage(intentText);
   const rawSlots =
-    shouldSearchSlots(bookingState, text, conversationWithState) &&
+    shouldSearchSlots(bookingState, intentText, conversationWithState) &&
     !health.personal &&
     !health.general &&
     !isAwaitingHealthReview(conversationWithState)
@@ -99,11 +104,14 @@ async function generateSeyaReply({
 
   try {
     const draft = lastSeyaText(fallback.conversation);
+    const polishSlots = resolvedSlots.length
+      ? resolvedSlots
+      : offeredSlots(fallback.conversation, conversation.proposedSlots);
     const polished = await polishSeyaText({
       conversation: fallback.conversation,
       text,
       seya,
-      slots: resolvedSlots,
+      slots: polishSlots,
       centerName,
       centerAddress,
       bookingState,
@@ -205,6 +213,9 @@ function polishPrompt({
     "Le texte Bookea est une fiche de faits autorisés, pas un script. Tu réponds d’abord au dernier message de la cliente.",
     "Si Bookea propose un créneau ou pose une question alors que la cliente n’a pas demandé ça, tu ne le recopies pas.",
     "Tu ne mets jamais fin à la conversation. Interdit : « écrivez-moi quand vous voulez reprendre », « je vous prie », « je reviendrai vers vous », « une conseillère vous recontacte », sauf si elle demande clairement à parler à quelqu’un.",
+    "Tu relis le fil. Si elle dit aujourd’hui, un jour, 9h, oui merci, oui toujours, ou « relis ce que je t’ai demandé », tu réponds à ÇA : un horaire déjà proposé, ou de nouveaux créneaux autorisés. Tu ne demandes pas la zone. Tu ne dis jamais qu’il n’y a plus de créneau si des horaires autorisés sont listés plus bas.",
+    "Si elle choisit 9h / 9h00 alors que 09h00 a été proposé, tu confirmes ce créneau.",
+    "Si elle dit oui toujours après « l’horaire vous convient », tu confirmes l’horaire déjà vu. Tu ne clôtures pas.",
     "Si elle dit oui, ok, d’accord ou merci après une proposition de rendez-vous, tu continues : tu proposes uniquement les créneaux autorisés, ou tu demandes si elle est plutôt disponible en début ou en fin de semaine. Tu ne clôtures pas.",
     "Si elle préfère recontacter elle-même, tu dis seulement : « D’accord, aucun souci, je vous laisse revenir vers nous quand ça sera le moment pour vous. Je vous souhaite une belle journée / une bonne soirée :) ». Pas de créneau, pas de jour, pas d’explication pour réserver à distance.",
     "Si Bookea cite des horaires ou demande un jour, tu gardes cette étape. Tu ne remplaces jamais ça par un au revoir.",
@@ -266,11 +277,24 @@ function pickSafeReply(draft, polished, bookingState) {
   if (replyPushesAfterPause(draft, candidate)) {
     return draft;
   }
+  if (
+    /quelle zone|zone souhaitez/i.test(candidate) &&
+    !/quelle zone|zone souhaitez/i.test(draft) &&
+    /\d{1,2}\s*h|semaine|jour|creneau|créneau/i.test(draft)
+  ) {
+    return draft;
+  }
+  if (
+    /pas de (creneau|disponib)|reprendre contact/i.test(candidate) &&
+    !/pas de (creneau|disponib)|reprendre contact/i.test(draft)
+  ) {
+    return draft;
+  }
   return candidate;
 }
 
 function replyClosesThread(text) {
-  return /reviendrai vers vous|vous recontacte|je vous laisse|je clos le sujet|une conseill[eè]re du centre, elle|ecrivez[- ]moi quand|reprendre la conversation|quand vous (voulez|souhaitez) reprendre|je vous prie[,.]/i.test(
+  return /reviendrai vers vous|vous recontacte|je vous laisse|je clos le sujet|une conseill[eè]re du centre, elle|ecrivez[- ]moi quand|reprendre (la conversation|contact)|quand vous (voulez|souhaitez) reprendre|je vous prie[,.]|pas de creneaux disponibles/i.test(
     String(text || ""),
   );
 }
@@ -356,7 +380,10 @@ function applyAiDecision(conversation, text, seya, slots, decision, extras = {})
       ? conversation.proposedSlots?.[decision.slotIndex - 1] ||
         safeSlots?.[decision.slotIndex - 1]
       : null) ||
-    matchProposedSlot(text, conversation.proposedSlots) ||
+    matchProposedSlot(text, conversation.proposedSlots, { confirmYes: true }) ||
+    matchProposedSlot(text, conversation.bookingState?.lastOfferedSlots, {
+      confirmYes: true,
+    }) ||
     matchProposedSlot(text, safeSlots);
 
   if (action === "stop") {

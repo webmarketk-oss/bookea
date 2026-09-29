@@ -9,10 +9,18 @@ function normalize(value) {
     .replace(/['’]/g, "'");
 }
 
+function isRereadAsk(text) {
+  const value = normalize(text);
+  return /relis|re[- ]lis|regarde ce que je (te |vous )?demande|tu (n[' ]as |n[' ]a )?(rien |pas )?compris|essaie de comprendre|comprendre mes questions/.test(
+    value,
+  );
+}
+
 function isOffTopicComplaint(text) {
   const value = normalize(text);
-  return /c[' ]est quoi le rapport|essaie de comprendre|comprendre mes questions|tu (n[' ]as pas |n[' ]a pas )?compris|hors sujet|rien a voir/.test(
-    value,
+  return (
+    isRereadAsk(text) ||
+    /c[' ]est quoi le rapport|hors sujet|rien a voir/.test(value)
   );
 }
 
@@ -30,12 +38,28 @@ function compactText(text) {
     .trim();
 }
 
+function parseClockMinutes(text) {
+  const value = compactText(text);
+  const times = [];
+  const pattern = /\b(\d{1,2})\s*(?:h|:)?\s*(\d{2})?\b/g;
+  let match = pattern.exec(value);
+  while (match) {
+    const hour = Number(match[1]);
+    const minutes = match[2] != null ? Number(match[2]) : 0;
+    if (hour >= 7 && hour <= 20 && minutes >= 0 && minutes <= 59) {
+      times.push(hour * 60 + minutes);
+    }
+    match = pattern.exec(value);
+  }
+  return times;
+}
+
 function isShortYes(text) {
   const value = compactText(text);
-  if (!value || value.length > 48) {
+  if (!value || value.length > 72) {
     return false;
   }
-  return /^(oui|ouais|ouai|ok|okay|okey|d'accord|dac|volontiers|avec plaisir|je veux bien|ca me va|ca marche|pourquoi pas|vas y|vas-y|allez y|allez|go|nickel|parfait|super|yes|yep)( (merci|s'il (te|vous) plait|svp|je veux bien|volontiers|avec plaisir))*$/.test(
+  return /^(bonjour |hello |salut |coucou )?(oui|ouais|ouai|ok|okay|okey|d'accord|dac|volontiers|avec plaisir|je veux bien|ca me va|ca marche|pourquoi pas|vas y|vas-y|allez y|allez|go|nickel|parfait|super|yes|yep)( (oui|ok|merci|s'il (te|vous) plait|svp|je veux bien|volontiers|avec plaisir|toujours))*$/.test(
     value,
   );
 }
@@ -46,8 +70,61 @@ function lastSeyaOfferedToBook(conversation) {
     return false;
   }
   const value = normalize(last);
-  return /propose(r)? (un )?(creneau|horaire|rdv)|souhaitez[- ]vous.*(creneau|rendez-vous|bilan|seance|rdv)|prendre (un )?(rdv|rendez-vous)|vous voulez (un rendez-vous|que je (vous )?propose)|je (peux|peux vous) (regarder|proposer)|quel jour|lequel vous irait|quand (etes|seriez)|debut de semaine|fin de semaine|je peux vous proposer/.test(
+  return /propose(r)? (un )?(creneau|horaire|rdv)|souhaitez[- ]vous|je (peux |vais )?(vous )?(regarder|proposer)|quel jour|lequel vous (irait|conviendrait)|quand (etes|seriez)|debut de semaine|fin de semaine|je peux vous proposer|autre journee|autre jour|lundi suivant|(l['’])?horaire.*(convient|irait)|convient toujours|pas de disponibilite|je (vous )propose/.test(
     value,
+  );
+}
+
+function offeredSlots(conversation, extraSlots) {
+  const fromConversation = Array.isArray(conversation?.proposedSlots)
+    ? conversation.proposedSlots
+    : [];
+  const fromState = Array.isArray(conversation?.bookingState?.lastOfferedSlots)
+    ? conversation.bookingState.lastOfferedSlots
+    : [];
+  const fromExtra = Array.isArray(extraSlots) ? extraSlots : [];
+  return fromConversation.length
+    ? fromConversation
+    : fromState.length
+      ? fromState
+      : fromExtra;
+}
+
+function isBookingThread(conversation) {
+  const state = conversation?.bookingState || {};
+  return Boolean(
+    (state.lastOfferedSlots || []).length ||
+      (conversation?.proposedSlots || []).length ||
+      state.requestedDate ||
+      state.requestedWeekday != null ||
+      state.pendingQuestion === "offer_slots" ||
+      conversation?.status === "RDV proposé" ||
+      conversation?.status === "RDV pris",
+  );
+}
+
+function checkingSlotReply() {
+  return "Parfait, je vérifie le créneau dont nous avions parlé et je reviens vers vous tout de suite 😊";
+}
+
+function isConfirmingOfferedTime(text, conversation) {
+  if (!conversation) {
+    return false;
+  }
+  if (isHesitation(text) || refusesSlots(text) || classifyPriceQuestion(text)) {
+    return false;
+  }
+  const hasOffered = offeredSlots(conversation).length > 0;
+  const lastAsked =
+    lastSeyaOfferedToBook(conversation) ||
+    /convient toujours|horaire vu ensemble/i.test(lastSeyaText(conversation));
+  if (!hasOffered && !lastAsked) {
+    return false;
+  }
+  return (
+    isShortYes(text) ||
+    parseClockMinutes(text).length > 0 ||
+    /toujours|ca me convient|ça me convient|c[' ]est bon/i.test(compactText(text))
   );
 }
 
@@ -63,12 +140,17 @@ function acceptsBookingOffer(text, conversation) {
   ) {
     return false;
   }
-  if (conversation.bookingState?.pendingQuestion === "no_slots") {
+  if (
+    conversation.bookingState?.pendingQuestion === "no_slots" &&
+    !lastSeyaOfferedToBook(conversation)
+  ) {
     return false;
   }
   return (
     lastSeyaOfferedToBook(conversation) ||
-    conversation.bookingState?.pendingQuestion === "offer_slots"
+    conversation.bookingState?.pendingQuestion === "offer_slots" ||
+    offeredSlots(conversation).length > 0 ||
+    conversation.status === "RDV proposé"
   );
 }
 
@@ -145,6 +227,12 @@ function wantsSlots(text, conversation) {
   if (acceptsBookingOffer(text, conversation)) {
     return true;
   }
+  if (isRereadAsk(text) && isBookingThread(conversation)) {
+    return true;
+  }
+  if (parseClockMinutes(text).length && offeredSlots(conversation).length) {
+    return true;
+  }
   const value = normalize(text);
   if (
     isIdentityQuestion(text) ||
@@ -153,7 +241,7 @@ function wantsSlots(text, conversation) {
     refusesSlots(text) ||
     classifyPriceQuestion(text) ||
     isPriceRepeatComplaint(text) ||
-    isOffTopicComplaint(text)
+    (isOffTopicComplaint(text) && !isBookingThread(conversation))
   ) {
     return false;
   }
@@ -166,7 +254,10 @@ function wantsSlots(text, conversation) {
   if (/^non\s+(lundi|mardi|mercredi|jeudi|vendredi|samedi)\b/.test(value)) {
     return true;
   }
-  const namesDay = /\b(lundi|mardi|mercredi|jeudi|vendredi|samedi|demain|aujourd)\b/.test(value);
+  const namesDay =
+    /\b(lundi|mardi|mercredi|jeudi|vendredi|samedi|demain|aujourd[' ]?hui)\b/.test(
+      value,
+    );
   const refusedDay = /pas (dispo|disponible) le |pas le |je ne suis pas disponible/.test(value);
   if (weekHalfFromText(text)) {
     return true;
@@ -256,7 +347,7 @@ function conversationalReply(text, conversation, qualification, now) {
   ) {
     return "";
   }
-  if (wantsSlots(text, conversation)) {
+  if (wantsSlots(text, conversation) || isBookingThread(conversation)) {
     return "";
   }
 
@@ -290,12 +381,16 @@ function composeReplies(parts) {
 module.exports = {
   acceptsBookingOffer,
   alreadyTold,
+  checkingSlotReply,
+  isConfirmingOfferedTime,
   composeReplies,
   conversationalReply,
   identityReply,
   isAwayForNow,
+  isBookingThread,
   isWillCallBack,
   isOffTopicComplaint,
+  isRereadAsk,
   greetingForTime,
   weekHalfFromText,
   willCallBackReply,
@@ -304,6 +399,8 @@ module.exports = {
   isShortYes,
   isThanks,
   lastSeyaOfferedToBook,
+  offeredSlots,
+  parseClockMinutes,
   refusesSlots,
   wantsSlots,
 };

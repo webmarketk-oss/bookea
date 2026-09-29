@@ -9,6 +9,7 @@ const {
   relanceCopy,
 } = require("./agent");
 const { sendSharedWhatsApp } = require("./whatsapp");
+const { isNearDuplicate } = require("./price");
 const { isSeyaOff, readCenterSeya, writeSeyaConversations } = require("./store");
 
 const FIRST_RELANCE_HOURS = 15;
@@ -17,6 +18,7 @@ const SECOND_RELANCE_HOURS = 24;
 const SECOND_RELANCE_UNTIL_HOURS = 36;
 const THIRD_RELANCE_HOURS = 5 * 24;
 const THIRD_RELANCE_UNTIL_HOURS = 6 * 24;
+const MIN_RELANCE_GAP_HOURS = 20;
 
 module.exports = async function handler(req, res) {
   if (req.method !== "GET" && req.method !== "POST") {
@@ -97,6 +99,13 @@ async function relanceCenter(supabase, center) {
     }
 
     const text = relanceCopy(conversation, round, center.name);
+    const lastSeya = [...(conversation.messages || [])]
+      .reverse()
+      .find((item) => item.author === "seya")?.text;
+    if (!text || isNearDuplicate(text, lastSeya || "")) {
+      nextConversations.push(updated);
+      continue;
+    }
     const result = await sendSharedWhatsApp(conversation.phone, text, {
       firstName: conversation.firstName,
       centerName: center.name,
@@ -138,6 +147,15 @@ function shouldSkipRelance(conversation) {
   if (lastLead && isOptOut(lastLead.text || "")) {
     return true;
   }
+  const seyaTexts = (conversation?.messages || [])
+    .filter((item) => item.author === "seya")
+    .map((item) => String(item.text || ""));
+  if (
+    seyaTexts.length >= 2 &&
+    isNearDuplicate(seyaTexts[seyaTexts.length - 1], seyaTexts[seyaTexts.length - 2])
+  ) {
+    return true;
+  }
   return (
     conversation?.healthReview?.status === "awaiting_human_health_review" ||
     conversation?.bookingState?.pendingQuestion === "no_slots" ||
@@ -175,6 +193,10 @@ function pickRelanceRound(conversation, now = new Date()) {
   const anchor = lastLead || lastSeyaAt(conversation);
   const idle = hoursSince(anchor, now);
   const sinceRelance = hoursSince(lastRelance, now);
+
+  if (!repliedAfterRelance && lastRelance && sinceRelance < MIN_RELANCE_GAP_HOURS) {
+    return 0;
+  }
 
   if (already >= 3) {
     return 0;

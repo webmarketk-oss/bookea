@@ -18,6 +18,7 @@ function emptyBookingState(centerId) {
     requestedDate: null,
     requestedWeekday: null,
     weekHalf: null,
+    dayPart: null,
     rejectedDates: [],
     rejectedWeekdays: [],
     lastOfferedSlots: [],
@@ -79,6 +80,24 @@ function applyBookingMessage(state, text, extras = {}) {
     next.pendingQuestion = null;
   }
 
+  if (/\baujourd[' ]?hui\b/.test(value)) {
+    next.requestedDate = todayIso(now);
+    next.requestedWeekday = weekdayOf(next.requestedDate);
+    next.weekHalf = null;
+    next.pendingQuestion = null;
+  } else if (/\bdemain\b/.test(value) && !explicitDate) {
+    next.requestedDate = addDays(todayIso(now), 1);
+    next.requestedWeekday = weekdayOf(next.requestedDate);
+    next.weekHalf = null;
+    next.pendingQuestion = null;
+  }
+
+  if (/apres[- ]?midi/.test(value)) {
+    next.dayPart = "afternoon";
+  } else if (/\bmatin\b/.test(value) && !/apres/.test(value)) {
+    next.dayPart = "morning";
+  }
+
   const weekHalf = weekHalfFromText(text);
   if (weekHalf) {
     next.weekHalf = weekHalf;
@@ -86,6 +105,17 @@ function applyBookingMessage(state, text, extras = {}) {
     next.requestedWeekday = null;
     next.lastOfferedSlots = [];
     next.pendingQuestion = null;
+  }
+
+  if (
+    isShortYes(text) &&
+    next.pendingQuestion === "offer_slots" &&
+    next.requestedDate &&
+    !explicitDate &&
+    namedDays.length === 0
+  ) {
+    next.rejectedDates = unique([...next.rejectedDates, next.requestedDate]);
+    next.requestedDate = null;
   }
 
   if (/suivant|prochain|un autre (lundi|mardi|mercredi|jeudi|vendredi|samedi)/.test(value)) {
@@ -205,7 +235,7 @@ function shouldSearchSlots(state, text, conversation) {
 
 function asksForOtherSlots(text) {
   const value = normalize(text);
-  return /change de jour|un autre jour|autres? horaires|d[' ]autres creneaux|propose quoi|suivant|prochain|debut de semaine|fin de semaine/.test(
+  return /change de jour|un autre jour|autre journee|autres? horaires|d[' ]autres creneaux|propose quoi|suivant|prochain|debut de semaine|fin de semaine|aujourd[' ]?hui/.test(
     value,
   ) || /\b(lundi|mardi|mercredi|jeudi|vendredi|samedi|demain)\b/.test(value);
 }
@@ -218,6 +248,21 @@ function weekHalfDays(half) {
     return [4, 5, 6];
   }
   return [];
+}
+
+function slotMinutes(slot) {
+  const [hours, minutes] = String(slot?.time || "00:00").split(":").map(Number);
+  return (hours || 0) * 60 + (minutes || 0);
+}
+
+function matchesDayPart(slot, state) {
+  if (state.dayPart === "afternoon") {
+    return slotMinutes(slot) >= 12 * 60;
+  }
+  if (state.dayPart === "morning") {
+    return slotMinutes(slot) < 12 * 60;
+  }
+  return true;
 }
 
 function matchesWeekHalf(slot, state) {
@@ -246,6 +291,7 @@ function guardSlots(slots, state, extras = {}) {
       return true;
     }
     if (!matchesWeekHalf(slot, state)) return true;
+    if (!matchesDayPart(slot, state)) return true;
     if (rejected.has(slot.date)) return true;
     if (rejectedDays.has(weekdayOf(slot.date))) return true;
     return false;
@@ -275,6 +321,9 @@ function guardSlots(slots, state, extras = {}) {
       return false;
     }
     if (!matchesWeekHalf(slot, state)) {
+      return false;
+    }
+    if (!matchesDayPart(slot, state)) {
       return false;
     }
     if (rejected.has(slot.date) || rejectedDays.has(weekdayOf(slot.date))) {

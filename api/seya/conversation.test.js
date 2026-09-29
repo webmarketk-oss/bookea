@@ -220,6 +220,166 @@ test("pas sur place / je vous contacterai : elle n’insiste pas", async () => {
   );
 });
 
+test("9h après des créneaux proposés : elle réserve 09h00, elle ne dit pas qu’il n’y a rien", async () => {
+  const { matchProposedSlot } = require("./agent");
+  const slots = [
+    { date: "2026-10-08", time: "09:00", label: "jeu. 08/10 à 09h00" },
+    { date: "2026-10-08", time: "09:30", label: "jeu. 08/10 à 09h30" },
+    { date: "2026-10-08", time: "10:00", label: "jeu. 08/10 à 10h00" },
+  ];
+  assert.equal(matchProposedSlot("9h", slots)?.time, "09:00");
+
+  let conversation = startConversation(
+    {
+      leadId: "lead-9h",
+      centerId: "jfg-clinique-clermont",
+      firstName: "Samantha",
+      lastName: "Test",
+      phone: "0611223344",
+      treatment: "Soin minceur",
+    },
+    "JFG Clinique Clermont",
+    seya,
+  );
+  conversation.proposedSlots = slots;
+  conversation.bookingState = {
+    ...(conversation.bookingState || {}),
+    lastOfferedSlots: slots,
+    appointmentStatus: "proposed",
+    pendingQuestion: null,
+  };
+  conversation.status = "RDV proposé";
+  conversation.qualification = {
+    need: "Soin minceur",
+    zone: "",
+    delay: "",
+    availability: "",
+  };
+  conversation.messages.push({
+    author: "seya",
+    text: "Le jeudi 08/10, je peux vous proposer 09h00, 09h30 ou 10h00. Lequel vous conviendrait le mieux ?",
+  });
+
+  const result = await generateSeyaReply({
+    conversation,
+    text: "9h",
+    seya,
+    appointments: [],
+    hours: hours(),
+    centerName: "JFG Clinique Clermont",
+    centerAddress: "12 rue de la République, 63000 Clermont-Ferrand",
+    centerId: "jfg-clinique-clermont",
+    now: NOW,
+  });
+  conversation = result.conversation;
+  assert.match(
+    lastSeya(conversation),
+    /je vérifie le créneau dont nous avions parlé/i,
+  );
+  assert.doesNotMatch(lastSeya(conversation), /pas de créneau|zone|reprendre contact/i);
+  assert.equal(result.shouldBook?.time, "09:00");
+  assert.equal(result.shouldBook?.date, "2026-10-08");
+});
+
+test("oui merci après « lundi suivant ou une autre journée » : des horaires, pas la zone", async () => {
+  let conversation = startConversation(
+    {
+      leadId: "lead-lundi",
+      centerId: "jfg-clinique-clermont",
+      firstName: "Léa",
+      lastName: "Test",
+      phone: "0611223344",
+      treatment: "Soin minceur",
+    },
+    "JFG Clinique Clermont",
+    seya,
+  );
+  conversation.qualification = {
+    need: "Soin minceur",
+    zone: "",
+    delay: "",
+    availability: "",
+  };
+  conversation.bookingState = {
+    ...(conversation.bookingState || {}),
+    requestedWeekday: 1,
+    requestedDate: "2026-09-28",
+    rejectedDates: ["2026-09-28"],
+    lastOfferedSlots: [],
+    pendingQuestion: "offer_slots",
+  };
+  conversation.messages.push(
+    { author: "lead", text: "Le lundi après midi" },
+    {
+      author: "seya",
+      text: "Je n’ai pas de disponibilité lundi 28/09 pour ce bilan. Souhaitez-vous que je regarde le lundi suivant ou une autre journée ?",
+    },
+  );
+
+  conversation = await reply(conversation, "Oui merci");
+  assert.doesNotMatch(lastSeya(conversation), /zone souhaitez-vous/i);
+  assert.match(lastSeya(conversation), /09h00|10h00|lun\.|mar\.|semaine|jeudi|mercredi/i);
+  assert.doesNotMatch(lastSeya(conversation), /reprendre contact|je reste disponible/i);
+});
+
+test("bonjour oui toujours après la relance horaire : elle vérifie le créneau", async () => {
+  const slots = [
+    { date: "2026-10-08", time: "09:00", label: "jeu. 08/10 à 09h00" },
+    { date: "2026-10-08", time: "09:30", label: "jeu. 08/10 à 09h30" },
+    { date: "2026-10-08", time: "10:00", label: "jeu. 08/10 à 10h00" },
+  ];
+  let conversation = startConversation(
+    {
+      leadId: "lead-toujours",
+      centerId: "jfg-clinique-clermont",
+      firstName: "Samantha",
+      lastName: "Test",
+      phone: "0611223344",
+      treatment: "Soin minceur",
+    },
+    "JFG Clinique Clermont",
+    seya,
+  );
+  conversation.proposedSlots = slots;
+  conversation.status = "RDV proposé";
+  conversation.qualification = {
+    need: "Soin minceur",
+    zone: "",
+    delay: "",
+    availability: "",
+  };
+  conversation.bookingState = {
+    ...(conversation.bookingState || {}),
+    lastOfferedSlots: slots,
+    appointmentStatus: "proposed",
+  };
+  conversation.messages.push({
+    author: "seya",
+    text: "Bonjour Samantha, je reviens vers vous pour Soin minceur chez JFG Clinique Clermont-Ferrand 😊 L’horaire vu ensemble vous convient toujours, ou je regarde autre chose ?",
+  });
+
+  const result = await generateSeyaReply({
+    conversation,
+    text: "Bonjour oui toujours",
+    seya,
+    appointments: [],
+    hours: hours(),
+    centerName: "JFG Clinique Clermont",
+    centerAddress: "12 rue de la République, 63000 Clermont-Ferrand",
+    centerId: "jfg-clinique-clermont",
+    now: NOW,
+  });
+  assert.equal(
+    lastSeya(result.conversation),
+    "Parfait, je vérifie le créneau dont nous avions parlé et je reviens vers vous tout de suite 😊",
+  );
+  assert.equal(result.shouldBook?.time, "09:00");
+  assert.doesNotMatch(
+    lastSeya(result.conversation),
+    /je reste disponible|reprendre contact/i,
+  );
+});
+
 test("oui merci après proposition de créneau : elle propose des horaires, elle ne clôt pas", async () => {
   let conversation = startConversation(
     {

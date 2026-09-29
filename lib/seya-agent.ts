@@ -120,7 +120,7 @@ export function suggestAvailableSlots({
   hours,
   days = 10,
   count = 3,
-  duration = 60,
+  duration = 75,
 }: {
   appointments: Appointment[];
   hours: CenterDayHours[];
@@ -603,6 +603,26 @@ function isBodyTreatment(need: string) {
   return /laser|minceur|cryo|épilation|epilation/i.test(need);
 }
 
+function parseClockMinutes(text: string) {
+  const value = text
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/['’]/g, "'");
+  const times: number[] = [];
+  const pattern = /\b(\d{1,2})\s*(?:h|:)?\s*(\d{2})?\b/g;
+  let match = pattern.exec(value);
+  while (match) {
+    const hour = Number(match[1]);
+    const minutes = match[2] != null ? Number(match[2]) : 0;
+    if (hour >= 7 && hour <= 20 && minutes >= 0 && minutes <= 59) {
+      times.push(hour * 60 + minutes);
+    }
+    match = pattern.exec(value);
+  }
+  return times;
+}
+
 function matchProposedSlot(text: string, slots: SeyaProposedSlot[]) {
   const value = text.toLowerCase().trim();
 
@@ -610,12 +630,34 @@ function matchProposedSlot(text: string, slots: SeyaProposedSlot[]) {
     return null;
   }
 
-  if (/1er|octobre|novembre|décembre|janvier|février|mars|avril|juin|juillet|août|septembre|mai\b/i.test(value)) {
+  const clocks = parseClockMinutes(text);
+  if (
+    /1er|octobre|novembre|décembre|janvier|février|mars|avril|juin|juillet|août|septembre|mai\b/i.test(
+      value,
+    ) &&
+    !clocks.length
+  ) {
     return null;
   }
 
   if (/^([123])$/.test(value)) {
     return slots[Number(value) - 1] ?? null;
+  }
+
+  if (clocks.length) {
+    const exact = slots.find((slot) => clocks.includes(timeToMinutes(slot.time)));
+    if (exact) {
+      return exact;
+    }
+    const hourOnly = clocks.find((item) => item % 60 === 0);
+    if (hourOnly != null) {
+      const sameHour = slots.find(
+        (slot) => Math.floor(timeToMinutes(slot.time) / 60) === hourOnly / 60,
+      );
+      if (sameHour) {
+        return sameHour;
+      }
+    }
   }
 
   if (/^(oui|ok|d['’]?accord|le premier|premier)$/i.test(value)) {

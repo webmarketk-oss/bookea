@@ -61,8 +61,13 @@ test("relance 2 : 24 h après la première, uniquement dans cette fenêtre", () 
     ...waiting,
     lastRelanceAt: hoursAgo(25),
     messages: [
-      ...waiting.messages,
-      { id: "m2b", author: "seya", text: "Je reviens vers vous", at: hoursAgo(25) },
+      { id: "m1", author: "seya", text: "Bonjour Léa", at: hoursAgo(40) },
+      {
+        id: "m2b",
+        author: "seya",
+        text: "Je reviens vers vous pour un horaire ?",
+        at: hoursAgo(25),
+      },
     ],
   };
   assert.equal(pickRelanceRound(due, NOW), 2);
@@ -140,6 +145,32 @@ test("pas de relance si stop, refus ou RDV confirmé", () => {
   assert.equal(shouldSkipRelance(conversation({ status: "RDV confirmé" })), true);
   assert.equal(shouldSkipRelance(conversation({ status: "Pas intéressé" })), true);
   assert.equal(pickRelanceRound(conversation({ status: "RDV pris" }), NOW), 0);
+});
+
+test("pas de deuxième relance identique, ni avant 20 h", () => {
+  const copy =
+    "Bonjour Léa, je reviens vers vous pour Soin minceur chez JFG 😊 L’horaire vu ensemble vous convient toujours, ou je regarde autre chose ?";
+  const doubled = conversation({
+    relanceCount: 1,
+    lastRelanceAt: hoursAgo(9),
+    proposedSlots: [{ date: "2026-10-08", time: "09:00", label: "jeu. 08/10 à 09h00" }],
+    messages: [
+      { id: "m1", author: "seya", text: copy, at: hoursAgo(9) },
+      { id: "m2", author: "seya", text: copy, at: hoursAgo(1) },
+    ],
+  });
+  assert.equal(shouldSkipRelance(doubled), true);
+  assert.equal(pickRelanceRound(doubled, NOW), 0);
+
+  const tooSoon = conversation({
+    relanceCount: 1,
+    lastRelanceAt: hoursAgo(9),
+    messages: [
+      { id: "m1", author: "seya", text: "Bonjour Léa", at: hoursAgo(40) },
+      { id: "m2", author: "seya", text: "Je reviens vers vous pour un horaire ?", at: hoursAgo(9) },
+    ],
+  });
+  assert.equal(pickRelanceRound(tooSoon, NOW), 0);
 });
 
 test("le texte de relance s’adapte et ne recopie pas un message déjà envoyé", () => {
