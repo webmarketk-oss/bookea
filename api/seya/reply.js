@@ -1,4 +1,7 @@
+const { createClient } = require("@supabase/supabase-js");
 const { generateSeyaReply, hasAiKey } = require("./ai");
+const { readCenterSeya } = require("./store");
+const { readHours } = require("./agent");
 
 module.exports = async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
@@ -26,16 +29,40 @@ module.exports = async function handler(req, res) {
       return res.status(400).json({ error: "missing_conversation" });
     }
 
+    const centerId = String(payload.centerId || conversation.centerId || "").trim();
+    if (!centerId) {
+      return res.status(400).json({ error: "missing_center" });
+    }
+    if (conversation.centerId && conversation.centerId !== centerId) {
+      return res.status(409).json({ error: "center_mismatch" });
+    }
+
+    const supabase = createServiceClient();
+    const latest = await readCenterSeya(supabase, centerId);
+    const { data: center, error } = await supabase
+      .from("centers")
+      .select("id,name,address_line1,city,postal_code,settings")
+      .eq("id", centerId)
+      .maybeSingle();
+    if (error || !center) {
+      return res.status(404).json({ error: "unknown_center" });
+    }
+
     const result = await generateSeyaReply({
-      conversation,
+      conversation: { ...conversation, centerId },
       text,
-      seya: payload.settings || {},
+      seya: latest.seya,
       slots: Array.isArray(payload.slots) ? payload.slots : [],
-      appointments: Array.isArray(payload.appointments) ? payload.appointments : undefined,
-      hours: Array.isArray(payload.hours) ? payload.hours : undefined,
-      centerName: payload.centerName || "le centre",
-      centerAddress: payload.centerAddress || "",
-      centerId: payload.centerId || conversation.centerId,
+      appointments: Array.isArray(payload.appointments)
+        ? payload.appointments
+        : undefined,
+      hours: Array.isArray(payload.hours) ? payload.hours : readHours(center.settings),
+      centerName: center.name || payload.centerName || "le centre",
+      centerAddress:
+        [center.address_line1, center.postal_code, center.city]
+          .filter(Boolean)
+          .join(", ") || payload.centerAddress || "",
+      centerId,
     });
 
     return res.status(200).json({
@@ -44,12 +71,24 @@ module.exports = async function handler(req, res) {
       conversation: result.conversation,
       shouldBook: result.shouldBook,
       ai: hasAiKey(),
+      centerId,
     });
   } catch (error) {
     console.error("[seya/reply]", error);
     return res.status(500).json({ error: "reply_failed" });
   }
 };
+
+function createServiceClient() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) {
+    throw new Error("Missing Supabase service configuration");
+  }
+  return createClient(url, key, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+}
 
 function parsePayload(body) {
   if (!body) {

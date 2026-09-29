@@ -9,6 +9,7 @@ const {
   relanceCopy,
 } = require("./agent");
 const { sendSharedWhatsApp } = require("./whatsapp");
+const { isSeyaOff, readCenterSeya, writeSeyaConversations } = require("./store");
 
 const FIRST_RELANCE_HOURS = 15;
 const FIRST_RELANCE_UNTIL_HOURS = 27;
@@ -69,10 +70,10 @@ function createServiceClient() {
 }
 
 async function relanceCenter(supabase, center) {
-  const settings = center.settings && typeof center.settings === "object" ? center.settings : {};
-  const seya = settings.seya && typeof settings.seya === "object" ? settings.seya : {};
+  const latest = await readCenterSeya(supabase, center.id);
+  const seya = latest.seya;
   const agent = agentSettings(seya);
-  if (!agent.relanceEnabled || seya.whatsappAgentEnabled === false) {
+  if (!agent.relanceEnabled || isSeyaOff(seya)) {
     return [];
   }
 
@@ -85,6 +86,12 @@ async function relanceCenter(supabase, center) {
     const updated = { ...conversation };
     const round = pickRelanceRound(conversation, now);
     if (!round) {
+      nextConversations.push(updated);
+      continue;
+    }
+
+    const current = await readCenterSeya(supabase, center.id);
+    if (isSeyaOff(current.seya)) {
       nextConversations.push(updated);
       continue;
     }
@@ -113,18 +120,11 @@ async function relanceCenter(supabase, center) {
   }
 
   if (sent.length > 0) {
-    await supabase
-      .from("centers")
-      .update({
-        settings: {
-          ...settings,
-          seya: {
-            ...seya,
-            conversations: persistableConversations(nextConversations),
-          },
-        },
-      })
-      .eq("id", center.id);
+    await writeSeyaConversations(
+      supabase,
+      center.id,
+      persistableConversations(nextConversations),
+    );
   }
 
   return sent;

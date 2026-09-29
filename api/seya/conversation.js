@@ -23,16 +23,114 @@ function isIdentityQuestion(text) {
   );
 }
 
-function isThanks(text) {
-  return /^(merci|merci beaucoup|super merci|ok merci|c[' ]est gentil)[\s!.]*$/i.test(
-    String(text || "").trim(),
+function compactText(text) {
+  return normalize(text)
+    .replace(/[.!,;:?…]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function isShortYes(text) {
+  const value = compactText(text);
+  if (!value || value.length > 48) {
+    return false;
+  }
+  return /^(oui|ouais|ouai|ok|okay|okey|d'accord|dac|volontiers|avec plaisir|je veux bien|ca me va|ca marche|pourquoi pas|vas y|vas-y|allez y|allez|go|nickel|parfait|super|yes|yep)( (merci|s'il (te|vous) plait|svp|je veux bien|volontiers|avec plaisir))*$/.test(
+    value,
   );
+}
+
+function lastSeyaOfferedToBook(conversation) {
+  const last = lastSeyaText(conversation);
+  if (!last) {
+    return false;
+  }
+  const value = normalize(last);
+  return /propose(r)? (un )?(creneau|horaire|rdv)|souhaitez[- ]vous.*(creneau|rendez-vous|bilan|seance|rdv)|prendre (un )?(rdv|rendez-vous)|vous voulez (un rendez-vous|que je (vous )?propose)|je (peux|peux vous) (regarder|proposer)|quel jour|lequel vous irait|quand (etes|seriez)|debut de semaine|fin de semaine|je peux vous proposer/.test(
+    value,
+  );
+}
+
+function acceptsBookingOffer(text, conversation) {
+  if (!conversation || !isShortYes(text)) {
+    return false;
+  }
+  if (
+    isHesitation(text) ||
+    refusesSlots(text) ||
+    isIdentityQuestion(text) ||
+    classifyPriceQuestion(text)
+  ) {
+    return false;
+  }
+  if (conversation.bookingState?.pendingQuestion === "no_slots") {
+    return false;
+  }
+  return (
+    lastSeyaOfferedToBook(conversation) ||
+    conversation.bookingState?.pendingQuestion === "offer_slots"
+  );
+}
+
+function isThanks(text, conversation) {
+  if (acceptsBookingOffer(text, conversation)) {
+    return false;
+  }
+  const value = compactText(text);
+  return /^(merci beaucoup d'avance|merci d'avance|merci beaucoup|super merci|ok merci|c'est gentil|je vous remercie|merci)$/.test(
+    value,
+  );
+}
+
+function isWillCallBack(text) {
+  const value = normalize(text);
+  return /je (prefere|vais|aimerais) (vous |te )?(re)?contacter|recontacter moi[- ]meme|c[' ]est moi qui (vous |te )?(re)?contacte|je (vous|te) (re)?contacterai|je (vous|te) rappellerai|je prefere (rappeler|vous rappeler)/.test(
+    value,
+  );
+}
+
+function isAwayForNow(text) {
+  const value = normalize(text);
+  return (
+    isWillCallBack(text) ||
+    /pas sur place|pour l[' ]instant pas|je (ne )?suis pas (la|sur place)/.test(value)
+  );
+}
+
+function weekHalfFromText(text) {
+  const value = normalize(text);
+  if (/debut de semaine|en debut|plutot (le )?debut/.test(value)) {
+    return "start";
+  }
+  if (/fin de semaine|en fin|plutot (la )?fin/.test(value)) {
+    return "end";
+  }
+  return "";
+}
+
+function greetingForTime(now) {
+  const date = now instanceof Date ? now : new Date();
+  const hour = Number(
+    new Intl.DateTimeFormat("en-GB", {
+      timeZone: "Europe/Paris",
+      hour: "2-digit",
+      hour12: false,
+    }).formatToParts(date).find((part) => part.type === "hour")?.value || 0,
+  );
+  return hour >= 18 ? "une bonne soirée" : "une belle journée";
+}
+
+function willCallBackReply(now) {
+  return `D’accord, aucun souci, je vous laisse revenir vers nous quand ça sera le moment pour vous. Je vous souhaite ${greetingForTime(now)} :)`;
 }
 
 function isHesitation(text) {
   const value = normalize(text);
-  return /je (reflechis|vais reflechir)|pas maintenant|on verra|je sais pas encore|je ne sais pas encore|pas sure|pas certain|plus tard|je vais voir|laisse[- ]moi|je (reviendrai|reviens) vers|je (te|vous) (recontacte|reviendrai)|on se reparle|je te (dis|tiens)/.test(
-    value,
+  return (
+    isAwayForNow(text) ||
+    /je (reflechis|vais reflechir)|pas maintenant|on verra|je sais pas encore|je ne sais pas encore|pas sure|pas certain|plus tard|je vais voir|laisse[- ]moi|je (reviendrai|reviens) vers|je (te|vous) (recontacte|reviendrai)|on se reparle|je te (dis|tiens)/.test(
+      value,
+    )
   );
 }
 
@@ -43,11 +141,14 @@ function refusesSlots(text) {
   );
 }
 
-function wantsSlots(text) {
+function wantsSlots(text, conversation) {
+  if (acceptsBookingOffer(text, conversation)) {
+    return true;
+  }
   const value = normalize(text);
   if (
     isIdentityQuestion(text) ||
-    isThanks(text) ||
+    isThanks(text, conversation) ||
     isHesitation(text) ||
     refusesSlots(text) ||
     classifyPriceQuestion(text) ||
@@ -67,6 +168,9 @@ function wantsSlots(text) {
   }
   const namesDay = /\b(lundi|mardi|mercredi|jeudi|vendredi|samedi|demain|aujourd)\b/.test(value);
   const refusedDay = /pas (dispo|disponible) le |pas le |je ne suis pas disponible/.test(value);
+  if (weekHalfFromText(text)) {
+    return true;
+  }
   if (/change de jour|un autre jour|autres? horaires|pas ce jour|d[' ]autres creneaux/.test(value)) {
     return true;
   }
@@ -101,17 +205,20 @@ function alreadyTold(conversation, needle) {
   );
 }
 
-function conversationalReply(text, conversation, qualification) {
+function conversationalReply(text, conversation, qualification, now) {
   if (isIdentityQuestion(text)) {
     return identityReply();
   }
-  if (isThanks(text)) {
-    return pickFresh(["Avec plaisir.", "Je reste disponible si besoin.", "Très bien."], conversation);
+  if (isThanks(text, conversation)) {
+    return pickFresh(["Avec plaisir.", "Très bien.", "Avec plaisir, à bientôt."], conversation);
+  }
+  if (isAwayForNow(text) || isWillCallBack(text)) {
+    return willCallBackReply(now);
   }
   if (isHesitation(text) || refusesSlots(text)) {
     return pickFresh(
       [
-        "Très bien, prenez le temps. Je reste là si une question vous vient.",
+        "Très bien, prenez le temps.",
         "D’accord, on n’avance pas sur un rendez-vous pour l’instant.",
       ],
       conversation,
@@ -149,7 +256,7 @@ function conversationalReply(text, conversation, qualification) {
   ) {
     return "";
   }
-  if (wantsSlots(text)) {
+  if (wantsSlots(text, conversation)) {
     return "";
   }
 
@@ -181,14 +288,22 @@ function composeReplies(parts) {
 }
 
 module.exports = {
+  acceptsBookingOffer,
   alreadyTold,
   composeReplies,
   conversationalReply,
   identityReply,
+  isAwayForNow,
+  isWillCallBack,
   isOffTopicComplaint,
+  greetingForTime,
+  weekHalfFromText,
+  willCallBackReply,
   isHesitation,
   isIdentityQuestion,
+  isShortYes,
   isThanks,
+  lastSeyaOfferedToBook,
   refusesSlots,
   wantsSlots,
 };

@@ -26,7 +26,6 @@ import {
   Trash2,
 } from "lucide-react";
 import {
-  CENTER_SETTINGS_STORAGE_KEY,
   defaultCenterDepositLinks,
   defaultCenterOffers,
   defaultExternalReviews,
@@ -122,8 +121,6 @@ type StoredCenterSettings = {
   offers: CenterPublicOffer[];
   reviewAutomation: CenterReviewAutomation;
 };
-
-const centerSettingsStorageKey = CENTER_SETTINGS_STORAGE_KEY;
 
 const initialServices: Service[] = [
   {
@@ -298,30 +295,24 @@ export default function CenterSettingsPage() {
     rating: 5,
     comment: "",
   });
+  const [loadedCenterId, setLoadedCenterId] = useState("");
   const [center, setCenter] = useState<CenterProfile>({
-    name: "JFG Clinique Clermont-Ferrand",
-    slug: "jfg-clinic-clermont",
-    city: "Clermont-Ferrand",
-    address: "12 avenue des Volcans, 63000 Clermont-Ferrand",
-    postalCode: "63000",
-    phone: "04 73 00 00 00",
-    email: "contact@jfg-clinique.fr",
-    description:
-      "Centre esthétique spécialisé en soins visage, laser, cryolipolyse et accompagnement personnalisé.",
+    name: "",
+    slug: "",
+    city: "",
+    address: "",
+    postalCode: "",
+    phone: "",
+    email: "",
+    description: "",
     bookingMode: "Réservation avec acompte selon prestation",
     published: true,
-    categories: [
-      "Institut beauté",
-      "Soin du visage",
-      "Minceur",
-      "Beauté des ongles",
-      "Beauté du regard",
-    ],
+    categories: [],
     profileColor: "#2563eb",
     socialLinks: {
-      instagram: "https://instagram.com/jfgclinique",
-      tiktok: "https://www.tiktok.com/@jfgclinique",
-      facebook: "https://facebook.com/jfgclinique",
+      instagram: "",
+      tiktok: "",
+      facebook: "",
     },
   });
 
@@ -407,22 +398,24 @@ export default function CenterSettingsPage() {
   );
 
   useEffect(() => {
-    try {
-      const stored = window.localStorage.getItem(centerSettingsStorageKey);
-      if (stored) {
-        applyStoredSettings(JSON.parse(stored) as Partial<StoredCenterSettings>);
-      }
-    } catch {
-      window.localStorage.removeItem(centerSettingsStorageKey);
-    }
+    let cancelled = false;
 
     void loadPublicCenterProfile().then((loaded) => {
+      if (cancelled) {
+        return;
+      }
+      if (loaded.centerId) {
+        setLoadedCenterId(loaded.centerId);
+      }
       if (loaded.settings) {
         applyStoredSettings(loaded.settings as Partial<StoredCenterSettings>);
       }
     });
 
     void loadCenterAssignmentOptions().then((loaded) => {
+      if (cancelled) {
+        return;
+      }
       if (loaded.cabins.length > 0) {
         setCenterCabins(loaded.cabins);
       }
@@ -430,6 +423,19 @@ export default function CenterSettingsPage() {
         setCenterPractitioners(loaded.practitioners);
       }
     });
+
+    const reloadOnCenterChange = () => {
+      window.location.reload();
+    };
+    window.addEventListener("bookea-active-center-changed", reloadOnCenterChange);
+
+    return () => {
+      cancelled = true;
+      window.removeEventListener(
+        "bookea-active-center-changed",
+        reloadOnCenterChange,
+      );
+    };
   }, []);
 
   const updateService = <K extends keyof Service>(
@@ -698,22 +704,25 @@ export default function CenterSettingsPage() {
     setSaving(true);
 
     try {
-      await savePublicCenterProfile({
-        center,
-        services: sortServicesByCategory(services, categoryOptions),
-        serviceCategories,
-        sources,
-        products: sortServicesByCategory(products, productCategoryOptions),
-        productCategories,
-        depositLinks,
-        stripeConnected,
-        coverPreview,
-        logoPreview,
-        photoPreviews,
-        externalReviews,
-        offers,
-        reviewAutomation,
-      });
+      await savePublicCenterProfile(
+        {
+          center,
+          services: sortServicesByCategory(services, categoryOptions),
+          serviceCategories,
+          sources,
+          products: sortServicesByCategory(products, productCategoryOptions),
+          productCategories,
+          depositLinks,
+          stripeConnected,
+          coverPreview,
+          logoPreview,
+          photoPreviews,
+          externalReviews,
+          offers,
+          reviewAutomation,
+        },
+        loadedCenterId || undefined,
+      );
       showNotice("Fiche publique enregistrée.");
     } catch (error) {
       showNotice(publicSaveErrorMessage(error), true);

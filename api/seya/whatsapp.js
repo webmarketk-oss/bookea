@@ -10,6 +10,7 @@ const {
   startConversation,
   pickSlotsForMessage,
 } = require("./agent");
+const { isSeyaOff, writeSeyaConversations } = require("./store");
 
 const GRAPH_VERSION = "v21.0";
 
@@ -218,7 +219,7 @@ async function handleIncoming(supabase, incoming) {
   }
 
   const seya = asRecord(asRecord(center.settings).seya);
-  if (seya.whatsappAgentEnabled === false) {
+  if (isSeyaOff(seya)) {
     return {
       phone: incoming.phone,
       routed: true,
@@ -293,18 +294,7 @@ async function handleIncoming(supabase, incoming) {
     ...conversations.filter((item) => item.leadId !== next.leadId),
   ]);
 
-  await supabase
-    .from("centers")
-    .update({
-      settings: {
-        ...asRecord(center.settings),
-        seya: {
-          ...seya,
-          conversations: saved,
-        },
-      },
-    })
-    .eq("id", center.id);
+  await writeSeyaConversations(supabase, center.id, saved);
 
   const reply = [...next.messages].reverse().find((item) => item.author === "seya");
   const previousSeya = [...(existing.messages || [])]
@@ -355,6 +345,7 @@ async function resolveCenterFromPhone(supabase, phone) {
     return null;
   }
 
+  const ranked = [];
   for (const client of matched) {
     const { data: lead } = await supabase
       .from("leads")
@@ -364,34 +355,43 @@ async function resolveCenterFromPhone(supabase, phone) {
       .order("last_activity_at", { ascending: false })
       .limit(1)
       .maybeSingle();
+    ranked.push({
+      client,
+      lead,
+      at: lead?.last_activity_at || lead?.updated_at || client.updated_at || "",
+    });
+  }
+  ranked.sort((a, b) => String(b.at).localeCompare(String(a.at)));
 
-    if (lead?.id) {
-      const { data: service } = lead.service_id
-        ? await supabase
-            .from("services")
-            .select("name")
-            .eq("id", lead.service_id)
-            .maybeSingle()
-        : { data: null };
+  const chosen = ranked.find((item) => item.lead?.id) || ranked[0];
+  if (chosen?.lead?.id) {
+    const client = chosen.client;
+    const lead = chosen.lead;
+    const { data: service } = lead.service_id
+      ? await supabase
+          .from("services")
+          .select("name")
+          .eq("id", lead.service_id)
+          .maybeSingle()
+      : { data: null };
 
-      const person = sanitizePersonName(client.first_name, client.last_name);
-      return {
-        centerId: client.center_id,
-        clientId: client.id,
-        leadId: lead.id,
-        firstName: person.firstName || "bonjour",
-        lastName: person.lastName,
-        phone: client.phone || phone,
-        treatment: service?.name || "",
-        campaign: Array.isArray(lead.campaigns)
-          ? lead.campaigns[0]?.name || ""
-          : lead.campaigns?.name || "",
-        status: lead.status || "Nouveau",
-      };
-    }
+    const person = sanitizePersonName(client.first_name, client.last_name);
+    return {
+      centerId: client.center_id,
+      clientId: client.id,
+      leadId: lead.id,
+      firstName: person.firstName || "bonjour",
+      lastName: person.lastName,
+      phone: client.phone || phone,
+      treatment: service?.name || "",
+      campaign: Array.isArray(lead.campaigns)
+        ? lead.campaigns[0]?.name || ""
+        : lead.campaigns?.name || "",
+      status: lead.status || "Nouveau",
+    };
   }
 
-  const client = matched[0];
+  const client = chosen?.client || matched[0];
   const person = sanitizePersonName(client.first_name, client.last_name);
   return {
     centerId: client.center_id,

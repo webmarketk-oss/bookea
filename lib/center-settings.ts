@@ -513,7 +513,11 @@ export async function loadPublicCenterProfile() {
 
     return { centerId: context.centerId, settings: merged };
   } catch {
-    return { settings: readCenterSettings() };
+    const id = readActiveCenterId();
+    return {
+      centerId: id || "",
+      settings: id ? readCenterSettings(id) : null,
+    };
   }
 }
 
@@ -562,8 +566,14 @@ export async function loadPublishedCenterProfile(slug: string) {
   );
 }
 
-export async function savePublicCenterProfile(nextSettings: StoredCenterSettings) {
+export async function savePublicCenterProfile(
+  nextSettings: StoredCenterSettings,
+  expectedCenterId?: string,
+) {
   const context = await getActiveCenterContext();
+  if (expectedCenterId && expectedCenterId !== context.centerId) {
+    throw new Error("Centre actif différent : réglages non enregistrés.");
+  }
   writeCenterSettingsSafe(nextSettings, true, context.centerId);
   const supabase = createClient();
   const { data } = await supabase

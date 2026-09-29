@@ -1,5 +1,5 @@
 const { classifyPriceQuestion, isPriceRepeatComplaint } = require("./price");
-const { isHesitation, refusesSlots, wantsSlots } = require("./conversation");
+const { isHesitation, isShortYes, refusesSlots, wantsSlots, weekHalfFromText } = require("./conversation");
 
 const WEEKDAYS = [
   "dimanche",
@@ -17,6 +17,7 @@ function emptyBookingState(centerId) {
     serviceIntent: "",
     requestedDate: null,
     requestedWeekday: null,
+    weekHalf: null,
     rejectedDates: [],
     rejectedWeekdays: [],
     lastOfferedSlots: [],
@@ -63,6 +64,7 @@ function applyBookingMessage(state, text, extras = {}) {
   if (explicitDate) {
     next.requestedDate = explicitDate;
     next.requestedWeekday = weekdayOf(explicitDate);
+    next.weekHalf = null;
     next.pendingQuestion = null;
   }
 
@@ -73,6 +75,16 @@ function applyBookingMessage(state, text, extras = {}) {
   if (!explicitDate && namedDays.length === 1 && !/pas (dispo|disponible).*|pas le /.test(value)) {
     next.requestedWeekday = namedDays[0];
     next.requestedDate = nextDateForWeekday(namedDays[0], now);
+    next.weekHalf = null;
+    next.pendingQuestion = null;
+  }
+
+  const weekHalf = weekHalfFromText(text);
+  if (weekHalf) {
+    next.weekHalf = weekHalf;
+    next.requestedDate = null;
+    next.requestedWeekday = null;
+    next.lastOfferedSlots = [];
     next.pendingQuestion = null;
   }
 
@@ -115,6 +127,7 @@ function applyBookingMessage(state, text, extras = {}) {
     });
     next.requestedDate = null;
     next.requestedWeekday = null;
+    next.weekHalf = null;
     next.pendingQuestion = "other_day";
   }
 
@@ -160,7 +173,7 @@ function applyBookingMessage(state, text, extras = {}) {
   return next;
 }
 
-function shouldSearchSlots(state, text) {
+function shouldSearchSlots(state, text, conversation) {
   if (
     asksPrice(text) ||
     asksLocation(text) ||
@@ -173,25 +186,46 @@ function shouldSearchSlots(state, text) {
   ) {
     return false;
   }
-  if (state.pendingQuestion === "no_slots" && !wantsSlots(text)) {
+  if (state.pendingQuestion === "no_slots" && !wantsSlots(text, conversation)) {
     return false;
   }
   if (state.pendingQuestion === "price" || state.pendingQuestion === "address") {
-    if (!wantsSlots(text)) {
+    if (!wantsSlots(text, conversation)) {
       return false;
     }
   }
   if ((state.lastOfferedSlots || []).length && !asksForOtherSlots(text)) {
     return false;
   }
-  return wantsSlots(text);
+  return (
+    wantsSlots(text, conversation) ||
+    (state.pendingQuestion === "offer_slots" && isShortYes(text))
+  );
 }
 
 function asksForOtherSlots(text) {
   const value = normalize(text);
-  return /change de jour|un autre jour|autres? horaires|d[' ]autres creneaux|propose quoi|suivant|prochain/.test(
+  return /change de jour|un autre jour|autres? horaires|d[' ]autres creneaux|propose quoi|suivant|prochain|debut de semaine|fin de semaine/.test(
     value,
   ) || /\b(lundi|mardi|mercredi|jeudi|vendredi|samedi|demain)\b/.test(value);
+}
+
+function weekHalfDays(half) {
+  if (half === "start") {
+    return [1, 2, 3];
+  }
+  if (half === "end") {
+    return [4, 5, 6];
+  }
+  return [];
+}
+
+function matchesWeekHalf(slot, state) {
+  const allowed = weekHalfDays(state.weekHalf);
+  if (!allowed.length || state.requestedDate || state.requestedWeekday != null) {
+    return true;
+  }
+  return allowed.includes(weekdayOf(slot.date));
 }
 
 function guardSlots(slots, state, extras = {}) {
@@ -211,6 +245,7 @@ function guardSlots(slots, state, extras = {}) {
     ) {
       return true;
     }
+    if (!matchesWeekHalf(slot, state)) return true;
     if (rejected.has(slot.date)) return true;
     if (rejectedDays.has(weekdayOf(slot.date))) return true;
     return false;
@@ -237,6 +272,9 @@ function guardSlots(slots, state, extras = {}) {
       state.requestedWeekday != null &&
       weekdayOf(slot.date) !== state.requestedWeekday
     ) {
+      return false;
+    }
+    if (!matchesWeekHalf(slot, state)) {
       return false;
     }
     if (rejected.has(slot.date) || rejectedDays.has(weekdayOf(slot.date))) {
@@ -268,7 +306,13 @@ function emptySlotFallback(state) {
   if (state.requestedWeekday != null) {
     return `Je n’ai pas de disponibilité ${WEEKDAYS[state.requestedWeekday]} pour ce bilan. Souhaitez-vous un autre jour ?`;
   }
-  return "Je n’ai plus de place sur ce jour-là. Quel autre jour vous irait ?";
+  if (state.weekHalf === "start") {
+    return "Je n’ai plus de place en début de semaine. Souhaitez-vous plutôt la fin de semaine ?";
+  }
+  if (state.weekHalf === "end") {
+    return "Je n’ai plus de place en fin de semaine. Souhaitez-vous plutôt le début de semaine ?";
+  }
+  return "Parfait. Vous êtes plutôt disponible en début de semaine, ou plutôt en fin de semaine ?";
 }
 
 function slotAllowed(slot, state) {

@@ -166,14 +166,13 @@ export const defaultTreatmentBriefs: SeyaTreatmentBrief[] = [
   {
     name: "Soin minceur",
     pricing: {
-      bilan: "offert",
-      discovery: "offerte",
+      bilan: "",
+      discovery: "",
       session: "",
-      package: "à partir de 500€, payable jusqu’en 10 fois",
+      package: "",
       sessionPolicy: "after_bilan",
     },
-    price:
-      "Le bilan et la séance découverte sont offerts. On y fait une analyse pour établir un devis. Si vous voulez, on peut regarder un créneau.",
+    price: "",
     brief:
       "Tu commences par la zone, comme tu le ferais au téléphone. Prix seulement si on te le demande. Si on te demande le tarif, tu le dis en une ou deux phrases, tu n’enchaînes pas avec des créneaux.",
     opening:
@@ -190,14 +189,13 @@ export const defaultTreatmentBriefs: SeyaTreatmentBrief[] = [
   {
     name: "Cryolipolyse",
     pricing: {
-      bilan: "offert",
-      discovery: "offerte",
+      bilan: "",
+      discovery: "",
       session: "",
-      package: "à partir de 500€, payable jusqu’en 10 fois",
+      package: "",
       sessionPolicy: "after_bilan",
     },
-    price:
-      "Le bilan et la séance découverte sont offerts. On y fait une analyse pour établir un devis. Si vous voulez, on peut regarder un créneau.",
+    price: "",
     brief:
       "Tu demandes la zone, simplement. Prix seulement si on te le demande. Doute santé : tu transmets à l’équipe.",
     opening:
@@ -245,16 +243,7 @@ const treatmentAliases: Array<{ keys: string[]; name: string }> = [
   },
 ];
 
-export const defaultSeyaOfferMaps: SeyaOfferMap[] = [
-  {
-    match: "offre 99",
-    label: "le bilan et la séance découverte offerts",
-  },
-  {
-    match: "cryo 99",
-    label: "le bilan et la séance découverte offerts",
-  },
-];
+export const defaultSeyaOfferMaps: SeyaOfferMap[] = [];
 
 export const defaultSeyaAgentSettings: SeyaAgentSettings = {
   whatsappAgentEnabled: true,
@@ -743,7 +732,7 @@ function normalizeHealthSheet(value?: SeyaHealthSheet | null): SeyaHealthSheet {
 
 function normalizeOfferMaps(value?: SeyaOfferMap[] | null) {
   if (!Array.isArray(value)) {
-    return defaultSeyaOfferMaps.map((item) => ({ ...item }));
+    return [];
   }
 
   const merged = new Map<string, SeyaOfferMap>();
@@ -829,6 +818,28 @@ export function writeLocalSeyaConversations(
   }
 }
 
+export function bindSeyaSettingsToCenter(
+  remote?: Partial<SeyaAgentSettings> | null,
+  local?: Partial<SeyaAgentSettings> | null,
+): SeyaAgentSettings {
+  if (remote != null) {
+    return normalizeSeyaAgentSettings({
+      ...remote,
+      treatmentBriefs: Array.isArray(remote.treatmentBriefs)
+        ? remote.treatmentBriefs
+        : [],
+      offerMaps: Array.isArray(remote.offerMaps) ? remote.offerMaps : [],
+    });
+  }
+  return normalizeSeyaAgentSettings(local ?? {});
+}
+
+function assertExpectedCenter(expectedCenterId: string | undefined, actualCenterId: string) {
+  if (expectedCenterId && expectedCenterId !== actualCenterId) {
+    throw new Error("Centre actif différent : réglages non enregistrés.");
+  }
+}
+
 export async function loadSeyaAgentSettings() {
   const context = await getActiveCenterContext();
   const localSettings = readLocalSeyaSettings(context.centerId);
@@ -851,28 +862,22 @@ export async function loadSeyaAgentSettings() {
 
   const remote = asRecord(asRecord(data?.settings).seya);
   const hasRemote = Boolean(asRecord(data?.settings).seya);
-  const settings = normalizeSeyaAgentSettings({
-    ...(localSettings ?? {}),
-    ...(hasRemote ? (remote as Partial<SeyaAgentSettings>) : {}),
-    brief:
-      (typeof remote.brief === "string" && remote.brief.trim()) ||
-      localSettings?.brief,
-    treatmentBriefs: Array.isArray(remote.treatmentBriefs)
-      ? (remote.treatmentBriefs as SeyaTreatmentBrief[])
-      : localSettings?.treatmentBriefs,
-    offerMaps: Array.isArray(remote.offerMaps)
-      ? (remote.offerMaps as SeyaOfferMap[])
-      : localSettings?.offerMaps,
-  });
+  const settings = bindSeyaSettingsToCenter(
+    hasRemote ? (remote as Partial<SeyaAgentSettings>) : null,
+    localSettings,
+  );
 
   writeLocalSeyaSettings(context.centerId, settings);
 
   const remoteConversations = Array.isArray(remote.conversations)
     ? (remote.conversations as SeyaConversation[])
     : [];
-  const conversations = mergeSeyaConversations(
-    remoteConversations,
-    readLocalSeyaConversations(context.centerId),
+  const conversations = conversationsForCenter(
+    mergeSeyaConversations(
+      remoteConversations,
+      readLocalSeyaConversations(context.centerId),
+    ),
+    context.centerId,
   );
   writeLocalSeyaConversations(context.centerId, conversations);
 
@@ -882,6 +887,15 @@ export async function loadSeyaAgentSettings() {
     settings,
     conversations,
   };
+}
+
+function conversationsForCenter(
+  conversations: SeyaConversation[],
+  centerId: string,
+) {
+  return conversations.filter(
+    (item) => !item.centerId || item.centerId === centerId,
+  );
 }
 
 export function mergeSeyaConversations(
@@ -912,9 +926,16 @@ export function mergeSeyaConversations(
     .slice(0, 80);
 }
 
-export async function saveSeyaConversations(conversations: SeyaConversation[]) {
+export async function saveSeyaConversations(
+  conversations: SeyaConversation[],
+  expectedCenterId?: string,
+) {
   const context = await getActiveCenterContext();
-  const next = mergeSeyaConversations(conversations);
+  assertExpectedCenter(expectedCenterId, context.centerId);
+  const next = conversationsForCenter(
+    mergeSeyaConversations(conversations),
+    context.centerId,
+  );
   writeLocalSeyaConversations(context.centerId, next);
 
   const supabase = createClient();
@@ -952,8 +973,12 @@ export async function saveSeyaConversations(conversations: SeyaConversation[]) {
   return next;
 }
 
-export async function saveSeyaAgentSettings(settings: SeyaAgentSettings) {
+export async function saveSeyaAgentSettings(
+  settings: SeyaAgentSettings,
+  expectedCenterId?: string,
+) {
   const context = await getActiveCenterContext();
+  assertExpectedCenter(expectedCenterId, context.centerId);
   const nextSettings = normalizeSeyaAgentSettings(settings);
   writeLocalSeyaSettings(context.centerId, nextSettings);
 

@@ -136,6 +136,70 @@ test("tarif de séance renseigné : il est donné directement", async () => {
   assert.doesNotMatch(text, /Le bilan et la séance découverte sont offerts/i);
 });
 
+test("Gap 99€ : l’offre du centre gagne, pas le bilan offert de Clermont", () => {
+  const { buildPriceReply } = require("./price");
+  const gap = {
+    treatmentBriefs: [
+      {
+        name: "Soin minceur",
+        pricing: {
+          bilan: "offert",
+          discovery: "offerte",
+          session: "",
+          package: "à partir de 500€, payable jusqu’en 10 fois",
+          sessionPolicy: "after_bilan",
+        },
+        price: "Le bilan et la séance découverte sont offerts.",
+      },
+    ],
+    offerMaps: [
+      { match: "offre 99", label: "une séance découverte / bilan à 99€" },
+      { match: "offre 49", label: "une séance découverte / bilan à 49€" },
+    ],
+  };
+  const for99 = buildPriceReply("C’est combien ?", gap, {
+    campaign: "offre 99",
+    treatment: "Soin minceur",
+    qualification: { need: "Soin minceur" },
+  });
+  assert.match(for99, /99€/);
+  assert.doesNotMatch(for99, /offert|gratuit/i);
+
+  const for49 = buildPriceReply("C’est combien ?", gap, {
+    campaign: "offre 49",
+    treatment: "Soin minceur",
+    qualification: { need: "Soin minceur" },
+  });
+  assert.match(for49, /49€/);
+  assert.doesNotMatch(for49, /offert|gratuit/i);
+});
+
+test("sans tarif renseigné pour ce centre : elle n’invente pas que c’est offert", () => {
+  const { buildPriceReply } = require("./price");
+  const text = buildPriceReply("C’est combien ?", { treatmentBriefs: [], offerMaps: [] }, {
+    treatment: "Soin minceur",
+    qualification: { need: "Soin minceur" },
+  });
+  assert.match(text, /pas ce tarif|équipe/i);
+  assert.doesNotMatch(text, /offert|gratuit/i);
+});
+
+test("Clermont avec bilan offert en fiche : elle le dit encore", () => {
+  const { buildPriceReply } = require("./price");
+  const text = buildPriceReply(
+    "Le bilan est-il gratuit ?",
+    seyaWith({
+      bilan: "offert",
+      discovery: "offerte",
+      session: "",
+      package: "",
+      sessionPolicy: "after_bilan",
+    }),
+    { treatment: "Soin minceur", qualification: { need: "Soin minceur" } },
+  );
+  assert.match(text, /offert/i);
+});
+
 test("le contrôle rejette une copie de la dernière réponse", () => {
   const previous =
     "Le bilan et la séance découverte sont offerts, c’est gratuit. On y fait une analyse corporelle pour établir un devis personnalisé. Quand seriez-vous disponible ?";

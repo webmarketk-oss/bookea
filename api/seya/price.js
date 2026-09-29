@@ -124,7 +124,94 @@ function resolvePricePolicy(seya, conversation) {
         ? /minceur|cryo/i.test(item?.name || "")
         : false,
     );
-  return normalizePricePolicy(brief?.pricing, brief?.price);
+  const policy = overlayOfferPricing(
+    normalizePricePolicy(brief?.pricing, brief?.price),
+    seya,
+    conversation,
+  );
+  if (shouldIgnoreLeakedOfferedDefault(seya, conversation, policy)) {
+    return overlayOfferPricing(emptyPricePolicy(), seya, conversation);
+  }
+  return policy;
+}
+
+function matchOfferMap(seya, conversation) {
+  const maps = Array.isArray(seya?.offerMaps) ? seya.offerMaps : [];
+  const hay = normalize(
+    `${conversation?.campaign || ""} ${conversation?.treatment || ""} ${conversation?.offerLabel || ""}`,
+  );
+  if (!hay) {
+    return null;
+  }
+  return (
+    maps.find((item) => {
+      const match = normalize(item?.match);
+      return match.length > 1 && hay.includes(match);
+    }) || null
+  );
+}
+
+function priceFromOfferText(text) {
+  const raw = String(text || "").trim();
+  if (!raw) {
+    return null;
+  }
+  const euro = raw.match(/(\d+)\s*€/);
+  if (euro) {
+    return { amount: `${euro[1]}€`, free: false };
+  }
+  if (/offert|offerte|gratuit/i.test(raw)) {
+    return { amount: "", free: true };
+  }
+  return null;
+}
+
+function overlayOfferPricing(policy, seya, conversation) {
+  const matched = matchOfferMap(seya, conversation);
+  const offer =
+    priceFromOfferText(matched?.label) ||
+    priceFromOfferText(conversation?.offerLabel) ||
+    priceFromOfferText(conversation?.campaign);
+  if (!offer) {
+    return policy;
+  }
+  if (offer.free) {
+    return {
+      ...policy,
+      bilan: policy.bilan || "offert",
+      discovery: policy.discovery || "offerte",
+    };
+  }
+  return {
+    ...policy,
+    bilan: offer.amount,
+    discovery: offer.amount,
+  };
+}
+
+function hasPaidOfferMaps(seya) {
+  return (Array.isArray(seya?.offerMaps) ? seya.offerMaps : []).some(
+    (item) => /\d+\s*€/.test(String(item?.label || "")) && !/offert|gratuit/i.test(String(item?.label || "")),
+  );
+}
+
+function isDefaultOfferedPolicy(policy) {
+  return (
+    isFree(policy.bilan) &&
+    (isFree(policy.discovery) || !policy.discovery) &&
+    /500/.test(policy.package || "")
+  );
+}
+
+function shouldIgnoreLeakedOfferedDefault(seya, conversation, policy) {
+  if (!hasPaidOfferMaps(seya) || matchOfferMap(seya, conversation)) {
+    return false;
+  }
+  return isFree(policy.bilan) || isDefaultOfferedPolicy(policy);
+}
+
+function unknownPriceReply() {
+  return "Je n’ai pas ce tarif en fiche pour ce centre. Je peux demander à l’équipe.";
 }
 
 function priceReplyForIntent(intent, policy, options = {}) {
@@ -145,14 +232,20 @@ function priceReplyForIntent(intent, policy, options = {}) {
 }
 
 function bilanReply(policy) {
-  if (isFree(policy.bilan) || !policy.bilan) {
+  if (!policy.bilan) {
+    return unknownPriceReply();
+  }
+  if (isFree(policy.bilan)) {
     return "Le bilan est offert. On y fait une analyse corporelle pour établir le protocole.";
   }
   return `Le bilan est à ${policy.bilan}.`;
 }
 
 function discoveryReply(policy) {
-  if (isFree(policy.discovery) || !policy.discovery) {
+  if (!policy.discovery) {
+    return unknownPriceReply();
+  }
+  if (isFree(policy.discovery)) {
     return "La séance découverte est offerte.";
   }
   return `La séance découverte est à ${policy.discovery}.`;
@@ -180,11 +273,13 @@ function packageReply(policy) {
 
 function genericPriceReply(policy) {
   const parts = [];
-  if (isFree(policy.bilan) || isFree(policy.discovery) || (!policy.bilan && !policy.session)) {
+  if (isFree(policy.bilan) || isFree(policy.discovery)) {
     parts.push("Le bilan et la séance découverte sont offerts, c’est gratuit.");
-  } else {
+  } else if (policy.bilan || policy.discovery) {
     if (policy.bilan) parts.push(`Le bilan : ${policy.bilan}.`);
     if (policy.discovery) parts.push(`La séance découverte : ${policy.discovery}.`);
+  } else if (!policy.session && !policy.package) {
+    return unknownPriceReply();
   }
   if (policy.session && ["fixed", "from", "range"].includes(policy.sessionPolicy)) {
     parts.push(announceSession(policy));
@@ -352,5 +447,7 @@ module.exports = {
   isPriceRepeatComplaint,
   normalizePricePolicy,
   priceReplyForIntent,
+  overlayOfferPricing,
   resolvePricePolicy,
+  unknownPriceReply,
 };

@@ -1,4 +1,5 @@
 const { familyFromTreatment, inferFamily, persistableConversations, startConversation } = require("./agent");
+const { isSeyaOff, isSeyaWelcomeOff, readCenterSeya, writeSeyaConversations } = require("./store");
 const { sendSharedWhatsApp } = require("./whatsapp");
 
 const ACTIVE_THREAD_HOURS = 24;
@@ -8,13 +9,10 @@ async function welcomeNewLead(supabase, center, context) {
     return { sent: false, skipped: "no_phone" };
   }
 
-  const settings = asRecord(center.settings);
-  const seya = asRecord(settings.seya);
-  if (seya.whatsappAgentEnabled === false) {
-    return { sent: false, skipped: "disabled" };
-  }
-  if (seya.autoMessageOnNewLead === false) {
-    return { sent: false, skipped: "auto_off" };
+  const latest = await readCenterSeya(supabase, center.id);
+  const seya = latest.seya;
+  if (isSeyaWelcomeOff(seya)) {
+    return { sent: false, skipped: isSeyaOff(seya) ? "disabled" : "auto_off" };
   }
 
   const conversations = Array.isArray(seya.conversations) ? seya.conversations : [];
@@ -36,6 +34,7 @@ async function welcomeNewLead(supabase, center, context) {
       phone: context.phone,
       treatment: context.treatment || existing?.treatment,
       campaign: context.campaign || existing?.campaign,
+      centerId: center.id,
     },
     center.name,
     seya,
@@ -49,6 +48,11 @@ async function welcomeNewLead(supabase, center, context) {
     familyFromTreatment(
       `${context.campaign || ""} ${context.treatment || ""} ${started.treatment || ""} ${started.offerLabel || ""}`,
     );
+  const again = await readCenterSeya(supabase, center.id);
+  if (isSeyaWelcomeOff(again.seya)) {
+    return { sent: false, skipped: isSeyaOff(again.seya) ? "disabled" : "auto_off" };
+  }
+
   const result = await sendSharedWhatsApp(context.phone, opening, {
     firstName: context.firstName || existing?.firstName,
     centerName: center.name,
@@ -80,27 +84,18 @@ async function welcomeNewLead(supabase, center, context) {
     updatedAt: new Date().toISOString(),
   };
 
-  await supabase
-    .from("centers")
-    .update({
-      settings: {
-        ...settings,
-        seya: {
-          ...seya,
-          conversations: persistableConversations(
-            [
-              next,
-              ...conversations.filter(
-                (item) =>
-                  item.leadId !== next.leadId &&
-                  !(phoneKey && last9(item.phone) === phoneKey),
-              ),
-            ],
-          ),
-        },
-      },
-    })
-    .eq("id", center.id);
+  await writeSeyaConversations(
+    supabase,
+    center.id,
+    persistableConversations([
+      next,
+      ...conversations.filter(
+        (item) =>
+          item.leadId !== next.leadId &&
+          !(phoneKey && last9(item.phone) === phoneKey),
+      ),
+    ]),
+  );
 
   if (context.leadId) {
     await supabase.from("lead_events").insert({

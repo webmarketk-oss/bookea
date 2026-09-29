@@ -141,26 +141,9 @@ export async function getActiveCenterContext(
     };
   }
 
-  const slug = process.env.NEXT_PUBLIC_DEFAULT_CENTER_SLUG ?? "jfg-clinic-clermont";
-  const { data: center, error } = await supabase
-    .from("centers")
-    .select("id,name,slug")
-    .eq("slug", slug)
-    .maybeSingle();
-
-  if (error) {
-    throw new Error(error.message);
-  }
-
-  if (!center?.id) {
-    throw new Error("Aucun centre accessible pour ce compte.");
-  }
-
-  return {
-    centerId: center.id as string,
-    centerName: (center.name as string | null) ?? "Centre Bookea",
-    centerSlug: (center.slug as string | null) ?? slug,
-  };
+  throw new Error(
+    "Aucun centre accessible pour ce compte. Reconnecte-toi : on n’ouvre plus un autre centre par défaut.",
+  );
 }
 
 export function readActiveCenterId() {

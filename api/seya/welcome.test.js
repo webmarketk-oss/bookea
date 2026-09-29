@@ -1,7 +1,90 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 
-const { isActiveWhatsAppThread } = require("./welcome");
+const { isActiveWhatsAppThread, welcomeNewLead } = require("./welcome");
+const { isSeyaOff, isSeyaWelcomeOff, writeSeyaConversations } = require("./store");
+
+function mockCenterClient(seya) {
+  let stored = { seya };
+  return {
+    stored: () => stored,
+    from(table) {
+      if (table !== "centers") {
+        return { insert: async () => ({ error: null }) };
+      }
+      return {
+        select() {
+          return {
+            eq() {
+              return {
+                maybeSingle: async () => ({
+                  data: { settings: stored },
+                  error: null,
+                }),
+              };
+            },
+          };
+        },
+        update(payload) {
+          return {
+            eq: async () => {
+              stored = payload.settings;
+              return { error: null };
+            },
+          };
+        },
+      };
+    },
+  };
+}
+
+test("off : aucun accueil WhatsApp, même si le message auto est encore on", () => {
+  assert.equal(isSeyaOff({ whatsappAgentEnabled: false }), true);
+  assert.equal(isSeyaWelcomeOff({ whatsappAgentEnabled: false, autoMessageOnNewLead: true }), true);
+  assert.equal(isSeyaWelcomeOff({ whatsappAgentEnabled: true, autoMessageOnNewLead: false }), true);
+  assert.equal(isSeyaWelcomeOff({ whatsappAgentEnabled: true, autoMessageOnNewLead: true }), false);
+  assert.equal(isSeyaWelcomeOff({}), false);
+});
+
+test("écrire les conversations ne doit pas recréer un flag manquant comme une activation", () => {
+  const before = { whatsappAgentEnabled: false, conversations: [] };
+  assert.equal(isSeyaOff({ ...before, conversations: [{ leadId: "x" }] }), true);
+});
+
+test("un lead n’est pas contacté si Seya est off en base, même si le webhook a un vieux settings", async () => {
+  const supabase = mockCenterClient({
+    whatsappAgentEnabled: false,
+    autoMessageOnNewLead: true,
+    conversations: [],
+  });
+  const result = await welcomeNewLead(
+    supabase,
+    {
+      id: "center-1",
+      name: "JFG Clinique Clermont",
+      settings: { seya: { whatsappAgentEnabled: true, autoMessageOnNewLead: true } },
+    },
+    {
+      leadId: "lead-1",
+      phone: "0612345678",
+      firstName: "Léa",
+      treatment: "Soin minceur",
+    },
+  );
+  assert.equal(result.sent, false);
+  assert.equal(result.skipped, "disabled");
+  assert.equal(supabase.stored().seya.whatsappAgentEnabled, false);
+});
+
+test("sauver une conversation ne réactive pas Seya", async () => {
+  const supabase = mockCenterClient({
+    whatsappAgentEnabled: false,
+    conversations: [],
+  });
+  await writeSeyaConversations(supabase, "center-1", [{ leadId: "lead-1" }]);
+  assert.equal(supabase.stored().seya.whatsappAgentEnabled, false);
+  assert.equal(supabase.stored().seya.conversations[0].leadId, "lead-1");
+});
 
 test("un fil de plus de 24 h n’est plus considéré comme actif", () => {
   const stale = {

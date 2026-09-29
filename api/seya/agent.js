@@ -14,6 +14,8 @@ const {
   enforcePriceReply,
   isNearDuplicate,
   isPriceRepeatComplaint,
+  resolvePricePolicy,
+  unknownPriceReply,
 } = require("./price");
 const {
   awaitingHealthReply,
@@ -32,6 +34,7 @@ const {
   isHesitation,
   isIdentityQuestion,
   isOffTopicComplaint,
+  isShortYes,
   isThanks,
   refusesSlots,
   wantsSlots,
@@ -62,10 +65,10 @@ const defaultBriefs = [
   {
     name: "Soin minceur",
     pricing: {
-      bilan: "offert",
-      discovery: "offerte",
+      bilan: "",
+      discovery: "",
       session: "",
-      package: "à partir de 500€, payable jusqu’en 10 fois",
+      package: "",
       sessionPolicy: "after_bilan",
     },
     price: "",
@@ -85,10 +88,10 @@ const defaultBriefs = [
   {
     name: "Cryolipolyse",
     pricing: {
-      bilan: "offert",
-      discovery: "offerte",
+      bilan: "",
+      discovery: "",
       session: "",
-      package: "à partir de 500€, payable jusqu’en 10 fois",
+      package: "",
       sessionPolicy: "after_bilan",
     },
     price: "",
@@ -177,7 +180,7 @@ function asksPrice(text) {
 function faqReply(text) {
   const value = normalize(text);
   if (/^\?+$/.test(String(text || "").trim())) {
-    return "Dites-moi ce que vous voulez savoir : le bilan (il est gratuit), un créneau, ou autre chose ?";
+    return "Dites-moi ce que vous voulez savoir : le prix, un créneau, ou autre chose ?";
   }
   if (/gratuit|offert/.test(value) && /bilan|decouverte|seance/.test(value)) {
     return "";
@@ -199,9 +202,6 @@ function asksLocation(text) {
     String(text || ""),
   );
 }
-
-const BILAN_PRICE_REPLY =
-  "Le bilan et la séance découverte sont offerts. Le protocole ensuite se précise après l’analyse corporelle.";
 
 function locationReply(address, centerName) {
   if (address) {
@@ -268,9 +268,22 @@ function looksRoboticOpening(value) {
   );
 }
 
-function resolveTreatmentPrice(seya, treatment) {
-  const brief = findTreatmentBrief(seya, treatment);
-  return String(brief?.price || "").trim();
+function resolveTreatmentPrice(seya, treatment, conversation) {
+  const policy = resolvePricePolicy(seya, {
+    ...(conversation || {}),
+    treatment: conversation?.treatment || treatment,
+    qualification: conversation?.qualification || { need: treatment },
+  });
+  if (policy.bilan) {
+    return /offert|gratuit/i.test(policy.bilan)
+      ? "Le bilan est offert."
+      : `Le bilan est à ${policy.bilan}.`;
+  }
+  const raw = String(findTreatmentBrief(seya, treatment)?.price || "").trim();
+  if (/séance découverte sont offerts/i.test(raw)) {
+    return "";
+  }
+  return raw;
 }
 
 function displayCareLabel(qualification, conversation) {
@@ -310,7 +323,7 @@ function priceReply(seya, qualification, conversation, text) {
   if (price && /analyse corporelle|devis personnalise|devis personnalisé/i.test(price)) {
     return price;
   }
-  return BILAN_PRICE_REPLY;
+  return unknownPriceReply();
 }
 
 function todayIso(now) {
@@ -617,7 +630,7 @@ function matchProposedSlot(text, slots) {
   if (/^([123])$/.test(value)) {
     return slots[Number(value) - 1] || null;
   }
-  if (/^(oui|ok|d['’]?accord|le premier|premier)$/i.test(value)) {
+  if (/^(oui|ok|d['’]?accord|le premier|premier)$/i.test(value) || isShortYes(text)) {
     return slots[0];
   }
   return (
@@ -632,11 +645,16 @@ function matchProposedSlot(text, slots) {
   );
 }
 
-function nextQualificationQuestion(qualification, seya, fallbackTreatment, conversation, text) {
-  return conversationalReply(text, conversation, {
-    ...qualification,
-    need: qualification.need || fallbackTreatment,
-  });
+function nextQualificationQuestion(qualification, seya, fallbackTreatment, conversation, text, now) {
+  return conversationalReply(
+    text,
+    conversation,
+    {
+      ...qualification,
+      need: qualification.need || fallbackTreatment,
+    },
+    now,
+  );
 }
 
 function message(author, text) {
@@ -847,10 +865,15 @@ function pickSlotsForState(appointments, hours, state, now) {
     count: 3,
     days: Math.max(45, untilRequested + 2),
     date: state.requestedDate || "",
-    weekdays:
-      state.requestedDate || state.requestedWeekday == null
-        ? []
-        : [state.requestedWeekday],
+    weekdays: state.requestedDate
+      ? []
+      : state.requestedWeekday != null
+        ? [state.requestedWeekday]
+        : state.weekHalf === "start"
+          ? [1, 2, 3]
+          : state.weekHalf === "end"
+            ? [4, 5, 6]
+            : [],
     excludeWeekdays: state.rejectedWeekdays,
     excludeDates: state.rejectedDates,
     now,
@@ -955,14 +978,14 @@ function applyLeadReply(conversation, text, seya, slots, extras = {}) {
     bookingState,
     _seya: seya,
   };
-  const allowRepeat = /lundi|mardi|mercredi|jeudi|vendredi|samedi|dispo|creneau|créneau|1er|octobre|\d{1,2}\/\d{1,2}/i.test(
+  const allowRepeat = /lundi|mardi|mercredi|jeudi|vendredi|samedi|debut de semaine|fin de semaine|dispo|creneau|créneau|1er|octobre|\d{1,2}\/\d{1,2}/i.test(
     String(text || ""),
   );
   const guarded = extras.guarded || guardSlots(slots, bookingState, {
     centerId: conversation.centerId,
     allowRepeat,
   });
-  const safeSlots = shouldSearchSlots(bookingState, text) ? guarded.slots : [];
+  const safeSlots = shouldSearchSlots(bookingState, text, conversation) ? guarded.slots : [];
   const qualification = mergeQualification(
     conversation.qualification,
     text,
@@ -985,19 +1008,19 @@ function applyLeadReply(conversation, text, seya, slots, extras = {}) {
       qualification,
       qualification.need ? "Qualifié" : "En cours",
       text,
-      conversationalReply(text, conversation, qualification),
+      conversationalReply(text, conversation, qualification, extras.now),
       bookingState,
     );
   }
 
-  if (isThanks(text) || isHesitation(text) || refusesSlots(text)) {
+  if (isThanks(text, conversation) || isHesitation(text) || refusesSlots(text)) {
     const pause = refusesSlots(text) || isHesitation(text);
     return finishLeadReply(
       conversation,
       qualification,
       qualification.need ? "Qualifié" : conversation.status || "En cours",
       text,
-      conversationalReply(text, conversation, qualification),
+      conversationalReply(text, conversation, qualification, extras.now),
       { ...bookingState, pendingQuestion: pause ? "no_slots" : bookingState.pendingQuestion },
       { proposedSlots: pause ? [] : conversation.proposedSlots },
     );
@@ -1130,7 +1153,7 @@ function applyLeadReply(conversation, text, seya, slots, extras = {}) {
   if (
     settings.handoffToHuman &&
     /conseill|parler (a|à) (un |une )?(humain|quelqu|personne)/i.test(text) &&
-    !wantsSlots(text)
+    !wantsSlots(text, conversation)
   ) {
     return finishLeadReply(
       conversation,
@@ -1142,13 +1165,13 @@ function applyLeadReply(conversation, text, seya, slots, extras = {}) {
     );
   }
 
-  if (wantsSlots(text) && !settings.bookAppointment) {
+  if (wantsSlots(text, conversation) && !settings.bookAppointment) {
     return finishLeadReply(
       conversation,
       qualification,
       qualification.need ? "Qualifié" : "En cours",
       text,
-      "Oui, on peut regarder un rendez-vous. Quel jour vous irait le mieux ?",
+      "Parfait. Vous êtes plutôt disponible en début de semaine, ou plutôt en fin de semaine ?",
       bookingState,
     );
   }
@@ -1192,8 +1215,8 @@ function applyLeadReply(conversation, text, seya, slots, extras = {}) {
 
   const readyToPropose =
     settings.bookAppointment &&
-    wantsSlots(text) &&
-    shouldSearchSlots(bookingState, text) &&
+    wantsSlots(text, conversation) &&
+    shouldSearchSlots(bookingState, text, conversation) &&
     !asksPrice(text) &&
     !classifyPriceQuestion(text) &&
     !isPriceRepeatComplaint(text) &&
@@ -1285,6 +1308,7 @@ function applyLeadReply(conversation, text, seya, slots, extras = {}) {
       conversation.treatment,
       conversation,
       text,
+      extras.now,
     ) || fallbackAfterNote(qualification, conversation);
   return finishLeadReply(
     conversation,
@@ -1310,8 +1334,11 @@ function lastOtherLeadText(conversation, current) {
 }
 
 function fallbackAfterNote(qualification, conversation) {
+  if (conversation?.bookingState?.pendingQuestion === "no_slots") {
+    return "Très bien. Je reste là si une question vous vient.";
+  }
   if (alreadyTold(conversation, "c['’]est note pour|propose un creneau")) {
-    return "Je reste disponible. Écrivez-moi quand vous voulez reprendre.";
+    return "Parfait. Vous êtes plutôt disponible en début de semaine, ou plutôt en fin de semaine ?";
   }
   if (qualification?.zone) {
     const zone = qualification.zone;
@@ -1354,14 +1381,15 @@ function finishLeadReply(
   });
   const reply = checked.text;
   const blockedProposal = reply !== seyaText;
+  const nextBookingState = blockedProposal
+    ? { ...bookingState, lastOfferedSlots: [], appointmentStatus: "none" }
+    : markOfferPending(bookingState, reply);
   return {
     conversation: {
       ...cleanConversation,
       qualification,
       status: blockedProposal && status === "RDV proposé" ? "Qualifié" : status,
-      bookingState: blockedProposal
-        ? { ...bookingState, lastOfferedSlots: [], appointmentStatus: "none" }
-        : bookingState,
+      bookingState: nextBookingState,
       proposedSlots: (extra.proposedSlots || conversation.proposedSlots || []).filter((slot) => {
         if ((bookingState.rejectedDates || []).includes(slot.date)) return false;
         if ((bookingState.rejectedWeekdays || []).includes(new Date(`${slot.date}T12:00:00`).getDay())) {
@@ -1387,6 +1415,18 @@ function finishLeadReply(
         ? extra.shouldBook
         : null,
   };
+}
+
+function markOfferPending(bookingState, reply) {
+  const value = normalize(reply);
+  if (
+    bookingState.pendingQuestion !== "no_slots" &&
+    /propose un creneau|souhaitez[- ]vous que je|vous voulez que je|quel jour vous irait/.test(value) &&
+    !/\d{1,2}\s*h/.test(value)
+  ) {
+    return { ...bookingState, pendingQuestion: "offer_slots" };
+  }
+  return bookingState;
 }
 
 function lastSeyaAt(conversation) {

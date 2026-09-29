@@ -264,6 +264,14 @@ test("gpt-4o peut reformuler, mais un lundi fuité est jeté au profit du brouil
     ),
     "Oui, on peut regarder un rendez-vous. Quel jour vous irait le mieux ?",
   );
+  assert.equal(
+    pickSafeReply(
+      "Le lun. 28/09 je peux vous proposer 09h00, 09h30 ou 10h00 — lequel vous irait le mieux ?",
+      "Je vous prie, Audreey. Je suis ici pour vous aider. Écrivez-moi quand vous souhaitez reprendre la conversation pour fixer un rendez-vous.",
+      emptyBookingState(CENTER_ID),
+    ),
+    "Le lun. 28/09 je peux vous proposer 09h00, 09h30 ou 10h00 — lequel vous irait le mieux ?",
+  );
 });
 
 test("suggestAvailableSlots sans filtre propose encore le lundi : le garde-fou reste obligatoire", () => {

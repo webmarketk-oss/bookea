@@ -38,6 +38,7 @@ import {
   markSeyaHealthReviewed,
   sortSeyaInbox,
   writeLocalSeyaConversations,
+  writeLocalSeyaSettings,
   type SeyaAgentSettings,
   type SeyaConversation,
   type SeyaHealthSheet,
@@ -374,6 +375,7 @@ export default function SeyaCrmPage() {
                       lead,
                       centerName: seya.centerName,
                       settings: seya.settings,
+                      centerId: seya.centerId,
                     });
                   } catch (error) {
                     console.error("[seya] start conversation failed", error);
@@ -386,7 +388,9 @@ export default function SeyaCrmPage() {
 
         if (seya.centerId) {
           writeLocalSeyaConversations(seya.centerId, nextConversations);
-          void saveSeyaConversations(nextConversations).catch(() => null);
+              void saveSeyaConversations(nextConversations, seya.centerId).catch(
+            () => null,
+          );
         }
 
         setCenterId(seya.centerId);
@@ -422,6 +426,10 @@ export default function SeyaCrmPage() {
     }
 
     void load();
+    const reloadOnCenterChange = () => {
+      window.location.reload();
+    };
+    window.addEventListener("bookea-active-center-changed", reloadOnCenterChange);
     void fetch("/api/seya/whatsapp")
       .then((response) => response.json())
       .then((payload) => {
@@ -440,6 +448,10 @@ export default function SeyaCrmPage() {
 
     return () => {
       cancelled = true;
+      window.removeEventListener(
+        "bookea-active-center-changed",
+        reloadOnCenterChange,
+      );
     };
   }, []);
 
@@ -452,7 +464,7 @@ export default function SeyaCrmPage() {
     setConversations(next);
     if (centerId) {
       writeLocalSeyaConversations(centerId, next);
-      void saveSeyaConversations(next).catch(() => null);
+      void saveSeyaConversations(next, centerId).catch(() => null);
     }
   }
 
@@ -465,14 +477,21 @@ export default function SeyaCrmPage() {
   async function persistAgentSettings(next: SeyaAgentSettings) {
     agentSettingsRef.current = next;
     setAgentSettings(next);
+    if (!centerId) {
+      setAgentFeedback("Centre introuvable : réglages non enregistrés.");
+      return;
+    }
+    writeLocalSeyaSettings(centerId, next);
     const seq = ++persistSeqRef.current;
     setSavingAgent(true);
     try {
-      await saveSeyaAgentSettings(next);
+      await saveSeyaAgentSettings(next, centerId);
       if (seq !== persistSeqRef.current) {
         return;
       }
-      setAgentFeedback("Réglages de l’agent enregistrés pour ce centre.");
+      setAgentFeedback(
+        `Réglages enregistrés pour ${centerName} uniquement.`,
+      );
     } catch {
       if (seq !== persistSeqRef.current) {
         return;
@@ -620,7 +639,7 @@ export default function SeyaCrmPage() {
         body: JSON.stringify({
           conversation: selectedConversation,
           text,
-          settings: agentSettings,
+          centerId,
           slots: availableSlots,
           appointments,
           hours,
@@ -807,10 +826,12 @@ export default function SeyaCrmPage() {
           </div>
           <div>
             <h2 className="text-base font-semibold">Agent WhatsApp Seya</h2>
+            <p className="mt-1 text-sm font-semibold text-violet-800">
+              Centre : {centerName || "—"}
+            </p>
             <p className="mt-1 max-w-3xl text-sm font-medium text-slate-500">
-              Remplis le prix de chaque soin : c’est ce que Seya dira si on lui
-              demande le tarif. Elle ne coupe plus le fil pour « arrête les
-              créneaux », et elle n’invente jamais un prix.
+              Ces réglages valent uniquement pour ce centre. Off, 99 € ou
+              offert ici ne s’appliquent jamais à un autre établissement.
             </p>
           </div>
         </div>
@@ -830,7 +851,7 @@ export default function SeyaCrmPage() {
         <div className="mt-5 grid gap-3">
           <ToggleRow
             title="WhatsApp Seya activé"
-            hint="Si c’est off, Seya ne parle pas pour ce centre (ex. Gap)."
+            hint="Si c’est off, aucun WhatsApp aux nouveaux leads (Meta, SaveMyLeads, relances)."
             enabled={agentSettings.whatsappAgentEnabled}
             onToggle={() =>
               void persistAgentSettings({
@@ -924,8 +945,9 @@ export default function SeyaCrmPage() {
             Offres campagne → texte WhatsApp
           </p>
           <p className="mt-1 text-xs font-medium text-slate-400">
-            Laisse 1 ligne par code campagne. Ne clique pas « Ajouter une offre »
-            pour le prix : ça va plus bas.
+            Laisse 1 ligne par code campagne (99€, 49€, offert…). Ces lignes
+            valent seulement pour ce centre : Gap ne reprend jamais Clermont.
+            Ne clique pas « Ajouter une offre » pour le prix : ça va plus bas.
           </p>
           <div className="mt-3 grid gap-3">
             {agentSettings.offerMaps.map((item, index) => (

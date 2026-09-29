@@ -186,6 +186,72 @@ test("je reviendrai : plus de créneaux ni « noté pour le ventre »", async ()
   assert.doesNotMatch(lastSeya(conversation), /noté pour le ventre/i);
 });
 
+test("pas sur place / je vous contacterai : elle n’insiste pas", async () => {
+  let conversation = startConversation(
+    {
+      leadId: "lead-pas-sur-place",
+      centerId: "jfg-clinique-clermont",
+      firstName: "Léa",
+      lastName: "Test",
+      phone: "0611223344",
+      treatment: "Soin minceur",
+    },
+    "JFG Clinique Clermont",
+    seya,
+  );
+
+  conversation = await reply(conversation, "C’est pour le ventre");
+  conversation = await reply(
+    conversation,
+    "Je vous contacterai, pour l'instant pas sur place",
+  );
+  assert.match(lastSeya(conversation), /d’accord, aucun souci|revenir vers nous|belle journée/i);
+  assert.doesNotMatch(
+    lastSeya(conversation),
+    /créneau|creneau|réserve|reserve|sur place|écrivez-moi quand|reprendre|je vous prie|début de semaine|à distance/i,
+  );
+  assert.equal((conversation.proposedSlots || []).length, 0);
+
+  conversation = await reply(conversation, "Merci d'avance");
+  assert.match(lastSeya(conversation), /plaisir|reste|très bien/i);
+  assert.doesNotMatch(
+    lastSeya(conversation),
+    /écrivez-moi quand|reprendre|je vous prie/i,
+  );
+});
+
+test("oui merci après proposition de créneau : elle propose des horaires, elle ne clôt pas", async () => {
+  let conversation = startConversation(
+    {
+      leadId: "lead-audreey",
+      centerId: "jfg-clinique-clermont",
+      firstName: "Audreey",
+      lastName: "Test",
+      phone: "0611223344",
+      treatment: "Soin minceur",
+      campaign: "Meta Lead Ads",
+    },
+    "JFG Clinique Clermont",
+    seya,
+  );
+
+  conversation = await reply(
+    conversation,
+    "Bonjour Je souhaiterais traiter le ventre et le bas du dos",
+  );
+  assert.match(lastSeya(conversation), /ventre|dos|créneau|creneau/i);
+  assert.doesNotMatch(lastSeya(conversation), /reprendre|écrivez-moi quand/i);
+
+  conversation = await reply(conversation, "Oui, merci");
+  const answer = lastSeya(conversation);
+  assert.match(answer, /09h00|10h00|lun\.|mar\.|mer\.|jeu\.|ven\.|sam\.|semaine/i);
+  assert.doesNotMatch(
+    answer,
+    /reprendre|écrivez-moi quand|je vous prie|fixer un rendez-vous/i,
+  );
+  assert.notEqual(conversation.status, "À recontacter");
+});
+
 test("demande de rendez-vous : elle reste dans le fil, elle ne clôt pas", async () => {
   const noBook = { ...seya, bookAppointment: false, askForAppointment: true };
   let conversation = startConversation(
@@ -212,10 +278,67 @@ test("demande de rendez-vous : elle reste dans le fil, elle ne clôt pas", async
     now: NOW,
   });
   conversation = result.conversation;
-  assert.match(lastSeya(conversation), /jour|rendez-vous/i);
+  assert.match(lastSeya(conversation), /semaine|rendez-vous|jour/i);
   assert.doesNotMatch(
     lastSeya(conversation),
     /recontacte|reviendrai|conseillère du centre, elle/i,
   );
   assert.notEqual(conversation.status, "À recontacter");
+});
+
+test("le soir elle souhaite une bonne soirée, le jour une belle journée", () => {
+  const { willCallBackReply } = require("./conversation");
+  assert.match(
+    willCallBackReply(new Date("2026-09-27T12:00:00+02:00")),
+    /belle journée :\)/,
+  );
+  assert.match(
+    willCallBackReply(new Date("2026-09-27T20:00:00+02:00")),
+    /bonne soirée :\)/,
+  );
+});
+
+test("ok je préfère vous recontacter : elle note, elle n’insiste pas", async () => {
+  let conversation = startConversation(
+    {
+      leadId: "lead-rappel",
+      centerId: "jfg-clinique-clermont",
+      firstName: "Léa",
+      lastName: "Test",
+      phone: "0611223344",
+      treatment: "Soin minceur",
+    },
+    "JFG Clinique Clermont",
+    seya,
+  );
+  conversation = await reply(conversation, "C’est pour le ventre");
+  conversation = await reply(
+    conversation,
+    "Ok, je préfère vous recontacter moi-même",
+  );
+  assert.match(lastSeya(conversation), /d’accord, aucun souci|revenir vers nous|belle journée/i);
+  assert.doesNotMatch(
+    lastSeya(conversation),
+    /09h00|lun\.|début de semaine|quel jour|écrivez-moi quand|à distance/i,
+  );
+  assert.equal((conversation.proposedSlots || []).length, 0);
+});
+
+test("début de semaine après un oui : elle propose des horaires de début de semaine", async () => {
+  let conversation = startConversation(
+    {
+      leadId: "lead-debut",
+      centerId: "jfg-clinique-clermont",
+      firstName: "Léa",
+      lastName: "Test",
+      phone: "0611223344",
+      treatment: "Soin minceur",
+    },
+    "JFG Clinique Clermont",
+    seya,
+  );
+  conversation = await reply(conversation, "Je veux un rendez-vous");
+  conversation = await reply(conversation, "Début de semaine");
+  assert.match(lastSeya(conversation), /lun\.|mar\.|mer\./i);
+  assert.doesNotMatch(lastSeya(conversation), /jeu\.|ven\.|sam\./i);
 });

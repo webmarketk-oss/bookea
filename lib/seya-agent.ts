@@ -66,10 +66,12 @@ export function startSeyaConversation({
   lead,
   centerName,
   settings,
+  centerId,
 }: {
   lead: Lead;
   centerName: string;
   settings: SeyaAgentSettings;
+  centerId?: string;
 }): SeyaConversation {
   const opening = buildOpeningMessage(lead, centerName, settings);
   const rawTreatment = lead.treatment.trim();
@@ -101,6 +103,7 @@ export function startSeyaConversation({
     treatment,
     campaign: lead.campaign,
     offerLabel: offer,
+    centerId,
     status: "À envoyer",
     qualification: {
       ...emptyQualification(),
@@ -303,7 +306,7 @@ export function applyLeadReply(
           createSeyaMessage("lead", text),
           createSeyaMessage(
             "seya",
-            "Oui, on peut regarder un rendez-vous. Quel jour vous irait le mieux ?",
+            "Parfait. Vous êtes plutôt disponible en début de semaine, ou plutôt en fin de semaine ?",
           ),
         ],
         updatedAt: new Date().toISOString(),
@@ -484,14 +487,26 @@ function priceReply(
       return `Nos cures commencent ${pack}. Le devis précis se fait après le bilan.`;
     }
   }
+  const offer = resolveOfferLabel(
+    settings,
+    conversation.campaign,
+    conversation.treatment,
+  );
+  const euro = offer.match(/(\d+)\s*€/);
+  if (euro) {
+    return `Cette offre est à ${euro[1]}€.`;
+  }
   const price = resolveTreatmentPrice(
     settings,
     `${qualification.need} ${qualification.zone} ${conversation.treatment}`,
   );
-  if (price && /analyse corporelle|devis personnalisé/i.test(price)) {
+  if (price && /offerts|offert|gratuit/i.test(price) && settings.offerMaps.some((item) => /\d+\s*€/.test(item.label))) {
+    return "Je n’ai pas ce tarif en fiche pour ce centre. Je peux demander à l’équipe.";
+  }
+  if (price) {
     return price;
   }
-  return "Le bilan et la séance découverte sont offerts, c’est gratuit. On y fait une analyse corporelle pour établir un devis personnalisé.";
+  return "Je n’ai pas ce tarif en fiche pour ce centre. Je peux demander à l’équipe.";
 }
 
 function mergeQualification(current: SeyaQualification, text: string) {
