@@ -20,7 +20,7 @@ import {
   addDaysIso,
   formatReminderDayLabel,
   isLeadCreatedOn,
-  isReminderDueOn,
+  isOpenReminderDue,
   monthStartIso,
   reminderDayOffset,
   todayIso,
@@ -143,7 +143,7 @@ export default function DashboardPage() {
   const fillRate = planningFillRate(todayAppointments, appointments);
   const reminderLeads = leads.filter(
     (lead) =>
-      isReminderDueOn(lead.reminderDate, today) &&
+      isOpenReminderDue(lead, today) &&
       !inactiveLeadStatuses.includes(lead.status),
   );
   const contactsToHandle = leads
@@ -153,7 +153,7 @@ export default function DashboardPage() {
       }
 
       return (
-        followUpStatuses.has(lead.status) || isReminderDueOn(lead.reminderDate, today)
+        followUpStatuses.has(lead.status) || isOpenReminderDue(lead, today)
       );
     })
     .sort((left, right) => {

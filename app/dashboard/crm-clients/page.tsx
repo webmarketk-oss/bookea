@@ -24,6 +24,10 @@ import {
 } from "lucide-react";
 
 import { PlaceSuggestField } from "@/components/forms/place-suggest-field";
+import {
+  PaymentStatusBadge,
+  PaymentStatusMark,
+} from "@/components/crm/payment-status-mark";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -644,10 +648,7 @@ export default function CRMClientsPage() {
                                 {client.firstName} {client.lastName}
                               </span>
                               {paymentTone ? (
-                                <CreditCard
-                                  className={`h-4 w-4 shrink-0 ${paymentToneStyles[paymentTone].icon}`}
-                                  aria-label={paymentToneStyles[paymentTone].label}
-                                />
+                                <PaymentStatusMark tone={paymentTone} />
                               ) : null}
                               {birthdayGift && birthdayGift.tone !== "month" ? (
                                 <Gift
@@ -777,7 +778,13 @@ function ClientPanel({
       data-client-fiche="true"
       className={`h-fit py-0 shadow-sm ${
         paymentTone
-          ? `${paymentToneStyles[paymentTone].border} ${paymentToneStyles[paymentTone].surface}`
+          ? `${paymentToneStyles[paymentTone].border} ${paymentToneStyles[paymentTone].surface} ring-2 ${
+              paymentTone === "paid"
+                ? "ring-emerald-500"
+                : paymentTone === "partial"
+                  ? "ring-orange-500"
+                  : "ring-red-500"
+            }`
           : "border-slate-200"
       }`}
     >
@@ -792,13 +799,14 @@ function ClientPanel({
                 {client.status}
               </Badge>
               {paymentTone ? (
-                <Badge className={paymentToneStyles[paymentTone].badge}>
-                  <CreditCard className="mr-1 h-3.5 w-3.5" />
-                  {paymentToneStyles[paymentTone].label}
-                  {client.balanceDue > 0
-                    ? ` · ${formatCurrency(client.balanceDue)}`
-                    : ""}
-                </Badge>
+                <PaymentStatusBadge
+                  tone={paymentTone}
+                  amountLabel={
+                    client.balanceDue > 0
+                      ? formatCurrency(client.balanceDue)
+                      : undefined
+                  }
+                />
               ) : null}
             </div>
             <p className="mt-1 text-sm font-medium text-slate-400">
@@ -1190,10 +1198,10 @@ function FullClientModal({
           paymentTone
             ? `${paymentToneStyles[paymentTone].surface} ring-2 ${
                 paymentTone === "paid"
-                  ? "ring-emerald-300"
+                  ? "ring-emerald-500"
                   : paymentTone === "partial"
-                    ? "ring-orange-300"
-                    : "ring-red-300"
+                    ? "ring-orange-500"
+                    : "ring-red-500"
               }`
             : "bg-white"
         }`}
@@ -1206,13 +1214,14 @@ function FullClientModal({
             <h2 className="mt-1 flex flex-wrap items-center gap-2 text-lg font-semibold text-slate-950">
               {form.firstName} {form.lastName}
               {paymentTone ? (
-                <Badge className={paymentToneStyles[paymentTone].badge}>
-                  <CreditCard className="mr-1 h-3.5 w-3.5" />
-                  {paymentToneStyles[paymentTone].label}
-                  {form.balanceDue > 0
-                    ? ` · ${formatCurrency(form.balanceDue)}`
-                    : ""}
-                </Badge>
+                <PaymentStatusBadge
+                  tone={paymentTone}
+                  amountLabel={
+                    form.balanceDue > 0
+                      ? formatCurrency(form.balanceDue)
+                      : undefined
+                  }
+                />
               ) : null}
             </h2>
             <p className="mt-1 text-sm font-semibold text-slate-500">

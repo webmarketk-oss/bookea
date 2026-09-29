@@ -71,7 +71,7 @@ export function useSidebarSlide(
       const target = event.target;
 
       if (
-        target instanceof HTMLElement &&
+        target instanceof Element &&
         target.closest("a, button, input, select, textarea, [data-sidebar-logout='true']")
       ) {
         return;

@@ -38,7 +38,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
 
     const target = event.target;
 
-    if (!(target instanceof HTMLElement)) {
+    if (!(target instanceof Element)) {
       return;
     }
 

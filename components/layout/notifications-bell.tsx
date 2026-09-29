@@ -2,9 +2,9 @@
 
 import { Bell } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
-import { Button } from "@/components/ui/button";
 import {
   loadCenterNotifications,
   markAllCenterNotificationsRead,
@@ -41,26 +41,35 @@ export function NotificationsBell({
 }: NotificationsBellProps) {
   const router = useRouter();
   const rootRef = useRef<HTMLDivElement | null>(null);
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  const ignoreCloseRef = useRef(false);
   const [open, setOpen] = useState(false);
+  const [ready, setReady] = useState(false);
   const [items, setItems] = useState<CenterNotification[]>([]);
+  const [portalTarget, setPortalTarget] = useState<HTMLElement | null>(null);
+  const [panelPos, setPanelPos] = useState<{
+    top: number;
+    left?: number;
+    right?: number;
+  } | null>(null);
+
+  const refresh = useCallback(async () => {
+    try {
+      void fetch("/api/sms/inbound").catch(() => null);
+      const next = await loadCenterNotifications();
+      setItems(next);
+    } catch {
+      // Keep the last list: a failed reload must not empty the bell.
+    } finally {
+      setReady(true);
+    }
+  }, []);
 
   useEffect(() => {
-    let alive = true;
+    setPortalTarget(document.body);
+  }, []);
 
-    async function refresh() {
-      try {
-        void fetch("/api/sms/inbound").catch(() => null);
-        const next = await loadCenterNotifications();
-        if (alive) {
-          setItems(next);
-        }
-      } catch {
-        if (alive) {
-          setItems([]);
-        }
-      }
-    }
-
+  useEffect(() => {
     void refresh();
     const unsubscribe = subscribeCenterNotificationSources(() => {
       void refresh();
@@ -70,21 +79,71 @@ export function NotificationsBell({
     }, 60_000);
 
     return () => {
-      alive = false;
       unsubscribe();
       window.clearInterval(timer);
     };
-  }, []);
+  }, [refresh]);
+
+  useEffect(() => {
+    if (open) {
+      void refresh();
+    }
+  }, [open, refresh]);
+
+  useLayoutEffect(() => {
+    if (!open) {
+      setPanelPos(null);
+      return;
+    }
+
+    function place() {
+      const rect = rootRef.current?.getBoundingClientRect();
+      if (!rect) {
+        return;
+      }
+
+      if (collapsed) {
+        setPanelPos({ top: rect.top, left: rect.right + 12 });
+        return;
+      }
+
+      setPanelPos({
+        top: rect.bottom + 8,
+        right: Math.max(12, window.innerWidth - rect.right),
+      });
+    }
+
+    place();
+    window.addEventListener("resize", place);
+    window.addEventListener("scroll", place, true);
+    return () => {
+      window.removeEventListener("resize", place);
+      window.removeEventListener("scroll", place, true);
+    };
+  }, [open, collapsed]);
 
   useEffect(() => {
     if (!open) {
       return;
     }
 
+    ignoreCloseRef.current = true;
+
     function handlePointer(event: MouseEvent) {
-      if (!rootRef.current?.contains(event.target as Node)) {
-        setOpen(false);
+      if (ignoreCloseRef.current) {
+        ignoreCloseRef.current = false;
+        return;
       }
+
+      const target = event.target as Node;
+      if (
+        rootRef.current?.contains(target) ||
+        panelRef.current?.contains(target)
+      ) {
+        return;
+      }
+
+      setOpen(false);
     }
 
     function handleKey(event: KeyboardEvent) {
@@ -103,6 +162,10 @@ export function NotificationsBell({
 
   const unreadCount = items.filter((item) => item.unread).length;
   const isDark = variant === "dark";
+
+  function toggleOpen() {
+    setOpen((current) => !current);
+  }
 
   function openItem(item: CenterNotification) {
     setItems((current) =>
@@ -125,20 +188,133 @@ export function NotificationsBell({
     await markAllCenterNotificationsRead(items);
   }
 
+  const panel =
+    open && panelPos ? (
+      <div
+        ref={panelRef}
+        data-sidebar-keep-open="true"
+        className={`fixed z-[200] w-80 rounded-2xl border p-3 shadow-xl ${
+          isDark
+            ? "border-white/10 bg-[#171b38] text-white"
+            : "border-slate-200 bg-white"
+        }`}
+        style={panelPos}
+      >
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <p className={`font-black ${isDark ? "text-white" : "text-slate-950"}`}>
+            Notifications
+          </p>
+          <div className="flex items-center gap-2">
+            {unreadCount > 0 && (
+              <button
+                type="button"
+                onClick={() => void markAllRead()}
+                className={`text-xs font-semibold ${
+                  isDark
+                    ? "text-white/60 hover:text-white"
+                    : "text-slate-500 hover:text-slate-800"
+                }`}
+              >
+                Tout lu
+              </button>
+            )}
+            <span
+              className={`rounded-full px-2 py-1 text-xs font-black ${
+                unreadCount > 0
+                  ? "bg-rose-500 text-white"
+                  : isDark
+                    ? "bg-white/10 text-white/70"
+                    : "bg-slate-100 text-slate-600"
+              }`}
+            >
+              {unreadCount}
+            </span>
+          </div>
+        </div>
+
+        <div className="max-h-80 space-y-2 overflow-y-auto">
+          {!ready ? (
+            <p
+              className={`rounded-xl border p-3 text-sm font-semibold ${
+                isDark
+                  ? "border-white/10 text-white/50"
+                  : "border-slate-100 text-slate-500"
+              }`}
+            >
+              Chargement des notifications…
+            </p>
+          ) : items.length === 0 ? (
+            <p
+              className={`rounded-xl border p-3 text-sm font-semibold ${
+                isDark
+                  ? "border-white/10 text-white/50"
+                  : "border-slate-100 text-slate-500"
+              }`}
+            >
+              Aucune notification pour ce centre.
+            </p>
+          ) : (
+            items.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => void openItem(item)}
+                className={`w-full rounded-xl border p-3 text-left transition ${
+                  item.unread
+                    ? isDark
+                      ? "border-white/15 bg-white/10"
+                      : "border-blue-100 bg-blue-50"
+                    : isDark
+                      ? "border-white/10 hover:bg-white/5"
+                      : "border-slate-100 hover:bg-slate-50"
+                }`}
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <p
+                    className={`min-w-0 flex-1 text-sm font-black leading-5 ${
+                      isDark ? "text-white" : "text-slate-950"
+                    }`}
+                  >
+                    {item.title}
+                  </p>
+                  {item.unread && (
+                    <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-rose-500" />
+                  )}
+                </div>
+                <p
+                  className={`mt-1 line-clamp-2 text-xs font-semibold ${
+                    isDark ? "text-white/65" : "text-slate-600"
+                  }`}
+                >
+                  {item.body}
+                </p>
+                <p
+                  className={`mt-1 text-[11px] font-medium ${
+                    isDark ? "text-white/40" : "text-slate-400"
+                  }`}
+                >
+                  {relativeTime(item.createdAt)}
+                </p>
+              </button>
+            ))
+          )}
+        </div>
+      </div>
+    ) : null;
+
   return (
     <div ref={rootRef} className="relative" data-sidebar-keep-open="true">
-      <Button
-        variant={isDark ? "ghost" : "outline"}
-        size="icon"
-        onClick={() => setOpen((current) => !current)}
+      <button
+        type="button"
+        onClick={toggleOpen}
         aria-label="Notifications"
         aria-expanded={open}
         className={
           isDark
-            ? `relative text-white/80 hover:bg-white/10 hover:text-white ${
-                collapsed ? "h-11 w-full" : ""
+            ? `relative inline-flex h-11 w-11 items-center justify-center rounded-xl text-white/80 transition-colors hover:bg-white/10 hover:text-white ${
+                collapsed ? "w-full" : ""
               }`
-            : "relative h-11 w-11 rounded-xl border border-[#dfe5f2] bg-white"
+            : "relative inline-flex h-11 w-11 items-center justify-center rounded-xl border border-[#dfe5f2] bg-white text-[#11152e] transition-colors hover:bg-[#e9eeff]"
         }
       >
         <Bell className="h-5 w-5" />
@@ -153,105 +329,9 @@ export function NotificationsBell({
         >
           {unreadCount}
         </span>
-      </Button>
+      </button>
 
-      {open && (
-        <div
-          className={`absolute z-50 w-80 rounded-2xl border p-3 shadow-xl ${
-            isDark
-              ? "right-0 top-12 border-white/10 bg-[#171b38] text-white"
-              : "right-0 top-12 border-slate-200 bg-white"
-          } ${collapsed ? "left-14 top-0 right-auto" : ""}`}
-        >
-          <div className="mb-3 flex items-center justify-between gap-3">
-            <p className={`font-black ${isDark ? "text-white" : "text-slate-950"}`}>
-              Notifications
-            </p>
-            <div className="flex items-center gap-2">
-              {unreadCount > 0 && (
-                <button
-                  type="button"
-                  onClick={() => void markAllRead()}
-                  className={`text-xs font-semibold ${
-                    isDark ? "text-white/60 hover:text-white" : "text-slate-500 hover:text-slate-800"
-                  }`}
-                >
-                  Tout lu
-                </button>
-              )}
-              <span
-                className={`rounded-full px-2 py-1 text-xs font-black ${
-                  unreadCount > 0
-                    ? "bg-rose-500 text-white"
-                    : isDark
-                      ? "bg-white/10 text-white/70"
-                      : "bg-slate-100 text-slate-600"
-                }`}
-              >
-                {unreadCount}
-              </span>
-            </div>
-          </div>
-
-          <div className="max-h-80 space-y-2 overflow-y-auto">
-            {items.length === 0 ? (
-              <p
-                className={`rounded-xl border p-3 text-sm font-semibold ${
-                  isDark
-                    ? "border-white/10 text-white/50"
-                    : "border-slate-100 text-slate-500"
-                }`}
-              >
-                Aucune notification pour ce centre.
-              </p>
-            ) : (
-              items.map((item) => (
-                <button
-                  key={item.id}
-                  type="button"
-                  onClick={() => void openItem(item)}
-                  className={`w-full rounded-xl border p-3 text-left transition ${
-                    item.unread
-                      ? isDark
-                        ? "border-white/15 bg-white/10"
-                        : "border-blue-100 bg-blue-50"
-                      : isDark
-                        ? "border-white/10 hover:bg-white/5"
-                        : "border-slate-100 hover:bg-slate-50"
-                  }`}
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    <p
-                      className={`min-w-0 flex-1 text-sm font-black leading-5 ${
-                        isDark ? "text-white" : "text-slate-950"
-                      }`}
-                    >
-                      {item.title}
-                    </p>
-                    {item.unread && (
-                      <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-rose-500" />
-                    )}
-                  </div>
-                  <p
-                    className={`mt-1 line-clamp-2 text-xs font-semibold ${
-                      isDark ? "text-white/65" : "text-slate-600"
-                    }`}
-                  >
-                    {item.body}
-                  </p>
-                  <p
-                    className={`mt-1 text-[11px] font-medium ${
-                      isDark ? "text-white/40" : "text-slate-400"
-                    }`}
-                  >
-                    {relativeTime(item.createdAt)}
-                  </p>
-                </button>
-              ))
-            )}
-          </div>
-        </div>
-      )}
+      {portalTarget && panel ? createPortal(panel, portalTarget) : null}
     </div>
   );
 }

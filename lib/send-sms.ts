@@ -54,6 +54,7 @@ export async function sendBookeaSms(input: SendSmsInput): Promise<SendSmsResult>
   const response = await fetch("/api/sms/send", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
+    signal: AbortSignal.timeout(15000),
     body: JSON.stringify({
       message: input.message,
       type: input.type || "transactional",
@@ -145,6 +146,7 @@ export async function syncBirthdaySms(input: {
   const response = await fetch("/api/sms/schedule", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
+    signal: AbortSignal.timeout(8000),
     body: JSON.stringify({
       action: enabled ? "schedule" : "cancel",
       kind: "birthday",
@@ -233,6 +235,7 @@ export async function scheduleAppointmentReminderSms(input: {
   const response = await fetch("/api/sms/schedule", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
+    signal: AbortSignal.timeout(8000),
     body: JSON.stringify({
       action: "schedule",
       appointmentId: input.appointmentId,
@@ -272,6 +275,7 @@ export async function cancelAppointmentSmsJobs(appointmentId: string) {
   await fetch("/api/sms/schedule", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
+    signal: AbortSignal.timeout(8000),
     body: JSON.stringify({
       action: "cancel",
       appointmentId,
@@ -283,6 +287,7 @@ export async function rescheduleAppointmentSmsJobs(appointmentId: string) {
   await fetch("/api/sms/schedule", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
+    signal: AbortSignal.timeout(8000),
     body: JSON.stringify({
       action: "reschedule",
       appointmentId,

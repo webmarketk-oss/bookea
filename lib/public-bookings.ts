@@ -237,11 +237,15 @@ export function mergePublicBookingIntoAppointments(
   return [...currentAppointments, bookingToAppointment(booking)];
 }
 
+export function duplicateLeadGroupKey(leads: Lead[]) {
+  return [...new Set(leads.map((lead) => lead.id))].sort().join("-");
+}
+
 export function findDuplicateLeadGroups(leads: Lead[]) {
   const groups = new Map<string, Lead[]>();
 
   leads.forEach((lead) => {
-    const keys = identityKeys(lead);
+    const keys = sureIdentityKeys(lead);
 
     keys.forEach((key) => {
       const group = groups.get(key) ?? [];
@@ -403,12 +407,32 @@ function bookingActivity(booking: PublicBookingRecord) {
   };
 }
 
-function identityKeys(identity: Identity) {
-  return [
-    normalizePhone(identity.phone),
-    normalizeEmail(identity.email),
-    splitIdentityName(identity).fullName,
-  ].filter(Boolean);
+export function sureIdentityKeys(identity: Identity) {
+  const keys: string[] = [];
+  const phoneDigits = normalizePhone(identity.phone);
+  const lastNine = phoneDigits.slice(-9);
+
+  if (lastNine.length === 9 && !/^0+$/.test(lastNine)) {
+    keys.push(`tel:${lastNine}`);
+  }
+
+  const email = normalizeEmail(identity.email);
+  if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    keys.push(`mail:${email}`);
+  }
+
+  return keys;
+}
+
+export function leadsAreSureDuplicates(leads: Lead[]) {
+  if (leads.length < 2) {
+    return false;
+  }
+
+  const keySets = leads.map((lead) => new Set(sureIdentityKeys(lead)));
+  return [...keySets[0]].some((key) =>
+    keySets.every((keys) => keys.has(key))
+  );
 }
 
 function splitIdentityName(identity: Identity) {

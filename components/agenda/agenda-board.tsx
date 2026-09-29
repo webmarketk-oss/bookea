@@ -4,15 +4,26 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react"
 import { createPortal } from "react-dom";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
+import { NotificationsBell } from "@/components/layout/notifications-bell";
+import {
+  PaymentStatusBadge,
+  PaymentStatusMark,
+} from "@/components/crm/payment-status-mark";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { cabins, practitioners } from "@/lib/agenda-data";
 import {
+  alignAppointmentCabinId,
+  alignAppointmentPractitionerId,
+  createCenterCabin,
   createCrmAppointment,
+  deleteCenterCabin,
   deleteCrmAppointment,
+  loadCenterCabins,
   loadCrmAppointments,
   persistCrmAppointment,
+  saveCenterCabins,
 } from "@/lib/agenda-supabase";
 import { issueAppointmentConfirmationUrl } from "@/lib/appointment-confirmation";
 import { markPastAppointmentsPresent } from "@/lib/appointment-presence";
@@ -63,17 +74,27 @@ import {
 import { getActiveCenterContext } from "@/lib/center-access";
 import { loadCenterHours, saveCenterHours } from "@/lib/center-hours";
 import {
+  addDaysToIso,
   dayHoursForSchedule,
+  dayHoursForWeekHours,
   defaultTeamSchedules,
   emptyTeamSchedule,
+  formatWeekRange,
+  hoursForWeek,
   isPractitionerWorkingOnDate,
+  isWeekPeriod,
   loadTeamPlanning,
+  mondayIso,
   practitionerColorOptions,
   saveTeamPlanning,
   teamAbsenceTypes,
+  upsertWeekHours,
+  weekHasValidatedHours,
   type TeamAbsence,
   type TeamAbsenceType,
+  type TeamPeriod,
   type TeamSchedule,
+  type TeamWeekHours,
 } from "@/lib/team-planning";
 import {
   Appointment,
@@ -93,7 +114,6 @@ import {
   ChevronRight,
   CheckCircle2,
   Clock3,
-  CreditCard,
   Grip,
   Minus,
   Plus,
@@ -108,29 +128,6 @@ const timeOptions = createTimeSlots(7, 19, 15);
 const SLOT_ROW_HEIGHT_REM = 1.85;
 const TIME_COLUMN_PX = 92;
 const CABIN_COLUMN_MIN_PX = 260;
-
-const cabinPalette = [
-  {
-    color: "from-blue-500 to-cyan-400",
-    softColor: "bg-blue-50 text-blue-700 border-blue-100",
-  },
-  {
-    color: "from-violet-500 to-fuchsia-400",
-    softColor: "bg-violet-50 text-violet-700 border-violet-100",
-  },
-  {
-    color: "from-emerald-500 to-teal-400",
-    softColor: "bg-emerald-50 text-emerald-700 border-emerald-100",
-  },
-  {
-    color: "from-amber-500 to-orange-400",
-    softColor: "bg-amber-50 text-amber-700 border-amber-100",
-  },
-  {
-    color: "from-rose-500 to-pink-400",
-    softColor: "bg-rose-50 text-rose-700 border-rose-100",
-  },
-];
 
 const appointmentDurationOptions = [
   "15",
@@ -334,30 +331,67 @@ export default function AgendaBoard() {
   const [portalTarget, setPortalTarget] = useState<HTMLElement | null>(null);
   const [isSavingAppointment, setIsSavingAppointment] = useState(false);
   const savingAppointmentRef = useRef(false);
+  const agendaEpochRef = useRef(0);
+  const agendaWritesRef = useRef(0);
+  const deletingAppointmentIdsRef = useRef(new Set<string>());
   const centerNameRef = useRef("");
   const teamSaveTimerRef = useRef<number | null>(null);
+  const cabinSaveTimerRef = useRef<number | null>(null);
+  const cabinListRef = useRef(cabins);
   const teamPlanningRef = useRef({
     practitioners,
     schedules: defaultTeamSchedules(),
   });
 
+  function beginAgendaWrite() {
+    agendaEpochRef.current += 1;
+    agendaWritesRef.current += 1;
+  }
+
+  function endAgendaWrite() {
+    agendaEpochRef.current += 1;
+    agendaWritesRef.current = Math.max(0, agendaWritesRef.current - 1);
+  }
+
   async function refreshAgenda() {
+    if (agendaWritesRef.current > 0) {
+      return;
+    }
+
+    const epoch = agendaEpochRef.current;
     setAgendaError("");
 
     try {
-      const [loadedAppointments, center, nextBalanceDueIndex, nextHours, team] =
+      const [
+        loadedAppointments,
+        loadedCabins,
+        center,
+        nextBalanceDueIndex,
+        nextHours,
+        team,
+      ] =
         await Promise.all([
           loadCrmAppointments(),
+          loadCenterCabins().catch(() => cabins),
           getActiveCenterContext(),
           loadClientBalanceDueIndex().catch(() => emptyClientBalanceDueIndex()),
           loadCenterHours().catch(() => null),
           loadTeamPlanning().catch(() => null),
         ]);
+
+      if (epoch !== agendaEpochRef.current || agendaWritesRef.current > 0) {
+        return;
+      }
+
       centerNameRef.current = center.centerName;
       setBalanceDueIndex(nextBalanceDueIndex);
       if (nextHours) {
         setCenterDayHours(nextHours);
       }
+      const nextPractitioners = team?.practitioners ?? practitionerList;
+      const nextCabins = loadedCabins.length > 0 ? loadedCabins : cabins;
+      cabinListRef.current = nextCabins;
+      setCabinList(nextCabins);
       if (team) {
         teamPlanningRef.current = {
           practitioners: team.practitioners,
@@ -371,15 +405,25 @@ export default function AgendaBoard() {
         mergePublicBookingsIntoAppointments(
           loadedAppointments,
           readPublicBookingsForCenter(center.centerName),
-        ),
+        ).map((appointment) => ({
+          ...appointment,
+          cabinId: alignAppointmentCabinId(appointment.cabinId, nextCabins),
+          practitionerId: alignAppointmentPractitionerId(
+            appointment,
+            nextPractitioners,
+          ),
+        })),
       );
     } catch (error) {
+      if (epoch !== agendaEpochRef.current || agendaWritesRef.current > 0) {
+        return;
+      }
+
       setAgendaError(
         error instanceof Error
           ? error.message
           : "Impossible de charger l'agenda.",
       );
-      setAppointmentList([]);
     } finally {
       setIsLoadingAgenda(false);
     }
@@ -632,6 +676,43 @@ export default function AgendaBoard() {
   }, [isModalOpen, laserAppointment, smsSettings]);
 
   useEffect(() => {
+    setAppointmentForm((current) => {
+      const cabinId = cabinList.some((cabin) => cabin.id === current.cabinId)
+        ? current.cabinId
+        : alignAppointmentCabinId(current.cabinId, cabinList);
+      const practitionerId = practitionerList.some(
+        (practitioner) => practitioner.id === current.practitionerId,
+      )
+        ? current.practitionerId
+        : alignAppointmentPractitionerId(
+            {
+              id: "",
+              personName: "",
+              phone: "",
+              treatment: "",
+              practitionerId: current.practitionerId,
+              cabinId: current.cabinId,
+              date: current.date,
+              start: current.start,
+              duration: current.duration,
+              status: current.status,
+              source: current.source,
+            },
+            practitionerList,
+          );
+
+      if (
+        cabinId === current.cabinId &&
+        practitionerId === current.practitionerId
+      ) {
+        return current;
+      }
+
+      return { ...current, cabinId, practitionerId };
+    });
+  }, [cabinList, practitionerList]);
+
+  useEffect(() => {
     void loadCenterSmsSettings()
       .then((result) => setSmsSettings(result.settings))
       .catch(() => null);
@@ -805,15 +886,48 @@ export default function AgendaBoard() {
     cabinList.length,
   ]);
 
-  function updateCabin(cabinId: string, updates: Partial<Cabin>) {
-    setCabinList((currentCabins) =>
-      currentCabins.map((cabin) =>
-        cabin.id === cabinId ? { ...cabin, ...updates } : cabin
-      )
-    );
+  function persistCabins(nextCabins: Cabin[]) {
+    cabinListRef.current = nextCabins;
+    if (cabinSaveTimerRef.current) {
+      window.clearTimeout(cabinSaveTimerRef.current);
+    }
+    cabinSaveTimerRef.current = window.setTimeout(() => {
+      void saveCenterCabins(cabinListRef.current).catch((error) => {
+        setAgendaError(
+          error instanceof Error
+            ? error.message
+            : "Les cabines n'ont pas pu être enregistrées.",
+        );
+      });
+    }, 400);
   }
 
-  function addCabin() {
+  function flushCabinSaves() {
+    if (cabinSaveTimerRef.current) {
+      window.clearTimeout(cabinSaveTimerRef.current);
+      cabinSaveTimerRef.current = null;
+    }
+
+    void saveCenterCabins(cabinListRef.current).catch((error) => {
+      setAgendaError(
+        error instanceof Error
+          ? error.message
+          : "Les cabines n'ont pas pu être enregistrées.",
+      );
+    });
+  }
+
+  function updateCabin(cabinId: string, updates: Partial<Cabin>) {
+    setCabinList((currentCabins) => {
+      const nextCabins = currentCabins.map((cabin) =>
+        cabin.id === cabinId ? { ...cabin, ...updates } : cabin
+      );
+      persistCabins(nextCabins);
+      return nextCabins;
+    });
+  }
+
+  async function addCabin() {
     const confirmed = window.confirm(
       "Êtes-vous sûr de vouloir ajouter une cabine ?"
     );
@@ -822,24 +936,25 @@ export default function AgendaBoard() {
       return;
     }
 
-    setCabinList((currentCabins) => {
-      const nextNumber = currentCabins.length + 1;
-      const palette = cabinPalette[(nextNumber - 1) % cabinPalette.length];
-
-      return [
-        ...currentCabins,
-        {
-          id: `cabine-${crypto.randomUUID()}`,
-          name: `Cabine ${nextNumber}`,
-          equipment: "À configurer",
-          color: palette.color,
-          softColor: palette.softColor,
-        },
-      ];
-    });
+    try {
+      const created = await createCenterCabin(cabinList.length);
+      setCabinList((currentCabins) => {
+        const next = [...currentCabins, created];
+        cabinListRef.current = next;
+        return next;
+      });
+      setAgendaNotice(`${created.name} ajoutée.`);
+      setAgendaError("");
+    } catch (error) {
+      setAgendaError(
+        error instanceof Error
+          ? error.message
+          : "La cabine n'a pas pu être ajoutée.",
+      );
+    }
   }
 
-  function removeCabin() {
+  async function removeCabin() {
     const confirmed = window.confirm(
       "Êtes-vous sûr de vouloir retirer une cabine ?"
     );
@@ -848,26 +963,38 @@ export default function AgendaBoard() {
       return;
     }
 
-    setCabinList((currentCabins) => {
-      if (currentCabins.length <= 1) {
-        window.alert("Vous devez garder au moins une cabine.");
-        return currentCabins;
-      }
+    if (cabinList.length <= 1) {
+      window.alert("Vous devez garder au moins une cabine.");
+      return;
+    }
 
-      const cabinToRemove = currentCabins[currentCabins.length - 1];
+    const cabinToRemove = cabinList[cabinList.length - 1];
+    const remainingCabins = cabinList.slice(0, -1);
+    const fallbackCabinId = remainingCabins[0]?.id;
 
+    try {
+      await deleteCenterCabin(cabinToRemove.id);
+      cabinListRef.current = remainingCabins;
+      setCabinList(remainingCabins);
       setAppointmentList((currentAppointments) =>
-        currentAppointments.filter(
-          (appointment) => appointment.cabinId !== cabinToRemove.id
+        currentAppointments.map((appointment) =>
+          appointment.cabinId === cabinToRemove.id && fallbackCabinId
+            ? { ...appointment, cabinId: fallbackCabinId }
+            : appointment
         )
       );
-
       setSelectedCabinIds((current) =>
         current.filter((id) => id !== cabinToRemove.id),
       );
-
-      return currentCabins.slice(0, -1);
-    });
+      setAgendaNotice(`${cabinToRemove.name} retirée.`);
+      setAgendaError("");
+    } catch (error) {
+      setAgendaError(
+        error instanceof Error
+          ? error.message
+          : "La cabine n'a pas pu être retirée.",
+      );
+    }
   }
 
   function persistTeamPlanning(next?: {
@@ -885,6 +1012,14 @@ export default function AgendaBoard() {
     teamSaveTimerRef.current = window.setTimeout(() => {
       void saveTeamPlanning(teamPlanningRef.current).catch(() => null);
     }, 400);
+  }
+
+  function flushTeamPlanning() {
+    if (teamSaveTimerRef.current) {
+      window.clearTimeout(teamSaveTimerRef.current);
+      teamSaveTimerRef.current = 0;
+    }
+    void saveTeamPlanning(teamPlanningRef.current).catch(() => null);
   }
 
   function updateTeamSchedule(
@@ -980,7 +1115,13 @@ export default function AgendaBoard() {
 
   function openAppointmentModal() {
     setAppointmentForm(
-      applyClientPositionStatus({ ...emptyAppointment, date: selectedDate }),
+      applyClientPositionStatus({
+        ...emptyAppointment,
+        date: selectedDate,
+        cabinId: cabinList[0]?.id ?? emptyAppointment.cabinId,
+        practitionerId:
+          practitionerList[0]?.id ?? emptyAppointment.practitionerId,
+      }),
     );
     setContactSearch("");
     setPickedContact(null);
@@ -1043,189 +1184,74 @@ export default function AgendaBoard() {
 
     savingAppointmentRef.current = true;
     setIsSavingAppointment(true);
+    beginAgendaWrite();
+
+    const notifyPlan = {
+      sendSmsNow,
+      sendEmailNow,
+      sendSmsJ7,
+      sendSmsJ5,
+      sendSms48h,
+      sendSms24h,
+      selectedDepositLinkId,
+      sendBirthdaySms,
+      birthDate: appointment.birthDate,
+      email: appointment.email,
+    };
+    const notifyCabinList = cabinList;
+    const notifySmsSettings = smsSettings;
+    const notifyDepositLinks = depositLinks;
+
+    setAppointmentList((currentAppointments) => [
+      ...currentAppointments,
+      appointment,
+    ]);
+    setSelectedDate(appointment.date);
+    setAgendaNotice("RDV enregistré.");
+    applyReminderDefaults();
+    setSelectedDepositLinkId("");
+    setSendBirthdaySms(true);
+    setIsModalOpen(false);
+    savingAppointmentRef.current = false;
+    setIsSavingAppointment(false);
+    void refreshAgendaContacts();
 
     try {
       const savedAppointment = await createCrmAppointment(appointment);
-      const smsVars = {
-        phone: savedAppointment.phone,
-        ...splitPersonName(savedAppointment.personName),
-        date: formatSmsDate(savedAppointment.date),
-        time: savedAppointment.start,
-        treatment: savedAppointment.treatment,
-        confirmationLink: "",
-        appointmentId: savedAppointment.id,
-      };
-      const notices = ["RDV enregistré."];
-      const appointmentEmail = String(
-        savedAppointment.email || appointment.email || "",
-      ).trim();
-      const shouldSendConfirmationEmail =
-        sendEmailNow &&
-        smsSettings?.confirmationEmailEnabled !== false &&
-        Boolean(appointmentEmail);
-      const canNotifyAppointment =
-        appointment.kind !== "Pause" &&
-        appointment.kind !== "Formation" &&
-        appointment.kind !== "Indisponible";
-
-      if (canNotifyAppointment && (savedAppointment.phone || shouldSendConfirmationEmail)) {
-        const reminderJobs: Array<{
-          kind: AppointmentReminderKind;
-          templateId?: string;
-          label: string;
-        }> = [];
-
-        if (
-          savedAppointment.phone &&
-          sendSmsJ7 &&
-          smsSettings?.reminderJ7Enabled !== false &&
-          isLaserRdv(
-            savedAppointment.treatment,
-            savedAppointment.cabinId,
-            cabinList,
-          )
-        ) {
-          reminderJobs.push({
-            kind: "reminder_j7",
-            templateId: smsSettings?.reminderJ7TemplateId,
-            label: "J-7 laser",
-          });
+      let discarded = false;
+      setAppointmentList((currentAppointments) => {
+        if (!currentAppointments.some((item) => item.id === appointment.id)) {
+          discarded = true;
+          return currentAppointments;
         }
 
-        if (savedAppointment.phone && sendSmsJ5 && smsSettings?.reminderJ5Enabled) {
-          reminderJobs.push({
-            kind: "reminder_j5",
-            templateId: smsSettings?.reminderJ5TemplateId,
-            label: "J-5",
-          });
-        }
+        return currentAppointments.map((item) =>
+          item.id === appointment.id ? savedAppointment : item,
+        );
+      });
 
-        if (savedAppointment.phone && sendSms48h && smsSettings?.reminder48hEnabled) {
-          reminderJobs.push({
-            kind: "reminder_48h",
-            templateId: smsSettings?.reminder48hTemplateId,
-            label: "48h",
-          });
-        }
-
-        if (savedAppointment.phone && sendSms24h && smsSettings?.reminder24hEnabled) {
-          reminderJobs.push({
-            kind: "reminder_24h",
-            templateId: smsSettings?.reminder24hTemplateId,
-            label: "24h",
-          });
-        }
-
-        if (
-          (sendSmsNow &&
-            smsSettings?.confirmationEnabled !== false &&
-            savedAppointment.phone) ||
-          shouldSendConfirmationEmail ||
-          reminderJobs.length > 0
-        ) {
-          try {
-            smsVars.confirmationLink = await issueAppointmentConfirmationUrl(
-              savedAppointment.id,
-            );
-          } catch {
-            smsVars.confirmationLink = "";
-          }
-        }
-
-        if (
-          savedAppointment.phone &&
-          sendSmsNow &&
-          smsSettings?.confirmationEnabled !== false
-        ) {
-          const confirmation = await sendSavedTemplateSms(
-            smsSettings?.confirmationTemplateId,
-            smsVars,
-          );
-          notices.push(
-            confirmation.ok
-              ? "SMS de confirmation envoyé."
-              : "Le SMS de confirmation n'a pas pu partir.",
-          );
-        }
-
-        if (shouldSendConfirmationEmail) {
-          const confirmationEmail = await sendAppointmentConfirmationEmail({
-            clientId: savedAppointment.clientId,
-            email: appointmentEmail,
-            firstName: smsVars.firstName,
-            lastName: smsVars.lastName,
-            date: smsVars.date,
-            time: smsVars.time,
-            treatment: smsVars.treatment,
-            confirmationLink: smsVars.confirmationLink,
-          });
-          notices.push(
-            confirmationEmail.ok
-              ? "Mail de confirmation envoyé."
-              : "Le mail de confirmation n'a pas pu partir.",
-          );
-        }
-
-        for (const job of reminderJobs) {
-          const reminder = await scheduleAppointmentReminderSms({
-            appointmentId: savedAppointment.id,
-            templateId: job.templateId,
-            kind: job.kind,
-            vars: smsVars,
-          });
-          notices.push(
-            reminder.ok
-              ? reminder.scheduled
-                ? `SMS ${job.label} programmé.`
-                : `SMS ${job.label} envoyé.`
-              : `Le SMS ${job.label} n'a pas pu être programmé.`,
-          );
-        }
-
-        if (savedAppointment.phone && selectedDepositLinkId) {
-          notices.push(
-            await sendSelectedDepositLinkSms(
-              savedAppointment,
-              selectedDepositLinkId,
-              depositLinks,
-              centerNameRef.current,
-            ),
-          );
-        }
-
-        if (savedAppointment.phone && appointment.birthDate) {
-          const birthday = await syncBirthdaySms({
-            clientId: savedAppointment.clientId,
-            birthDate: appointment.birthDate,
-            phone: savedAppointment.phone,
-            firstName: smsVars.firstName,
-            lastName: smsVars.lastName,
-            enabled: sendBirthdaySms && smsSettings?.birthdaySmsEnabled !== false,
-          });
-          notices.push(
-            sendBirthdaySms
-              ? birthday.ok
-                ? birthday.sent
-                  ? "SMS anniversaire envoyé."
-                  : "SMS anniversaire programmé pour le jour J."
-                : "Le SMS anniversaire n'a pas pu être programmé."
-              : "Date d'anniversaire enregistrée.",
-          );
-        }
+      if (discarded) {
+        void deleteCrmAppointment(savedAppointment.id);
+        void cancelAppointmentSmsJobs(savedAppointment.id);
+        return;
       }
 
-      setAppointmentList((currentAppointments) => [
-        ...currentAppointments,
-        savedAppointment,
-      ]);
-      setSelectedDate(savedAppointment.date);
-      setAgendaNotice(notices.join(" "));
-      applyReminderDefaults();
-      setSelectedDepositLinkId("");
-      setSendBirthdaySms(true);
-      setIsModalOpen(false);
-      void refreshAgendaContacts();
+      void notifyCreatedAppointment(savedAppointment, {
+        ...notifyPlan,
+        cabinList: notifyCabinList,
+        smsSettings: notifySmsSettings,
+        depositLinks: notifyDepositLinks,
+        centerName: centerNameRef.current,
+      }).then((extraNotices) => {
+        if (extraNotices.length > 0) {
+          setAgendaNotice(["RDV enregistré.", ...extraNotices].join(" "));
+        }
+      });
     } catch (error) {
+      setAppointmentList((currentAppointments) =>
+        currentAppointments.filter((item) => item.id !== appointment.id),
+      );
+      setAgendaNotice("");
       setAgendaError(
         error instanceof Error
           ? error.message
@@ -1234,6 +1260,7 @@ export default function AgendaBoard() {
     } finally {
       savingAppointmentRef.current = false;
       setIsSavingAppointment(false);
+      endAgendaWrite();
     }
   }
 
@@ -1275,11 +1302,12 @@ export default function AgendaBoard() {
           : cabinTreatment,
     });
 
+    beginAgendaWrite();
     persistCrmAppointment(updatedAppointment)
-      .then(async (savedAppointment) => {
+      .then((savedAppointment) => {
         replaceAppointment(appointmentId, savedAppointment);
         unlinkPublicBooking(appointmentBeforeMove);
-        await rescheduleAppointmentSmsJobs(savedAppointment.id);
+        void rescheduleAppointmentSmsJobs(savedAppointment.id);
         if (canOfferAppointmentNotify(savedAppointment, smsSettings)) {
           setMoveNotifyAppointment(savedAppointment);
         } else {
@@ -1287,13 +1315,22 @@ export default function AgendaBoard() {
         }
       })
       .catch((error) => {
-      setAgendaError(
-        error instanceof Error
-          ? error.message
-          : "Le déplacement du RDV n'a pas pu être sauvegardé.",
-      );
-      void refreshAgenda();
-    });
+        setAppointmentList((currentAppointments) =>
+          currentAppointments.map((appointment) =>
+            appointment.id === appointmentId
+              ? appointmentBeforeMove
+              : appointment,
+          ),
+        );
+        setAgendaError(
+          error instanceof Error
+            ? error.message
+            : "Le déplacement du RDV n'a pas pu être sauvegardé.",
+        );
+      })
+      .finally(() => {
+        endAgendaWrite();
+      });
   }
 
   async function sendSelectedConfirmations(
@@ -1317,11 +1354,20 @@ export default function AgendaBoard() {
   }
 
   async function deleteAppointment(appointmentId: string) {
+    if (deletingAppointmentIdsRef.current.has(appointmentId)) {
+      return false;
+    }
+
+    beginAgendaWrite();
+    deletingAppointmentIdsRef.current.add(appointmentId);
+
     const confirmed = window.confirm(
       "Êtes-vous sûr de vouloir supprimer le RDV ?"
     );
 
     if (!confirmed) {
+      deletingAppointmentIdsRef.current.delete(appointmentId);
+      endAgendaWrite();
       return false;
     }
 
@@ -1339,9 +1385,9 @@ export default function AgendaBoard() {
 
     try {
       unlinkPublicBooking(appointmentToDelete);
-      await cancelAppointmentSmsJobs(appointmentId);
       await deleteCrmAppointment(appointmentId);
-      setAgendaNotice("RDV supprimé. Les rappels SMS prévus pour ce rendez-vous sont annulés.");
+      void cancelAppointmentSmsJobs(appointmentId);
+      setAgendaNotice("RDV supprimé.");
       return true;
     } catch (error) {
       setAppointmentList(previousAppointments);
@@ -1351,6 +1397,9 @@ export default function AgendaBoard() {
           : "Le RDV n'a pas pu être supprimé.",
       );
       return false;
+    } finally {
+      deletingAppointmentIdsRef.current.delete(appointmentId);
+      endAgendaWrite();
     }
   }
 
@@ -1368,38 +1417,38 @@ export default function AgendaBoard() {
     );
     saveAppointmentStatusOverride(nextAppointment);
     setSelectedDate(updatedAppointment.date);
+    beginAgendaWrite();
 
     try {
       const savedAppointment = await persistCrmAppointment(nextAppointment);
       replaceAppointment(localId, savedAppointment);
       unlinkPublicBooking(nextAppointment);
       if (savedAppointment.status === "Annulation") {
-        await cancelAppointmentSmsJobs(savedAppointment.id);
+        void cancelAppointmentSmsJobs(savedAppointment.id);
         setAgendaNotice("RDV mis à jour. Les rappels SMS prévus sont annulés.");
       } else {
-        await rescheduleAppointmentSmsJobs(savedAppointment.id);
-        const confirmationNotices = await sendAppointmentConfirmations(
-          savedAppointment,
-          {
-            sms: Boolean(notify?.sms),
-            email: Boolean(notify?.email),
-            settings: smsSettings,
-          },
-        );
-        const depositNotice = notify?.depositLinkId
-          ? await sendSelectedDepositLinkSms(
-              savedAppointment,
-              notify.depositLinkId,
-              depositLinks,
-              centerNameRef.current,
-            )
-          : "";
-        setAgendaNotice(
-          ["RDV mis à jour.", ...confirmationNotices, depositNotice]
-            .filter(Boolean)
-            .join(" ")
-            .trim(),
-        );
+        void rescheduleAppointmentSmsJobs(savedAppointment.id);
+        setAgendaNotice("RDV mis à jour.");
+        void sendAppointmentConfirmations(savedAppointment, {
+          sms: Boolean(notify?.sms),
+          email: Boolean(notify?.email),
+          settings: smsSettings,
+        }).then(async (confirmationNotices) => {
+          const depositNotice = notify?.depositLinkId
+            ? await sendSelectedDepositLinkSms(
+                savedAppointment,
+                notify.depositLinkId,
+                depositLinks,
+                centerNameRef.current,
+              )
+            : "";
+          setAgendaNotice(
+            ["RDV mis à jour.", ...confirmationNotices, depositNotice]
+              .filter(Boolean)
+              .join(" ")
+              .trim(),
+          );
+        });
       }
     } catch (error) {
       setAppointmentList(previousAppointments);
@@ -1408,6 +1457,8 @@ export default function AgendaBoard() {
           ? error.message
           : "Le RDV n'a pas pu être mis à jour.",
       );
+    } finally {
+      endAgendaWrite();
     }
   }
 
@@ -1446,6 +1497,7 @@ export default function AgendaBoard() {
       )
     );
     saveAppointmentStatusOverride(updatedAppointment);
+    beginAgendaWrite();
 
     persistCrmAppointment(updatedAppointment)
       .then((savedAppointment) => {
@@ -1459,7 +1511,10 @@ export default function AgendaBoard() {
           ? error.message
           : "Le statut du RDV n'a pas pu être sauvegardé.",
       );
-    });
+    })
+      .finally(() => {
+        endAgendaWrite();
+      });
   }
 
   const contactMatches =
@@ -1632,6 +1687,7 @@ export default function AgendaBoard() {
           </div>
 
           <div className="flex flex-wrap items-center gap-3">
+            <NotificationsBell />
             <div className="flex h-11 items-center rounded-xl border border-slate-200 bg-white p-1">
               <button
                 type="button"
@@ -2037,18 +2093,60 @@ export default function AgendaBoard() {
           <TeamPlanning
             practitioners={practitionerList}
             schedules={teamSchedules}
+            selectedDate={selectedDate}
             onAddPractitioner={addPractitioner}
             onPractitionerChange={updatePractitioner}
             onRemovePractitioner={removePractitioner}
             onScheduleChange={updateTeamSchedule}
+            onValidateHours={flushTeamPlanning}
           />
         )}
       </div>
 
         {activeTab === "agenda" && agendaView === "day" ? (
-        <section className="sticky top-0 z-20 h-dvh bg-slate-100 px-4 pb-3 pt-1 lg:px-8">
-          <div className="mx-auto h-full min-w-0 max-w-[1800px]">
-          <Card className="relative z-0 h-full overflow-hidden border-slate-200 py-0 shadow-sm">
+        <section className="sticky top-0 z-30 flex h-dvh flex-col bg-slate-100 px-4 pb-3 pt-1 lg:px-8">
+          <div className="mx-auto flex h-full min-w-0 max-w-[1800px] flex-col">
+          <div className="mb-1 flex shrink-0 flex-wrap items-center gap-2">
+            <div className="flex items-center gap-1 rounded-xl border border-slate-200 bg-white p-1 shadow-sm">
+              <button
+                type="button"
+                onClick={() => slideCabinBoard(-1)}
+                className="flex h-9 w-9 items-center justify-center rounded-lg text-slate-500 transition-colors hover:bg-slate-50 hover:text-slate-950"
+                aria-label="Voir les cabines à gauche"
+              >
+                <ChevronLeft className="h-4 w-4" />
+              </button>
+              <button
+                type="button"
+                onClick={() => slideCabinBoard(1)}
+                className="flex h-9 w-9 items-center justify-center rounded-lg text-slate-500 transition-colors hover:bg-slate-50 hover:text-slate-950"
+                aria-label="Voir les cabines à droite"
+              >
+                <ChevronRight className="h-4 w-4" />
+              </button>
+              <button
+                type="button"
+                onClick={() => void removeCabin()}
+                className="flex h-9 w-9 items-center justify-center rounded-lg text-slate-500 transition-colors hover:bg-red-50 hover:text-red-600"
+                aria-label="Retirer une cabine"
+              >
+                <Minus className="h-4 w-4" />
+              </button>
+              <button
+                type="button"
+                onClick={() => void addCabin()}
+                className="flex h-9 w-9 items-center justify-center rounded-lg bg-blue-600 text-white transition-colors hover:bg-blue-700"
+                aria-label="Ajouter une cabine"
+              >
+                <Plus className="h-4 w-4" />
+              </button>
+            </div>
+            <p className="text-xs font-semibold text-slate-500">
+              Renommez les cabines, ajoutez-en ou retirez-en. Les changements
+              sont enregistrés.
+            </p>
+          </div>
+          <Card className="relative z-0 min-h-0 flex-1 overflow-hidden border-slate-200 py-0 shadow-sm">
             <CardContent className="relative h-full min-w-0 p-0">
               <div
                 ref={boardScrollRef}
@@ -2070,14 +2168,17 @@ export default function AgendaBoard() {
                 {visibleCabinList.map((cabin) => (
                   <div
                     key={cabin.id}
-                    className={`border-r border-slate-100 bg-gradient-to-br ${cabin.color} px-2.5 py-1.5 text-white last:border-r-0`}
+                    className={`relative z-50 border-r border-slate-100 bg-gradient-to-br ${cabin.color} px-2.5 py-1.5 text-white last:border-r-0`}
+                    onMouseDown={(event) => event.stopPropagation()}
+                    onPointerDown={(event) => event.stopPropagation()}
                   >
                     <input
                       value={cabin.name}
                       onChange={(event) =>
                         updateCabin(cabin.id, { name: event.target.value })
                       }
-                      className="w-full rounded-md bg-white/10 px-2 py-1 font-bold text-white outline-none placeholder:text-white/70 focus:bg-white/20"
+                      onBlur={flushCabinSaves}
+                      className="pointer-events-auto relative z-50 w-full rounded-md bg-white/10 px-2 py-1 font-bold text-white outline-none placeholder:text-white/70 focus:bg-white/20"
                     />
                     <input
                       value={cabin.equipment}
@@ -2086,7 +2187,8 @@ export default function AgendaBoard() {
                           equipment: event.target.value,
                         })
                       }
-                      className="mt-1 w-full rounded-md bg-white/10 px-2 py-1 text-xs font-medium text-white/80 outline-none placeholder:text-white/60 focus:bg-white/20"
+                      onBlur={flushCabinSaves}
+                      className="pointer-events-auto relative z-50 mt-1 w-full rounded-md bg-white/10 px-2 py-1 text-xs font-medium text-white/80 outline-none placeholder:text-white/60 focus:bg-white/20"
                     />
                   </div>
                 ))}
@@ -2914,6 +3016,7 @@ export default function AgendaBoard() {
             practitionerList={practitionerList}
             depositLinks={depositLinks}
             smsSettings={smsSettings}
+            paymentTone={getPaymentTone(balanceDueIndex, selectedAppointment)}
             onClose={() => setSelectedAppointmentId(null)}
             onDelete={() => deleteAppointment(selectedAppointment.id)}
             onSave={updateAppointment}
@@ -3310,8 +3413,10 @@ function WeekSchedule({
                         data-appointment-id={appointment.id}
                         onClick={() => onOpen(appointment.id)}
                         className={`w-full rounded-xl border p-3 text-left text-sm shadow-sm transition-transform hover:-translate-y-0.5 hover:shadow-md ${
-                          statusClasses[appointment.status]
-                        } ${tone ? paymentToneStyles[tone].ring : ""}`}
+                          tone
+                            ? paymentToneStyles[tone].fill
+                            : statusClasses[appointment.status]
+                        }`}
                         role="button"
                         tabIndex={0}
                         onKeyDown={(event) => {
@@ -3325,10 +3430,7 @@ function WeekSchedule({
                             <p className="flex items-center gap-1.5 font-semibold">
                               {appointment.start} · {appointment.personName}
                               {tone ? (
-                                <CreditCard
-                                  className={`h-3.5 w-3.5 shrink-0 ${paymentToneStyles[tone].icon}`}
-                                  aria-label={paymentToneStyles[tone].label}
-                                />
+                                <PaymentStatusMark tone={tone} />
                               ) : null}
                             </p>
                             <p className="mt-1 text-xs font-semibold opacity-75">
@@ -3371,13 +3473,16 @@ function WeekSchedule({
 function TeamPlanning({
   practitioners,
   schedules,
+  selectedDate,
   onAddPractitioner,
   onPractitionerChange,
   onRemovePractitioner,
   onScheduleChange,
+  onValidateHours,
 }: {
   practitioners: Practitioner[];
   schedules: TeamSchedule[];
+  selectedDate: string;
   onAddPractitioner: () => void;
   onPractitionerChange: (
     practitionerId: string,
@@ -3388,8 +3493,10 @@ function TeamPlanning({
     practitionerId: string,
     updates: Partial<TeamSchedule>
   ) => void;
+  onValidateHours: () => void;
 }) {
   const teamTimeOptions = timeOptions.filter((hour) => hour !== "19:00");
+  const defaultWeekStart = mondayIso(selectedDate);
 
   return (
     <div className="space-y-6">
@@ -3403,9 +3510,9 @@ function TeamPlanning({
               </h2>
             </div>
             <p className="mt-2 text-sm text-slate-500">
-              Modifiez les noms, les couleurs et les horaires de chaque jour.
-              Les absences se posent d’une date à une autre, avec un motif
-              modifiable.
+              Passez en période 1 semaine pour Gap et les plannings qui
+              changent. Validez chaque praticien(ne), puis la semaine suivante
+              reprend les mêmes horaires.
             </p>
           </div>
           <Button
@@ -3423,256 +3530,466 @@ function TeamPlanning({
           const practitioner = practitioners.find(
             (item) => item.id === schedule.practitionerId
           );
-          const activeDays = weekDays.filter((day) =>
-            schedule.workingDays.includes(day.value)
-          );
 
           if (!practitioner) {
             return null;
           }
 
           return (
-            <Card
+            <TeamPractitionerCard
               key={schedule.practitionerId}
-              className="border-slate-200 py-0 shadow-sm"
+              practitioner={practitioner}
+              schedule={schedule}
+              practitionersCount={practitioners.length}
+              teamTimeOptions={teamTimeOptions}
+              defaultWeekStart={defaultWeekStart}
+              onPractitionerChange={onPractitionerChange}
+              onRemovePractitioner={onRemovePractitioner}
+              onScheduleChange={onScheduleChange}
+              onValidateHours={onValidateHours}
+            />
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function TeamPractitionerCard({
+  practitioner,
+  schedule,
+  practitionersCount,
+  teamTimeOptions,
+  defaultWeekStart,
+  onPractitionerChange,
+  onRemovePractitioner,
+  onScheduleChange,
+  onValidateHours,
+}: {
+  practitioner: Practitioner;
+  schedule: TeamSchedule;
+  practitionersCount: number;
+  teamTimeOptions: string[];
+  defaultWeekStart: string;
+  onPractitionerChange: (
+    practitionerId: string,
+    updates: Partial<Practitioner>,
+  ) => void;
+  onRemovePractitioner: (practitionerId: string) => void;
+  onScheduleChange: (
+    practitionerId: string,
+    updates: Partial<TeamSchedule>
+  ) => void;
+  onValidateHours: () => void;
+}) {
+  const [weekStart, setWeekStart] = useState(() => mondayIso(defaultWeekStart));
+  const [draft, setDraft] = useState<TeamWeekHours | null>(null);
+  const [validatedLabel, setValidatedLabel] = useState("");
+  const weekMode = isWeekPeriod(schedule);
+  const savedWeek = hoursForWeek(schedule, weekStart);
+  const editor = draft ?? savedWeek;
+  const weekValidated = weekHasValidatedHours(schedule, weekStart) && !draft;
+  const carriedForward =
+    weekMode &&
+    !weekHasValidatedHours(schedule, weekStart) &&
+    schedule.weekHours.some((item) => item.weekStart < weekStart);
+  const activeDays = weekDays.filter((day) =>
+    (weekMode ? editor.workingDays : schedule.workingDays).includes(day.value),
+  );
+
+  function changePeriod(value: string) {
+    const period: TeamPeriod =
+      value === "week" ? "week" : value === "1" ? 1 : value === "6" ? 6 : 3;
+    onScheduleChange(schedule.practitionerId, {
+      period,
+      months: period === "week" ? 1 : period,
+    });
+    setDraft(null);
+    setValidatedLabel("");
+  }
+
+  function applyDraft(patch: Partial<TeamWeekHours>) {
+    setDraft((current) => ({
+      ...(current ?? savedWeek),
+      ...patch,
+      weekStart,
+    }));
+    setValidatedLabel("");
+  }
+
+  function persistValidatedHours(hours: TeamWeekHours, nextWeek = false) {
+    const weekHours = upsertWeekHours(schedule.weekHours, hours);
+    onScheduleChange(schedule.practitionerId, {
+      weekHours,
+      workingDays: hours.workingDays,
+      startTime: hours.startTime,
+      endTime: hours.endTime,
+      dayHours: hours.dayHours,
+      startDate: hours.weekStart,
+      period: schedule.period,
+      months: schedule.months,
+    });
+    setDraft(null);
+    setValidatedLabel(
+      nextWeek ? "Validée. Semaine suivante reprise." : "Horaires validés",
+    );
+    onValidateHours();
+
+    if (nextWeek) {
+      setWeekStart(addDaysToIso(hours.weekStart, 7));
+    }
+  }
+
+  function validateCurrentWeek() {
+    if (weekMode) {
+      persistValidatedHours(editor);
+      return;
+    }
+
+    onValidateHours();
+    setValidatedLabel("Horaires validés");
+  }
+
+  function validateAndOpenNextWeek() {
+    persistValidatedHours(editor, true);
+  }
+
+  function goToWeek(offsetWeeks: number) {
+    setWeekStart((current) => addDaysToIso(current, offsetWeeks * 7));
+    setDraft(null);
+    setValidatedLabel("");
+  }
+
+  return (
+    <Card className="border-slate-200 py-0 shadow-sm">
+      <CardContent className="space-y-4 p-5">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0 flex-1 space-y-2">
+            <div className="flex items-center gap-3">
+              <span
+                className={`h-3.5 w-3.5 shrink-0 rounded-full ${practitioner.color}`}
+              />
+              <Input
+                value={practitioner.name}
+                onChange={(event) =>
+                  onPractitionerChange(schedule.practitionerId, {
+                    name: event.target.value,
+                  })
+                }
+                className="h-10 font-medium"
+                aria-label="Nom de la praticienne"
+              />
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {practitionerColorOptions.map((color) => (
+                <button
+                  key={color}
+                  type="button"
+                  onClick={() =>
+                    onPractitionerChange(schedule.practitionerId, {
+                      color,
+                    })
+                  }
+                  className={`h-6 w-6 rounded-full ${color} ${
+                    practitioner.color === color
+                      ? "ring-2 ring-slate-900 ring-offset-2"
+                      : "opacity-70 hover:opacity-100"
+                  }`}
+                  aria-label={`Couleur ${color}`}
+                />
+              ))}
+            </div>
+          </div>
+          <div className="flex flex-col items-end gap-2">
+            <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-500">
+              {activeDays.length} j / semaine
+            </span>
+            {practitionersCount > 1 ? (
+              <button
+                type="button"
+                onClick={() => onRemovePractitioner(schedule.practitionerId)}
+                className="text-xs font-semibold text-slate-400 hover:text-rose-600"
+              >
+                Retirer
+              </button>
+            ) : null}
+          </div>
+        </div>
+
+        {weekMode ? (
+          <div className="flex items-center justify-between gap-2 rounded-2xl border border-violet-100 bg-violet-50 px-2 py-2">
+            <button
+              type="button"
+              onClick={() => goToWeek(-1)}
+              className="flex h-9 w-9 items-center justify-center rounded-xl bg-white text-violet-700 shadow-sm"
+              aria-label="Semaine précédente"
             >
-              <CardContent className="space-y-4 p-5">
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div className="min-w-0 flex-1 space-y-2">
-                    <div className="flex items-center gap-3">
-                      <span
-                        className={`h-3.5 w-3.5 shrink-0 rounded-full ${practitioner.color}`}
-                      />
-                      <Input
-                        value={practitioner.name}
-                        onChange={(event) =>
-                          onPractitionerChange(schedule.practitionerId, {
-                            name: event.target.value,
-                          })
-                        }
-                        className="h-10 font-medium"
-                        aria-label="Nom de la praticienne"
-                      />
-                    </div>
-                    <div className="flex flex-wrap gap-1.5">
-                      {practitionerColorOptions.map((color) => (
-                        <button
-                          key={color}
-                          type="button"
-                          onClick={() =>
-                            onPractitionerChange(schedule.practitionerId, {
-                              color,
-                            })
-                          }
-                          className={`h-6 w-6 rounded-full ${color} ${
-                            practitioner.color === color
-                              ? "ring-2 ring-slate-900 ring-offset-2"
-                              : "opacity-70 hover:opacity-100"
-                          }`}
-                          aria-label={`Couleur ${color}`}
-                        />
-                      ))}
-                    </div>
-                  </div>
-                  <div className="flex flex-col items-end gap-2">
-                    <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-500">
-                      {activeDays.length} j / semaine
-                    </span>
-                    {practitioners.length > 1 ? (
-                      <button
-                        type="button"
-                        onClick={() =>
-                          onRemovePractitioner(schedule.practitionerId)
-                        }
-                        className="text-xs font-semibold text-slate-400 hover:text-rose-600"
-                      >
-                        Retirer
-                      </button>
-                    ) : null}
-                  </div>
-                </div>
+              <ChevronLeft className="h-4 w-4" />
+            </button>
+            <div className="min-w-0 text-center">
+              <p className="text-sm font-semibold text-slate-950">
+                Semaine {formatWeekRange(weekStart)}
+              </p>
+              <p className="text-xs font-medium text-violet-700">
+                {weekValidated
+                  ? "Semaine validée"
+                  : carriedForward
+                    ? "Mêmes horaires que la semaine précédente"
+                    : "À valider pour cette semaine"}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => goToWeek(1)}
+              className="flex h-9 w-9 items-center justify-center rounded-xl bg-white text-violet-700 shadow-sm"
+              aria-label="Semaine suivante"
+            >
+              <ChevronRight className="h-4 w-4" />
+            </button>
+          </div>
+        ) : null}
 
-                <div className="grid gap-3 md:grid-cols-[1fr_120px_1fr]">
-                  <Field label="Début">
-                    <Input
-                      type="date"
-                      value={schedule.startDate}
-                      onChange={(event) =>
-                        onScheduleChange(schedule.practitionerId, {
-                          startDate: event.target.value,
-                        })
-                      }
-                    />
-                  </Field>
+        <div className="grid gap-3 md:grid-cols-[1fr_140px_1fr]">
+          {weekMode ? null : (
+            <Field label="Début">
+              <Input
+                type="date"
+                value={schedule.startDate}
+                onChange={(event) =>
+                  onScheduleChange(schedule.practitionerId, {
+                    startDate: event.target.value,
+                  })
+                }
+              />
+            </Field>
+          )}
 
-                  <Field label="Période">
-                    <Select
-                      value={String(schedule.months)}
-                      options={["1", "3", "6"]}
-                      labels={{
-                        "1": "1 mois",
-                        "3": "3 mois",
-                        "6": "6 mois",
-                      }}
-                      onChange={(value) =>
-                        onScheduleChange(schedule.practitionerId, {
-                          months: Number(value) as TeamSchedule["months"],
-                        })
-                      }
-                    />
-                  </Field>
+          <Field label="Période">
+            <Select
+              value={weekMode ? "week" : String(schedule.period ?? schedule.months)}
+              options={["week", "1", "3", "6"]}
+              labels={{
+                week: "1 semaine",
+                "1": "1 mois",
+                "3": "3 mois",
+                "6": "6 mois",
+              }}
+              onChange={changePeriod}
+            />
+          </Field>
 
-                  <div className="grid grid-cols-2 gap-2">
-                    <Field label="Arrivée">
-                      <Select
-                        value={schedule.startTime}
-                        options={teamTimeOptions}
-                        onChange={(value) =>
-                          onScheduleChange(schedule.practitionerId, {
-                            startTime: value,
-                          })
-                        }
-                      />
-                    </Field>
-                    <Field label="Départ">
-                      <Select
-                        value={schedule.endTime}
-                        options={timeOptions}
-                        onChange={(value) =>
-                          onScheduleChange(schedule.practitionerId, {
-                            endTime: value,
-                          })
-                        }
-                      />
-                    </Field>
-                  </div>
-                </div>
+          <div className={`grid grid-cols-2 gap-2 ${weekMode ? "md:col-span-2" : ""}`}>
+            <Field label="Arrivée">
+              <Select
+                value={weekMode ? editor.startTime : schedule.startTime}
+                options={teamTimeOptions}
+                onChange={(value) =>
+                  weekMode
+                    ? applyDraft({ startTime: value })
+                    : onScheduleChange(schedule.practitionerId, {
+                        startTime: value,
+                      })
+                }
+              />
+            </Field>
+            <Field label="Départ">
+              <Select
+                value={weekMode ? editor.endTime : schedule.endTime}
+                options={timeOptions}
+                onChange={(value) =>
+                  weekMode
+                    ? applyDraft({ endTime: value })
+                    : onScheduleChange(schedule.practitionerId, {
+                        endTime: value,
+                      })
+                }
+              />
+            </Field>
+          </div>
+        </div>
 
-                <div>
-                  <div className="mb-2 flex flex-wrap gap-2">
-                    <button
-                      type="button"
-                      onClick={() =>
-                        onScheduleChange(schedule.practitionerId, {
-                          workingDays: [1, 2, 3, 4, 5],
-                        })
-                      }
-                      className="rounded-lg bg-blue-50 px-3 py-1.5 text-xs font-bold text-blue-700 transition-colors hover:bg-blue-100"
-                    >
-                      Semaine
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        onScheduleChange(schedule.practitionerId, {
-                          workingDays: [1, 2, 3, 5, 6],
-                        })
-                      }
-                      className="rounded-lg bg-violet-50 px-3 py-1.5 text-xs font-bold text-violet-700 transition-colors hover:bg-violet-100"
-                    >
-                      Sauf jeu/dim
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        onScheduleChange(schedule.practitionerId, {
-                          workingDays: [],
-                        })
-                      }
-                      className="rounded-lg bg-slate-100 px-3 py-1.5 text-xs font-bold text-slate-500 transition-colors hover:bg-slate-200"
-                    >
-                      Repos
-                    </button>
-                  </div>
+        <div>
+          <div className="mb-2 flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() =>
+                weekMode
+                  ? applyDraft({ workingDays: [1, 2, 3, 4, 5] })
+                  : onScheduleChange(schedule.practitionerId, {
+                      workingDays: [1, 2, 3, 4, 5],
+                    })
+              }
+              className="rounded-lg bg-blue-50 px-3 py-1.5 text-xs font-bold text-blue-700 transition-colors hover:bg-blue-100"
+            >
+              Semaine
+            </button>
+            <button
+              type="button"
+              onClick={() =>
+                weekMode
+                  ? applyDraft({ workingDays: [1, 2, 3, 5, 6] })
+                  : onScheduleChange(schedule.practitionerId, {
+                      workingDays: [1, 2, 3, 5, 6],
+                    })
+              }
+              className="rounded-lg bg-violet-50 px-3 py-1.5 text-xs font-bold text-violet-700 transition-colors hover:bg-violet-100"
+            >
+              Sauf jeu/dim
+            </button>
+            <button
+              type="button"
+              onClick={() =>
+                weekMode
+                  ? applyDraft({ workingDays: [], dayHours: [] })
+                  : onScheduleChange(schedule.practitionerId, {
+                      workingDays: [],
+                    })
+              }
+              className="rounded-lg bg-slate-100 px-3 py-1.5 text-xs font-bold text-slate-500 transition-colors hover:bg-slate-200"
+            >
+              Repos
+            </button>
+          </div>
 
-                  <div className="grid grid-cols-7 gap-2">
-                    {weekDays.map((day) => {
-                      const checked = schedule.workingDays.includes(day.value);
+          <div className="grid grid-cols-7 gap-2">
+            {weekDays.map((day) => {
+              const workingDays = weekMode
+                ? editor.workingDays
+                : schedule.workingDays;
+              const checked = workingDays.includes(day.value);
 
-                      return (
-                        <button
-                          key={day.value}
-                          type="button"
-                          onClick={() =>
-                            onScheduleChange(schedule.practitionerId, {
-                              workingDays: checked
-                                ? schedule.workingDays.filter(
-                                    (value) => value !== day.value
-                                  )
-                                : [...schedule.workingDays, day.value].sort(
-                                    (left, right) => left - right,
-                                  ),
-                              dayHours: checked
-                                ? schedule.dayHours.filter(
-                                    (item) => item.weekday !== day.value,
-                                  )
-                                : schedule.dayHours,
-                            })
-                          }
-                          className={`min-h-16 rounded-xl border text-sm font-medium transition-colors ${
-                            checked
-                              ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                              : "border-slate-200 bg-slate-50 text-slate-300"
-                          }`}
-                        >
-                          <span className="block">{day.label}</span>
-                          <span className="mt-1 block text-lg">
-                            {checked ? "✓" : "—"}
-                          </span>
-                        </button>
-                      );
-                    })}
-                  </div>
-
-                  {activeDays.length > 0 ? (
-                    <div className="mt-3 space-y-2">
-                      <p className="text-xs font-semibold text-slate-500">
-                        Horaires par jour
-                      </p>
-                      {activeDays.map((day) => {
-                        const hours = dayHoursForSchedule(schedule, day.value);
-                        return (
-                          <div
-                            key={day.value}
-                            className="grid grid-cols-[64px_1fr_1fr] items-center gap-2"
-                          >
-                            <span className="text-sm font-medium text-slate-700">
-                              {day.label}
-                            </span>
-                            <Select
-                              value={hours.startTime}
-                              options={teamTimeOptions}
-                              onChange={(value) =>
-                                onScheduleChange(schedule.practitionerId, {
-                                  dayHours: upsertDayHours(
-                                    schedule.dayHours,
-                                    day.value,
-                                    value,
-                                    hours.endTime,
-                                  ),
-                                })
-                              }
-                            />
-                            <Select
-                              value={hours.endTime}
-                              options={timeOptions}
-                              onChange={(value) =>
-                                onScheduleChange(schedule.practitionerId, {
-                                  dayHours: upsertDayHours(
-                                    schedule.dayHours,
-                                    day.value,
-                                    hours.startTime,
-                                    value,
-                                  ),
-                                })
-                              }
-                            />
-                          </div>
+              return (
+                <button
+                  key={day.value}
+                  type="button"
+                  onClick={() => {
+                    const nextDays = checked
+                      ? workingDays.filter((value) => value !== day.value)
+                      : [...workingDays, day.value].sort(
+                          (left, right) => left - right,
                         );
-                      })}
-                    </div>
-                  ) : null}
-                </div>
+                    const sourceHours = weekMode
+                      ? editor.dayHours
+                      : schedule.dayHours;
+                    const nextHours = checked
+                      ? sourceHours.filter((item) => item.weekday !== day.value)
+                      : sourceHours;
+
+                    if (weekMode) {
+                      applyDraft({
+                        workingDays: nextDays,
+                        dayHours: nextHours,
+                      });
+                      return;
+                    }
+
+                    onScheduleChange(schedule.practitionerId, {
+                      workingDays: nextDays,
+                      dayHours: nextHours,
+                    });
+                  }}
+                  className={`min-h-16 rounded-xl border text-sm font-medium transition-colors ${
+                    checked
+                      ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                      : "border-slate-200 bg-slate-50 text-slate-300"
+                  }`}
+                >
+                  <span className="block">{day.label}</span>
+                  <span className="mt-1 block text-lg">
+                    {checked ? "✓" : "—"}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+
+          {activeDays.length > 0 ? (
+            <div className="mt-3 space-y-2">
+              <p className="text-xs font-semibold text-slate-500">
+                Horaires par jour
+                {weekMode ? ` · ${formatWeekRange(weekStart)}` : ""}
+              </p>
+              {activeDays.map((day) => {
+                const hours = weekMode
+                  ? dayHoursForWeekHours(editor, day.value)
+                  : dayHoursForSchedule(schedule, day.value);
+                return (
+                  <div
+                    key={day.value}
+                    className="grid grid-cols-[64px_1fr_1fr] items-center gap-2"
+                  >
+                    <span className="text-sm font-medium text-slate-700">
+                      {day.label}
+                    </span>
+                    <Select
+                      value={hours.startTime}
+                      options={teamTimeOptions}
+                      onChange={(value) => {
+                        const nextHours = upsertDayHours(
+                          weekMode ? editor.dayHours : schedule.dayHours,
+                          day.value,
+                          value,
+                          hours.endTime,
+                        );
+                        if (weekMode) {
+                          applyDraft({ dayHours: nextHours });
+                          return;
+                        }
+                        onScheduleChange(schedule.practitionerId, {
+                          dayHours: nextHours,
+                        });
+                      }}
+                    />
+                    <Select
+                      value={hours.endTime}
+                      options={timeOptions}
+                      onChange={(value) => {
+                        const nextHours = upsertDayHours(
+                          weekMode ? editor.dayHours : schedule.dayHours,
+                          day.value,
+                          hours.startTime,
+                          value,
+                        );
+                        if (weekMode) {
+                          applyDraft({ dayHours: nextHours });
+                          return;
+                        }
+                        onScheduleChange(schedule.practitionerId, {
+                          dayHours: nextHours,
+                        });
+                      }}
+                    />
+                  </div>
+                );
+              })}
+            </div>
+          ) : null}
+
+          <div className="mt-4 flex flex-wrap items-center gap-2">
+            <Button
+              type="button"
+              className="bg-violet-700 hover:bg-violet-800"
+              onClick={validateCurrentWeek}
+            >
+              <CheckCircle2 className="mr-2 h-4 w-4" />
+              Valider les horaires
+            </Button>
+            {weekMode ? (
+              <Button
+                type="button"
+                variant="outline"
+                onClick={validateAndOpenNextWeek}
+              >
+                Valider et semaine suivante
+              </Button>
+            ) : null}
+            {validatedLabel ? (
+              <span className="text-xs font-semibold text-emerald-700">
+                {validatedLabel}
+              </span>
+            ) : null}
+          </div>
+        </div>
 
                 <div className="rounded-2xl border border-slate-100 bg-slate-50 p-3">
                   <div className="mb-3 grid gap-2 md:grid-cols-2">
@@ -3807,12 +4124,8 @@ function TeamPlanning({
                     </p>
                   )}
                 </div>
-              </CardContent>
-            </Card>
-          );
-        })}
-      </div>
-    </div>
+      </CardContent>
+    </Card>
   );
 }
 
@@ -4537,20 +4850,19 @@ function AppointmentCard({
         event.dataTransfer.effectAllowed = "move";
       }}
       className={`relative z-10 flex h-full cursor-grab flex-col overflow-hidden rounded-lg border px-2 py-1 shadow-sm transition-transform hover:-translate-y-0.5 hover:shadow-md active:cursor-grabbing ${
-        statusClasses[appointment.status]
-      } ${paymentTone ? paymentToneStyles[paymentTone].ring : ""} ${
-        focused ? "ring-2 ring-blue-500 ring-offset-2" : ""
-      } ${selectedForMove ? "ring-2 ring-blue-500" : ""}`}
+        paymentTone
+          ? paymentToneStyles[paymentTone].fill
+          : statusClasses[appointment.status]
+      } ${focused ? "ring-2 ring-blue-500 ring-offset-2" : ""} ${
+        selectedForMove ? "ring-2 ring-blue-500" : ""
+      }`}
     >
       <div className="mb-1 flex items-start justify-between gap-1">
         <div className="min-w-0 flex-1">
           <p className="flex items-start gap-1 break-words font-semibold leading-tight">
             <span className="min-w-0">{appointment.personName}</span>
             {paymentTone ? (
-              <CreditCard
-                className={`mt-0.5 h-3.5 w-3.5 shrink-0 ${paymentToneStyles[paymentTone].icon}`}
-                aria-label={paymentToneStyles[paymentTone].label}
-              />
+              <PaymentStatusMark tone={paymentTone} />
             ) : null}
           </p>
           <p className="text-xs font-semibold opacity-75">
@@ -4561,13 +4873,9 @@ function AppointmentCard({
           <div className="flex flex-col items-end gap-1">
             <span
               className={`mt-1 h-3 w-3 rounded-full ${
-                paymentTone === "paid"
-                  ? "bg-emerald-500"
-                  : paymentTone === "partial"
-                    ? "bg-orange-500"
-                    : paymentTone === "unpaid"
-                      ? "bg-red-500"
-                      : statusDotClasses[appointment.status]
+                paymentTone
+                  ? paymentToneStyles[paymentTone].dot
+                  : statusDotClasses[appointment.status]
               }`}
               aria-label={
                 paymentTone
@@ -4764,6 +5072,195 @@ function canOfferAppointmentNotify(
   return canSms || canEmail;
 }
 
+async function notifyCreatedAppointment(
+  savedAppointment: Appointment,
+  plan: {
+    sendSmsNow: boolean;
+    sendEmailNow: boolean;
+    sendSmsJ7: boolean;
+    sendSmsJ5: boolean;
+    sendSms48h: boolean;
+    sendSms24h: boolean;
+    selectedDepositLinkId: string;
+    sendBirthdaySms: boolean;
+    birthDate?: string;
+    email?: string;
+    cabinList: Cabin[];
+    smsSettings: CenterSmsSettings | null;
+    depositLinks: CenterDepositLinkSetting[];
+    centerName: string;
+  },
+) {
+  const notices: string[] = [];
+  const appointmentEmail = String(
+    savedAppointment.email || plan.email || "",
+  ).trim();
+  const shouldSendConfirmationEmail =
+    plan.sendEmailNow &&
+    plan.smsSettings?.confirmationEmailEnabled !== false &&
+    Boolean(appointmentEmail);
+  const canNotifyAppointment = isBookableNotifyKind(savedAppointment);
+
+  if (!canNotifyAppointment || (!savedAppointment.phone && !shouldSendConfirmationEmail)) {
+    return notices;
+  }
+
+  const smsVars = {
+    phone: savedAppointment.phone,
+    ...splitPersonName(savedAppointment.personName),
+    date: formatSmsDate(savedAppointment.date),
+    time: savedAppointment.start,
+    treatment: savedAppointment.treatment,
+    confirmationLink: "",
+    appointmentId: savedAppointment.id,
+  };
+  const reminderJobs: Array<{
+    kind: AppointmentReminderKind;
+    templateId?: string;
+    label: string;
+  }> = [];
+
+  if (
+    savedAppointment.phone &&
+    plan.sendSmsJ7 &&
+    plan.smsSettings?.reminderJ7Enabled !== false &&
+    isLaserRdv(
+      savedAppointment.treatment,
+      savedAppointment.cabinId,
+      plan.cabinList,
+    )
+  ) {
+    reminderJobs.push({
+      kind: "reminder_j7",
+      templateId: plan.smsSettings?.reminderJ7TemplateId,
+      label: "J-7 laser",
+    });
+  }
+
+  if (savedAppointment.phone && plan.sendSmsJ5 && plan.smsSettings?.reminderJ5Enabled) {
+    reminderJobs.push({
+      kind: "reminder_j5",
+      templateId: plan.smsSettings?.reminderJ5TemplateId,
+      label: "J-5",
+    });
+  }
+
+  if (savedAppointment.phone && plan.sendSms48h && plan.smsSettings?.reminder48hEnabled) {
+    reminderJobs.push({
+      kind: "reminder_48h",
+      templateId: plan.smsSettings?.reminder48hTemplateId,
+      label: "48h",
+    });
+  }
+
+  if (savedAppointment.phone && plan.sendSms24h && plan.smsSettings?.reminder24hEnabled) {
+    reminderJobs.push({
+      kind: "reminder_24h",
+      templateId: plan.smsSettings?.reminder24hTemplateId,
+      label: "24h",
+    });
+  }
+
+  if (
+    (plan.sendSmsNow &&
+      plan.smsSettings?.confirmationEnabled !== false &&
+      savedAppointment.phone) ||
+    shouldSendConfirmationEmail ||
+    reminderJobs.length > 0
+  ) {
+    try {
+      smsVars.confirmationLink = await issueAppointmentConfirmationUrl(
+        savedAppointment.id,
+      );
+    } catch {
+      smsVars.confirmationLink = "";
+    }
+  }
+
+  if (
+    savedAppointment.phone &&
+    plan.sendSmsNow &&
+    plan.smsSettings?.confirmationEnabled !== false
+  ) {
+    const confirmation = await sendSavedTemplateSms(
+      plan.smsSettings?.confirmationTemplateId,
+      smsVars,
+    );
+    notices.push(
+      confirmation.ok
+        ? "SMS de confirmation envoyé."
+        : "Le SMS de confirmation n'a pas pu partir.",
+    );
+  }
+
+  if (shouldSendConfirmationEmail) {
+    const confirmationEmail = await sendAppointmentConfirmationEmail({
+      clientId: savedAppointment.clientId,
+      email: appointmentEmail,
+      firstName: smsVars.firstName,
+      lastName: smsVars.lastName,
+      date: smsVars.date,
+      time: smsVars.time,
+      treatment: smsVars.treatment,
+      confirmationLink: smsVars.confirmationLink,
+    });
+    notices.push(
+      confirmationEmail.ok
+        ? "Mail de confirmation envoyé."
+        : "Le mail de confirmation n'a pas pu partir.",
+    );
+  }
+
+  for (const job of reminderJobs) {
+    const reminder = await scheduleAppointmentReminderSms({
+      appointmentId: savedAppointment.id,
+      templateId: job.templateId,
+      kind: job.kind,
+      vars: smsVars,
+    });
+    notices.push(
+      reminder.ok
+        ? reminder.scheduled
+          ? `SMS ${job.label} programmé.`
+          : `SMS ${job.label} envoyé.`
+        : `Le SMS ${job.label} n'a pas pu être programmé.`,
+    );
+  }
+
+  if (savedAppointment.phone && plan.selectedDepositLinkId) {
+    notices.push(
+      await sendSelectedDepositLinkSms(
+        savedAppointment,
+        plan.selectedDepositLinkId,
+        plan.depositLinks,
+        plan.centerName,
+      ),
+    );
+  }
+
+  if (savedAppointment.phone && plan.birthDate) {
+    const birthday = await syncBirthdaySms({
+      clientId: savedAppointment.clientId,
+      birthDate: plan.birthDate,
+      phone: savedAppointment.phone,
+      firstName: smsVars.firstName,
+      lastName: smsVars.lastName,
+      enabled: plan.sendBirthdaySms && plan.smsSettings?.birthdaySmsEnabled !== false,
+    });
+    notices.push(
+      plan.sendBirthdaySms
+        ? birthday.ok
+          ? birthday.sent
+            ? "SMS anniversaire envoyé."
+            : "SMS anniversaire programmé pour le jour J."
+          : "Le SMS anniversaire n'a pas pu être programmé."
+        : "Date d'anniversaire enregistrée.",
+    );
+  }
+
+  return notices;
+}
+
 async function sendAppointmentConfirmations(
   appointment: Appointment,
   options: {
@@ -4946,6 +5443,7 @@ function AppointmentDetailsModal({
   practitionerList,
   depositLinks,
   smsSettings,
+  paymentTone,
   onClose,
   onDelete,
   onSave,
@@ -4956,6 +5454,7 @@ function AppointmentDetailsModal({
   practitionerList: Practitioner[];
   depositLinks: CenterDepositLinkSetting[];
   smsSettings: CenterSmsSettings | null;
+  paymentTone?: ReturnType<typeof getPaymentTone>;
   onClose: () => void;
   onDelete: () => boolean | void | Promise<boolean | void>;
   onSave: (
@@ -5014,12 +5513,23 @@ function AppointmentDetailsModal({
     >
       <form
         onSubmit={saveAppointment}
-        className="relative max-h-[92vh] w-full max-w-3xl overflow-y-auto rounded-2xl bg-white p-6 shadow-2xl"
+        className={`relative max-h-[92vh] w-full max-w-3xl overflow-y-auto rounded-2xl p-6 shadow-2xl ${
+          paymentTone
+            ? `${paymentToneStyles[paymentTone].surface} ring-2 ${
+                paymentTone === "paid"
+                  ? "ring-emerald-500"
+                  : paymentTone === "partial"
+                    ? "ring-orange-500"
+                    : "ring-red-500"
+              }`
+            : "bg-white"
+        }`}
       >
         <div className="mb-5 flex items-start justify-between gap-4">
           <div>
-            <h2 className="text-lg font-semibold text-slate-950">
+            <h2 className="flex flex-wrap items-center gap-2 text-lg font-semibold text-slate-950">
               Modifier le rendez-vous
+              {paymentTone ? <PaymentStatusBadge tone={paymentTone} /> : null}
             </h2>
             <p className="mt-1 text-sm font-semibold text-slate-500">
               Changez la date, l&apos;heure ou la cabine, puis coche SMS / Email

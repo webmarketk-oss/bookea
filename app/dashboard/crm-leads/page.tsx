@@ -16,6 +16,7 @@ import {
   addDaysIso,
   matchesCrmQuickFilter,
   rdvBookedStatusList,
+  reminderDateAfterStatusChange,
   todayIso,
   type CrmQuickFilter,
 } from "@/lib/crm-stats";
@@ -37,7 +38,9 @@ import {
   readAppointmentStatusOverrides,
 } from "@/lib/appointment-crm-sync";
 import {
+  duplicateLeadGroupKey,
   findDuplicateLeadGroups,
+  leadsAreSureDuplicates,
   mergeDuplicateLeads,
   mergePublicBookingsIntoLeads,
   PUBLIC_BOOKINGS_UPDATED_EVENT,
@@ -72,6 +75,20 @@ type FicheBox = {
 };
 
 const FICHE_BOTTOM_GAP = 12;
+const CRM_DISMISSED_DUPLICATES_KEY = "bookea-crm-dismissed-duplicates";
+
+function readDismissedDuplicateKeys() {
+  try {
+    const parsed = JSON.parse(
+      window.localStorage.getItem(CRM_DISMISSED_DUPLICATES_KEY) || "[]"
+    );
+    return Array.isArray(parsed)
+      ? parsed.filter((value): value is string => typeof value === "string")
+      : [];
+  } catch {
+    return [];
+  }
+}
 
 function getLeadRow(leadId: string) {
   return document.querySelector(`[data-lead-id="${leadId}"]`);
@@ -139,6 +156,9 @@ export default function CRMLeadsPage() {
   const [isLeadDetailsOpen, setIsLeadDetailsOpen] = useState(false);
   const [isNewLeadOpen, setIsNewLeadOpen] = useState(false);
   const [isMergingDuplicates, setIsMergingDuplicates] = useState(false);
+  const [dismissedDuplicateKeys, setDismissedDuplicateKeys] = useState<string[]>(
+    []
+  );
   const [newLeadForm, setNewLeadForm] = useState(emptyLeadForm);
   const [activeTab, setActiveTab] = useState<CRMTab>("prospects");
   const [quickDateFilter, setQuickDateFilter] =
@@ -161,6 +181,14 @@ export default function CRMLeadsPage() {
   const duplicateLeadGroups = useMemo(
     () => findDuplicateLeadGroups(leadList),
     [leadList]
+  );
+  const visibleDuplicateGroups = useMemo(
+    () =>
+      duplicateLeadGroups.filter(
+        (group) =>
+          !dismissedDuplicateKeys.includes(duplicateLeadGroupKey(group))
+      ),
+    [dismissedDuplicateKeys, duplicateLeadGroups]
   );
 
   async function refreshCrmLeads() {
@@ -211,6 +239,10 @@ export default function CRMLeadsPage() {
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     refreshCrmLeads();
+  }, []);
+
+  useEffect(() => {
+    setDismissedDuplicateKeys(readDismissedDuplicateKeys());
   }, []);
 
   useEffect(() => {
@@ -484,10 +516,15 @@ export default function CRMLeadsPage() {
           return lead;
         }
 
+        const nextReminder = reminderDateAfterStatusChange(
+          lead.reminderDate,
+          lead.reminderDate,
+        );
+
         return {
           ...lead,
           status,
-          updatedDate: todayIso(),
+          reminderDate: nextReminder,
           activityLog: [
             {
               id: crypto.randomUUID(),
@@ -688,6 +725,12 @@ export default function CRMLeadsPage() {
     const dealAmount = Number(patch.dealAmount || 0);
     const nextStatus = patch.status;
     const statusChanged = leadBeforeUpdate.status !== nextStatus;
+    const nextReminder = statusChanged
+      ? reminderDateAfterStatusChange(
+          leadBeforeUpdate.reminderDate,
+          patch.reminderDate,
+        )
+      : patch.reminderDate || undefined;
 
     setLeadList((currentLeads) =>
       currentLeads.map((lead) => {
@@ -712,11 +755,9 @@ export default function CRMLeadsPage() {
           commercial: patch.commercial,
           status: nextStatus,
           dealAmount: Number.isFinite(dealAmount) ? dealAmount : lead.dealAmount,
-          reminderDate:
-            patch.reminderDate ||
-            (statusChanged ? leadBeforeUpdate.reminderDate : undefined),
+          reminderDate: nextReminder,
           nextAction: patch.nextAction,
-          updatedDate: todayIso(),
+          updatedDate: statusChanged ? lead.updatedDate : todayIso(),
           activityLog: statusChanged
             ? [
                 {
@@ -752,9 +793,7 @@ export default function CRMLeadsPage() {
         status: nextStatus,
         dealAmount: Number.isFinite(dealAmount) ? dealAmount : leadBeforeUpdate.dealAmount,
         nextAction: patch.nextAction,
-        reminderDate:
-          patch.reminderDate ||
-          (statusChanged ? leadBeforeUpdate.reminderDate || "" : patch.reminderDate),
+        reminderDate: nextReminder || "",
       });
       if (patch.phone) {
         void syncBirthdaySms({
@@ -781,6 +820,13 @@ export default function CRMLeadsPage() {
     const duplicateLeads = group.slice(1);
 
     if (!primaryLead || duplicateLeads.length === 0 || isMergingDuplicates) {
+      return;
+    }
+
+    if (!leadsAreSureDuplicates(group)) {
+      setCrmError(
+        "Fusion refusée : ces fiches n'ont pas le même téléphone ni le même email."
+      );
       return;
     }
 
@@ -816,6 +862,29 @@ export default function CRMLeadsPage() {
     } finally {
       setIsMergingDuplicates(false);
     }
+  }
+
+  function handleDismissDuplicate(group: Lead[]) {
+    const key = duplicateLeadGroupKey(group);
+
+    setDismissedDuplicateKeys((current) => {
+      if (current.includes(key)) {
+        return current;
+      }
+
+      const next = [...current, key];
+
+      try {
+        window.localStorage.setItem(
+          CRM_DISMISSED_DUPLICATES_KEY,
+          JSON.stringify(next)
+        );
+      } catch {
+        // ignore quota / private mode
+      }
+
+      return next;
+    });
   }
 
   function openNewLeadModal() {
@@ -1003,35 +1072,50 @@ export default function CRMLeadsPage() {
               </div>
             ) : (
               <>
-            {duplicateLeadGroups.length > 0 && (
+            {visibleDuplicateGroups.length > 0 && (
               <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-slate-900 shadow-sm">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
                     <p className="text-sm font-black uppercase text-amber-700">
-                      Doublons potentiels
+                      Doublons confirmés
                     </p>
                     <p className="mt-1 text-sm font-semibold text-slate-600">
-                      Même téléphone, même email ou même nom/prénom détecté.
+                      Même téléphone ou même email uniquement. Vérifiez que
+                      c’est bien la même personne avant de fusionner.
                     </p>
                   </div>
 
-                  <div className="flex flex-wrap gap-2">
-                    {duplicateLeadGroups[0].map((lead, index) => (
+                  <div className="flex flex-wrap items-center gap-2">
+                    {visibleDuplicateGroups[0].map((lead, index) => (
                       <span
                         key={lead.id}
                         className="rounded-full bg-white px-3 py-2 text-sm font-bold text-slate-700"
                       >
                         {index + 1}. {lead.firstName} {lead.lastName}
+                        {lead.phone ? ` · ${lead.phone}` : ""}
+                        {lead.email ? ` · ${lead.email}` : ""}
                       </span>
                     ))}
                     <Button
                       type="button"
                       disabled={isMergingDuplicates}
-                      onClick={() => handleMergeDuplicate(duplicateLeadGroups[0])}
+                      onClick={() =>
+                        handleMergeDuplicate(visibleDuplicateGroups[0])
+                      }
                     >
                       {isMergingDuplicates
                         ? "Fusion en cours..."
                         : "Fusionner vers la fiche 1"}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      disabled={isMergingDuplicates}
+                      onClick={() =>
+                        handleDismissDuplicate(visibleDuplicateGroups[0])
+                      }
+                    >
+                      Non merci
                     </Button>
                   </div>
                 </div>

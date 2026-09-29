@@ -100,6 +100,48 @@ export function isReminderDueOn(date?: string | null, today = todayIso()) {
   return offset !== null && offset <= 0;
 }
 
+export function isOpenReminderDue(
+  lead: Pick<Lead, "reminderDate" | "activityLog">,
+  today = todayIso(),
+) {
+  if (!isReminderDueOn(lead.reminderDate, today)) {
+    return false;
+  }
+
+  const reminder = toDateOnlyIso(lead.reminderDate);
+  if (!reminder) {
+    return false;
+  }
+
+  return !lead.activityLog.some((activity) => {
+    if (activity.type !== "status") {
+      return false;
+    }
+
+    const handledOn = activityDateToIso(activity);
+    return Boolean(handledOn && handledOn >= reminder);
+  });
+}
+
+export function reminderDateAfterStatusChange(
+  previousReminder?: string | null,
+  nextReminder?: string | null,
+  today = todayIso(),
+) {
+  const previous = toDateOnlyIso(previousReminder);
+  const next = toDateOnlyIso(nextReminder);
+
+  if (next && next !== previous) {
+    return next;
+  }
+
+  if (isReminderDueOn(previous, today)) {
+    return undefined;
+  }
+
+  return previous;
+}
+
 export function formatReminderDayLabel(date?: string | null, today = todayIso()) {
   const offset = reminderDayOffset(date, today);
 

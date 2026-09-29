@@ -1,5 +1,11 @@
 import { getActiveCenterContext } from "@/lib/center-access";
-import { toDateOnlyIso, toLocalIsoDate } from "@/lib/crm-stats";
+import { invoicePaymentAmounts } from "@/lib/client-balance";
+import {
+  isReminderDueOn,
+  reminderDateAfterStatusChange,
+  toDateOnlyIso,
+  toLocalIsoDate,
+} from "@/lib/crm-stats";
 import { sanitizePersonName } from "@/lib/seya-person-name";
 import { createClient } from "@/lib/supabase";
 import { normalizeLeadStatus } from "@/lib/lead-statuses";
@@ -349,11 +355,15 @@ export async function updateCrmLeadStatus(
 ) {
   const supabase = createClient();
   const centerId = await getLeadCenterId(supabase, lead.id);
+  const nextReminder = reminderDateAfterStatusChange(
+    lead.reminderDate,
+    lead.reminderDate,
+  );
+  const consumedDueReminder = isReminderDueOn(lead.reminderDate) && !nextReminder;
 
   await updateLeadFields(supabase, lead.id, {
     status,
-    updated_at: new Date().toISOString(),
-    last_activity_at: new Date().toISOString(),
+    ...(consumedDueReminder ? { recall_date: null } : {}),
   });
 
   await insertLeadEvent(supabase, centerId, lead.id, {
@@ -611,6 +621,14 @@ export async function updateCrmLeadDetails(lead: Lead, input: NewCrmLeadInput) {
 
   const now = new Date().toISOString();
   const nextStatus = normalizeLeadStatus(input.status);
+  const statusChanged = nextStatus !== lead.status;
+  const nextReminder = statusChanged
+    ? reminderDateAfterStatusChange(lead.reminderDate, input.reminderDate)
+    : input.reminderDate;
+  const consumedDueReminder =
+    statusChanged &&
+    isReminderDueOn(lead.reminderDate) &&
+    !toDateOnlyIso(nextReminder);
   const assignedToProfileId = await findAssignedProfileId(
     supabase,
     centerId,
@@ -622,16 +640,15 @@ export async function updateCrmLeadDetails(lead: Lead, input: NewCrmLeadInput) {
     campaign_id: campaignId,
     service_id: serviceId,
     status: nextStatus,
-    recall_date:
-      toDateOnlyIso(input.reminderDate) ||
-      (nextStatus !== lead.status ? toDateOnlyIso(lead.reminderDate) || null : null),
+    recall_date: toDateOnlyIso(nextReminder) || null,
     next_action: input.nextAction.trim() || "À contacter",
     amount_cure_ttc: input.dealAmount || 0,
     ...(assignedToProfileId !== undefined
       ? { assigned_to_profile_id: assignedToProfileId }
       : {}),
-    updated_at: now,
-    last_activity_at: now,
+    ...(consumedDueReminder
+      ? {}
+      : { updated_at: now, last_activity_at: now }),
   });
 
   if (nextStatus !== lead.status) {
@@ -1441,14 +1458,14 @@ function toCrmClient(row: ClientRow): CrmClient {
         `${b.appointment_date} ${b.starts_at}`,
       ),
     )[0];
-  const paidTotal = invoices.reduce(
-    (total, invoice) => total + Number(invoice.paid_amount ?? 0),
-    0,
-  );
-  const balanceDue = invoices.reduce(
-    (total, invoice) => total + Number(invoice.balance_due ?? 0),
-    0,
-  );
+  const paidTotal = invoices.reduce((total, invoice) => {
+    const amounts = invoicePaymentAmounts(invoice);
+    return total + (amounts?.paid ?? 0);
+  }, 0);
+  const balanceDue = invoices.reduce((total, invoice) => {
+    const amounts = invoicePaymentAmounts(invoice);
+    return total + (amounts?.due ?? 0);
+  }, 0);
   const leadAmount = leads.reduce(
     (total, lead) => total + Number(lead.amount_cure_ttc ?? 0),
     0,
@@ -1545,14 +1562,23 @@ function toClientCares(
   leads: NonNullable<ClientRow["leads"]>,
   invoices: NonNullable<ClientRow["invoices"]>,
 ): CrmClientCare[] {
-  const invoiceCares = invoices.map((invoice) => ({
-    id: invoice.id,
-    label: invoice.type === "devis" ? "Devis client" : "Facture client",
-    date: formatDisplayDateForCrm(invoice.issued_on),
-    amount: Number(invoice.total_ttc ?? 0),
-    paid: Number(invoice.paid_amount ?? 0),
-    status: normalizeCareStatus(invoice.status, Number(invoice.balance_due ?? 0)),
-  }));
+  const invoiceCares = invoices.flatMap((invoice) => {
+    const amounts = invoicePaymentAmounts(invoice);
+    if (!amounts) {
+      return [];
+    }
+
+    return [
+      {
+        id: invoice.id,
+        label: invoice.type === "devis" ? "Devis client" : "Facture client",
+        date: formatDisplayDateForCrm(invoice.issued_on),
+        amount: Number(invoice.total_ttc ?? 0) || amounts.paid + amounts.due,
+        paid: amounts.paid,
+        status: normalizeCareStatus(invoice.status, amounts.due),
+      },
+    ];
+  });
 
   if (invoiceCares.length > 0) {
     return invoiceCares;
@@ -1618,8 +1644,11 @@ function normalizeCareStatus(
   status: string,
   balanceDue: number,
 ): CrmClientCare["status"] {
-  if (status === "paid" || balanceDue <= 0) return "Payé";
-  if (status === "pending_payment") return "Acompte";
+  const normalized = (status || "").toLowerCase();
+  if (normalized === "paid" || normalized === "credit_note" || balanceDue <= 0) {
+    return "Payé";
+  }
+  if (normalized === "pending_payment") return "Acompte";
   return "À encaisser";
 }
 

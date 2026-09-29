@@ -696,16 +696,29 @@ export async function loadCenterNotifications(): Promise<CenterNotification[]> {
     return applyReadState(notificationsCache.items, state);
   }
 
-  const [leads, appointments, inbox, profile] = await Promise.all([
-    loadCrmLeads()
-      .then((result) => result.leads)
-      .catch(() => [] as Lead[]),
-    loadNotificationAppointments().catch(() => [] as NotificationAppointment[]),
-    loadSmsInbox().catch(() => [] as SmsInboxItem[]),
-    loadPublicCenterProfile().catch(() => ({
-      settings: readCenterSettings(),
-    })),
-  ]);
+  const [leadsResult, appointmentsResult, inboxResult, profileResult] =
+    await Promise.allSettled([
+      loadCrmLeads().then((result) => result.leads),
+      loadNotificationAppointments(),
+      loadSmsInbox(),
+      loadPublicCenterProfile(),
+    ]);
+
+  if (
+    leadsResult.status === "rejected" &&
+    appointmentsResult.status === "rejected"
+  ) {
+    throw new Error("Impossible de charger les notifications du centre.");
+  }
+
+  const leads = leadsResult.status === "fulfilled" ? leadsResult.value : [];
+  const appointments =
+    appointmentsResult.status === "fulfilled" ? appointmentsResult.value : [];
+  const inbox = inboxResult.status === "fulfilled" ? inboxResult.value : [];
+  const profile =
+    profileResult.status === "fulfilled"
+      ? profileResult.value
+      : { settings: readCenterSettings() };
 
   const bookings = bookingsForCenter(context.centerName);
   const reviews =

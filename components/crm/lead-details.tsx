@@ -26,6 +26,7 @@ import {
   type CenterSmsSettings,
 } from "@/lib/sms-settings";
 import { sendBookeaSms } from "@/lib/send-sms";
+import { reminderDateAfterStatusChange } from "@/lib/crm-stats";
 import { Lead, LeadStatus } from "@/types/lead";
 import {
   Calendar,
@@ -281,8 +282,10 @@ export default function LeadDetails({
       treatment: form.treatment.trim() || lead.treatment,
       nextAction: form.nextAction.trim() || "À contacter",
       reminderDate:
-        form.reminderDate ||
-        (form.status !== lead.status ? lead.reminderDate ?? "" : form.reminderDate),
+        form.status !== lead.status
+          ? reminderDateAfterStatusChange(lead.reminderDate, form.reminderDate) ??
+            ""
+          : form.reminderDate,
     };
 
     if (JSON.stringify(nextForm) === JSON.stringify(leadToInfoForm(lead))) {

@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useState } from "react";
+import { useState } from "react";
 import {
   Table,
   TableBody,
@@ -9,7 +9,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { isReminderDueOn, toDateOnlyIso } from "@/lib/crm-stats";
+import { isOpenReminderDue, toDateOnlyIso } from "@/lib/crm-stats";
 import {
   isInactiveLeadStatus,
   leadStatusClassName,
@@ -50,8 +50,8 @@ export default function ProspectsTable({
     .sort((current, next) => {
       const currentInactive = isInactiveLeadStatus(current.lead.status);
       const nextInactive = isInactiveLeadStatus(next.lead.status);
-      const currentReminderDue = isReminderDueOn(current.lead.reminderDate);
-      const nextReminderDue = isReminderDueOn(next.lead.reminderDate);
+      const currentReminderDue = isOpenReminderDue(current.lead);
+      const nextReminderDue = isOpenReminderDue(next.lead);
 
       if (currentInactive && !nextInactive) {
         return 1;
@@ -80,12 +80,12 @@ export default function ProspectsTable({
         return 1;
       }
 
-      const recencyDiff = leadRecency(next.lead).localeCompare(
-        leadRecency(current.lead)
+      const createdDiff = (next.lead.createdDate || "").localeCompare(
+        current.lead.createdDate || "",
       );
 
-      if (recencyDiff !== 0) {
-        return recencyDiff;
+      if (createdDiff !== 0) {
+        return createdDiff;
       }
 
       return current.index - next.index;
@@ -147,33 +147,20 @@ export default function ProspectsTable({
         </TableHeader>
 
         <TableBody>
-          {sortedLeads.map((lead, index) => {
+          {sortedLeads.map((lead) => {
             const isInactive = isInactiveLeadStatus(lead.status);
-            const showLostHeader =
-              isInactive &&
-              (index === 0 || !isInactiveLeadStatus(sortedLeads[index - 1].status));
             const latestComment = getLatestLeadComment(lead);
 
             return (
-            <Fragment key={lead.id}>
-            {showLostHeader ? (
-              <TableRow className="hover:bg-transparent">
-                <TableCell
-                  colSpan={9}
-                  className="h-8 bg-slate-100 py-0 text-[11px] font-black uppercase tracking-wide text-slate-500"
-                >
-                  Classés en bas
-                </TableCell>
-              </TableRow>
-            ) : null}
             <TableRow
+              key={lead.id}
               data-lead-id={lead.id}
               data-lead-row="true"
               onClick={() => onSelectLead(lead)}
               className={cn(
                 "h-20 cursor-pointer transition-all hover:bg-slate-50",
                 isInactive && "bg-slate-50 hover:bg-slate-100",
-                isReminderDueOn(lead.reminderDate) &&
+                isOpenReminderDue(lead) &&
                   !isInactive &&
                   "bg-amber-50 hover:bg-amber-50",
                 isLeadDetailsOpen &&
@@ -212,7 +199,7 @@ export default function ProspectsTable({
                   }
                   className={cn(
                     "h-8 w-[11rem] shrink-0 rounded-lg border border-slate-200 bg-white px-2 text-xs font-semibold outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100",
-                    isReminderDueOn(lead.reminderDate) &&
+                    isOpenReminderDue(lead) &&
                       "border-amber-200 bg-amber-100 text-amber-800"
                   )}
                 />
@@ -279,7 +266,7 @@ export default function ProspectsTable({
                 className={cn(
                   "sticky right-0 z-10 whitespace-normal border-l border-slate-200 bg-white shadow-[-8px_0_12px_rgba(15,23,42,0.06)]",
                   isInactive && "bg-slate-50",
-                  isReminderDueOn(lead.reminderDate) &&
+                  isOpenReminderDue(lead) &&
                     !isInactive &&
                     "bg-amber-50",
                   selectedLead.id === lead.id && "bg-blue-50",
@@ -316,7 +303,6 @@ export default function ProspectsTable({
                 ) : null}
               </TableCell>
             </TableRow>
-            </Fragment>
             );
           })}
         </TableBody>
@@ -401,13 +387,5 @@ function getLatestLeadComment(lead: Lead) {
     text: latestComment,
     type: "comment" as const,
   };
-}
-
-function leadRecency(lead: Lead) {
-  if (lead.status === "Nouveau") {
-    return lead.createdDate;
-  }
-
-  return lead.lastActivityAt || lead.updatedDate || lead.createdDate;
 }
 

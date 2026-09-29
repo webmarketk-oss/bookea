@@ -17,6 +17,8 @@ export const paymentToneStyles: Record<
   {
     badge: string;
     border: string;
+    dot: string;
+    fill: string;
     icon: string;
     label: string;
     ring: string;
@@ -25,31 +27,37 @@ export const paymentToneStyles: Record<
   }
 > = {
   paid: {
-    badge: "border-emerald-200 bg-emerald-100 text-emerald-800",
-    border: "border-emerald-300",
-    icon: "text-emerald-600",
+    badge: "border-emerald-300 bg-emerald-600 text-white",
+    border: "border-emerald-500",
+    dot: "bg-emerald-500",
+    fill: "border-emerald-400 bg-emerald-100 text-emerald-950",
+    icon: "text-emerald-700",
     label: "Payé",
-    ring: "ring-2 ring-emerald-400",
-    row: "bg-emerald-50",
-    surface: "bg-emerald-50/80",
+    ring: "ring-2 ring-emerald-500",
+    row: "bg-emerald-100",
+    surface: "bg-emerald-100",
   },
   partial: {
-    badge: "border-orange-200 bg-orange-100 text-orange-800",
-    border: "border-orange-300",
-    icon: "text-orange-600",
+    badge: "border-orange-300 bg-orange-500 text-white",
+    border: "border-orange-500",
+    dot: "bg-orange-500",
+    fill: "border-orange-400 bg-orange-100 text-orange-950",
+    icon: "text-orange-700",
     label: "Reste à payer",
-    ring: "ring-2 ring-orange-400",
-    row: "bg-orange-50",
-    surface: "bg-orange-50/80",
+    ring: "ring-2 ring-orange-500",
+    row: "bg-orange-100",
+    surface: "bg-orange-100",
   },
   unpaid: {
-    badge: "border-red-200 bg-red-100 text-red-800",
-    border: "border-red-300",
-    icon: "text-red-600",
+    badge: "border-red-300 bg-red-600 text-white",
+    border: "border-red-500",
+    dot: "bg-red-500",
+    fill: "border-red-400 bg-red-100 text-red-950",
+    icon: "text-red-700",
     label: "Non payé",
-    ring: "ring-2 ring-red-400",
-    row: "bg-red-50",
-    surface: "bg-red-50/80",
+    ring: "ring-2 ring-red-500",
+    row: "bg-red-100",
+    surface: "bg-red-100",
   },
 };
 
@@ -59,6 +67,7 @@ type InvoiceBalanceRow = {
   paid_amount: number | string | null;
   status: string | null;
   total_ttc: number | string | null;
+  type: string | null;
   clients:
     | {
         first_name: string | null;
@@ -100,11 +109,54 @@ export function paymentToneFromAmounts(paid: number, due: number) {
   return "unpaid" as const;
 }
 
+export function invoicePaymentAmounts(row: {
+  balance_due?: number | string | null;
+  paid_amount?: number | string | null;
+  status?: string | null;
+  total_ttc?: number | string | null;
+  type?: string | null;
+}) {
+  const status = (row.status || "").toLowerCase();
+  const type = (row.type || "").toLowerCase();
+
+  if (
+    status === "cancelled" ||
+    status === "canceled" ||
+    status === "annulee" ||
+    status === "annulée" ||
+    type === "devis" ||
+    type === "avoir"
+  ) {
+    return null;
+  }
+
+  const total = Number(row.total_ttc ?? 0);
+  const paid = Math.max(0, Number(row.paid_amount ?? 0));
+  const storedDue = Number(row.balance_due);
+  let due = Number.isFinite(storedDue) ? Math.max(0, storedDue) : Math.max(total - paid, 0);
+
+  if (status === "paid" || status === "credit_note") {
+    return { paid: Math.max(paid, total), due: 0 };
+  }
+
+  if (due <= 0 && paid < total) {
+    due = Math.max(total - paid, 0);
+  }
+
+  return { paid, due };
+}
+
 export function paymentToneFromClient(client: {
   balanceDue: number;
+  totalSpent?: number;
   cares?: Array<{ amount: number; paid: number }>;
 }) {
-  const paid = (client.cares ?? []).reduce((total, care) => total + care.paid, 0);
+  const paidFromCares = (client.cares ?? []).reduce(
+    (total, care) => total + care.paid,
+    0,
+  );
+  const paid =
+    paidFromCares > 0 ? paidFromCares : Number(client.totalSpent ?? 0);
   return paymentToneFromAmounts(paid, client.balanceDue);
 }
 
@@ -156,7 +208,7 @@ export async function loadClientBalanceDueIndex(): Promise<ClientBalanceDueIndex
     const { data, error } = await supabase
       .from("invoices")
       .select(
-        "client_id, balance_due, paid_amount, total_ttc, status, clients(first_name, last_name, phone)",
+        "client_id, balance_due, paid_amount, total_ttc, status, type, clients(first_name, last_name, phone)",
       )
       .eq("center_id", center.centerId);
 
@@ -176,13 +228,8 @@ export async function loadClientBalanceDueIndex(): Promise<ClientBalanceDueIndex
     >();
 
     for (const row of data as InvoiceBalanceRow[]) {
-      const status = (row.status || "").toLowerCase();
-      if (
-        status === "cancelled" ||
-        status === "canceled" ||
-        status === "annulee" ||
-        status === "annulée"
-      ) {
+      const amounts = invoicePaymentAmounts(row);
+      if (!amounts) {
         continue;
       }
 
@@ -204,8 +251,8 @@ export async function loadClientBalanceDueIndex(): Promise<ClientBalanceDueIndex
         phone,
         due: 0,
       };
-      current.paid += Number(row.paid_amount ?? 0);
-      current.due += Number(row.balance_due ?? 0);
+      current.paid += amounts.paid;
+      current.due += amounts.due;
       totals.set(key, current);
     }
 

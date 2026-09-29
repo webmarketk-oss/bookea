@@ -241,7 +241,14 @@ function mapMetaLead(lead, change) {
     email: pick(fields, ["email", "email_address", "adresse_email"]),
     phone: pick(fields, ["phone_number", "phone", "telephone", "numero_de_telephone"]),
     treatment: careLabelForFamily(family) || rawTreatment,
-    campaign: lead.campaign_name || change.campaignId || "Meta Lead Ads",
+    campaign:
+      pick(fields, ["offre", "offer", "offer_title"]) ||
+      (lead.campaign_name && !/meta lead|facebook/i.test(lead.campaign_name)
+        ? lead.campaign_name
+        : "") ||
+      lead.ad_name ||
+      change.campaignId ||
+      "Meta Lead Ads",
     rawFields: fields,
   };
 }

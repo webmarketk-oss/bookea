@@ -40,7 +40,7 @@ module.exports = async function handler(req, res) {
       return res.status(400).json({ ok: false, error: "missing_center" });
     }
 
-    const mapped = mapIncomingLead(payload);
+    const mapped = mapIncomingLead(payload, req.query);
 
     if (!mapped.phone && !mapped.email) {
       return res.status(400).json({ ok: false, error: "missing_contact" });
@@ -129,29 +129,25 @@ function pickExact(fields, names) {
   return "";
 }
 
-function mapIncomingLead(payload) {
-  const fields = flattenFields(payload);
+function mapIncomingLead(payload, query) {
+  const fields = {
+    ...flattenFields(queryFields(query)),
+    ...flattenFields(payload),
+  };
   const person = resolvePersonName(fields, pickExact);
-  const formName = pick(fields, [
+  const formName = pickUseful(fields, [
     "form_name",
     "form",
     "campaign",
     "campagne",
     "campaign_name",
   ]);
-  const pageName = pick(fields, ["page_name", "page"]);
-  const adName = pick(fields, ["ad_name", "ad", "adset_name", "publicite"]);
-  const offer = pick(fields, [
-    "offre",
-    "offer_title",
-    "payload_offer_title",
-    "offer_name",
-    "titre_offre",
-    "offer",
-  ]);
+  const pageName = pickUseful(fields, ["page_name", "page"]);
+  const adName = pickUseful(fields, ["ad_name", "ad", "adset_name", "publicite"]);
+  const offer = pickOffer(fields);
   const treatment = cleanIncomingTreatment(
     offer ||
-      pick(fields, [
+      pickUseful(fields, [
         "treatment",
         "service",
         "soin",
@@ -173,12 +169,14 @@ function mapIncomingLead(payload) {
     treatment,
     campaign:
       offer ||
-      pick(fields, ["campaign_name", "campagne", "campaign", "form_name"]) ||
+      treatment ||
       formName ||
+      adName ||
       pageName ||
       "Meta Lead Ads",
     formName,
     pageName,
+    offer,
   };
 }
 
@@ -448,7 +446,25 @@ function flattenFields(raw, prefix = "") {
     return result;
   }
 
-  if (typeof raw === "string" || typeof raw === "number" || typeof raw === "boolean") {
+  if (typeof raw === "string") {
+    const text = raw.trim();
+    if (prefix) {
+      result[normalizeFieldName(prefix)] = text;
+    }
+    if (
+      (text.startsWith("{") && text.endsWith("}")) ||
+      (text.startsWith("[") && text.endsWith("]"))
+    ) {
+      try {
+        Object.assign(result, flattenFields(JSON.parse(text), prefix));
+      } catch {
+        // keep the raw string
+      }
+    }
+    return result;
+  }
+
+  if (typeof raw === "number" || typeof raw === "boolean") {
     if (prefix) {
       result[normalizeFieldName(prefix)] = String(raw).trim();
     }
@@ -457,12 +473,13 @@ function flattenFields(raw, prefix = "") {
 
   if (Array.isArray(raw)) {
     for (const item of raw) {
-      if (item && typeof item === "object" && "name" in item) {
-        const name = String(item.name);
-        Object.assign(
-          result,
-          flattenFields(item.value ?? item.values, prefix ? `${prefix}.${name}` : name),
-        );
+      if (isFieldPair(item)) {
+        const name = fieldPairName(item);
+        const value = fieldPairValue(item);
+        Object.assign(result, flattenFields(value, name));
+        if (prefix) {
+          Object.assign(result, flattenFields(value, `${prefix}.${name}`));
+        }
         continue;
       }
 
@@ -472,6 +489,16 @@ function flattenFields(raw, prefix = "") {
   }
 
   if (typeof raw === "object") {
+    if (isFieldPair(raw)) {
+      const name = fieldPairName(raw);
+      const value = fieldPairValue(raw);
+      Object.assign(result, flattenFields(value, name));
+      if (prefix) {
+        Object.assign(result, flattenFields(value, `${prefix}.${name}`));
+      }
+      return result;
+    }
+
     for (const [key, value] of Object.entries(raw)) {
       Object.assign(result, flattenFields(value, prefix ? `${prefix}.${key}` : key));
       if (value != null && (typeof value === "string" || typeof value === "number")) {
@@ -511,6 +538,87 @@ function pick(fields, names) {
   }
 
   return "";
+}
+
+function pickUseful(fields, names) {
+  const keys = Object.keys(fields || {});
+  for (const name of names) {
+    const direct = fields[name];
+    if (direct && !isJunkIncoming(direct)) {
+      return String(direct).trim();
+    }
+    const match = keys.find(
+      (key) => key === name || key.endsWith(`_${name}`) || key.endsWith(`.${name}`),
+    );
+    if (match && fields[match] && !isJunkIncoming(fields[match])) {
+      return String(fields[match]).trim();
+    }
+  }
+
+  return "";
+}
+
+function pickOffer(fields) {
+  const preferred = pickUseful(fields, [
+    "offre",
+    "offer_title",
+    "payload_offer_title",
+    "offer_name",
+    "titre_offre",
+    "offer",
+    "ad_offer",
+  ]);
+  if (preferred) {
+    return preferred;
+  }
+
+  const keys = Object.keys(fields || {});
+  const match = keys.find((key) =>
+    /(^|_)(offre|offer_title|payload_offer_title|titre_offre|offer_name)(_|$)/.test(
+      key,
+    ),
+  );
+  if (match && fields[match] && !isJunkIncoming(fields[match])) {
+    return String(fields[match]).trim();
+  }
+
+  return "";
+}
+
+function queryFields(query) {
+  if (!query || typeof query !== "object") {
+    return {};
+  }
+
+  const result = {};
+  for (const [key, value] of Object.entries(query)) {
+    if (key === "center" || key === "center_slug") {
+      continue;
+    }
+    result[key] = Array.isArray(value) ? value[0] : value;
+  }
+  return result;
+}
+
+function isFieldPair(item) {
+  if (!item || typeof item !== "object" || Array.isArray(item)) {
+    return false;
+  }
+  const name = fieldPairName(item);
+  return Boolean(name) && fieldPairValue(item) != null;
+}
+
+function fieldPairName(item) {
+  const name = item.name ?? item.key ?? item.label ?? item.question ?? item.field;
+  return name == null ? "" : String(name).trim();
+}
+
+function fieldPairValue(item) {
+  if ("value" in item) return item.value;
+  if ("values" in item) return item.values;
+  if ("answer" in item) return item.answer;
+  if ("title" in item) return item.title;
+  return null;
 }
 
 function normalizeFieldName(name) {
@@ -556,3 +664,5 @@ function firstValue(...values) {
 
   return "";
 }
+
+module.exports.mapIncomingLead = mapIncomingLead;

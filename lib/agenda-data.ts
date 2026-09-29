@@ -34,6 +34,38 @@ export const practitioners: Practitioner[] = [
   },
 ];
 
+export const cabinPalette = [
+  {
+    color: "from-blue-500 to-cyan-400",
+    softColor: "bg-blue-50 text-blue-700 border-blue-100",
+    hex: "#2563eb",
+  },
+  {
+    color: "from-violet-500 to-fuchsia-400",
+    softColor: "bg-violet-50 text-violet-700 border-violet-100",
+    hex: "#7c3aed",
+  },
+  {
+    color: "from-emerald-500 to-teal-400",
+    softColor: "bg-emerald-50 text-emerald-700 border-emerald-100",
+    hex: "#059669",
+  },
+  {
+    color: "from-amber-500 to-orange-400",
+    softColor: "bg-amber-50 text-amber-700 border-amber-100",
+    hex: "#d97706",
+  },
+  {
+    color: "from-rose-500 to-pink-400",
+    softColor: "bg-rose-50 text-rose-700 border-rose-100",
+    hex: "#e11d48",
+  },
+];
+
+export function cabinVisuals(index: number) {
+  return cabinPalette[Math.max(0, index) % cabinPalette.length];
+}
+
 export const cabins: Cabin[] = [
   {
     id: "cabine-1",

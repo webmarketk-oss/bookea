@@ -68,11 +68,11 @@ export default function Sidebar({
 
     const target = event.target;
 
-    if (!(target instanceof HTMLElement)) {
+    if (!(target instanceof Element)) {
       return;
     }
 
-    if (target.closest("[data-sidebar-logout='true']")) {
+    if (target.closest("a, button, input, select, textarea, [data-sidebar-logout='true']")) {
       return;
     }
 
@@ -124,6 +124,7 @@ export default function Sidebar({
           icon={LayoutDashboard}
           active={pathname === "/dashboard"}
           collapsed={collapsed}
+          onExpand={() => onCollapsedChange(false)}
         />
 
         <NavGroup
@@ -133,6 +134,7 @@ export default function Sidebar({
           href="/dashboard/crm-leads"
           active={crmOpen}
           defaultOpen={crmOpen}
+          onExpand={() => onCollapsedChange(false)}
         >
           <NavItem
             href="/dashboard/crm-leads"
@@ -205,6 +207,7 @@ export default function Sidebar({
           icon={Calendar}
           active={pathname.startsWith("/dashboard/agenda")}
           collapsed={collapsed}
+          onExpand={() => onCollapsedChange(false)}
         />
 
         <NavItem
@@ -213,6 +216,7 @@ export default function Sidebar({
           icon={Settings}
           active={pathname.startsWith("/dashboard/parametres-centre")}
           collapsed={collapsed}
+          onExpand={() => onCollapsedChange(false)}
         />
 
         <NavItem
@@ -221,6 +225,7 @@ export default function Sidebar({
           icon={ShieldCheck}
           active={pathname.startsWith("/dashboard/admin-centres")}
           collapsed={collapsed}
+          onExpand={() => onCollapsedChange(false)}
         />
       </nav>
 

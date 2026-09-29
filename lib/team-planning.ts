@@ -29,6 +29,16 @@ export type TeamDayHours = {
   weekday: number;
 };
 
+export type TeamPeriod = "week" | 1 | 3 | 6;
+
+export type TeamWeekHours = {
+  dayHours: TeamDayHours[];
+  endTime: string;
+  startTime: string;
+  weekStart: string;
+  workingDays: number[];
+};
+
 export type TeamSchedule = {
   absenceEndDate: string;
   absenceNote: string;
@@ -38,9 +48,11 @@ export type TeamSchedule = {
   dayHours: TeamDayHours[];
   endTime: string;
   months: 1 | 3 | 6;
+  period: TeamPeriod;
   practitionerId: string;
   startDate: string;
   startTime: string;
+  weekHours: TeamWeekHours[];
   workingDays: number[];
 };
 
@@ -61,11 +73,53 @@ export const practitionerColorOptions = [
   "bg-slate-500",
 ];
 
-function todayIso() {
+export function todayIso() {
   const now = new Date();
   const month = String(now.getMonth() + 1).padStart(2, "0");
   const day = String(now.getDate()).padStart(2, "0");
   return `${now.getFullYear()}-${month}-${day}`;
+}
+
+function toIsoDate(date: Date) {
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${date.getFullYear()}-${month}-${day}`;
+}
+
+export function mondayIso(date: string) {
+  const parsed = new Date(`${date.slice(0, 10)}T00:00:00`);
+  if (Number.isNaN(parsed.getTime())) {
+    return mondayIso(todayIso());
+  }
+
+  const day = parsed.getDay();
+  const offset = day === 0 ? -6 : 1 - day;
+  parsed.setDate(parsed.getDate() + offset);
+  return toIsoDate(parsed);
+}
+
+export function addDaysToIso(date: string, amount: number) {
+  const parsed = new Date(`${date.slice(0, 10)}T00:00:00`);
+  parsed.setDate(parsed.getDate() + amount);
+  return toIsoDate(parsed);
+}
+
+export function formatWeekRange(weekStart: string) {
+  const start = new Date(`${mondayIso(weekStart)}T00:00:00`);
+  const end = new Date(`${addDaysToIso(mondayIso(weekStart), 6)}T00:00:00`);
+  const startLabel = start.toLocaleDateString("fr-FR", {
+    day: "numeric",
+    month: "short",
+  });
+  const endLabel = end.toLocaleDateString("fr-FR", {
+    day: "numeric",
+    month: "short",
+  });
+  return `${startLabel} → ${endLabel}`;
+}
+
+export function isWeekPeriod(schedule: Pick<TeamSchedule, "period">) {
+  return schedule.period === "week";
 }
 
 function asRecord(value: unknown) {
@@ -91,6 +145,8 @@ export function emptyTeamSchedule(practitionerId: string): TeamSchedule {
     startTime: "09:00",
     endTime: "18:00",
     dayHours: [],
+    period: 3,
+    weekHours: [],
     absenceStartDate: todayIso(),
     absenceEndDate: todayIso(),
     absenceType: "Congé payé",
@@ -130,6 +186,123 @@ export function normalizeTeamAbsence(value: unknown): TeamAbsence | null {
   };
 }
 
+function cloneDayHours(dayHours: TeamDayHours[]) {
+  return dayHours.map((item) => ({ ...item }));
+}
+
+export function normalizeWeekHours(
+  value: unknown,
+  fallback: Pick<TeamSchedule, "startTime" | "endTime" | "workingDays" | "dayHours">,
+): TeamWeekHours | null {
+  const row = asRecord(value);
+  const rawWeekStart = asString(row.weekStart).slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(rawWeekStart)) {
+    return null;
+  }
+  const weekStart = mondayIso(rawWeekStart);
+
+  const workingDays = Array.isArray(row.workingDays)
+    ? row.workingDays
+        .map((day) => Number(day))
+        .filter((day) => Number.isInteger(day) && day >= 0 && day <= 6)
+    : [...fallback.workingDays];
+
+  const dayHours = Array.isArray(row.dayHours)
+    ? row.dayHours
+        .map((item) => {
+          const hours = asRecord(item);
+          const weekday = Number(hours.weekday);
+          if (!Number.isInteger(weekday) || weekday < 0 || weekday > 6) {
+            return null;
+          }
+          return {
+            weekday,
+            startTime: asString(hours.startTime, fallback.startTime).slice(0, 5),
+            endTime: asString(hours.endTime, fallback.endTime).slice(0, 5),
+          } satisfies TeamDayHours;
+        })
+        .filter((item): item is TeamDayHours => Boolean(item))
+    : cloneDayHours(fallback.dayHours);
+
+  return {
+    weekStart,
+    workingDays,
+    startTime: asString(row.startTime, fallback.startTime).slice(0, 5),
+    endTime: asString(row.endTime, fallback.endTime).slice(0, 5),
+    dayHours,
+  };
+}
+
+export function snapshotFromSchedule(
+  schedule: Pick<
+    TeamSchedule,
+    "workingDays" | "startTime" | "endTime" | "dayHours"
+  >,
+  weekStart: string,
+): TeamWeekHours {
+  return {
+    weekStart: mondayIso(weekStart),
+    workingDays: [...schedule.workingDays],
+    startTime: schedule.startTime,
+    endTime: schedule.endTime,
+    dayHours: cloneDayHours(schedule.dayHours),
+  };
+}
+
+export function hoursForWeek(schedule: TeamSchedule, weekStart: string): TeamWeekHours {
+  const monday = mondayIso(weekStart);
+  const exact = schedule.weekHours.find((item) => item.weekStart === monday);
+  if (exact) {
+    return {
+      ...exact,
+      dayHours: cloneDayHours(exact.dayHours),
+      workingDays: [...exact.workingDays],
+    };
+  }
+
+  const previous = schedule.weekHours
+    .filter((item) => item.weekStart < monday)
+    .sort((left, right) => left.weekStart.localeCompare(right.weekStart))
+    .at(-1);
+
+  if (previous) {
+    return {
+      ...previous,
+      weekStart: monday,
+      dayHours: cloneDayHours(previous.dayHours),
+      workingDays: [...previous.workingDays],
+    };
+  }
+
+  return snapshotFromSchedule(schedule, monday);
+}
+
+export function upsertWeekHours(
+  list: TeamWeekHours[],
+  next: TeamWeekHours,
+): TeamWeekHours[] {
+  const weekStart = mondayIso(next.weekStart);
+  return [
+    ...list.filter((item) => item.weekStart !== weekStart),
+    { ...next, weekStart },
+  ].sort((left, right) => left.weekStart.localeCompare(right.weekStart));
+}
+
+export function weekHasValidatedHours(schedule: TeamSchedule, weekStart: string) {
+  const monday = mondayIso(weekStart);
+  return schedule.weekHours.some((item) => item.weekStart === monday);
+}
+
+export function dayHoursForWeekHours(hours: TeamWeekHours, weekday: number) {
+  return (
+    hours.dayHours.find((item) => item.weekday === weekday) ?? {
+      weekday,
+      startTime: hours.startTime,
+      endTime: hours.endTime,
+    }
+  );
+}
+
 export function normalizeTeamSchedule(
   value: unknown,
   fallbackId: string,
@@ -141,7 +314,20 @@ export function normalizeTeamSchedule(
         .map((day) => Number(day))
         .filter((day) => Number.isInteger(day) && day >= 0 && day <= 6)
     : base.workingDays;
-  const months = Number(row.months);
+  const monthsValue = Number(row.months);
+  const months: 1 | 3 | 6 =
+    monthsValue === 1 || monthsValue === 6 ? monthsValue : 3;
+  const periodRaw = row.period ?? row.months;
+  const period: TeamPeriod =
+    periodRaw === "week" || periodRaw === 0 || periodRaw === "0"
+      ? "week"
+      : Number(periodRaw) === 1
+        ? 1
+        : Number(periodRaw) === 6
+          ? 6
+          : months;
+  const startTime = asString(row.startTime, base.startTime).slice(0, 5);
+  const endTime = asString(row.endTime, base.endTime).slice(0, 5);
   const absences = Array.isArray(row.absences)
     ? row.absences
         .map((item) => normalizeTeamAbsence(item))
@@ -157,20 +343,34 @@ export function normalizeTeamSchedule(
           }
           return {
             weekday,
-            startTime: asString(hours.startTime, base.startTime).slice(0, 5),
-            endTime: asString(hours.endTime, base.endTime).slice(0, 5),
+            startTime: asString(hours.startTime, startTime).slice(0, 5),
+            endTime: asString(hours.endTime, endTime).slice(0, 5),
           } satisfies TeamDayHours;
         })
         .filter((item): item is TeamDayHours => Boolean(item))
+    : [];
+  const weekHours = Array.isArray(row.weekHours)
+    ? row.weekHours
+        .map((item) =>
+          normalizeWeekHours(item, {
+            startTime,
+            endTime,
+            workingDays,
+            dayHours,
+          }),
+        )
+        .filter((item): item is TeamWeekHours => Boolean(item))
     : [];
 
   return {
     ...base,
     startDate: asString(row.startDate, base.startDate).slice(0, 10),
-    months: months === 1 || months === 6 ? months : 3,
+    months: period === "week" ? 1 : period,
+    period,
+    weekHours,
     workingDays,
-    startTime: asString(row.startTime, base.startTime).slice(0, 5),
-    endTime: asString(row.endTime, base.endTime).slice(0, 5),
+    startTime,
+    endTime,
     dayHours,
     absenceStartDate: asString(row.absenceStartDate || row.absenceDate, base.absenceStartDate).slice(0, 10),
     absenceEndDate: asString(row.absenceEndDate || row.absenceDate, base.absenceEndDate).slice(0, 10),
@@ -241,13 +441,15 @@ export function defaultTeamSchedules(): TeamSchedule[] {
 }
 
 export function dayHoursForSchedule(schedule: TeamSchedule, weekday: number) {
-  return (
-    schedule.dayHours.find((item) => item.weekday === weekday) ?? {
-      weekday,
-      startTime: schedule.startTime,
-      endTime: schedule.endTime,
-    }
-  );
+  return dayHoursForWeekHours(snapshotFromSchedule(schedule, schedule.startDate), weekday);
+}
+
+export function resolvedHoursForDate(schedule: TeamSchedule, date: string) {
+  if (!isWeekPeriod(schedule)) {
+    return snapshotFromSchedule(schedule, mondayIso(date));
+  }
+
+  return hoursForWeek(schedule, mondayIso(date));
 }
 
 export function isDateInAbsence(absence: TeamAbsence, date: string) {
@@ -262,7 +464,11 @@ export function isPractitionerWorkingOnDate(schedule: TeamSchedule, date: string
     isDateInAbsence(absence, date),
   );
 
-  return schedule.workingDays.includes(day) && !hasAbsence;
+  if (hasAbsence) {
+    return false;
+  }
+
+  return resolvedHoursForDate(schedule, date).workingDays.includes(day);
 }
 
 function readLocalTeamPlanning(centerId: string) {

@@ -1,9 +1,9 @@
-import { cabins, practitioners } from "@/lib/agenda-data";
+import { cabins, cabinVisuals, practitioners } from "@/lib/agenda-data";
 import { markPastAppointmentsPresent } from "@/lib/appointment-presence";
 import { getActiveCenterContext } from "@/lib/center-access";
 import { normalizeLeadStatus } from "@/lib/lead-statuses";
 import { createClient } from "@/lib/supabase";
-import type { Appointment, AppointmentStatus } from "@/types/agenda";
+import type { Appointment, AppointmentStatus, Cabin, Practitioner } from "@/types/agenda";
 
 type SupabaseClient = ReturnType<typeof createClient>;
 
@@ -268,6 +268,199 @@ export async function loadCenterAssignmentOptions() {
     };
   } catch {
     return { cabins: [] as string[], practitioners: [] as string[] };
+  }
+}
+
+export function alignAppointmentCabinId(cabinId: string, cabinList: Cabin[]) {
+  if (cabinList.some((cabin) => cabin.id === cabinId)) {
+    return cabinId;
+  }
+
+  const legacy = /^cabine-(\d+)$/i.exec(cabinId);
+  if (legacy) {
+    const index = Number(legacy[1]) - 1;
+    return cabinList[index]?.id ?? cabinList[0]?.id ?? cabinId;
+  }
+
+  const normalized = cabinId.trim().toLowerCase();
+  const byName = cabinList.find(
+    (cabin) => cabin.name.trim().toLowerCase() === normalized,
+  );
+  return byName?.id ?? cabinList[0]?.id ?? cabinId;
+}
+
+export function alignAppointmentPractitionerId(
+  appointment: Appointment,
+  practitionerList: Practitioner[],
+) {
+  if (practitionerList.some((item) => item.id === appointment.practitionerId)) {
+    return appointment.practitionerId;
+  }
+
+  const name = appointment.practitionerName?.trim().toLowerCase();
+  if (name) {
+    const byName = practitionerList.find(
+      (item) => item.name.trim().toLowerCase() === name,
+    );
+    if (byName) {
+      return byName.id;
+    }
+  }
+
+  return practitionerList[0]?.id ?? appointment.practitionerId;
+}
+
+export async function loadCenterCabins() {
+  try {
+    const supabase = createClient();
+    const centerId = await getAgendaCenterId(supabase);
+    const [{ data: rooms, error: roomsError }, { data: center }] =
+      await Promise.all([
+        supabase
+          .from("rooms")
+          .select("id,name,color,display_order,is_active")
+          .eq("center_id", centerId)
+          .order("display_order", { ascending: true })
+          .order("name", { ascending: true }),
+        supabase
+          .from("centers")
+          .select("settings")
+          .eq("id", centerId)
+          .maybeSingle(),
+      ]);
+
+    if (roomsError) {
+      throw new Error(roomsError.message);
+    }
+
+    const equipmentMap = readRoomEquipment(center?.settings);
+    let rows = (rooms ?? []).filter(
+      (row) => row?.id && row.is_active !== false,
+    );
+
+    if (rows.length === 0) {
+      rows = await seedDefaultRooms(supabase, centerId);
+    }
+
+    return rows.map((row, index) =>
+      mapRoomToCabin(row, index, equipmentMap),
+    );
+  } catch {
+    return cabins;
+  }
+}
+
+export async function createCenterCabin(currentCount: number) {
+  const supabase = createClient();
+  const centerId = await getAgendaCenterId(supabase);
+  const index = Math.max(0, currentCount);
+  const visuals = cabinVisuals(index);
+  const name = `Cabine ${index + 1}`;
+  const { data, error } = await supabase
+    .from("rooms")
+    .insert({
+      center_id: centerId,
+      name,
+      color: visuals.hex,
+      display_order: index + 1,
+      is_active: true,
+    })
+    .select("id,name,color,display_order,is_active")
+    .single();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  const cabin = mapRoomToCabin(data, index, {});
+  await patchRoomEquipment(supabase, centerId, { [cabin.id]: cabin.equipment });
+  return cabin;
+}
+
+export async function updateCenterCabin(cabin: Cabin, index: number) {
+  if (!isPersistedAppointmentId(cabin.id)) {
+    return cabin;
+  }
+
+  const supabase = createClient();
+  const centerId = await getAgendaCenterId(supabase);
+  const visuals = cabinVisuals(index);
+  const name = cabin.name.trim() || `Cabine ${index + 1}`;
+  const { error } = await supabase
+    .from("rooms")
+    .update({
+      name,
+      color: visuals.hex,
+      display_order: index + 1,
+      is_active: true,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", cabin.id)
+    .eq("center_id", centerId);
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  await patchRoomEquipment(supabase, centerId, {
+    [cabin.id]: cabin.equipment.trim(),
+  });
+
+  return {
+    ...cabin,
+    name,
+    color: visuals.color,
+    softColor: visuals.softColor,
+  };
+}
+
+export async function saveCenterCabins(nextCabins: Cabin[]) {
+  const supabase = createClient();
+  const centerId = await getAgendaCenterId(supabase);
+  const equipment: Record<string, string> = {};
+
+  for (let index = 0; index < nextCabins.length; index += 1) {
+    const cabin = nextCabins[index];
+    if (!isPersistedAppointmentId(cabin.id)) {
+      continue;
+    }
+
+    const visuals = cabinVisuals(index);
+    const name = cabin.name.trim() || `Cabine ${index + 1}`;
+    const { error } = await supabase
+      .from("rooms")
+      .update({
+        name,
+        color: visuals.hex,
+        display_order: index + 1,
+        is_active: true,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", cabin.id)
+      .eq("center_id", centerId);
+
+    if (error) {
+      throw new Error(error.message);
+    }
+
+    equipment[cabin.id] = cabin.equipment.trim();
+  }
+
+  if (Object.keys(equipment).length > 0) {
+    await patchRoomEquipment(supabase, centerId, equipment);
+  }
+}
+
+export async function deleteCenterCabin(cabinId: string) {
+  if (!isPersistedAppointmentId(cabinId)) {
+    return;
+  }
+
+  const supabase = createClient();
+  const { error } = await supabase.from("rooms").delete().eq("id", cabinId);
+
+  if (error) {
+    throw new Error(error.message);
   }
 }
 
@@ -572,6 +765,18 @@ async function ensureRoom(
   centerId: string,
   cabinId: string,
 ) {
+  if (isPersistedAppointmentId(cabinId)) {
+    const { data, error } = await supabase
+      .from("rooms")
+      .select("id")
+      .eq("id", cabinId)
+      .eq("center_id", centerId)
+      .maybeSingle();
+
+    if (error) throw new Error(error.message);
+    if (data?.id) return data.id as string;
+  }
+
   const cabin = cabins.find((item) => item.id === cabinId);
   const name = cabin?.name ?? "Cabine";
   const { data: existing, error: existingError } = await supabase
@@ -600,8 +805,23 @@ async function ensurePractitioner(
   centerId: string,
   practitionerId: string,
 ) {
-  const practitioner = practitioners.find((item) => item.id === practitionerId);
-  const name = practitioner?.name ?? "Praticienne";
+  if (isPersistedAppointmentId(practitionerId)) {
+    const { data, error } = await supabase
+      .from("practitioners")
+      .select("id")
+      .eq("id", practitionerId)
+      .eq("center_id", centerId)
+      .maybeSingle();
+
+    if (error) throw new Error(error.message);
+    if (data?.id) return data.id as string;
+  }
+
+  const name = await resolvePractitionerName(
+    supabase,
+    centerId,
+    practitionerId,
+  );
   const names = splitPersonName(name);
   const { data: existingRows, error: existingError } = await supabase
     .from("practitioners")
@@ -633,6 +853,37 @@ async function ensurePractitioner(
   if (error) throw new Error(error.message);
 
   return data.id as string;
+}
+
+async function resolvePractitionerName(
+  supabase: SupabaseClient,
+  centerId: string,
+  practitionerId: string,
+) {
+  const hardcoded = practitioners.find((item) => item.id === practitionerId);
+  if (hardcoded?.name) {
+    return hardcoded.name;
+  }
+
+  const { data, error } = await supabase
+    .from("centers")
+    .select("settings")
+    .eq("id", centerId)
+    .maybeSingle();
+
+  if (error) throw new Error(error.message);
+
+  const team = asRecord(asRecord(asRecord(data?.settings).agenda).team);
+  const list = Array.isArray(team.practitioners) ? team.practitioners : [];
+  const found = list.find(
+    (item) =>
+      item &&
+      typeof item === "object" &&
+      String((item as { id?: unknown }).id || "") === practitionerId,
+  ) as { name?: unknown } | undefined;
+
+  const name = String(found?.name || "").trim();
+  return name || "Praticienne";
 }
 
 function toAppointmentFields(
@@ -673,7 +924,8 @@ function toAppointment(row: AppointmentRow): Appointment {
     email: client?.email ?? undefined,
     treatment: service?.name ?? "Soin à préciser",
     practitionerId: getPractitionerIdByName(practitionerDisplayName(practitioner)),
-    cabinId: getCabinIdByName(room?.name),
+    practitionerName: practitionerDisplayName(practitioner) ?? undefined,
+    cabinId: row.room_id || getCabinIdByName(room?.name),
     date: row.appointment_date,
     start: row.starts_at.slice(0, 5),
     duration: row.duration_minutes,
@@ -746,6 +998,119 @@ function normalizeName(value?: string | null) {
 
 function getCabinIdByName(name?: string | null) {
   return cabins.find((cabin) => cabin.name === name)?.id ?? cabins[0]?.id ?? "cabine-1";
+}
+
+function asRecord(value: unknown) {
+  return value && typeof value === "object"
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+type RoomRow = {
+  id: string;
+  name?: string | null;
+  color?: string | null;
+  display_order?: number | null;
+  is_active?: boolean | null;
+};
+
+function mapRoomToCabin(
+  row: RoomRow,
+  index: number,
+  equipmentMap: Record<string, string>,
+): Cabin {
+  const visuals = cabinVisuals(index);
+  const fallback = cabins[index];
+
+  return {
+    id: row.id,
+    name: String(row.name || fallback?.name || `Cabine ${index + 1}`).trim(),
+    equipment:
+      equipmentMap[row.id] ||
+      fallback?.equipment ||
+      "",
+    color: visuals.color,
+    softColor: visuals.softColor,
+  };
+}
+
+function readRoomEquipment(settings: unknown) {
+  const raw = asRecord(asRecord(asRecord(settings).agenda).roomEquipment);
+  const result: Record<string, string> = {};
+
+  for (const [id, value] of Object.entries(raw)) {
+    if (id && typeof value === "string") {
+      result[id] = value;
+    }
+  }
+
+  return result;
+}
+
+async function patchRoomEquipment(
+  supabase: SupabaseClient,
+  centerId: string,
+  patch: Record<string, string>,
+) {
+  const { data, error } = await supabase
+    .from("centers")
+    .select("settings")
+    .eq("id", centerId)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  const currentSettings = asRecord(data?.settings);
+  const currentAgenda = asRecord(currentSettings.agenda);
+  const { error: updateError } = await supabase
+    .from("centers")
+    .update({
+      settings: {
+        ...currentSettings,
+        agenda: {
+          ...currentAgenda,
+          roomEquipment: {
+            ...readRoomEquipment(currentSettings),
+            ...patch,
+          },
+        },
+      },
+    })
+    .eq("id", centerId);
+
+  if (updateError) {
+    throw new Error(updateError.message);
+  }
+}
+
+async function seedDefaultRooms(supabase: SupabaseClient, centerId: string) {
+  const payload = cabins.map((cabin, index) => {
+    const visuals = cabinVisuals(index);
+    return {
+      center_id: centerId,
+      name: cabin.name,
+      color: visuals.hex,
+      display_order: index + 1,
+      is_active: true,
+    };
+  });
+  const { data, error } = await supabase
+    .from("rooms")
+    .insert(payload)
+    .select("id,name,color,display_order,is_active");
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  const rows = data ?? [];
+  const equipment = Object.fromEntries(
+    rows.map((row, index) => [row.id, cabins[index]?.equipment ?? ""]),
+  );
+  await patchRoomEquipment(supabase, centerId, equipment);
+  return rows;
 }
 
 function addMinutesToTime(time: string, minutes: number) {

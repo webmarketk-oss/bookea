@@ -42,6 +42,7 @@ export interface Appointment {
   email?: string;
   treatment: string;
   practitionerId: string;
+  practitionerName?: string;
   cabinId: string;
   date: string;
   start: string;
