@@ -201,6 +201,13 @@ function weekHalfFromText(text) {
   return "";
 }
 
+function asksOtherDay(text) {
+  const value = normalize(text);
+  return /change de jour|d[' ]?autres? ?j|un autre jour|autre journee|autres? (jours?|horaires)|pas ce jour|d[' ]autres creneaux/.test(
+    value,
+  );
+}
+
 function greetingForTime(now) {
   const date = now instanceof Date ? now : new Date();
   const hour = Number(
@@ -276,7 +283,7 @@ function wantsSlots(text, conversation) {
   if (weekHalfFromText(text)) {
     return true;
   }
-  if (/change de jour|un autre jour|autres? horaires|pas ce jour|d[' ]autres creneaux/.test(value)) {
+  if (asksOtherDay(text)) {
     return true;
   }
   const asksAgenda =
@@ -411,6 +418,7 @@ module.exports = {
   isRereadAsk,
   greetingForTime,
   weekHalfFromText,
+  asksOtherDay,
   willCallBackReply,
   isHesitation,
   isIdentityQuestion,

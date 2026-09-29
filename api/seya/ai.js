@@ -31,7 +31,7 @@ const {
 } = require("./booking-state");
 const { classifyHealthMessage, isAwaitingHealthReview } = require("./health");
 const { classifyPriceQuestion, isPriceRepeatComplaint } = require("./price");
-const { isRereadAsk, offeredSlots, wantsSlots } = require("./conversation");
+const { asksOtherDay, isRereadAsk, offeredSlots, wantsSlots } = require("./conversation");
 
 function seyaModel() {
   const requested = String(process.env.OPENAI_MODEL || "").trim();
@@ -71,9 +71,11 @@ async function generateSeyaReply({
     centerId: centerId || conversation.centerId || bookingState.centerId,
     bookingState,
   };
-  const allowRepeat = /lundi|mardi|mercredi|jeudi|vendredi|samedi|debut de semaine|fin de semaine|dispo|creneau|créneau|1er|octobre|\d{1,2}\/\d{1,2}/i.test(
-    String(intentText || ""),
-  );
+  const allowRepeat =
+    asksOtherDay(intentText) ||
+    /lundi|mardi|mercredi|jeudi|vendredi|samedi|debut de semaine|fin de semaine|dispo|creneau|créneau|1er|octobre|\d{1,2}\/\d{1,2}/i.test(
+      String(intentText || ""),
+    );
   const health = classifyHealthMessage(intentText);
   const rawSlots =
     shouldSearchSlots(bookingState, intentText, conversationWithState) &&
@@ -344,9 +346,11 @@ function applyAiDecision(conversation, text, seya, slots, decision, extras = {})
     centerId: extras.centerId || conversation.centerId,
     now: extras.now,
   });
-  const allowRepeat = /lundi|mardi|mercredi|jeudi|vendredi|samedi|debut de semaine|fin de semaine|dispo|creneau|créneau|1er|octobre|\d{1,2}\/\d{1,2}/i.test(
-    String(text || ""),
-  );
+  const allowRepeat =
+    asksOtherDay(text) ||
+    /lundi|mardi|mercredi|jeudi|vendredi|samedi|debut de semaine|fin de semaine|dispo|creneau|créneau|1er|octobre|\d{1,2}\/\d{1,2}/i.test(
+      String(text || ""),
+    );
   const guarded = extras.guarded || guardSlots(slots, bookingState, {
     centerId: extras.centerId || conversation.centerId,
     allowRepeat,

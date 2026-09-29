@@ -46,6 +46,7 @@ const {
   parseClockMinutes,
   refusesSlots,
   wantsSlots,
+  asksOtherDay,
 } = require("./conversation");
 const { inferCareFamily, naturalOfferPhrase } = require("./care-family");
 const { sanitizePersonName } = require("../../lib/seya-person-name");
@@ -943,9 +944,8 @@ function parseDayRequest(text, conversation) {
   }
 
   if (
-    /change de jour|un autre jour|autres? horaires|d['’]autres creneaux|pas ce jour/.test(
-      value,
-    )
+    asksOtherDay(text) ||
+    /d['’]autres creneaux/.test(value)
   ) {
     excludeDates.push(...proposedDates);
     if (!wantsAnother) {
@@ -994,6 +994,7 @@ function pickSlotsForState(appointments, hours, state, now) {
     excludeWeekdays: state.rejectedWeekdays,
     excludeDates: state.rejectedDates,
     duration: BILAN_DURATION_MINUTES,
+    dayPart: state.dayPart,
     now,
   };
   return suggestAvailableSlots(appointments, hours, options);
@@ -1045,7 +1046,15 @@ function suggestAvailableSlots(appointments, hours, countOrOptions = 3, duration
     }
     const start = timeToMinutes(dayHours.startTime || "09:00");
     const end = timeToMinutes(dayHours.endTime || "19:00");
-    for (let minutes = start; minutes + slotDuration <= end; minutes += 30) {
+    const afternoonStart = 12 * 60;
+    let from = start;
+    let to = end;
+    if (options.dayPart === "afternoon") {
+      from = Math.max(start, afternoonStart);
+    } else if (options.dayPart === "morning") {
+      to = Math.min(end, afternoonStart);
+    }
+    for (let minutes = from; minutes + slotDuration <= to; minutes += 30) {
       if (date === today && minutes < nowMinutes + 60) {
         continue;
       }
@@ -1102,9 +1111,11 @@ function applyLeadReply(conversation, text, seya, slots, extras = {}) {
     bookingState,
     _seya: seya,
   };
-  const allowRepeat = /lundi|mardi|mercredi|jeudi|vendredi|samedi|debut de semaine|fin de semaine|dispo|creneau|créneau|1er|octobre|\d{1,2}\/\d{1,2}/i.test(
-    String(intentText || ""),
-  );
+  const allowRepeat =
+    asksOtherDay(intentText) ||
+    /lundi|mardi|mercredi|jeudi|vendredi|samedi|debut de semaine|fin de semaine|dispo|creneau|créneau|1er|octobre|\d{1,2}\/\d{1,2}/i.test(
+      String(intentText || ""),
+    );
   const guarded = extras.guarded && !reread
     ? extras.guarded
     : guardSlots(slots, bookingState, {

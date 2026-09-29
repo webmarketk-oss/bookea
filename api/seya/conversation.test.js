@@ -616,3 +616,122 @@ test("début de semaine après un oui : elle propose des horaires de début de s
   assert.match(lastSeya(conversation), /lun\.|mar\.|mer\./i);
   assert.doesNotMatch(lastSeya(conversation), /jeu\.|ven\.|sam\./i);
 });
+
+test("fin de semaine les après-midi : des créneaux l’après-midi, pas « plus de place »", async () => {
+  const now = new Date("2026-09-29T09:07:00");
+  let conversation = startConversation(
+    {
+      leadId: "lead-aprem",
+      centerId: "jfg-clinique-clermont",
+      firstName: "Samantha",
+      lastName: "Test",
+      phone: "0611223344",
+      treatment: "Soin minceur",
+    },
+    "JFG Clinique Clermont",
+    seya,
+  );
+  conversation.status = "RDV proposé";
+  conversation.qualification = {
+    need: "Soin minceur",
+    zone: "",
+    delay: "",
+    availability: "",
+  };
+  conversation.proposedSlots = [
+    { date: "2026-09-29", time: "10:30", label: "mar. 29/09 à 10h30" },
+    { date: "2026-09-29", time: "11:00", label: "mar. 29/09 à 11h00" },
+    { date: "2026-09-29", time: "11:30", label: "mar. 29/09 à 11h30" },
+  ];
+  conversation.bookingState = {
+    ...(conversation.bookingState || {}),
+    lastOfferedSlots: conversation.proposedSlots,
+    appointmentStatus: "proposed",
+  };
+  conversation.messages.push({
+    author: "seya",
+    text: "Vous êtes plutôt disponible en début de semaine, ou plutôt en fin de semaine ?",
+  });
+
+  const result = await generateSeyaReply({
+    conversation,
+    text: "Fin de semaine les après midi",
+    seya,
+    appointments: [],
+    hours: hours(),
+    centerName: "JFG Clinique Clermont",
+    centerAddress: "3 rue Eugène Gilbert",
+    centerId: "jfg-clinique-clermont",
+    now,
+  });
+  const answer = lastSeya(result.conversation);
+  assert.doesNotMatch(answer, /plus de place|début de semaine|zone souhaitez/i);
+  assert.match(answer, /12h00|12h30|13h00|14h00|15h00|16h00|17h00/i);
+  assert.match(answer, /jeu\.|ven\.|sam\./i);
+  assert.doesNotMatch(answer, /09h00|10h00|11h00/i);
+  for (const slot of result.conversation.proposedSlots || []) {
+    const [h] = String(slot.time).split(":").map(Number);
+    assert.ok(h >= 12, slot.label);
+    const weekday = new Date(`${slot.date}T12:00:00`).getDay();
+    assert.ok([4, 5, 6].includes(weekday), slot.label);
+  }
+});
+
+test("donne d'autre j : elle propose d'autres jours, elle ne redemande pas la moitié de semaine", async () => {
+  const now = new Date("2026-09-29T09:07:00");
+  let conversation = startConversation(
+    {
+      leadId: "lead-autre-j",
+      centerId: "jfg-clinique-clermont",
+      firstName: "Samantha",
+      lastName: "Test",
+      phone: "0611223344",
+      treatment: "Soin minceur",
+    },
+    "JFG Clinique Clermont",
+    seya,
+  );
+  conversation.status = "RDV proposé";
+  conversation.qualification = {
+    need: "Soin minceur",
+    zone: "",
+    delay: "",
+    availability: "",
+  };
+  conversation.proposedSlots = [
+    { date: "2026-09-29", time: "10:30", label: "mar. 29/09 à 10h30" },
+    { date: "2026-09-29", time: "11:00", label: "mar. 29/09 à 11h00" },
+    { date: "2026-09-29", time: "11:30", label: "mar. 29/09 à 11h30" },
+  ];
+  conversation.bookingState = {
+    ...(conversation.bookingState || {}),
+    lastOfferedSlots: conversation.proposedSlots,
+    appointmentStatus: "proposed",
+  };
+  conversation.messages.push({
+    author: "seya",
+    text: "Ce créneau n’est plus disponible. Le mar. 29/09 je peux vous proposer 10h30, 11h00 ou 11h30 — lequel vous irait le mieux ?",
+  });
+
+  const result = await generateSeyaReply({
+    conversation,
+    text: "Donne d'autre j",
+    seya,
+    appointments: [],
+    hours: hours(),
+    centerName: "JFG Clinique Clermont",
+    centerAddress: "3 rue Eugène Gilbert",
+    centerId: "jfg-clinique-clermont",
+    now,
+  });
+  const answer = lastSeya(result.conversation);
+  assert.doesNotMatch(
+    answer,
+    /début de semaine|fin de semaine|plus de place|zone souhaitez/i,
+  );
+  assert.match(answer, /09h00|10h00|mer\.|jeu\.|ven\./i);
+  assert.equal(
+    (result.conversation.proposedSlots || []).some((slot) => slot.date === "2026-09-29"),
+    false,
+  );
+});

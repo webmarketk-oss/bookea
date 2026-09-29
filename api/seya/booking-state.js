@@ -1,5 +1,5 @@
 const { classifyPriceQuestion, isPriceRepeatComplaint } = require("./price");
-const { isHesitation, isShortYes, refusesSlots, wantsSlots, weekHalfFromText } = require("./conversation");
+const { asksOtherDay, isHesitation, isShortYes, refusesSlots, wantsSlots, weekHalfFromText } = require("./conversation");
 
 const WEEKDAYS = [
   "dimanche",
@@ -151,13 +151,14 @@ function applyBookingMessage(state, text, extras = {}) {
       });
   }
 
-  if (/change de jour|un autre jour|autres? horaires|pas ce jour/.test(value)) {
+  if (asksOtherDay(text)) {
     next.lastOfferedSlots.forEach((slot) => {
       next.rejectedDates = unique([...next.rejectedDates, slot.date]);
     });
     next.requestedDate = null;
     next.requestedWeekday = null;
     next.weekHalf = null;
+    next.lastOfferedSlots = [];
     next.pendingQuestion = "other_day";
   }
 
@@ -235,9 +236,13 @@ function shouldSearchSlots(state, text, conversation) {
 
 function asksForOtherSlots(text) {
   const value = normalize(text);
-  return /change de jour|un autre jour|autre journee|autres? horaires|d[' ]autres creneaux|propose quoi|suivant|prochain|debut de semaine|fin de semaine|aujourd[' ]?hui/.test(
-    value,
-  ) || /\b(lundi|mardi|mercredi|jeudi|vendredi|samedi|demain)\b/.test(value);
+  return (
+    asksOtherDay(text) ||
+    /propose quoi|suivant|prochain|debut de semaine|fin de semaine|aujourd[' ]?hui/.test(
+      value,
+    ) ||
+    /\b(lundi|mardi|mercredi|jeudi|vendredi|samedi|demain)\b/.test(value)
+  );
 }
 
 function weekHalfDays(half) {
@@ -384,9 +389,10 @@ function replyHasForbiddenSlots(text, state) {
     ? Number(state.requestedDate.slice(0, 4))
     : new Date().getFullYear();
   const dates = [...raw.matchAll(/(\d{1,2})\/(\d{1,2})/g)];
+  const probeTime = state.dayPart === "afternoon" ? "14:00" : "09:00";
   for (const match of dates) {
     const iso = `${year}-${String(match[2]).padStart(2, "0")}-${String(match[1]).padStart(2, "0")}`;
-    if (!slotAllowed({ date: iso, time: "09:00" }, state)) {
+    if (!slotAllowed({ date: iso, time: probeTime }, state)) {
       return true;
     }
   }
