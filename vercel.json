@@ -6,7 +6,7 @@
     },
     {
       "path": "/api/seya/relance",
-      "schedule": "0 * * * *"
+      "schedule": "* * * * *"
     }
   ],
   "functions": {

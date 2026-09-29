@@ -51,6 +51,86 @@ test("écrire les conversations ne doit pas recréer un flag manquant comme une 
   assert.equal(isSeyaOff({ ...before, conversations: [{ leadId: "x" }] }), true);
 });
 
+test("un lead n’est pas contacté tout de suite : le WhatsApp est programmé dans 4 min", async () => {
+  const { WELCOME_DELAY_MS, isWelcomeDue } = require("./welcome");
+  const now = new Date("2026-09-29T08:00:00Z");
+  const supabase = mockCenterClient({
+    whatsappAgentEnabled: true,
+    autoMessageOnNewLead: true,
+    conversations: [],
+  });
+  const result = await welcomeNewLead(
+    supabase,
+    { id: "center-1", name: "JFG Clinique Clermont" },
+    {
+      leadId: "lead-1",
+      phone: "0612345678",
+      firstName: "Léa",
+      treatment: "Soin minceur",
+    },
+    now,
+  );
+  assert.equal(result.sent, false);
+  assert.equal(result.skipped, "scheduled");
+  const queued = supabase.stored().seya.conversations[0];
+  assert.equal(queued.status, "À envoyer");
+  assert.equal(
+    Date.parse(queued.welcomeSendAt) - now.getTime(),
+    WELCOME_DELAY_MS,
+  );
+  assert.equal(isWelcomeDue(queued, now), false);
+  assert.equal(
+    isWelcomeDue(queued, new Date(now.getTime() + WELCOME_DELAY_MS)),
+    true,
+  );
+});
+
+test("au bout de 4 min le message part, pas avant", async () => {
+  const { sendDueWelcomes, WELCOME_DELAY_MS } = require("./welcome");
+  const now = new Date("2026-09-29T08:00:00Z");
+  const dueAt = new Date(now.getTime() + WELCOME_DELAY_MS);
+  const conversation = {
+    leadId: "lead-1",
+    phone: "0612345678",
+    firstName: "Léa",
+    treatment: "Soin minceur",
+    status: "À envoyer",
+    welcomeSendAt: dueAt.toISOString(),
+    messages: [{ author: "seya", text: "Bonjour Léa, c’est Seya." }],
+  };
+  const supabase = mockCenterClient({
+    whatsappAgentEnabled: true,
+    autoMessageOnNewLead: true,
+    conversations: [conversation],
+  });
+  const sends = [];
+  const early = await sendDueWelcomes(
+    supabase,
+    { id: "center-1", name: "JFG" },
+    async () => {
+      sends.push("early");
+      return { sent: true, via: "whatsapp" };
+    },
+    now,
+  );
+  assert.equal(early.length, 0);
+  assert.equal(sends.length, 0);
+
+  const due = await sendDueWelcomes(
+    supabase,
+    { id: "center-1", name: "JFG" },
+    async () => {
+      sends.push("due");
+      return { sent: true, via: "whatsapp" };
+    },
+    dueAt,
+  );
+  assert.equal(due.length, 1);
+  assert.deepEqual(sends, ["due"]);
+  assert.equal(supabase.stored().seya.conversations[0].status, "En cours");
+  assert.equal(supabase.stored().seya.conversations[0].welcomeSendAt, null);
+});
+
 test("un lead n’est pas contacté si Seya est off en base, même si le webhook a un vieux settings", async () => {
   const supabase = mockCenterClient({
     whatsappAgentEnabled: false,

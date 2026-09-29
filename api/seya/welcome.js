@@ -3,8 +3,9 @@ const { isSeyaOff, isSeyaWelcomeOff, readCenterSeya, writeSeyaConversations } = 
 const { sendSharedWhatsApp } = require("./whatsapp");
 
 const ACTIVE_THREAD_HOURS = 24;
+const WELCOME_DELAY_MS = 4 * 60 * 1000;
 
-async function welcomeNewLead(supabase, center, context) {
+async function welcomeNewLead(supabase, center, context, now = new Date()) {
   if (!center?.id || !context?.phone) {
     return { sent: false, skipped: "no_phone" };
   }
@@ -22,8 +23,15 @@ async function welcomeNewLead(supabase, center, context) {
       item.leadId === context.leadId ||
       (phoneKey && last9(item.phone) === phoneKey),
   );
-  if (existing && isActiveWhatsAppThread(existing)) {
+  if (existing && isActiveWhatsAppThread(existing) && !isPendingWelcome(existing)) {
     return { sent: false, skipped: "already_messaged" };
+  }
+  if (isPendingWelcome(existing)) {
+    return {
+      sent: false,
+      skipped: "scheduled",
+      sendAt: existing.welcomeSendAt,
+    };
   }
 
   const started = startConversation(
@@ -39,34 +47,7 @@ async function welcomeNewLead(supabase, center, context) {
     center.name,
     seya,
   );
-  const opening =
-    [...(started.messages || [])].reverse().find((item) => item.author === "seya")
-      ?.text || "";
-
-  const family =
-    inferFamily(seya, context.campaign, context.treatment) ||
-    familyFromTreatment(
-      `${context.campaign || ""} ${context.treatment || ""} ${started.treatment || ""} ${started.offerLabel || ""}`,
-    );
-  const again = await readCenterSeya(supabase, center.id);
-  if (isSeyaWelcomeOff(again.seya)) {
-    return { sent: false, skipped: isSeyaOff(again.seya) ? "disabled" : "auto_off" };
-  }
-
-  const result = await sendSharedWhatsApp(context.phone, opening, {
-    firstName: context.firstName || existing?.firstName,
-    centerName: center.name,
-    treatment:
-      started.treatment ||
-      started.offerLabel ||
-      context.treatment ||
-      "",
-    campaign: context.campaign || started.campaign || "",
-    offerLabel: started.offerLabel || "",
-    family,
-    preferTemplate: true,
-  });
-
+  const sendAt = new Date(now.getTime() + WELCOME_DELAY_MS).toISOString();
   const next = {
     ...started,
     ...(existing || {}),
@@ -76,12 +57,13 @@ async function welcomeNewLead(supabase, center, context) {
     messages: existing
       ? [...(existing.messages || []), ...(started.messages || [])]
       : started.messages,
-    status: result.sent ? "En cours" : started.status,
-    sendError: result.sent ? null : result.error || result.reason || "échec WhatsApp",
-    sentVia: result.via || null,
+    status: "À envoyer",
+    welcomeSendAt: sendAt,
+    sendError: null,
+    sentVia: null,
     relanceCount: 0,
     lastRelanceAt: null,
-    updatedAt: new Date().toISOString(),
+    updatedAt: now.toISOString(),
   };
 
   await writeSeyaConversations(
@@ -97,25 +79,130 @@ async function welcomeNewLead(supabase, center, context) {
     ]),
   );
 
-  if (context.leadId) {
-    await supabase.from("lead_events").insert({
-      center_id: center.id,
-      lead_id: context.leadId,
-      event_type: "system",
-      note: result.sent
-        ? existing
-          ? `Seya a renvoyé un WhatsApp (réinscription, ${result.via || "whatsapp"}).`
-          : `Seya a envoyé le premier WhatsApp (${result.via || "whatsapp"}).`
-        : `Seya n’a pas pu envoyer le premier WhatsApp : ${result.error || result.reason || "échec"}.`,
-    });
+  return {
+    sent: false,
+    skipped: "scheduled",
+    sendAt,
+  };
+}
+
+async function sendDueWelcomes(
+  supabase,
+  center,
+  sendWhatsApp = sendSharedWhatsApp,
+  now = new Date(),
+) {
+  if (!center?.id) {
+    return [];
   }
 
-  return {
-    sent: Boolean(result.sent),
-    via: result.via || null,
-    skipped: result.sent ? null : result.reason || "send_failed",
-    error: result.error || null,
-  };
+  const latest = await readCenterSeya(supabase, center.id);
+  if (isSeyaWelcomeOff(latest.seya)) {
+    return [];
+  }
+
+  const conversations = Array.isArray(latest.seya.conversations)
+    ? latest.seya.conversations
+    : [];
+  const sent = [];
+  const nextConversations = [];
+  let changed = false;
+
+  for (const conversation of conversations) {
+    const updated = { ...conversation };
+    if (!isWelcomeDue(updated, now)) {
+      nextConversations.push(updated);
+      continue;
+    }
+    if ((updated.messages || []).some((item) => item.author === "lead")) {
+      updated.welcomeSendAt = null;
+      nextConversations.push(updated);
+      changed = true;
+      continue;
+    }
+
+    const again = await readCenterSeya(supabase, center.id);
+    if (isSeyaWelcomeOff(again.seya)) {
+      nextConversations.push(updated);
+      continue;
+    }
+
+    const opening =
+      [...(updated.messages || [])]
+        .reverse()
+        .find((item) => item.author === "seya")?.text || "";
+    if (!opening) {
+      nextConversations.push(updated);
+      continue;
+    }
+
+    const family =
+      inferFamily(again.seya, updated.campaign, updated.treatment) ||
+      familyFromTreatment(
+        `${updated.campaign || ""} ${updated.treatment || ""} ${updated.offerLabel || ""}`,
+      );
+    const result = await sendWhatsApp(updated.phone, opening, {
+      firstName: updated.firstName,
+      centerName: center.name,
+      treatment: updated.treatment || updated.offerLabel || "",
+      campaign: updated.campaign || "",
+      offerLabel: updated.offerLabel || "",
+      family,
+      preferTemplate: true,
+    });
+
+    if (result.sent) {
+      updated.status = "En cours";
+      updated.welcomeSendAt = null;
+      updated.sendError = null;
+      updated.sentVia = result.via || "whatsapp";
+      updated.updatedAt = now.toISOString();
+      sent.push({
+        centerId: center.id,
+        leadId: updated.leadId,
+        via: result.via || "whatsapp",
+      });
+      changed = true;
+      if (updated.leadId) {
+        await supabase.from("lead_events").insert({
+          center_id: center.id,
+          lead_id: updated.leadId,
+          event_type: "system",
+          note: `Seya a envoyé le premier WhatsApp (${result.via || "whatsapp"}), 4 min après l’inscription.`,
+        });
+      }
+    } else {
+      updated.sendError = result.error || result.reason || "échec WhatsApp";
+      changed = true;
+    }
+    nextConversations.push(updated);
+  }
+
+  if (changed) {
+    await writeSeyaConversations(
+      supabase,
+      center.id,
+      persistableConversations(nextConversations),
+    );
+  }
+
+  return sent;
+}
+
+function isPendingWelcome(conversation) {
+  return Boolean(
+    conversation &&
+      conversation.status === "À envoyer" &&
+      conversation.welcomeSendAt,
+  );
+}
+
+function isWelcomeDue(conversation, now = new Date()) {
+  if (!isPendingWelcome(conversation)) {
+    return false;
+  }
+  const at = Date.parse(conversation.welcomeSendAt);
+  return Number.isFinite(at) && now.getTime() >= at;
 }
 
 function isActiveWhatsAppThread(conversation) {
@@ -134,15 +221,15 @@ function isActiveWhatsAppThread(conversation) {
   return !closed;
 }
 
-function asRecord(value) {
-  return value && typeof value === "object" ? value : {};
-}
-
 function last9(value) {
   return String(value || "").replace(/\D/g, "").slice(-9);
 }
 
 module.exports = {
+  WELCOME_DELAY_MS,
   welcomeNewLead,
+  sendDueWelcomes,
   isActiveWhatsAppThread,
+  isPendingWelcome,
+  isWelcomeDue,
 };

@@ -36,6 +36,7 @@ const {
   isIdentityQuestion,
   isOffTopicComplaint,
   isRereadAsk,
+  isAppointmentConfirmed,
   isConfirmingOfferedTime,
   isShortYes,
   isThanks,
@@ -377,6 +378,71 @@ function formatSlotLabel(date, time) {
   const weekday = new Date(`${date}T12:00:00`).getDay();
   const [, month, day] = date.split("-");
   return `${weekdayShort[weekday]} ${day}/${month} à ${time.replace(":", "h")}`;
+}
+
+function formatConfirmedSlot(slot) {
+  const date = String(slot?.date || "");
+  const time = String(slot?.time || "").replace(":", "h");
+  const weekday = date ? new Date(`${date}T12:00:00`).getDay() : 0;
+  const [, month, day] = date.split("-");
+  const rawDay = weekdayNames[weekday] || "";
+  return {
+    day: rawDay ? rawDay.charAt(0).toUpperCase() + rawDay.slice(1) : "",
+    date: day && month ? `${day}/${month}` : "",
+    time: time || "",
+  };
+}
+
+function confirmedAppointmentReply({
+  slot,
+  centerName,
+  centerAddress,
+  brief,
+} = {}) {
+  const parts = formatConfirmedSlot(slot);
+  const fromBrief = fillConfirmationTemplate(brief, parts);
+  if (fromBrief) {
+    return fromBrief;
+  }
+  const where = formatConfirmationPlace(centerName, centerAddress);
+  return [
+    "Parfait, votre rendez-vous est confirmé ✅",
+    `📅 ${parts.day} ${parts.date} à ${parts.time}`.replace(/\s+/g, " ").trim(),
+    `📍 ${where}`,
+    "Vous recevrez un SMS 48 h avant avec un lien pour confirmer ou modifier votre rendez-vous. En cas d’empêchement, merci de nous prévenir.",
+    "À très bientôt,",
+    "Seya",
+  ].join("\n");
+}
+
+function formatConfirmationPlace(centerName, centerAddress) {
+  const name = String(centerName || "").trim();
+  const address = String(centerAddress || "").trim();
+  if (name && address) {
+    if (address.toLowerCase().includes(name.toLowerCase())) {
+      return address;
+    }
+    return `${name}, ${address}`;
+  }
+  return address || name || "le centre";
+}
+
+function fillConfirmationTemplate(brief, parts) {
+  const raw = String(brief || "");
+  const quoted = raw.match(
+    /[«"“]\s*(Parfait, votre rendez-vous est confirmé[\s\S]+?Seya)\s*[»"”]/i,
+  );
+  const block =
+    quoted?.[1] ||
+    raw.match(/(Parfait, votre rendez-vous est confirmé[\s\S]+?Seya)/i)?.[1];
+  if (!block) {
+    return "";
+  }
+  return block
+    .replace(/\[Jour\]/gi, parts.day)
+    .replace(/\[date\]/gi, parts.date)
+    .replace(/\[heure\]/gi, parts.time)
+    .trim();
 }
 
 function agentSettings(seya) {
@@ -1037,7 +1103,8 @@ function applyLeadReply(conversation, text, seya, slots, extras = {}) {
   );
   const pool = offeredSlots(conversation, slots);
   const chosenSlot =
-    bookingState.pendingQuestion === "no_slots" && !lastSeyaOfferedToBook(conversation)
+    isAppointmentConfirmed(conversation) ||
+    (bookingState.pendingQuestion === "no_slots" && !lastSeyaOfferedToBook(conversation))
       ? null
       : matchProposedSlot(intentText, conversation.proposedSlots, {
           confirmYes: true,
@@ -1063,16 +1130,31 @@ function applyLeadReply(conversation, text, seya, slots, extras = {}) {
     );
   }
 
-  if (isThanks(text, conversation) || isHesitation(text) || refusesSlots(text)) {
-    const pause = refusesSlots(text) || isHesitation(text);
+  if (
+    isThanks(text, conversation) ||
+    isHesitation(text) ||
+    refusesSlots(text) ||
+    (isAppointmentConfirmed(conversation) && isShortYes(text))
+  ) {
+    const confirmed = isAppointmentConfirmed(conversation);
+    const pause = !confirmed && (refusesSlots(text) || isHesitation(text));
     return finishLeadReply(
       conversation,
       qualification,
-      qualification.need ? "Qualifié" : conversation.status || "En cours",
+      confirmed
+        ? conversation.status || "RDV confirmé"
+        : qualification.need
+          ? "Qualifié"
+          : conversation.status || "En cours",
       text,
       conversationalReply(text, conversation, qualification, extras.now),
-      { ...bookingState, pendingQuestion: pause ? "no_slots" : bookingState.pendingQuestion },
-      { proposedSlots: pause ? [] : conversation.proposedSlots },
+      {
+        ...bookingState,
+        pendingQuestion: pause ? "no_slots" : bookingState.pendingQuestion,
+        lastOfferedSlots: confirmed ? [] : bookingState.lastOfferedSlots,
+        appointmentStatus: confirmed ? "confirmed" : bookingState.appointmentStatus,
+      },
+      { proposedSlots: confirmed || pause ? [] : conversation.proposedSlots },
     );
   }
 
@@ -1649,7 +1731,7 @@ module.exports = {
   lastSeyaAt,
   persistableConversation,
   persistableConversations,
-  BILAN_DURATION_MINUTES,
+  confirmedAppointmentReply,
   daysSince,
   matchProposedSlot,
   mergeQualification,

@@ -6,6 +6,7 @@ const { isNearDuplicate } = require("./price");
 const { sanitizePersonName } = require("../../lib/seya-person-name");
 const {
   BILAN_DURATION_MINUTES,
+  confirmedAppointmentReply,
   humanSlotReply,
   message,
   persistableConversations,
@@ -267,18 +268,28 @@ async function handleIncoming(supabase, incoming) {
   const next = result.conversation;
   next.lastRelanceAt = next.lastRelanceAt || existing.lastRelanceAt;
   next.relanceCount = 0;
+  next.welcomeSendAt = null;
 
   const followUps = [];
   const wantedSlot = result.shouldBook;
   if (wantedSlot) {
     try {
       await bookSeyaAppointment(supabase, center.id, context, next, wantedSlot);
-      if (next.bookingState) {
-        next.bookingState.appointmentStatus = "confirmed";
-      }
       next.status = "RDV confirmé";
+      next.bookedSlot = wantedSlot;
+      next.proposedSlots = [];
+      if (next.bookingState) {
+        next.bookingState.lastOfferedSlots = [];
+        next.bookingState.appointmentStatus = "confirmed";
+        next.bookingState.pendingQuestion = null;
+      }
       followUps.push(
-        `C’est noté, ${wantedSlot.label} est bien bloqué pour ${next.qualification?.need || "votre soin"}. Vous recevrez la confirmation du centre.`,
+        confirmedAppointmentReply({
+          slot: wantedSlot,
+          centerName: center.name,
+          centerAddress: readCenterAddress(center),
+          brief: seya.brief,
+        }),
       );
     } catch (bookError) {
       console.error("[seya/whatsapp] book failed", bookError);

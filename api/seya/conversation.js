@@ -91,6 +91,9 @@ function offeredSlots(conversation, extraSlots) {
 }
 
 function isBookingThread(conversation) {
+  if (isAppointmentConfirmed(conversation)) {
+    return false;
+  }
   const state = conversation?.bookingState || {};
   return Boolean(
     (state.lastOfferedSlots || []).length ||
@@ -107,8 +110,16 @@ function checkingSlotReply() {
   return "Parfait, je vérifie le créneau dont nous avions parlé et je reviens vers vous tout de suite 😊";
 }
 
+function isAppointmentConfirmed(conversation) {
+  return (
+    conversation?.status === "RDV confirmé" ||
+    conversation?.bookingState?.appointmentStatus === "confirmed" ||
+    Boolean(conversation?.bookedSlot)
+  );
+}
+
 function isConfirmingOfferedTime(text, conversation) {
-  if (!conversation) {
+  if (!conversation || isAppointmentConfirmed(conversation)) {
     return false;
   }
   if (isHesitation(text) || refusesSlots(text) || classifyPriceQuestion(text)) {
@@ -129,7 +140,7 @@ function isConfirmingOfferedTime(text, conversation) {
 }
 
 function acceptsBookingOffer(text, conversation) {
-  if (!conversation || !isShortYes(text)) {
+  if (!conversation || !isShortYes(text) || isAppointmentConfirmed(conversation)) {
     return false;
   }
   if (
@@ -224,6 +235,9 @@ function refusesSlots(text) {
 }
 
 function wantsSlots(text, conversation) {
+  if (isAppointmentConfirmed(conversation) && (isShortYes(text) || isThanks(text, conversation))) {
+    return false;
+  }
   if (acceptsBookingOffer(text, conversation)) {
     return true;
   }
@@ -300,7 +314,10 @@ function conversationalReply(text, conversation, qualification, now) {
   if (isIdentityQuestion(text)) {
     return identityReply();
   }
-  if (isThanks(text, conversation)) {
+  if (
+    isThanks(text, conversation) ||
+    (isAppointmentConfirmed(conversation) && isShortYes(text))
+  ) {
     return pickFresh(["Avec plaisir.", "Très bien.", "Avec plaisir, à bientôt."], conversation);
   }
   if (isAwayForNow(text) || isWillCallBack(text)) {
@@ -382,6 +399,7 @@ module.exports = {
   acceptsBookingOffer,
   alreadyTold,
   checkingSlotReply,
+  isAppointmentConfirmed,
   isConfirmingOfferedTime,
   composeReplies,
   conversationalReply,

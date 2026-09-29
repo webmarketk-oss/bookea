@@ -8,6 +8,7 @@ const {
   persistableConversations,
   relanceCopy,
 } = require("./agent");
+const { sendDueWelcomes } = require("./welcome");
 const { sendSharedWhatsApp } = require("./whatsapp");
 const { isNearDuplicate } = require("./price");
 const { isSeyaOff, readCenterSeya, writeSeyaConversations } = require("./store");
@@ -41,6 +42,8 @@ module.exports = async function handler(req, res) {
 
     const sent = [];
     for (const center of centers || []) {
+      const welcomed = await sendDueWelcomes(supabase, center);
+      sent.push(...welcomed.map((item) => ({ ...item, kind: "welcome" })));
       const result = await relanceCenter(supabase, center);
       sent.push(...result);
     }

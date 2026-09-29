@@ -484,6 +484,85 @@ test("ok je préfère vous recontacter : elle note, elle n’insiste pas", async
   assert.equal((conversation.proposedSlots || []).length, 0);
 });
 
+test("ok merci après un RDV déjà confirmé : elle ne reprend pas le créneau", async () => {
+  const slots = [
+    { date: "2026-09-29", time: "09:00", label: "mar. 29/09 à 09h00" },
+    { date: "2026-09-29", time: "10:30", label: "mar. 29/09 à 10h30" },
+  ];
+  let conversation = startConversation(
+    {
+      leadId: "lead-ok-merci",
+      centerId: "jfg-clinique-clermont",
+      firstName: "Samantha",
+      lastName: "Test",
+      phone: "0611223344",
+      treatment: "Soin minceur",
+    },
+    "JFG Clinique Clermont",
+    seya,
+  );
+  conversation.proposedSlots = slots;
+  conversation.bookedSlot = slots[0];
+  conversation.status = "RDV confirmé";
+  conversation.qualification = {
+    need: "Soin minceur",
+    zone: "",
+    delay: "",
+    availability: "",
+  };
+  conversation.bookingState = {
+    ...(conversation.bookingState || {}),
+    lastOfferedSlots: slots,
+    appointmentStatus: "confirmed",
+  };
+  conversation.messages.push({
+    author: "seya",
+    text: "C’est noté, mar. 29/09 à 09h00 est bien bloqué pour Soin minceur. Vous recevrez la confirmation du centre.",
+  });
+
+  const result = await generateSeyaReply({
+    conversation,
+    text: "Ok merci",
+    seya,
+    appointments: [
+      { date: "2026-09-29", start: "09:00", duration: 75 },
+    ],
+    hours: hours(),
+    centerName: "JFG Clinique Clermont",
+    centerAddress: "3 rue Eugène Gilbert, 63000 Clermont-Ferrand",
+    centerId: "jfg-clinique-clermont",
+    now: NOW,
+  });
+  assert.equal(result.shouldBook, null);
+  assert.equal(result.conversation.status, "RDV confirmé");
+  assert.doesNotMatch(
+    lastSeya(result.conversation),
+    /n['’]est plus disponible|zone souhaitez-vous|je peux vous proposer|10h30|11h00/i,
+  );
+  assert.match(lastSeya(result.conversation), /plaisir|très bien|à bientôt/i);
+});
+
+test("le message de confirmation reprend le modèle des consignes", () => {
+  const { confirmedAppointmentReply } = require("./agent");
+  const text = confirmedAppointmentReply({
+    slot: { date: "2026-09-29", time: "09:00" },
+    centerName: "JFG Clinic Clermont-Ferrand",
+    centerAddress: "3 rue Eugène Gilbert",
+    brief: `Dès qu’un rendez-vous est enregistré et confirmé dans l’agenda, envoie ce message en renseignant le jour, la date et l’heure exacts :
+« Parfait, votre rendez-vous est confirmé ✅
+📅 [Jour] [date] à [heure]
+📍 JFG Clinic Clermont-Ferrand, 3 rue Eugène Gilbert
+Vous recevrez un SMS 48 h avant avec un lien pour confirmer ou modifier votre rendez-vous. En cas d’empêchement, merci de nous prévenir.
+À très bientôt,
+Seya »`,
+  });
+  assert.match(text, /Parfait, votre rendez-vous est confirmé/);
+  assert.match(text, /Mardi 29\/09 à 09h00/);
+  assert.match(text, /JFG Clinic Clermont-Ferrand, 3 rue Eugène Gilbert/);
+  assert.match(text, /SMS 48 h avant/);
+  assert.doesNotMatch(text, /\[Jour\]|\[date\]|\[heure\]|bien bloqué/);
+});
+
 test("début de semaine après un oui : elle propose des horaires de début de semaine", async () => {
   let conversation = startConversation(
     {
