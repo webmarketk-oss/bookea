@@ -274,6 +274,23 @@ test("gpt-4o peut reformuler, mais un lundi fuité est jeté au profit du brouil
   );
 });
 
+test("la reformulation ne recolle pas le dernier message Seya", () => {
+  const state = emptyBookingState(CENTER_ID);
+  const previous = "Vous êtes plutôt disponible en début de semaine, ou plutôt en fin de semaine ?";
+  const draft = "Je peux vous proposer jeu. 01/10 à 14h00, 14h30 ou 15h00 — lequel vous irait le mieux ?";
+  const conversation = {
+    messages: [
+      { author: "seya", text: previous },
+      { author: "lead", text: "fin de semaine" },
+      { author: "seya", text: draft },
+    ],
+  };
+  assert.equal(
+    pickSafeReply(draft, previous, state, conversation),
+    draft,
+  );
+});
+
 test("suggestAvailableSlots sans filtre propose encore le lundi : le garde-fou reste obligatoire", () => {
   const unfiltered = suggestAvailableSlots([], hours(), { count: 3, days: 7, now: NOW });
   assert.equal(unfiltered[0]?.date, "2026-09-28");

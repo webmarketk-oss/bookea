@@ -1,5 +1,14 @@
 const { classifyPriceQuestion, isPriceRepeatComplaint } = require("./price");
-const { asksOtherDay, isHesitation, isShortYes, refusesSlots, wantsSlots, weekHalfFromText } = require("./conversation");
+const {
+  asksOtherDay,
+  dayPartFromText,
+  isHesitation,
+  isShortYes,
+  lastSeyaAskedToSearch,
+  refusesSlots,
+  wantsSlots,
+  weekHalfFromText,
+} = require("./conversation");
 
 const WEEKDAYS = [
   "dimanche",
@@ -92,10 +101,11 @@ function applyBookingMessage(state, text, extras = {}) {
     next.pendingQuestion = null;
   }
 
-  if (/apres[- ]?midi/.test(value)) {
-    next.dayPart = "afternoon";
-  } else if (/\bmatin\b/.test(value) && !/apres/.test(value)) {
-    next.dayPart = "morning";
+  const dayPart = dayPartFromText(text);
+  if (dayPart) {
+    next.dayPart = dayPart;
+    next.lastOfferedSlots = [];
+    next.pendingQuestion = null;
   }
 
   const weekHalf = weekHalfFromText(text);
@@ -104,6 +114,24 @@ function applyBookingMessage(state, text, extras = {}) {
     next.requestedDate = null;
     next.requestedWeekday = null;
     next.lastOfferedSlots = [];
+    next.pendingQuestion = null;
+  }
+
+  if (isShortYes(text) && lastSeyaAskedToSearch(extras.conversation)) {
+    const previous = [
+      ...(next.lastOfferedSlots || []),
+      ...((extras.conversation && extras.conversation.proposedSlots) || []),
+    ];
+    previous.forEach((slot) => {
+      if (slot?.date) {
+        next.rejectedDates = unique([...next.rejectedDates, slot.date]);
+      }
+    });
+    next.lastOfferedSlots = [];
+    next.weekHalf = null;
+    next.dayPart = null;
+    next.requestedDate = null;
+    next.requestedWeekday = null;
     next.pendingQuestion = null;
   }
 
@@ -205,6 +233,7 @@ function applyBookingMessage(state, text, extras = {}) {
 }
 
 function shouldSearchSlots(state, text, conversation) {
+  const forceSearch = lastSeyaAskedToSearch(conversation) && isShortYes(text);
   if (
     asksPrice(text) ||
     asksLocation(text) ||
@@ -225,11 +254,12 @@ function shouldSearchSlots(state, text, conversation) {
       return false;
     }
   }
-  if ((state.lastOfferedSlots || []).length && !asksForOtherSlots(text)) {
+  if ((state.lastOfferedSlots || []).length && !asksForOtherSlots(text) && !forceSearch) {
     return false;
   }
   return (
     wantsSlots(text, conversation) ||
+    forceSearch ||
     (state.pendingQuestion === "offer_slots" && isShortYes(text))
   );
 }
@@ -238,6 +268,7 @@ function asksForOtherSlots(text) {
   const value = normalize(text);
   return (
     asksOtherDay(text) ||
+    Boolean(dayPartFromText(text)) ||
     /propose quoi|suivant|prochain|debut de semaine|fin de semaine|aujourd[' ]?hui/.test(
       value,
     ) ||
@@ -261,11 +292,15 @@ function slotMinutes(slot) {
 }
 
 function matchesDayPart(slot, state) {
+  const minutes = slotMinutes(slot);
+  if (state.dayPart === "evening") {
+    return minutes >= 16 * 60;
+  }
   if (state.dayPart === "afternoon") {
-    return slotMinutes(slot) >= 12 * 60;
+    return minutes >= 14 * 60;
   }
   if (state.dayPart === "morning") {
-    return slotMinutes(slot) < 12 * 60;
+    return minutes < 12 * 60;
   }
   return true;
 }
@@ -360,6 +395,9 @@ function emptySlotFallback(state) {
   if (state.requestedWeekday != null) {
     return `Je n’ai pas de disponibilité ${WEEKDAYS[state.requestedWeekday]} pour ce bilan. Souhaitez-vous un autre jour ?`;
   }
+  if (state.dayPart === "evening") {
+    return "Je n’ai pas de créneau en fin de journée sur ces jours-là. Souhaitez-vous un autre horaire, ou une autre journée ?";
+  }
   if (state.weekHalf === "start") {
     return "Je n’ai plus de place en début de semaine. Souhaitez-vous plutôt la fin de semaine ?";
   }
@@ -389,7 +427,12 @@ function replyHasForbiddenSlots(text, state) {
     ? Number(state.requestedDate.slice(0, 4))
     : new Date().getFullYear();
   const dates = [...raw.matchAll(/(\d{1,2})\/(\d{1,2})/g)];
-  const probeTime = state.dayPart === "afternoon" ? "14:00" : "09:00";
+  const probeTime =
+    state.dayPart === "evening"
+      ? "17:00"
+      : state.dayPart === "afternoon"
+        ? "15:00"
+        : "09:00";
   for (const match of dates) {
     const iso = `${year}-${String(match[2]).padStart(2, "0")}-${String(match[1]).padStart(2, "0")}`;
     if (!slotAllowed({ date: iso, time: probeTime }, state)) {

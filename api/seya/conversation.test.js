@@ -666,12 +666,12 @@ test("fin de semaine les après-midi : des créneaux l’après-midi, pas « plu
   });
   const answer = lastSeya(result.conversation);
   assert.doesNotMatch(answer, /plus de place|début de semaine|zone souhaitez/i);
-  assert.match(answer, /12h00|12h30|13h00|14h00|15h00|16h00|17h00/i);
+  assert.match(answer, /14h00|14h30|15h00|16h00|17h00/i);
   assert.match(answer, /jeu\.|ven\.|sam\./i);
-  assert.doesNotMatch(answer, /09h00|10h00|11h00/i);
+  assert.doesNotMatch(answer, /09h00|10h00|11h00|12h00|13h00/i);
   for (const slot of result.conversation.proposedSlots || []) {
     const [h] = String(slot.time).split(":").map(Number);
-    assert.ok(h >= 12, slot.label);
+    assert.ok(h >= 14, slot.label);
     const weekday = new Date(`${slot.date}T12:00:00`).getDay();
     assert.ok([4, 5, 6].includes(weekday), slot.label);
   }
@@ -734,4 +734,123 @@ test("donne d'autre j : elle propose d'autres jours, elle ne redemande pas la mo
     (result.conversation.proposedSlots || []).some((slot) => slot.date === "2026-09-29"),
     false,
   );
+});
+
+test("oui merci après relance disponibilités : elle cherche des créneaux, elle ne dit pas plus de place", async () => {
+  const now = new Date("2026-09-29T10:26:00");
+  let conversation = startConversation(
+    {
+      leadId: "lead-relance-oui",
+      centerId: "jfg-clinique-clermont",
+      firstName: "Samantha",
+      lastName: "Test",
+      phone: "0611223344",
+      treatment: "Soin minceur",
+    },
+    "JFG Clinique Clermont",
+    seya,
+  );
+  conversation.status = "RDV proposé";
+  conversation.qualification = {
+    need: "Soin minceur",
+    zone: "",
+    delay: "",
+    availability: "",
+  };
+  conversation.proposedSlots = [
+    { date: "2026-09-29", time: "10:30", label: "mar. 29/09 à 10h30" },
+  ];
+  conversation.bookingState = {
+    ...(conversation.bookingState || {}),
+    lastOfferedSlots: conversation.proposedSlots,
+    weekHalf: "end",
+    dayPart: "afternoon",
+    appointmentStatus: "proposed",
+    pendingQuestion: "offer_slots",
+  };
+  conversation.messages.push(
+    {
+      author: "seya",
+      text: "Je n’ai plus de place en fin de semaine. Souhaitez-vous plutôt le début de semaine ?",
+    },
+    {
+      author: "seya",
+      text: "Bonjour Samantha, je reviens vers vous pour Soin minceur chez JFG Clinic Clermont-ferrand 😊 Vous souhaitez que je regarde les disponibilités pour vous ?",
+    },
+  );
+
+  const result = await generateSeyaReply({
+    conversation,
+    text: "oui merci",
+    seya,
+    appointments: [],
+    hours: hours(),
+    centerName: "JFG Clinique Clermont",
+    centerAddress: "3 rue Eugène Gilbert",
+    centerId: "jfg-clinique-clermont",
+    now,
+  });
+  const answer = lastSeya(result.conversation);
+  assert.doesNotMatch(answer, /plus de place|début de semaine|zone souhaitez/i);
+  assert.match(answer, /09h00|10h00|14h00|mer\.|jeu\.|ven\./i);
+  assert.doesNotMatch(answer, /mar\. 29\/09/i);
+});
+
+test("fin de journée après midi : des horaires en fin de journée, pas « aucun créneau »", async () => {
+  const now = new Date("2026-09-29T10:32:00");
+  let conversation = startConversation(
+    {
+      leadId: "lead-fin-journee",
+      centerId: "jfg-clinique-clermont",
+      firstName: "Samantha",
+      lastName: "Test",
+      phone: "0611223344",
+      treatment: "Soin minceur",
+    },
+    "JFG Clinique Clermont",
+    seya,
+  );
+  conversation.status = "RDV proposé";
+  conversation.qualification = {
+    need: "Soin minceur",
+    zone: "",
+    delay: "",
+    availability: "",
+  };
+  const noon = [
+    { date: "2026-10-01", time: "12:00", label: "jeu. 01/10 à 12h00" },
+    { date: "2026-10-01", time: "12:30", label: "jeu. 01/10 à 12h30" },
+    { date: "2026-10-01", time: "13:00", label: "jeu. 01/10 à 13h00" },
+  ];
+  conversation.proposedSlots = noon;
+  conversation.bookingState = {
+    ...(conversation.bookingState || {}),
+    lastOfferedSlots: noon,
+    weekHalf: "end",
+    dayPart: "afternoon",
+    appointmentStatus: "proposed",
+  };
+  conversation.messages.push({
+    author: "seya",
+    text: "Pour la fin de semaine, je peux vous proposer le jeudi 01/10 à 12h00, 12h30 ou 13h00. Lequel vous conviendrait le mieux ?",
+  });
+
+  const result = await generateSeyaReply({
+    conversation,
+    text: "fin de journée",
+    seya,
+    appointments: [],
+    hours: hours(),
+    centerName: "JFG Clinique Clermont",
+    centerAddress: "3 rue Eugène Gilbert",
+    centerId: "jfg-clinique-clermont",
+    now,
+  });
+  const answer = lastSeya(result.conversation);
+  assert.doesNotMatch(answer, /pas de créneau|plus de place|désolée|zone souhaitez/i);
+  assert.match(answer, /16h00|16h30|17h00|17h30/i);
+  for (const slot of result.conversation.proposedSlots || []) {
+    const [h] = String(slot.time).split(":").map(Number);
+    assert.ok(h >= 16, slot.label);
+  }
 });

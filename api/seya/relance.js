@@ -120,6 +120,19 @@ async function relanceCenter(supabase, center) {
       updated.lastRelanceAt = now.toISOString();
       updated.relanceCount = round;
       updated.updatedAt = updated.lastRelanceAt;
+      const keepOffered = /horaire vu ensemble|convient toujours/.test(text);
+      if (!keepOffered) {
+        updated.proposedSlots = [];
+        updated.bookingState = {
+          ...(updated.bookingState || {}),
+          lastOfferedSlots: [],
+          weekHalf: null,
+          dayPart: null,
+          requestedDate: null,
+          requestedWeekday: null,
+          pendingQuestion: "offer_slots",
+        };
+      }
       sent.push({
         centerId: center.id,
         leadId: conversation.leadId,

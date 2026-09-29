@@ -70,7 +70,20 @@ function lastSeyaOfferedToBook(conversation) {
     return false;
   }
   const value = normalize(last);
-  return /propose(r)? (un )?(creneau|horaire|rdv)|souhaitez[- ]vous|je (peux |vais )?(vous )?(regarder|proposer)|quel jour|lequel vous (irait|conviendrait)|quand (etes|seriez)|debut de semaine|fin de semaine|je peux vous proposer|autre journee|autre jour|lundi suivant|(l['’])?horaire.*(convient|irait)|convient toujours|pas de disponibilite|je (vous )propose/.test(
+  return /propose(r)? (un )?(creneau|horaire|rdv)|je (peux |vais )?(vous )?(regarder|proposer)|quel jour|lequel vous (irait|conviendrait)|quand (etes|seriez)|debut de semaine|fin de semaine|je peux vous proposer|autre journee|autre jour|lundi suivant|(l['’])?horaire.*(convient|irait)|convient toujours|pas de disponibilite|je (vous )propose/.test(
+    value,
+  );
+}
+
+function lastSeyaAskedToSearch(conversation) {
+  const value = normalize(lastSeyaText(conversation));
+  if (!value) {
+    return false;
+  }
+  if (/convient toujours|horaire vu ensemble/.test(value)) {
+    return false;
+  }
+  return /regarde(r)? (les )?(d[' ]autres )?(disponibilites|un creneau|un horaire)|disponibilites pour vous|regarde autre chose|je dois regarder un creneau/.test(
     value,
   );
 }
@@ -125,16 +138,25 @@ function isConfirmingOfferedTime(text, conversation) {
   if (isHesitation(text) || refusesSlots(text) || classifyPriceQuestion(text)) {
     return false;
   }
+  if (lastSeyaAskedToSearch(conversation)) {
+    return false;
+  }
   const hasOffered = offeredSlots(conversation).length > 0;
   const lastAsked =
     lastSeyaOfferedToBook(conversation) ||
     /convient toujours|horaire vu ensemble/i.test(lastSeyaText(conversation));
-  if (!hasOffered && !lastAsked) {
+  const clock = parseClockMinutes(text).length > 0;
+  if (!hasOffered) {
+    return false;
+  }
+  if (clock) {
+    return true;
+  }
+  if (!lastAsked) {
     return false;
   }
   return (
     isShortYes(text) ||
-    parseClockMinutes(text).length > 0 ||
     /toujours|ca me convient|ça me convient|c[' ]est bon/i.test(compactText(text))
   );
 }
@@ -192,11 +214,32 @@ function isAwayForNow(text) {
 
 function weekHalfFromText(text) {
   const value = normalize(text);
-  if (/debut de semaine|en debut|plutot (le )?debut/.test(value)) {
+  if (/debut de semaine|en debut de semaine|plutot (le )?debut( de semaine)?/.test(value) && !/fin de semaine/.test(value)) {
     return "start";
   }
-  if (/fin de semaine|en fin|plutot (la )?fin/.test(value)) {
+  if (/fin de semaine|en fin de semaine/.test(value)) {
     return "end";
+  }
+  if (/plutot (la )?fin/.test(value) && !/fin de journee/.test(value)) {
+    return "end";
+  }
+  return "";
+}
+
+function dayPartFromText(text) {
+  const value = normalize(text);
+  if (
+    /fin de journee|en fin de journee|le soir|\bsoiree\b|vers 1[6-9]\s*h|apres 16\s*h/.test(
+      value,
+    )
+  ) {
+    return "evening";
+  }
+  if (/apres[- ]?midi/.test(value)) {
+    return "afternoon";
+  }
+  if (/\bmatin\b/.test(value) && !/apres/.test(value)) {
+    return "morning";
   }
   return "";
 }
@@ -280,7 +323,7 @@ function wantsSlots(text, conversation) {
       value,
     );
   const refusedDay = /pas (dispo|disponible) le |pas le |je ne suis pas disponible/.test(value);
-  if (weekHalfFromText(text)) {
+  if (weekHalfFromText(text) || dayPartFromText(text)) {
     return true;
   }
   if (asksOtherDay(text)) {
@@ -388,6 +431,9 @@ function conversationalReply(text, conversation, qualification, now) {
     return `C’est noté pour ${label}. Vous voulez que je vous propose un créneau ?`;
   }
   if (!zone && /minceur|cryo|epilation|laser/i.test(need)) {
+    if (alreadyTold(conversation, "quelle zone")) {
+      return "";
+    }
     return "C’est noté. Quelle zone souhaitez-vous travailler ?";
   }
   if (/bonjour|hello|salut/.test(value) && /ventre|poids|minceur|mincir/.test(value)) {
@@ -418,7 +464,9 @@ module.exports = {
   isRereadAsk,
   greetingForTime,
   weekHalfFromText,
+  dayPartFromText,
   asksOtherDay,
+  lastSeyaAskedToSearch,
   willCallBackReply,
   isHesitation,
   isIdentityQuestion,

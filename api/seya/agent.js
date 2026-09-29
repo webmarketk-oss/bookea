@@ -42,6 +42,7 @@ const {
   isThanks,
   checkingSlotReply,
   lastSeyaOfferedToBook,
+  lastSeyaAskedToSearch,
   offeredSlots,
   parseClockMinutes,
   refusesSlots,
@@ -1004,6 +1005,7 @@ function pickSlotsForMessage(appointments, hours, conversation, text, now) {
   const state = applyBookingMessage(conversation.bookingState, text, {
     centerId: conversation.centerId,
     now,
+    conversation,
   });
   return pickSlotsForState(appointments, hours, state, now);
 }
@@ -1046,13 +1048,16 @@ function suggestAvailableSlots(appointments, hours, countOrOptions = 3, duration
     }
     const start = timeToMinutes(dayHours.startTime || "09:00");
     const end = timeToMinutes(dayHours.endTime || "19:00");
-    const afternoonStart = 12 * 60;
+    const afternoonStart = 14 * 60;
+    const eveningStart = 16 * 60;
     let from = start;
     let to = end;
-    if (options.dayPart === "afternoon") {
+    if (options.dayPart === "evening") {
+      from = Math.max(start, eveningStart);
+    } else if (options.dayPart === "afternoon") {
       from = Math.max(start, afternoonStart);
     } else if (options.dayPart === "morning") {
-      to = Math.min(end, afternoonStart);
+      to = Math.min(end, 12 * 60);
     }
     for (let minutes = from; minutes + slotDuration <= to; minutes += 30) {
       if (date === today && minutes < nowMinutes + 60) {
@@ -1104,6 +1109,7 @@ function applyLeadReply(conversation, text, seya, slots, extras = {}) {
       : applyBookingMessage(conversation.bookingState, intentText, {
           centerId: extras.centerId || conversation.centerId,
           now: extras.now,
+          conversation,
         });
   conversation = {
     ...conversation,
@@ -1113,7 +1119,7 @@ function applyLeadReply(conversation, text, seya, slots, extras = {}) {
   };
   const allowRepeat =
     asksOtherDay(intentText) ||
-    /lundi|mardi|mercredi|jeudi|vendredi|samedi|debut de semaine|fin de semaine|dispo|creneau|créneau|1er|octobre|\d{1,2}\/\d{1,2}/i.test(
+    /lundi|mardi|mercredi|jeudi|vendredi|samedi|debut de semaine|fin de semaine|fin de journee|soir|apres.?midi|dispo|creneau|créneau|1er|octobre|\d{1,2}\/\d{1,2}/i.test(
       String(intentText || ""),
     );
   const guarded = extras.guarded && !reread
@@ -1131,15 +1137,17 @@ function applyLeadReply(conversation, text, seya, slots, extras = {}) {
     conversation.treatment,
   );
   const pool = offeredSlots(conversation, slots);
+  const confirmYes = isConfirmingOfferedTime(intentText, conversation);
   const chosenSlot =
     isAppointmentConfirmed(conversation) ||
+    (lastSeyaAskedToSearch(conversation) && isShortYes(intentText)) ||
     (bookingState.pendingQuestion === "no_slots" && !lastSeyaOfferedToBook(conversation))
       ? null
       : matchProposedSlot(intentText, conversation.proposedSlots, {
-          confirmYes: true,
+          confirmYes,
         }) ||
         matchProposedSlot(intentText, conversation.bookingState?.lastOfferedSlots, {
-          confirmYes: true,
+          confirmYes,
         }) ||
         matchProposedSlot(intentText, pool);
   const refuses = isOptOut(text);
@@ -1413,6 +1421,7 @@ function applyLeadReply(conversation, text, seya, slots, extras = {}) {
         pendingQuestion: "offer_slots",
         rejectedDates: rejected,
       },
+      { proposedSlots: [] },
     );
   }
 
@@ -1529,12 +1538,18 @@ function fallbackAfterNote(qualification, conversation) {
   ) {
     return "Très bien. Je reste là si une question vous vient.";
   }
+  if (alreadyTold(conversation, "debut de semaine.*fin de semaine|fin de semaine.*debut de semaine")) {
+    return "Dites-moi un jour qui vous arrange, je regarde tout de suite.";
+  }
   if (isBookingThread(conversation) || alreadyTold(conversation, "c['’]est note pour|propose un creneau")) {
     return "Parfait. Vous êtes plutôt disponible en début de semaine, ou plutôt en fin de semaine ?";
   }
   if (qualification?.zone) {
     const zone = qualification.zone;
     const label = /cuisse/.test(zone) ? "les cuisses" : `le ${zone}`;
+    if (alreadyTold(conversation, "c['’]est note pour")) {
+      return "Dites-moi un jour qui vous irait, je vous propose un horaire.";
+    }
     return `C’est noté pour ${label}. Vous voulez que je vous propose un créneau ?`;
   }
   if (qualification?.need) {

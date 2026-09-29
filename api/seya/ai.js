@@ -30,7 +30,7 @@ const {
   slotAllowed,
 } = require("./booking-state");
 const { classifyHealthMessage, isAwaitingHealthReview } = require("./health");
-const { classifyPriceQuestion, isPriceRepeatComplaint } = require("./price");
+const { classifyPriceQuestion, isPriceRepeatComplaint, isNearDuplicate } = require("./price");
 const { asksOtherDay, isRereadAsk, offeredSlots, wantsSlots } = require("./conversation");
 
 function seyaModel() {
@@ -65,6 +65,7 @@ async function generateSeyaReply({
   const bookingState = applyBookingMessage(conversation.bookingState, intentText, {
     centerId: centerId || conversation.centerId,
     now,
+    conversation,
   });
   const conversationWithState = {
     ...conversation,
@@ -73,7 +74,7 @@ async function generateSeyaReply({
   };
   const allowRepeat =
     asksOtherDay(intentText) ||
-    /lundi|mardi|mercredi|jeudi|vendredi|samedi|debut de semaine|fin de semaine|dispo|creneau|créneau|1er|octobre|\d{1,2}\/\d{1,2}/i.test(
+    /lundi|mardi|mercredi|jeudi|vendredi|samedi|debut de semaine|fin de semaine|fin de journee|soir|apres.?midi|dispo|creneau|créneau|1er|octobre|\d{1,2}\/\d{1,2}/i.test(
       String(intentText || ""),
     );
   const health = classifyHealthMessage(intentText);
@@ -184,7 +185,8 @@ async function polishSeyaText({
         role: "user",
         content: [
           `Dernier message de la cliente : ${String(text || "").slice(0, 800)}`,
-          `Faits Bookea autorisés (à utiliser, pas à recopier) : ${String(draft || "").slice(0, 700)}`,
+          threadContext(conversation, text),
+          `Faits Bookea autorisés (à utiliser, pas à recopier mot pour mot) : ${String(draft || "").slice(0, 700)}`,
         ].join("\n"),
       },
     ],
@@ -211,17 +213,20 @@ function polishPrompt({
     .join(" · ");
 
   return [
-    "Tu es Seya, au standard WhatsApp. Tu parles comme une réceptionniste au téléphone : naturelle, posée, vouvoiement, 1 à 3 phrases.",
-    "Le texte Bookea est une fiche de faits autorisés, pas un script. Tu réponds d’abord au dernier message de la cliente.",
-    "Si Bookea propose un créneau ou pose une question alors que la cliente n’a pas demandé ça, tu ne le recopies pas.",
+    "Tu es Seya, au standard WhatsApp. Chaleureuse, naturelle, claire, vouvoiement. Tu parles comme une réceptionniste au téléphone, 1 à 3 phrases.",
+    "Ton objectif est d’accompagner jusqu’à la prise de rendez-vous, sans insister et sans coller deux fois la même réponse.",
+    "Avant de répondre, tu tiens compte de tout le fil : ce que le prospect a demandé, les infos déjà données, les disponibilités déjà évoquées.",
+    "Tu réponds au dernier message, dans ce contexte. Interdit de reposer une question déjà traitée. Interdit de recoller le dernier message Seya.",
+    "Le texte Bookea est une fiche de faits autorisés, pas un script. Si Bookea propose un créneau ou pose une question alors que la cliente n’a pas demandé ça, tu ne le recopies pas.",
     "Tu ne mets jamais fin à la conversation. Interdit : « écrivez-moi quand vous voulez reprendre », « je vous prie », « je reviendrai vers vous », « une conseillère vous recontacte », sauf si elle demande clairement à parler à quelqu’un.",
-    "Tu relis le fil. Si elle dit aujourd’hui, un jour, 9h, oui merci, oui toujours, ou « relis ce que je t’ai demandé », tu réponds à ÇA : un horaire déjà proposé, ou de nouveaux créneaux autorisés. Tu ne demandes pas la zone. Tu ne dis jamais qu’il n’y a plus de créneau si des horaires autorisés sont listés plus bas.",
+    "Si elle dit aujourd’hui, un jour, 9h, oui merci, oui toujours, fin de journée, après-midi, ou « relis ce que je t’ai demandé », tu réponds à ÇA : un horaire déjà proposé, ou de nouveaux créneaux autorisés. Tu ne redemandes pas la zone.",
+    "Tu ne dis jamais qu’il n’y a plus de créneau si des horaires autorisés sont listés plus bas.",
     "Si elle choisit 9h / 9h00 alors que 09h00 a été proposé, tu confirmes ce créneau.",
     "Si elle dit oui toujours après « l’horaire vous convient », tu confirmes l’horaire déjà vu. Tu ne clôtures pas.",
-    "Si elle dit oui, ok, d’accord ou merci après une proposition de rendez-vous, tu continues : tu proposes uniquement les créneaux autorisés, ou tu demandes si elle est plutôt disponible en début ou en fin de semaine. Tu ne clôtures pas.",
-    "Si elle préfère recontacter elle-même, tu dis seulement : « D’accord, aucun souci, je vous laisse revenir vers nous quand ça sera le moment pour vous. Je vous souhaite une belle journée / une bonne soirée :) ». Pas de créneau, pas de jour, pas d’explication pour réserver à distance.",
+    "Si elle dit oui, ok, d’accord ou merci après qu’on lui a proposé de regarder les disponibilités, tu proposes des créneaux autorisés. Tu ne répètes pas « plus de place ».",
+    "Si elle dit fin de journée, tu proposes des horaires en fin de journée parmi les créneaux autorisés, pas 12h.",
+    "Si elle préfère recontacter elle-même, tu dis seulement : « D’accord, aucun souci, je vous laisse revenir vers nous quand ça sera le moment pour vous. Je vous souhaite une belle journée / une bonne soirée :) ». Pas de créneau, pas de jour.",
     "Si Bookea cite des horaires ou demande un jour, tu gardes cette étape. Tu ne remplaces jamais ça par un au revoir.",
-    "Si elle veut un rendez-vous, tu restes avec elle : tu demandes un jour ou tu proposes uniquement les créneaux autorisés.",
     "Tu ne changes aucun fait. Tu n’inventes ni jour, ni heure, ni prix, ni adresse, ni résultat médical.",
     "Pas de liste 1) 2) 3). Pas de « Lead Meta ». Un smiley au plus, pas à chaque message. Tu ne termines pas chaque phrase par une question.",
     `Centre : ${centerName || "le centre"}.`,
@@ -249,6 +254,54 @@ function polishPrompt({
     .join("\n");
 }
 
+function threadContext(conversation, text) {
+  const qualification = conversation?.qualification || {};
+  const state = conversation?.bookingState || {};
+  const previousSeya = previousSeyaText(conversation);
+  const known = [
+    qualification.need ? `soin ${qualification.need}` : "",
+    qualification.zone ? `zone ${qualification.zone}` : "",
+    state.weekHalf === "end"
+      ? "fin de semaine"
+      : state.weekHalf === "start"
+        ? "début de semaine"
+        : "",
+    state.dayPart === "evening"
+      ? "fin de journée"
+      : state.dayPart === "afternoon"
+        ? "après-midi"
+        : state.dayPart === "morning"
+          ? "matin"
+          : "",
+  ].filter(Boolean);
+  const offered = offeredSlots(conversation)
+    .map((slot) => slot.label)
+    .filter(Boolean)
+    .slice(0, 6)
+    .join(", ");
+  return [
+    previousSeya
+      ? `Dernier message Seya (ne pas le recoller, ne pas reposer la même question) : ${String(previousSeya).slice(0, 400)}`
+      : "",
+    known.length ? `Déjà établi dans ce fil : ${known.join(" · ")}.` : "",
+    offered ? `Disponibilités déjà évoquées : ${offered}.` : "",
+    `Réponds à : ${String(text || "").slice(0, 400)}`,
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+function previousSeyaText(conversation) {
+  const texts = (conversation?.messages || [])
+    .filter((item) => item.author === "seya")
+    .map((item) => String(item.text || "").trim())
+    .filter(Boolean);
+  if (texts.length >= 2) {
+    return texts[texts.length - 2];
+  }
+  return "";
+}
+
 function lastSeyaText(conversation) {
   return (
     [...(conversation?.messages || [])]
@@ -257,7 +310,7 @@ function lastSeyaText(conversation) {
   );
 }
 
-function pickSafeReply(draft, polished, bookingState) {
+function pickSafeReply(draft, polished, bookingState, conversation) {
   const candidate = sanitizeReply(polished);
   if (!candidate || candidate.length < 8) {
     return draft;
@@ -290,6 +343,10 @@ function pickSafeReply(draft, polished, bookingState) {
     /pas de (creneau|disponib)|reprendre contact/i.test(candidate) &&
     !/pas de (creneau|disponib)|reprendre contact/i.test(draft)
   ) {
+    return draft;
+  }
+  const previous = previousSeyaText(conversation);
+  if (previous && isNearDuplicate(candidate, previous) && !isNearDuplicate(draft, previous)) {
     return draft;
   }
   return candidate;
@@ -329,7 +386,7 @@ function withPolishedText(result, polished, bookingState) {
     return result;
   }
   const draft = messages[index].text;
-  const safe = pickSafeReply(draft, polished, bookingState);
+  const safe = pickSafeReply(draft, polished, bookingState, conversation);
   if (safe === draft) {
     return result;
   }
@@ -345,10 +402,11 @@ function applyAiDecision(conversation, text, seya, slots, decision, extras = {})
   const bookingState = extras.bookingState || applyBookingMessage(conversation.bookingState, text, {
     centerId: extras.centerId || conversation.centerId,
     now: extras.now,
+    conversation,
   });
   const allowRepeat =
     asksOtherDay(text) ||
-    /lundi|mardi|mercredi|jeudi|vendredi|samedi|debut de semaine|fin de semaine|dispo|creneau|créneau|1er|octobre|\d{1,2}\/\d{1,2}/i.test(
+    /lundi|mardi|mercredi|jeudi|vendredi|samedi|debut de semaine|fin de semaine|fin de journee|soir|apres.?midi|dispo|creneau|créneau|1er|octobre|\d{1,2}\/\d{1,2}/i.test(
       String(text || ""),
     );
   const guarded = extras.guarded || guardSlots(slots, bookingState, {
