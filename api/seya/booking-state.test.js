@@ -5,6 +5,7 @@ delete process.env.OPENAI_API_KEY;
 
 const {
   applyBookingMessage,
+  dbStatusWhenSlotPositioned,
   emptyBookingState,
   enforceOutgoingText,
   guardSlots,
@@ -311,3 +312,68 @@ test("suggestAvailableSlots sans filtre propose encore le lundi : le garde-fou r
   assert.equal(guarded.slots.length, 0);
   assert.doesNotMatch(guarded.fallback, /lun\./);
 });
+
+test("un RDV de 75 min à 15h bloque 16h, comme à la réservation", () => {
+  const { isSlotBusy, pickSlotsForState, BILAN_DURATION_MINUTES } = require("./agent");
+  const date = "2026-10-15";
+  const appointments = [
+    { date, start: "15:00:00", duration: 75, status: "confirmed" },
+  ];
+  assert.equal(isSlotBusy(appointments, date, "16:00", BILAN_DURATION_MINUTES), true);
+  const slots = pickSlotsForState(
+    appointments,
+    hours(),
+    {
+      ...emptyBookingState(CENTER_ID),
+      requestedDate: date,
+      dayPart: "afternoon",
+    },
+    NOW,
+  );
+  assert.equal(slots.some((slot) => slot.time === "16:00"), false);
+});
+
+test("un créneau déjà refusé n’est pas reproposé", () => {
+  const { pickSlotsForState } = require("./agent");
+  const date = "2026-10-15";
+  const slots = pickSlotsForState(
+    [],
+    hours(),
+    {
+      ...emptyBookingState(CENTER_ID),
+      requestedDate: date,
+      dayPart: "afternoon",
+      rejectedSlots: [{ date, time: "16:00" }],
+    },
+    NOW,
+  );
+  assert.equal(slots.some((slot) => slot.time === "16:00"), false);
+  assert.ok(slots.length > 0);
+});
+
+test("un créneau Seya à plus de 48h est confirmé, laser comme cryo", () => {
+  const when = new Date();
+  when.setDate(when.getDate() + 5);
+  const date = [
+    when.getFullYear(),
+    String(when.getMonth() + 1).padStart(2, "0"),
+    String(when.getDate()).padStart(2, "0"),
+  ].join("-");
+
+  assert.equal(dbStatusWhenSlotPositioned(date, "10:00"), "confirmed");
+
+  const soon = new Date();
+  soon.setHours(soon.getHours() + 12);
+  const soonDate = [
+    soon.getFullYear(),
+    String(soon.getMonth() + 1).padStart(2, "0"),
+    String(soon.getDate()).padStart(2, "0"),
+  ].join("-");
+  const soonTime = [
+    String(soon.getHours()).padStart(2, "0"),
+    String(soon.getMinutes()).padStart(2, "0"),
+  ].join(":");
+
+  assert.equal(dbStatusWhenSlotPositioned(soonDate, soonTime), "to_confirm");
+});
+

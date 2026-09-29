@@ -8,6 +8,7 @@ const {
   BILAN_DURATION_MINUTES,
   confirmedAppointmentReply,
   humanSlotReply,
+  isSlotBusy,
   message,
   persistableConversations,
   pickSlotsForState,
@@ -15,6 +16,7 @@ const {
   startConversation,
   pickSlotsForMessage,
 } = require("./agent");
+const { dbStatusWhenSlotPositioned } = require("./booking-state");
 const { isSeyaOff, writeSeyaConversations } = require("./store");
 
 const GRAPH_VERSION = "v21.0";
@@ -336,6 +338,10 @@ async function handleIncoming(supabase, incoming) {
       if (next.bookingState) {
         next.bookingState.appointmentStatus = "proposed";
         next.bookingState.lastOfferedSlots = [];
+        next.bookingState.rejectedSlots = [
+          ...(next.bookingState.rejectedSlots || []),
+          { date: wantedSlot.date, time: wantedSlot.time },
+        ];
       }
       const alternatives = pickSlotsForState(
         [
@@ -351,6 +357,10 @@ async function handleIncoming(supabase, incoming) {
           ...(next.bookingState || {}),
           lastOfferedSlots: [],
           requestedDate: wantedSlot.date,
+          rejectedSlots: [
+            ...((next.bookingState && next.bookingState.rejectedSlots) || []),
+            { date: wantedSlot.date, time: wantedSlot.time },
+          ],
         },
         new Date(),
       );
@@ -567,8 +577,8 @@ async function loadCenterAppointments(supabase, centerId) {
 
   return (data || []).map((row) => ({
     date: row.appointment_date,
-    start: String(row.starts_at || "").slice(0, 5),
-    duration: row.duration_minutes || BILAN_DURATION_MINUTES,
+    start: row.starts_at,
+    duration: row.duration_minutes,
     status: row.status || "",
   }));
 }
@@ -590,19 +600,13 @@ async function bookSeyaAppointment(supabase, centerId, context, conversation, sl
     .select("starts_at,duration_minutes,status")
     .eq("center_id", centerId)
     .eq("appointment_date", slot.date);
-  const taken = (existing || []).some((row) => {
-    if (/annul/i.test(String(row.status || ""))) {
-      return false;
-    }
-    const otherStart = String(row.starts_at || "")
-      .slice(0, 5)
-      .split(":")
-      .map(Number);
-    const otherFrom = (otherStart[0] || 0) * 60 + (otherStart[1] || 0);
-    const otherTo = otherFrom + (row.duration_minutes || BILAN_DURATION_MINUTES);
-    return startMinutes < otherTo && endMinutes > otherFrom;
-  });
-  if (taken) {
+  const busy = (existing || []).map((row) => ({
+    date: slot.date,
+    start: row.starts_at,
+    duration: row.duration_minutes,
+    status: row.status || "",
+  }));
+  if (isSlotBusy(busy, slot.date, slot.time, BILAN_DURATION_MINUTES)) {
     throw new Error("slot_taken");
   }
 
@@ -616,7 +620,7 @@ async function bookSeyaAppointment(supabase, centerId, context, conversation, sl
     starts_at: start,
     ends_at: endsAt,
     duration_minutes: BILAN_DURATION_MINUTES,
-    status: "to_confirm",
+    status: dbStatusWhenSlotPositioned(slot.date, slot.time),
     origin: "seya",
     notes: `RDV Seya WhatsApp · ${conversation.qualification?.need || context.treatment || "soin"}`,
     updated_at: new Date().toISOString(),

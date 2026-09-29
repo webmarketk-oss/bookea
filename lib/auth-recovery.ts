@@ -17,7 +17,8 @@ export function parseAuthRedirect(href = window.location.href) {
   const isRecovery =
     type === "recovery" ||
     (next || "").includes(RESET_PASSWORD_PATH) ||
-    url.pathname === RESET_PASSWORD_PATH;
+    url.pathname === RESET_PASSWORD_PATH ||
+    hash.get("type") === "recovery";
 
   return {
     url,
@@ -31,41 +32,58 @@ export function parseAuthRedirect(href = window.location.href) {
   };
 }
 
-export function markPasswordRecoveryPending() {
+function readStorageFlag() {
   try {
-    sessionStorage.setItem(PASSWORD_RECOVERY_FLAG, String(Date.now()));
+    return (
+      window.localStorage.getItem(PASSWORD_RECOVERY_FLAG) ||
+      window.sessionStorage.getItem(PASSWORD_RECOVERY_FLAG)
+    );
   } catch {
-    // sessionStorage can be blocked in private mode
+    return null;
+  }
+}
+
+export function markPasswordRecoveryPending() {
+  const value = String(Date.now());
+  try {
+    window.localStorage.setItem(PASSWORD_RECOVERY_FLAG, value);
+  } catch {
+    // private mode
+  }
+  try {
+    window.sessionStorage.setItem(PASSWORD_RECOVERY_FLAG, value);
+  } catch {
+    // private mode
   }
 }
 
 export function isPasswordRecoveryPending(
   maxAgeMs = PASSWORD_RECOVERY_MAX_AGE_MS,
 ) {
-  try {
-    const raw = sessionStorage.getItem(PASSWORD_RECOVERY_FLAG);
-    if (!raw) {
-      return false;
-    }
-
-    const startedAt = Number(raw);
-    return Number.isFinite(startedAt) && Date.now() - startedAt < maxAgeMs;
-  } catch {
+  const raw = readStorageFlag();
+  if (!raw) {
     return false;
   }
+
+  const startedAt = Number(raw);
+  return Number.isFinite(startedAt) && Date.now() - startedAt < maxAgeMs;
 }
 
 export function clearPasswordRecoveryPending() {
   try {
-    sessionStorage.removeItem(PASSWORD_RECOVERY_FLAG);
+    window.localStorage.removeItem(PASSWORD_RECOVERY_FLAG);
+  } catch {
+    // ignore
+  }
+  try {
+    window.sessionStorage.removeItem(PASSWORD_RECOVERY_FLAG);
   } catch {
     // ignore
   }
 }
 
 export function buildPasswordRecoveryRedirectTo(origin: string) {
-  const url = new URL(AUTH_CALLBACK_PATH, origin);
-  url.searchParams.set("next", RESET_PASSWORD_PATH);
+  const url = new URL(RESET_PASSWORD_PATH, origin);
   url.searchParams.set("type", "recovery");
   return url.toString();
 }
@@ -78,6 +96,9 @@ export function buildResetPasswordHref(href = window.location.href) {
       nextUrl.searchParams.set(key, value);
     }
   });
+  if (!nextUrl.searchParams.get("type")) {
+    nextUrl.searchParams.set("type", "recovery");
+  }
   nextUrl.hash = url.hash;
   return `${nextUrl.pathname}${nextUrl.search}${nextUrl.hash}`;
 }
@@ -88,10 +109,31 @@ export function buildCallbackHref(href = window.location.href) {
   url.searchParams.forEach((value, key) => {
     nextUrl.searchParams.set(key, value);
   });
-  if (isRecovery) {
+  if (isRecovery || isPasswordRecoveryPending()) {
     nextUrl.searchParams.set("type", "recovery");
     nextUrl.searchParams.set("next", RESET_PASSWORD_PATH);
   }
   nextUrl.hash = url.hash;
   return `${nextUrl.pathname}${nextUrl.search}${nextUrl.hash}`;
+}
+
+export function navigatePreservingAuth(href: string) {
+  window.location.replace(href);
+}
+
+export async function waitForAuthSession(
+  getSession: () => Promise<{ data: { session: unknown } }>,
+  attempts = 12,
+  delayMs = 200,
+) {
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    const { data } = await getSession();
+    if (data.session) {
+      return data.session;
+    }
+
+    await new Promise((resolve) => window.setTimeout(resolve, delayMs));
+  }
+
+  return null;
 }

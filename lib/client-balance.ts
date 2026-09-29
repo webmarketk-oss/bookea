@@ -1,16 +1,26 @@
 import { getActiveCenterContext } from "@/lib/center-access";
+import {
+  addPaymentTone,
+  emptyClientBalanceDueIndex,
+  invoicePaymentAmounts,
+  isUsablePersonName,
+  normalizePersonName,
+  paymentToneFromAmounts,
+  phoneKey,
+  type ClientBalanceDueIndex,
+  type PaymentTone,
+} from "@/lib/payment-tone";
 import { createClient } from "@/lib/supabase";
 
-export type PaymentTone = "paid" | "partial" | "unpaid";
-
-export type ClientBalanceDueIndex = {
-  clientIds: Set<string>;
-  names: Set<string>;
-  phones: Set<string>;
-  tonesByClientId: Map<string, PaymentTone>;
-  tonesByName: Map<string, PaymentTone>;
-  tonesByPhone: Map<string, PaymentTone>;
-};
+export type { ClientBalanceDueIndex, PaymentTone } from "@/lib/payment-tone";
+export {
+  emptyClientBalanceDueIndex,
+  getPaymentTone,
+  hasOutstandingPayment,
+  invoicePaymentAmounts,
+  paymentToneFromAmounts,
+  paymentToneFromClient,
+} from "@/lib/payment-tone";
 
 export const paymentToneStyles: Record<
   PaymentTone,
@@ -82,122 +92,23 @@ type InvoiceBalanceRow = {
     | null;
 };
 
-export function emptyClientBalanceDueIndex(): ClientBalanceDueIndex {
-  return {
-    clientIds: new Set(),
-    names: new Set(),
-    phones: new Set(),
-    tonesByClientId: new Map(),
-    tonesByName: new Map(),
-    tonesByPhone: new Map(),
-  };
-}
-
-export function paymentToneFromAmounts(paid: number, due: number) {
-  if (due <= 0 && paid <= 0) {
-    return null;
-  }
-
-  if (due <= 0) {
-    return "paid" as const;
-  }
-
-  if (paid > 0) {
-    return "partial" as const;
-  }
-
-  return "unpaid" as const;
-}
-
-export function invoicePaymentAmounts(row: {
-  balance_due?: number | string | null;
-  paid_amount?: number | string | null;
-  status?: string | null;
-  total_ttc?: number | string | null;
-  type?: string | null;
-}) {
-  const status = (row.status || "").toLowerCase();
-  const type = (row.type || "").toLowerCase();
-
-  if (
-    status === "cancelled" ||
-    status === "canceled" ||
-    status === "annulee" ||
-    status === "annulée" ||
-    type === "devis" ||
-    type === "avoir"
-  ) {
-    return null;
-  }
-
-  const total = Number(row.total_ttc ?? 0);
-  const paid = Math.max(0, Number(row.paid_amount ?? 0));
-  const storedDue = Number(row.balance_due);
-  let due = Number.isFinite(storedDue) ? Math.max(0, storedDue) : Math.max(total - paid, 0);
-
-  if (status === "paid" || status === "credit_note") {
-    return { paid: Math.max(paid, total), due: 0 };
-  }
-
-  if (due <= 0 && paid < total) {
-    due = Math.max(total - paid, 0);
-  }
-
-  return { paid, due };
-}
-
-export function paymentToneFromClient(client: {
-  balanceDue: number;
-  totalSpent?: number;
-  cares?: Array<{ amount: number; paid: number }>;
-}) {
-  const paidFromCares = (client.cares ?? []).reduce(
-    (total, care) => total + care.paid,
-    0,
-  );
-  const paid =
-    paidFromCares > 0 ? paidFromCares : Number(client.totalSpent ?? 0);
-  return paymentToneFromAmounts(paid, client.balanceDue);
-}
-
-export function getPaymentTone(
-  index: ClientBalanceDueIndex,
-  identity: {
-    clientId?: string;
-    personName?: string;
-    phone?: string;
-  },
-) {
-  if (identity.clientId) {
-    const tone = index.tonesByClientId.get(identity.clientId);
-    if (tone) {
-      return tone;
-    }
-  }
-
-  const phone = phoneKey(identity.phone ?? "");
-  if (phone.length >= 8) {
-    const tone = index.tonesByPhone.get(phone);
-    if (tone) {
-      return tone;
-    }
-  }
-
-  const name = normalizePersonName(identity.personName ?? "");
-  return name.length > 0 ? index.tonesByName.get(name) ?? null : null;
-}
-
-export function hasOutstandingPayment(
-  index: ClientBalanceDueIndex,
-  identity: {
-    clientId?: string;
-    personName?: string;
-    phone?: string;
-  },
-) {
-  const tone = getPaymentTone(index, identity);
-  return tone === "partial" || tone === "unpaid";
-}
+type LeadBalanceRow = {
+  amount_cure_ttc: number | string | null;
+  client_id: string | null;
+  status: string | null;
+  clients:
+    | {
+        first_name: string | null;
+        last_name: string | null;
+        phone: string | null;
+      }
+    | Array<{
+        first_name: string | null;
+        last_name: string | null;
+        phone: string | null;
+      }>
+    | null;
+};
 
 export async function loadClientBalanceDueIndex(): Promise<ClientBalanceDueIndex> {
   const index = emptyClientBalanceDueIndex();
@@ -212,10 +123,6 @@ export async function loadClientBalanceDueIndex(): Promise<ClientBalanceDueIndex
       )
       .eq("center_id", center.centerId);
 
-    if (error || !data) {
-      return index;
-    }
-
     const totals = new Map<
       string,
       {
@@ -227,69 +134,92 @@ export async function loadClientBalanceDueIndex(): Promise<ClientBalanceDueIndex
       }
     >();
 
-    for (const row of data as InvoiceBalanceRow[]) {
-      const amounts = invoicePaymentAmounts(row);
-      if (!amounts) {
-        continue;
+    if (!error && data) {
+      for (const row of data as InvoiceBalanceRow[]) {
+        const amounts = invoicePaymentAmounts(row);
+        if (!amounts) {
+          continue;
+        }
+
+        const client = Array.isArray(row.clients) ? row.clients[0] : row.clients;
+        const name = normalizePersonName(
+          [client?.first_name, client?.last_name].filter(Boolean).join(" "),
+        );
+        const phone = phoneKey(client?.phone ?? "");
+        const key = row.client_id || phone || name;
+
+        if (!key) {
+          continue;
+        }
+
+        const current = totals.get(key) ?? {
+          clientId: row.client_id ?? undefined,
+          name,
+          paid: 0,
+          phone,
+          due: 0,
+        };
+        current.paid += amounts.paid;
+        current.due += amounts.due;
+        totals.set(key, current);
       }
 
-      const client = Array.isArray(row.clients) ? row.clients[0] : row.clients;
-      const name = normalizePersonName(
-        [client?.first_name, client?.last_name].filter(Boolean).join(" "),
-      );
-      const phone = phoneKey(client?.phone ?? "");
-      const key = row.client_id || phone || name;
+      for (const current of totals.values()) {
+        const tone = paymentToneFromAmounts(current.paid, current.due);
+        if (!tone) {
+          continue;
+        }
 
-      if (!key) {
-        continue;
+        addPaymentTone(index, current, tone);
       }
-
-      const current = totals.get(key) ?? {
-        clientId: row.client_id ?? undefined,
-        name,
-        paid: 0,
-        phone,
-        due: 0,
-      };
-      current.paid += amounts.paid;
-      current.due += amounts.due;
-      totals.set(key, current);
     }
 
-    for (const current of totals.values()) {
-      const tone = paymentToneFromAmounts(current.paid, current.due);
-      if (!tone) {
-        continue;
-      }
+    const { data: leadRows, error: leadError } = await supabase
+      .from("leads")
+      .select(
+        "client_id, status, amount_cure_ttc, clients(first_name, last_name, phone)",
+      )
+      .eq("center_id", center.centerId);
 
-      if (current.clientId) {
-        index.tonesByClientId.set(
-          current.clientId,
-          worseTone(index.tonesByClientId.get(current.clientId), tone),
-        );
-        if (tone !== "paid") {
-          index.clientIds.add(current.clientId);
+    if (!leadError && leadRows) {
+      for (const row of leadRows as LeadBalanceRow[]) {
+        const amount = Number(row.amount_cure_ttc ?? 0);
+        if (amount <= 0) {
+          continue;
         }
-      }
 
-      if (current.phone.length >= 8) {
-        index.tonesByPhone.set(
-          current.phone,
-          worseTone(index.tonesByPhone.get(current.phone), tone),
+        const client = Array.isArray(row.clients) ? row.clients[0] : row.clients;
+        const name = normalizePersonName(
+          [client?.first_name, client?.last_name].filter(Boolean).join(" "),
         );
-        if (tone !== "paid") {
-          index.phones.add(current.phone);
-        }
-      }
+        const phone = phoneKey(client?.phone ?? "");
+        const clientId = row.client_id ?? undefined;
 
-      if (current.name) {
-        index.tonesByName.set(
-          current.name,
-          worseTone(index.tonesByName.get(current.name), tone),
-        );
-        if (tone !== "paid") {
-          index.names.add(current.name);
+        if (
+          (clientId && index.tonesByClientId.has(clientId)) ||
+          (phone.length >= 8 && index.tonesByPhone.has(phone)) ||
+          (isUsablePersonName(name) && index.tonesByName.has(name))
+        ) {
+          continue;
         }
+
+        const sold = ["Vendu", "Client", "Client converti"].includes(
+          row.status ?? "",
+        );
+        const tone = paymentToneFromAmounts(sold ? amount : 0, sold ? 0 : amount);
+        if (!tone) {
+          continue;
+        }
+
+        addPaymentTone(
+          index,
+          {
+            clientId,
+            name,
+            phone,
+          },
+          tone,
+        );
       }
     }
   } catch {
@@ -297,31 +227,4 @@ export async function loadClientBalanceDueIndex(): Promise<ClientBalanceDueIndex
   }
 
   return index;
-}
-
-function worseTone(current: PaymentTone | undefined, next: PaymentTone) {
-  const rank: Record<PaymentTone, number> = {
-    paid: 0,
-    partial: 1,
-    unpaid: 2,
-  };
-
-  if (!current) {
-    return next;
-  }
-
-  return rank[next] > rank[current] ? next : current;
-}
-
-function normalizePersonName(value: string) {
-  return value
-    .normalize("NFD")
-    .replace(/\p{Diacritic}/gu, "")
-    .toLowerCase()
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function phoneKey(value: string) {
-  return value.replace(/\D/g, "").slice(-9);
 }

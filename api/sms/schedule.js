@@ -88,9 +88,6 @@ async function handleBirthdayJob(res, payload, action) {
   const clientId = String(payload.clientId || "").trim();
   const centerIdHint = String(payload.centerId || "").trim();
   const enabled = payload.enabled !== false;
-  const birthDate = toIsoBirthDate(
-    payload.birthDate || payload.vars?.birthDate || client?.birthdate,
-  );
   let client = null;
 
   if (clientId) {
@@ -106,6 +103,10 @@ async function handleBirthdayJob(res, payload, action) {
 
     client = data;
   }
+
+  const birthDate = toIsoBirthDate(
+    payload.birthDate || payload.vars?.birthDate || client?.birthdate,
+  );
 
   const centerId = String(client?.center_id || centerIdHint || "").trim();
 
@@ -129,6 +130,25 @@ async function handleBirthdayJob(res, payload, action) {
 
   const sms = parseCenterSmsSettings(centerRow.settings);
   const phone = normalizePhone(payload.vars?.phone || payload.phone || client?.phone);
+  const optedOut = (sms.jobs || []).some(
+    (job) =>
+      job?.kind === "birthday" &&
+      job?.status === "cancelled" &&
+      job?.reason === "opt_out" &&
+      ((clientId && job.clientId === clientId) ||
+        (phone && normalizePhone(job.phone) === phone)),
+  );
+
+  if (action === "status") {
+    return res.status(200).json({
+      ok: true,
+      enabled: sms.birthdaySmsEnabled !== false && !optedOut,
+      scheduled: (sms.jobs || []).some((job) =>
+        birthdayJobMatches(job, clientId, phone),
+      ),
+    });
+  }
+
   const shouldCancel =
     action === "cancel" || enabled === false || !birthDate || !sms.birthdaySmsEnabled;
 

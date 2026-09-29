@@ -2,11 +2,12 @@
 
 import { AuthFeedback, getAuthFeedback } from "@/lib/auth-errors";
 import {
-  RESET_PASSWORD_PATH,
   buildPasswordRecoveryRedirectTo,
+  buildResetPasswordHref,
   clearPasswordRecoveryPending,
   isPasswordRecoveryPending,
   markPasswordRecoveryPending,
+  navigatePreservingAuth,
   parseAuthRedirect,
 } from "@/lib/auth-recovery";
 import { createClient } from "@/lib/supabase";
@@ -45,7 +46,7 @@ export function LoginForm({ initialError }: LoginFormProps) {
     const client = createClient();
 
     if (auth.isRecovery || (auth.hasAuthPayload && recoveryPending)) {
-      router.replace(RESET_PASSWORD_PATH + auth.url.search + auth.url.hash);
+      navigatePreservingAuth(buildResetPasswordHref());
     }
 
     if (typeof window !== "undefined" && window.location.search.includes("reset=expired")) {

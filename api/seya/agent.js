@@ -354,11 +354,12 @@ function addDaysIso(iso, days) {
 }
 
 function timeToMinutes(value) {
-  const [hours, minutes] = String(value || "00:00")
-    .slice(0, 5)
-    .split(":")
-    .map(Number);
-  return hours * 60 + minutes;
+  const raw = String(value || "00:00");
+  const match = raw.match(/(\d{1,2}):(\d{2})/);
+  if (!match) {
+    return 0;
+  }
+  return Number(match[1]) * 60 + Number(match[2]);
 }
 
 function minutesToTime(value) {
@@ -374,6 +375,40 @@ function currentMinutes(now) {
 
 function rangesOverlap(startA, endA, startB, endB) {
   return startA < endB && startB < endA;
+}
+
+function appointmentDurationMinutes(appointment) {
+  const raw = Number(appointment?.duration ?? appointment?.duration_minutes);
+  return Number.isFinite(raw) && raw > 0 ? raw : BILAN_DURATION_MINUTES;
+}
+
+function isBlockingAppointment(appointment, date) {
+  if (!appointment) {
+    return false;
+  }
+  if (appointment.date && appointment.date !== date) {
+    return false;
+  }
+  if (appointment.kind === "Pause") {
+    return false;
+  }
+  if (/annul|cancel/i.test(String(appointment.status || ""))) {
+    return false;
+  }
+  return true;
+}
+
+function isSlotBusy(appointments, date, time, duration = BILAN_DURATION_MINUTES) {
+  const start = timeToMinutes(time);
+  const end = start + (Number(duration) > 0 ? Number(duration) : BILAN_DURATION_MINUTES);
+  return (appointments || []).some((appointment) => {
+    if (!isBlockingAppointment(appointment, date)) {
+      return false;
+    }
+    const otherStart = timeToMinutes(appointment.start || appointment.starts_at);
+    const otherEnd = otherStart + appointmentDurationMinutes(appointment);
+    return rangesOverlap(start, end, otherStart, otherEnd);
+  });
 }
 
 function formatSlotLabel(date, time) {
@@ -732,7 +767,11 @@ function matchProposedSlot(text, slots, options = {}) {
     return slots[Number(value) - 1] || null;
   }
   if (clocks.length) {
-    const exact = slots.find((slot) => clocks.includes(timeToMinutes(slot.time)));
+    const dated = options.date
+      ? slots.filter((slot) => slot.date === options.date)
+      : slots;
+    const pool = dated.length ? dated : slots;
+    const exact = pool.find((slot) => clocks.includes(timeToMinutes(slot.time)));
     if (exact) {
       return exact;
     }
@@ -994,6 +1033,7 @@ function pickSlotsForState(appointments, hours, state, now) {
             : [],
     excludeWeekdays: state.rejectedWeekdays,
     excludeDates: state.rejectedDates,
+    excludeSlots: state.rejectedSlots,
     duration: BILAN_DURATION_MINUTES,
     dayPart: state.dayPart,
     now,
@@ -1024,6 +1064,11 @@ function suggestAvailableSlots(appointments, hours, countOrOptions = 3, duration
     ? options.excludeWeekdays
     : [];
   const excludeDates = Array.isArray(options.excludeDates) ? options.excludeDates : [];
+  const excludeSlots = new Set(
+    (Array.isArray(options.excludeSlots) ? options.excludeSlots : [])
+      .map((slot) => `${slot.date}|${String(slot.time || "").slice(0, 5)}`)
+      .filter(Boolean),
+  );
   const slots = [];
   const clock = options.now instanceof Date ? options.now : new Date();
   const today = todayIso(clock);
@@ -1064,18 +1109,10 @@ function suggestAvailableSlots(appointments, hours, countOrOptions = 3, duration
         continue;
       }
       const time = minutesToTime(minutes);
-      const busy = (appointments || []).some((appointment) => {
-        if (appointment.date !== date) return false;
-        if (appointment.kind === "Pause") return false;
-        if (/annul/i.test(String(appointment.status || ""))) return false;
-        return rangesOverlap(
-          minutes,
-          minutes + slotDuration,
-          timeToMinutes(appointment.start),
-          timeToMinutes(appointment.start) + (appointment.duration || 60),
-        );
-      });
-      if (busy) {
+      if (excludeSlots.has(`${date}|${time}`)) {
+        continue;
+      }
+      if (isSlotBusy(appointments, date, time, slotDuration)) {
         continue;
       }
       slots.push({ date, time, label: formatSlotLabel(date, time) });
@@ -1145,11 +1182,13 @@ function applyLeadReply(conversation, text, seya, slots, extras = {}) {
       ? null
       : matchProposedSlot(intentText, conversation.proposedSlots, {
           confirmYes,
+          date: bookingState.requestedDate,
         }) ||
         matchProposedSlot(intentText, conversation.bookingState?.lastOfferedSlots, {
           confirmYes,
+          date: bookingState.requestedDate,
         }) ||
-        matchProposedSlot(intentText, pool);
+        matchProposedSlot(intentText, pool, { date: bookingState.requestedDate });
   const refuses = isOptOut(text);
 
   if (refuses) {
@@ -1789,6 +1828,8 @@ module.exports = {
   emptySlotFallback,
   familyFromTreatment,
   guardSlots,
+  isSlotBusy,
+  BILAN_DURATION_MINUTES,
   lastLeadAt,
   lastSeyaAt,
   persistableConversation,

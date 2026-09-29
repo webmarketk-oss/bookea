@@ -1,6 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+} from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
@@ -20,12 +27,20 @@ import {
   createCrmAppointment,
   deleteCenterCabin,
   deleteCrmAppointment,
+  isPersistedAppointmentId,
   loadCenterCabins,
   loadCrmAppointments,
   persistCrmAppointment,
   saveCenterCabins,
 } from "@/lib/agenda-supabase";
 import { issueAppointmentConfirmationUrl } from "@/lib/appointment-confirmation";
+import {
+  applyPositionedAppointmentStatus,
+  agendaBlockTitle,
+  isAgendaBlockKind,
+  isAppointmentWithinHoursAhead,
+  withAgendaBlockIdentity,
+} from "@/lib/appointment-position-status";
 import { markPastAppointmentsPresent } from "@/lib/appointment-presence";
 import {
   emptyClientBalanceDueIndex,
@@ -45,7 +60,6 @@ import {
   scheduleAppointmentReminderSms,
   sendBookeaSms,
   sendSavedTemplateSms,
-  syncBirthdaySms,
 } from "@/lib/send-sms";
 import {
   addCenterService,
@@ -71,8 +85,27 @@ import {
   readPublicBookingsForCenter,
   removePublicBooking,
 } from "@/lib/public-bookings";
-import { getActiveCenterContext } from "@/lib/center-access";
+import { loadClientNotifyPref } from "@/lib/client-notify";
 import { loadCenterHours, saveCenterHours } from "@/lib/center-hours";
+import {
+  AGENDA_SEYA_DURATION_MINUTES,
+  agendaSeyaClientName,
+  agendaSeyaSuggestionTexts,
+  createAgendaDeskConversation,
+  isSeyaAgendaBlockCommand,
+  pickFreeCabinId,
+  seyaAgendaOccupancyAppointments,
+} from "@/lib/seya-agenda";
+import {
+  applyLeadReply,
+  lastSeyaMessage,
+  suggestAvailableSlots,
+} from "@/lib/seya-agent";
+import {
+  defaultSeyaAgentSettings,
+  loadSeyaAgentSettings,
+  type SeyaConversation,
+} from "@/lib/seya-settings";
 import {
   addDaysToIso,
   dayHoursForSchedule,
@@ -115,6 +148,7 @@ import {
   CheckCircle2,
   Clock3,
   Grip,
+  Loader2,
   Minus,
   Plus,
   RefreshCcw,
@@ -125,32 +159,59 @@ import {
 } from "lucide-react";
 
 const timeOptions = createTimeSlots(7, 19, 15);
-const SLOT_ROW_HEIGHT_REM = 1.85;
+const VISIBLE_AGENDA_HOURS = 3;
+const SLOT_STEP_MINUTES = 15;
+const VISIBLE_SLOT_COUNT = (VISIBLE_AGENDA_HOURS * 60) / SLOT_STEP_MINUTES;
 const TIME_COLUMN_PX = 92;
 const CABIN_COLUMN_MIN_PX = 260;
+const MAX_BLOCK_DURATION_MINUTES = 9 * 60;
+const MAX_APPOINTMENT_DURATION_MINUTES = 2 * 60;
+const ALL_DAY_DURATION_MINUTES = 720;
 
-const appointmentDurationOptions = [
-  "15",
-  "30",
-  "45",
-  "60",
-  "75",
-  "90",
-  "105",
-  "120",
-  "720",
-];
-const appointmentDurationLabels: Record<string, string> = {
-  "15": "15 min",
-  "30": "30 min",
-  "45": "45 min",
-  "60": "1 h",
-  "75": "1 h 15",
-  "90": "1 h 30",
-  "105": "1 h 45",
-  "120": "2 h",
-  "720": "Toute la journée",
-};
+function durationLabel(minutes: number) {
+  if (minutes >= ALL_DAY_DURATION_MINUTES) {
+    return "Toute la journée";
+  }
+
+  if (minutes < 60) {
+    return `${minutes} min`;
+  }
+
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  if (rest === 0) {
+    return `${hours} h`;
+  }
+
+  return `${hours} h ${rest}`;
+}
+
+function buildDurationOptions(maxMinutes: number) {
+  const options: string[] = [];
+  for (
+    let minutes = SLOT_STEP_MINUTES;
+    minutes <= maxMinutes;
+    minutes += SLOT_STEP_MINUTES
+  ) {
+    options.push(String(minutes));
+  }
+  options.push(String(ALL_DAY_DURATION_MINUTES));
+  return options;
+}
+
+function durationLabelsFor(options: string[]) {
+  return Object.fromEntries(
+    options.map((value) => [value, durationLabel(Number(value))]),
+  );
+}
+
+const appointmentDurationOptions = buildDurationOptions(
+  MAX_APPOINTMENT_DURATION_MINUTES,
+);
+const blockDurationOptions = buildDurationOptions(MAX_BLOCK_DURATION_MINUTES);
+const appointmentDurationLabels = durationLabelsFor([
+  ...new Set([...appointmentDurationOptions, ...blockDurationOptions]),
+]);
 
 const emptyAppointment = {
   personName: "",
@@ -167,6 +228,7 @@ const emptyAppointment = {
   kind: "Rendez-vous" as AppointmentKind,
   notes: "",
   birthDate: "",
+  clientId: "",
 };
 
 const statusClasses: Record<AppointmentStatus, string> = {
@@ -280,6 +342,10 @@ export default function AgendaBoard() {
   const [centerDayHours, setCenterDayHours] = useState(defaultCenterDayHours);
   const [seyaCommand, setSeyaCommand] = useState("");
   const [seyaFeedback, setSeyaFeedback] = useState("");
+  const [seyaAsking, setSeyaAsking] = useState(false);
+  const [seyaConversation, setSeyaConversation] =
+    useState<SeyaConversation | null>(null);
+  const [seyaSettings, setSeyaSettings] = useState(defaultSeyaAgentSettings);
   const [dailyInfoByDate, setDailyInfoByDate] = useState<
     Record<string, string>
   >(() => loadStoredDailyInfo());
@@ -300,6 +366,12 @@ export default function AgendaBoard() {
     null
   );
   const boardScrollRef = useRef<HTMLDivElement>(null);
+  const boardSectionRef = useRef<HTMLElement>(null);
+  const [slotRowHeightPx, setSlotRowHeightPx] = useState<number | null>(null);
+  const [cabinColumnWidthPx, setCabinColumnWidthPx] = useState<number | null>(
+    null,
+  );
+  const windowScrolledDateRef = useRef("");
   const [appointmentForm, setAppointmentForm] = useState(() =>
     applyClientPositionStatus({
       ...emptyAppointment,
@@ -308,7 +380,7 @@ export default function AgendaBoard() {
   );
   const [sendSmsNow, setSendSmsNow] = useState(true);
   const [sendEmailNow, setSendEmailNow] = useState(true);
-  const [sendSmsJ7, setSendSmsJ7] = useState(false);
+  const [sendSmsJ7, setSendSmsJ7] = useState(true);
   const [sendSmsJ5, setSendSmsJ5] = useState(false);
   const [sendSms48h, setSendSms48h] = useState(false);
   const [sendSms24h, setSendSms24h] = useState(false);
@@ -316,7 +388,6 @@ export default function AgendaBoard() {
     defaultCenterDepositLinks.filter((link) => link.active),
   );
   const [selectedDepositLinkId, setSelectedDepositLinkId] = useState("");
-  const [sendBirthdaySms, setSendBirthdaySms] = useState(true);
   const [smsSettings, setSmsSettings] = useState<CenterSmsSettings | null>(null);
   const [moveNotifyAppointment, setMoveNotifyAppointment] =
     useState<Appointment | null>(null);
@@ -335,6 +406,7 @@ export default function AgendaBoard() {
   const agendaWritesRef = useRef(0);
   const deletingAppointmentIdsRef = useRef(new Set<string>());
   const centerNameRef = useRef("");
+  const centerIdRef = useRef("");
   const teamSaveTimerRef = useRef<number | null>(null);
   const cabinSaveTimerRef = useRef<number | null>(null);
   const cabinListRef = useRef(cabins);
@@ -384,6 +456,10 @@ export default function AgendaBoard() {
       }
 
       centerNameRef.current = center.centerName;
+      if (centerIdRef.current && centerIdRef.current !== center.centerId) {
+        setSeyaConversation(null);
+      }
+      centerIdRef.current = center.centerId;
       setBalanceDueIndex(nextBalanceDueIndex);
       if (nextHours) {
         setCenterDayHours(nextHours);
@@ -405,14 +481,16 @@ export default function AgendaBoard() {
         mergePublicBookingsIntoAppointments(
           loadedAppointments,
           readPublicBookingsForCenter(center.centerName),
-        ).map((appointment) => ({
-          ...appointment,
-          cabinId: alignAppointmentCabinId(appointment.cabinId, nextCabins),
-          practitionerId: alignAppointmentPractitionerId(
-            appointment,
-            nextPractitioners,
-          ),
-        })),
+        ).map((appointment) =>
+          withClientPositionStatus({
+            ...appointment,
+            cabinId: alignAppointmentCabinId(appointment.cabinId, nextCabins),
+            practitionerId: alignAppointmentPractitionerId(
+              appointment,
+              nextPractitioners,
+            ),
+          }),
+        ),
       );
     } catch (error) {
       if (epoch !== agendaEpochRef.current || agendaWritesRef.current > 0) {
@@ -589,37 +667,199 @@ export default function AgendaBoard() {
     selectedPractitionerIds,
   ]);
 
-  useEffect(() => {
+  const visibleCabinList = useMemo(() => {
+    if (selectedCabinIds.length === 0) {
+      return cabinList;
+    }
+
+    const nextCabins = cabinList.filter((cabin) =>
+      selectedCabinIds.includes(cabin.id),
+    );
+
+    return nextCabins.length > 0 ? nextCabins : cabinList;
+  }, [cabinList, selectedCabinIds]);
+
+  useLayoutEffect(() => {
+    if (activeTab !== "agenda" || agendaView !== "day" || isSelectedDayClosed) {
+      return;
+    }
+
     const board = boardScrollRef.current;
     if (!board) {
       return;
     }
 
-    const scrollBoard = board;
-
-    function onWheel(event: WheelEvent) {
-      const atTop = scrollBoard.scrollTop <= 0;
-      const atBottom =
-        scrollBoard.scrollTop + scrollBoard.clientHeight >=
-        scrollBoard.scrollHeight - 1;
-      const atLeft = scrollBoard.scrollLeft <= 0;
-      const atRight =
-        scrollBoard.scrollLeft + scrollBoard.clientWidth >=
-        scrollBoard.scrollWidth - 1;
-
-      if (
-        (event.deltaY < 0 && atTop) ||
-        (event.deltaY > 0 && atBottom) ||
-        (event.deltaX < 0 && atLeft) ||
-        (event.deltaX > 0 && atRight)
-      ) {
-        event.preventDefault();
+    function measureBoardLayout() {
+      const currentBoard = boardScrollRef.current;
+      if (!currentBoard) {
+        return;
       }
+
+      const nextCabinWidth = Math.max(
+        1,
+        Math.floor(currentBoard.clientWidth - TIME_COLUMN_PX),
+      );
+      setCabinColumnWidthPx((current) =>
+        current != null && Math.abs(current - nextCabinWidth) < 1
+          ? current
+          : nextCabinWidth,
+      );
+
+      const header = currentBoard.querySelector("[data-agenda-header]");
+      const headerHeight =
+        header instanceof HTMLElement ? header.offsetHeight : 0;
+      const available = currentBoard.clientHeight - headerHeight;
+
+      if (available < 160) {
+        return;
+      }
+
+      const nextHeight = available / VISIBLE_SLOT_COUNT;
+      setSlotRowHeightPx((current) =>
+        current != null && Math.abs(current - nextHeight) < 0.5
+          ? current
+          : nextHeight,
+      );
     }
 
-    board.addEventListener("wheel", onWheel, { passive: false });
-    return () => board.removeEventListener("wheel", onWheel);
-  }, [activeTab, agendaView]);
+    measureBoardLayout();
+    const observer = new ResizeObserver(measureBoardLayout);
+    observer.observe(board);
+
+    return () => {
+      observer.disconnect();
+    };
+  }, [
+    activeTab,
+    agendaView,
+    isSelectedDayClosed,
+    agendaSlots.length,
+    visibleCabinList.length,
+  ]);
+
+  useLayoutEffect(() => {
+    const board = boardScrollRef.current;
+    if (!board || !cabinColumnWidthPx) {
+      return;
+    }
+
+    const maxIndex = Math.max(0, visibleCabinList.length - 1);
+    const index = Math.round(board.scrollLeft / cabinColumnWidthPx);
+    const nextIndex = Math.min(maxIndex, Math.max(0, index));
+    board.scrollLeft = nextIndex * cabinColumnWidthPx;
+  }, [cabinColumnWidthPx, visibleCabinList.length]);
+
+  useLayoutEffect(() => {
+    if (activeTab !== "agenda" || agendaView !== "day") {
+      windowScrolledDateRef.current = "";
+      return;
+    }
+
+    if (agendaFocus?.appointmentId || agendaFocus?.start) {
+      windowScrolledDateRef.current = "";
+      return;
+    }
+
+    if (isSelectedDayClosed || agendaSlots.length === 0 || !slotRowHeightPx) {
+      return;
+    }
+
+    if (windowScrolledDateRef.current === selectedDate) {
+      return;
+    }
+
+    const board = boardScrollRef.current;
+    if (!board) {
+      return;
+    }
+
+    const now = new Date();
+    const nowMinutes =
+      selectedDate === todayIso()
+        ? now.getHours() * 60 + now.getMinutes()
+        : timeToMinutes(centerStartTime);
+    const dayStart = timeToMinutes(centerStartTime);
+    const dayEnd = timeToMinutes(centerEndTime);
+    const windowMinutes = VISIBLE_AGENDA_HOURS * 60;
+    const latestStart = Math.max(dayStart, dayEnd - windowMinutes);
+    const windowStart = Math.min(Math.max(nowMinutes, dayStart), latestStart);
+    const slotIndex = closestAgendaSlotIndex(
+      agendaSlots,
+      minutesToTime(windowStart),
+    );
+
+    if (slotIndex < 0) {
+      return;
+    }
+
+    const slot = board.querySelector(
+      `[data-agenda-slot="${CSS.escape(agendaSlots[slotIndex])}"]`,
+    );
+
+    if (!(slot instanceof HTMLElement)) {
+      return;
+    }
+
+    const header = board.querySelector("[data-agenda-header]");
+    const headerHeight =
+      header instanceof HTMLElement ? header.offsetHeight : 0;
+    const boardRect = board.getBoundingClientRect();
+    const slotRect = slot.getBoundingClientRect();
+    board.scrollTo({
+      top: Math.max(
+        0,
+        board.scrollTop + (slotRect.top - boardRect.top) - headerHeight,
+      ),
+      left: board.scrollLeft,
+    });
+    windowScrolledDateRef.current = selectedDate;
+  }, [
+    activeTab,
+    agendaFocus?.appointmentId,
+    agendaFocus?.start,
+    agendaSlots,
+    agendaView,
+    centerEndTime,
+    centerStartTime,
+    isSelectedDayClosed,
+    selectedDate,
+    slotRowHeightPx,
+  ]);
+
+  useEffect(() => {
+    const section = boardSectionRef.current;
+    const board = boardScrollRef.current;
+
+    if (!section || !board) {
+      return;
+    }
+
+    function onWheel(event: WheelEvent) {
+      event.preventDefault();
+      event.stopPropagation();
+
+      const line = 16;
+      const deltaY =
+        event.deltaMode === 1
+          ? event.deltaY * line
+          : event.deltaMode === 2
+            ? event.deltaY * board.clientHeight
+            : event.deltaY;
+      const deltaX =
+        event.deltaMode === 1
+          ? event.deltaX * line
+          : event.deltaMode === 2
+            ? event.deltaX * board.clientWidth
+            : event.deltaX;
+
+      board.scrollTop += deltaY;
+      board.scrollLeft += deltaX;
+    }
+
+    section.addEventListener("wheel", onWheel, { capture: true, passive: false });
+    return () =>
+      section.removeEventListener("wheel", onWheel, { capture: true });
+  }, [activeTab, agendaView, isSelectedDayClosed]);
 
   useEffect(() => {
     function syncPublicBookings() {
@@ -633,6 +873,14 @@ export default function AgendaBoard() {
 
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void refreshAgenda();
+    void loadSeyaAgentSettings()
+      .then((loaded) => {
+        setSeyaSettings(loaded.settings);
+        if (loaded.centerId) {
+          centerIdRef.current = loaded.centerId;
+        }
+      })
+      .catch(() => null);
     function refreshIfVisible() {
       if (document.visibilityState === "visible") {
         void refreshAgenda();
@@ -670,10 +918,24 @@ export default function AgendaBoard() {
       return;
     }
 
-    setSendSmsJ7(
-      laserAppointment && reminderFlagsFromSettings(smsSettings).sendSmsJ7,
-    );
-  }, [isModalOpen, laserAppointment, smsSettings]);
+    const flags = reminderFlagsFromSettings(smsSettings);
+    let cancelled = false;
+    void loadClientNotifyPref(appointmentForm.clientId).then((pref) => {
+      if (cancelled) {
+        return;
+      }
+      setSendSmsNow(flags.sendSmsNow && pref.sms);
+      setSendEmailNow(flags.sendEmailNow && pref.email);
+      setSendSmsJ7(laserAppointment && flags.sendSmsJ7 && pref.sms);
+      setSendSmsJ5(flags.sendSmsJ5 && pref.sms);
+      setSendSms48h(flags.sendSms48h && pref.sms);
+      setSendSms24h(flags.sendSms24h && pref.sms);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [appointmentForm.clientId, isModalOpen, laserAppointment, smsSettings]);
 
   useEffect(() => {
     setAppointmentForm((current) => {
@@ -754,18 +1016,6 @@ export default function AgendaBoard() {
     [appointmentList, selectedCabinIds, selectedDate, selectedPractitionerIds]
   );
 
-  const visibleCabinList = useMemo(() => {
-    if (selectedCabinIds.length === 0) {
-      return cabinList;
-    }
-
-    const nextCabins = cabinList.filter((cabin) =>
-      selectedCabinIds.includes(cabin.id),
-    );
-
-    return nextCabins.length > 0 ? nextCabins : cabinList;
-  }, [cabinList, selectedCabinIds]);
-
   const practitionersOfDay = practitionerList.filter((practitioner) => {
     const schedule = teamSchedules.find(
       (item) => item.practitionerId === practitioner.id
@@ -821,6 +1071,10 @@ export default function AgendaBoard() {
           return false;
         }
 
+        if (isAgendaBlockKind(appointment.kind, appointment.treatment)) {
+          return false;
+        }
+
         return isAppointmentWithinHoursAhead(
           appointment.date,
           appointment.start,
@@ -834,6 +1088,26 @@ export default function AgendaBoard() {
           : current.start.localeCompare(next.start);
       });
   }, [appointmentList]);
+
+  const seyaSuggestions = useMemo(
+    () =>
+      agendaSeyaSuggestionTexts({
+        slots: suggestAvailableSlots({
+          appointments: appointmentList,
+          hours: centerDayHours,
+          count: 2,
+          duration: AGENDA_SEYA_DURATION_MINUTES,
+        }),
+        toConfirm: appointmentsToConfirm[0]
+          ? {
+              personName: appointmentsToConfirm[0].personName,
+              date: appointmentsToConfirm[0].date,
+              start: appointmentsToConfirm[0].start,
+            }
+          : null,
+      }),
+    [appointmentList, appointmentsToConfirm, centerDayHours],
+  );
 
   const stats = useMemo(() => {
     const confirmed = visibleAppointments.filter(
@@ -1108,6 +1382,7 @@ export default function AgendaBoard() {
     const flags = reminderFlagsFromSettings(settings);
     setSendSmsNow(flags.sendSmsNow);
     setSendEmailNow(flags.sendEmailNow);
+    setSendSmsJ7(flags.sendSmsJ7);
     setSendSmsJ5(flags.sendSmsJ5);
     setSendSms48h(flags.sendSms48h);
     setSendSms24h(flags.sendSms24h);
@@ -1128,7 +1403,6 @@ export default function AgendaBoard() {
     setEditingClient(false);
     applyReminderDefaults();
     setSelectedDepositLinkId("");
-    setSendBirthdaySms(true);
     setIsModalOpen(true);
     void refreshAgendaContacts();
   }
@@ -1142,6 +1416,7 @@ export default function AgendaBoard() {
 
     const appointment: Appointment = {
       id: crypto.randomUUID(),
+      clientId: appointmentForm.clientId?.trim() || undefined,
       personName: appointmentForm.personName.trim(),
       phone: appointmentForm.phone.trim(),
       treatment: appointmentForm.treatment.trim(),
@@ -1160,9 +1435,9 @@ export default function AgendaBoard() {
 
     Object.assign(appointment, withClientPositionStatus(appointment));
 
-    if (isAgendaBlockKind(appointment.kind)) {
-      appointment.personName = appointment.personName || appointment.kind || "Pause";
-      appointment.treatment = appointment.treatment || appointment.kind || "Pause";
+    if (isAgendaBlockKind(appointment.kind, appointment.treatment, appointment.personName)) {
+      Object.assign(appointment, withAgendaBlockIdentity(appointment));
+      appointment.status = "Confirmé";
     }
 
     if (!appointment.personName) {
@@ -1194,8 +1469,6 @@ export default function AgendaBoard() {
       sendSms48h,
       sendSms24h,
       selectedDepositLinkId,
-      sendBirthdaySms,
-      birthDate: appointment.birthDate,
       email: appointment.email,
     };
     const notifyCabinList = cabinList;
@@ -1210,7 +1483,6 @@ export default function AgendaBoard() {
     setAgendaNotice("RDV enregistré.");
     applyReminderDefaults();
     setSelectedDepositLinkId("");
-    setSendBirthdaySms(true);
     setIsModalOpen(false);
     savingAppointmentRef.current = false;
     setIsSavingAppointment(false);
@@ -1533,11 +1805,14 @@ export default function AgendaBoard() {
         ...form,
         personName: contact.name,
         phone: contact.phone,
-        treatment: contact.treatment,
+        treatment: contact.treatment || form.treatment,
         source: contact.type,
         email: contact.email,
         birthDate: contact.birthDate || "",
         kind: "Rendez-vous",
+        clientId: contact.id.startsWith("client:")
+          ? contact.id.slice("client:".length)
+          : "",
       }),
     );
   }
@@ -1552,55 +1827,236 @@ export default function AgendaBoard() {
       phone: "",
       email: "",
       birthDate: "",
+      clientId: "",
     }));
   }
 
-  function createSeyaBlock() {
+  async function submitSeyaAgenda() {
+    const command = seyaCommand.trim();
+    if (!command || seyaAsking) {
+      return;
+    }
+
+    if (isSeyaAgendaBlockCommand(command)) {
+      await createSeyaBlock(command);
+      return;
+    }
+
+    await askSeyaAgenda(command);
+  }
+
+  async function askSeyaAgenda(command: string) {
+    setSeyaAsking(true);
+    setSeyaFeedback("Seya réfléchit…");
+
+    let centerId = centerIdRef.current;
+    if (!centerId) {
+      try {
+        const center = await getActiveCenterContext();
+        centerId = center.centerId;
+        centerIdRef.current = center.centerId;
+        centerNameRef.current = center.centerName;
+      } catch {
+        setSeyaAsking(false);
+        setSeyaFeedback("Impossible de joindre le centre actif.");
+        return;
+      }
+    }
+
+    const conversation =
+      seyaConversation?.centerId === centerId
+        ? seyaConversation
+        : createAgendaDeskConversation(centerId);
+    const occupancy = seyaAgendaOccupancyAppointments(appointmentList);
+    const fallbackSlots = suggestAvailableSlots({
+      appointments: appointmentList,
+      hours: centerDayHours,
+      count: 3,
+      duration: AGENDA_SEYA_DURATION_MINUTES,
+    });
+    const centerSettings = readCenterSettings();
+    const centerAddress = [
+      centerSettings?.center?.address,
+      centerSettings?.center?.postalCode,
+      centerSettings?.center?.city,
+    ]
+      .filter(Boolean)
+      .join(", ");
+
+    let result = applyLeadReply(
+      conversation,
+      command,
+      seyaSettings,
+      fallbackSlots,
+    );
+
+    try {
+      const response = await fetch("/api/seya/reply", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          conversation,
+          text: command,
+          centerId,
+          slots: fallbackSlots,
+          appointments: occupancy,
+          hours: centerDayHours,
+          centerName: centerNameRef.current,
+          centerAddress,
+        }),
+      });
+      const payload = (await response.json().catch(() => ({}))) as {
+        conversation?: SeyaConversation;
+        shouldBook?: { date: string; time: string; label: string } | null;
+      };
+      if (payload.conversation) {
+        result = {
+          conversation: payload.conversation,
+          shouldBook: payload.shouldBook ?? null,
+        };
+      }
+    } catch {
+      // Local Seya rules still answer if the API is unreachable.
+    }
+
+    setSeyaConversation(result.conversation);
+    setSeyaCommand("");
+    const reply = lastSeyaMessage(result.conversation)?.text?.trim() || "";
+    setSeyaFeedback(reply || "Seya n’a pas pu répondre.");
+
+    if (!result.shouldBook) {
+      setSeyaAsking(false);
+      return;
+    }
+
+    const booked = result.shouldBook;
+    const treatment =
+      result.conversation.qualification.need ||
+      result.conversation.treatment ||
+      "Soin à préciser";
+    const appointment: Appointment = applyPositionedAppointmentStatus({
+      id: crypto.randomUUID(),
+      personName: agendaSeyaClientName(
+        result.conversation.firstName,
+        result.conversation.lastName,
+      ),
+      phone: result.conversation.phone || "",
+      treatment,
+      practitionerId:
+        getFirstWorkingPractitionerId(teamSchedules, booked.date) ??
+        practitionerList[0]?.id ??
+        "samantha",
+      cabinId: pickFreeCabinId({
+        appointments: appointmentList,
+        cabinIds: cabinList.map((cabin) => cabin.id),
+        date: booked.date,
+        start: booked.time,
+        duration: AGENDA_SEYA_DURATION_MINUTES,
+      }),
+      date: booked.date,
+      start: booked.time,
+      duration: AGENDA_SEYA_DURATION_MINUTES,
+      status: "À confirmer",
+      source: "Seya",
+      kind: "Rendez-vous",
+      notes: `RDV posé par Seya Agenda : ${command}`,
+    });
+
+    beginAgendaWrite();
+    setAppointmentList((currentAppointments) => [
+      ...currentAppointments,
+      appointment,
+    ]);
+    setSelectedDate(booked.date);
+
+    try {
+      const saved = await createCrmAppointment(appointment);
+      setAppointmentList((currentAppointments) =>
+        currentAppointments.map((item) =>
+          item.id === appointment.id ? saved : item,
+        ),
+      );
+      setSeyaFeedback(
+        reply
+          ? `${reply}\nRendez-vous posé dans l’agenda : ${booked.label}.`
+          : `Rendez-vous posé dans l’agenda : ${booked.label}.`,
+      );
+    } catch {
+      setAppointmentList((currentAppointments) =>
+        currentAppointments.filter((item) => item.id !== appointment.id),
+      );
+      setSeyaFeedback(
+        reply
+          ? `${reply}\nLe créneau est validé, mais le rendez-vous n’a pas pu être écrit dans l’agenda.`
+          : "Le rendez-vous n’a pas pu être écrit dans l’agenda.",
+      );
+    } finally {
+      endAgendaWrite();
+      setSeyaAsking(false);
+    }
+  }
+
+  async function createSeyaBlock(command: string) {
     const block = parseSeyaBlockCommand(
-      seyaCommand,
+      command,
       selectedDate,
       cabinList,
       centerStartTime,
-      centerEndTime
+      centerEndTime,
     );
 
     if (!block) {
       setSeyaFeedback(
-        "Je n'ai pas compris le bloc. Exemple : pause pendant 5 semaines sur toutes les cabines entre 14h et 15h."
+        "Je n'ai pas compris le bloc. Exemple : pause pendant 5 semaines sur toutes les cabines entre 14h et 15h.",
       );
       return;
     }
 
     if (block.action === "delete") {
-      setAppointmentList((currentAppointments) => {
-        const appointmentsToKeep = currentAppointments.filter((appointment) => {
-          const matchesDate = block.dates.includes(appointment.date);
-          const matchesCabin = block.cabinIds.includes(appointment.cabinId);
-          const matchesTime = appointmentOverlapsBlock(appointment, block);
-          const matchesKind =
-            appointment.kind === block.kind ||
-            appointment.personName === block.label ||
-            appointment.treatment === block.label ||
-            appointment.source === "Seya";
+      const appointmentsToDelete = appointmentList.filter((appointment) => {
+        const matchesDate = block.dates.includes(appointment.date);
+        const matchesCabin = block.cabinIds.includes(appointment.cabinId);
+        const matchesTime = appointmentOverlapsBlock(appointment, block);
+        const matchesKind =
+          appointment.kind === block.kind ||
+          appointment.personName === block.label ||
+          appointment.treatment === block.label ||
+          appointment.source === "Seya";
 
-          return !(
-            matchesDate &&
-            matchesCabin &&
-            matchesTime &&
-            matchesKind
-          );
-        });
-        const deletedCount = currentAppointments.length - appointmentsToKeep.length;
-
-        setSeyaFeedback(
-          deletedCount > 0
-            ? `${deletedCount} bloc${deletedCount > 1 ? "s" : ""} supprimé${deletedCount > 1 ? "s" : ""}.`
-            : "Aucun bloc correspondant trouvé à supprimer."
-        );
-
-        return appointmentsToKeep;
+        return matchesDate && matchesCabin && matchesTime && matchesKind;
       });
+      const deletedCount = appointmentsToDelete.length;
+      const deletedIds = new Set(
+        appointmentsToDelete.map((appointment) => appointment.id),
+      );
+
+      beginAgendaWrite();
+      setAppointmentList((currentAppointments) =>
+        currentAppointments.filter((appointment) => !deletedIds.has(appointment.id)),
+      );
+      setSeyaFeedback(
+        deletedCount > 0
+          ? `${deletedCount} bloc${deletedCount > 1 ? "s" : ""} supprimé${deletedCount > 1 ? "s" : ""}.`
+          : "Aucun bloc correspondant trouvé à supprimer.",
+      );
       setSeyaCommand("");
+
+      try {
+        await Promise.all(
+          appointmentsToDelete
+            .filter((appointment) => isPersistedAppointmentId(appointment.id))
+            .map((appointment) => deleteCrmAppointment(appointment.id)),
+        );
+      } catch (error) {
+        setAppointmentList(appointmentList);
+        setSeyaFeedback(
+          error instanceof Error
+            ? error.message
+            : "Les blocs n’ont pas pu être supprimés.",
+        );
+      } finally {
+        endAgendaWrite();
+      }
       return;
     }
 
@@ -1611,7 +2067,7 @@ export default function AgendaBoard() {
           practitionerList[0]?.id ??
           "samantha";
 
-        return {
+        return withAgendaBlockIdentity({
           id: crypto.randomUUID(),
           personName: block.label,
           phone: "",
@@ -1624,34 +2080,62 @@ export default function AgendaBoard() {
           status: "Confirmé" as AppointmentStatus,
           source: "Seya" as AppointmentSource,
           kind: block.kind,
-          notes: `Bloc créé par Seya : ${seyaCommand}`,
-        };
-      })
+          notes: `Bloc créé par Seya : ${command}`,
+        });
+      }),
     );
-
-    setAppointmentList((currentAppointments) => {
-      const existingKeys = new Set(
-        currentAppointments.map(
-          (appointment) =>
-            `${appointment.date}-${appointment.start}-${appointment.cabinId}-${appointment.kind}-${appointment.personName}`
-        )
-      );
-      const appointmentsToAdd = nextAppointments.filter((appointment) => {
-        const key = `${appointment.date}-${appointment.start}-${appointment.cabinId}-${appointment.kind}-${appointment.personName}`;
-
-        return !existingKeys.has(key);
-      });
-
-      setSeyaFeedback(
-        appointmentsToAdd.length > 0
-          ? `${appointmentsToAdd.length} bloc${appointmentsToAdd.length > 1 ? "s" : ""} créé${appointmentsToAdd.length > 1 ? "s" : ""}.`
-          : "Ces blocs existent déjà sur le planning."
-      );
-
-      return [...currentAppointments, ...appointmentsToAdd];
+    const existingKeys = new Set(
+      appointmentList.map(
+        (appointment) =>
+          `${appointment.date}-${appointment.start}-${appointment.cabinId}-${appointment.kind}-${appointment.personName}`,
+      ),
+    );
+    const appointmentsToAdd = nextAppointments.filter((appointment) => {
+      const key = `${appointment.date}-${appointment.start}-${appointment.cabinId}-${appointment.kind}-${appointment.personName}`;
+      return !existingKeys.has(key);
     });
+
+    beginAgendaWrite();
+    setAppointmentList((currentAppointments) => [
+      ...currentAppointments,
+      ...appointmentsToAdd,
+    ]);
+    setSeyaFeedback(
+      appointmentsToAdd.length > 0
+        ? `${appointmentsToAdd.length} bloc${appointmentsToAdd.length > 1 ? "s" : ""} créé${appointmentsToAdd.length > 1 ? "s" : ""}.`
+        : "Ces blocs existent déjà sur le planning.",
+    );
     setSelectedDate(block.date);
     setSeyaCommand("");
+
+    try {
+      const savedAppointments = await Promise.all(
+        appointmentsToAdd.map((appointment) => createCrmAppointment(appointment)),
+      );
+      const savedByLocalId = new Map(
+        appointmentsToAdd.map((appointment, index) => [
+          appointment.id,
+          savedAppointments[index] ?? appointment,
+        ]),
+      );
+      setAppointmentList((currentAppointments) =>
+        currentAppointments.map(
+          (appointment) => savedByLocalId.get(appointment.id) ?? appointment,
+        ),
+      );
+    } catch (error) {
+      const addedIds = new Set(appointmentsToAdd.map((appointment) => appointment.id));
+      setAppointmentList((currentAppointments) =>
+        currentAppointments.filter((appointment) => !addedIds.has(appointment.id)),
+      );
+      setSeyaFeedback(
+        error instanceof Error
+          ? error.message
+          : "Les blocs n’ont pas pu être enregistrés.",
+      );
+    } finally {
+      endAgendaWrite();
+    }
   }
 
   function slideCabinBoard(direction: -1 | 1) {
@@ -1659,15 +2143,21 @@ export default function AgendaBoard() {
 
     if (!board) return;
 
+    const cabinWidth = cabinColumnWidthPx ?? CABIN_COLUMN_MIN_PX;
     board.scrollBy({
-      left: direction * CABIN_COLUMN_MIN_PX,
+      left: direction * cabinWidth,
       behavior: "smooth",
     });
   }
 
+  const cabinColumnSize = cabinColumnWidthPx ?? CABIN_COLUMN_MIN_PX;
   const cabinBoardMinWidth =
-    TIME_COLUMN_PX + visibleCabinList.length * CABIN_COLUMN_MIN_PX;
-  const cabinBoardColumns = `${TIME_COLUMN_PX}px repeat(${visibleCabinList.length}, minmax(${CABIN_COLUMN_MIN_PX}px, 1fr))`;
+    TIME_COLUMN_PX + visibleCabinList.length * cabinColumnSize;
+  const cabinBoardColumns = `${TIME_COLUMN_PX}px repeat(${visibleCabinList.length}, ${cabinColumnSize}px)`;
+  const slotRowSize =
+    slotRowHeightPx != null
+      ? `${slotRowHeightPx}px`
+      : `calc((100dvh - 8.5rem) / ${VISIBLE_SLOT_COUNT})`;
 
   return (
     <main className="min-w-0 bg-slate-100">
@@ -1959,32 +2449,47 @@ export default function AgendaBoard() {
                 <h2 className="font-semibold">Seya Agenda</h2>
               </div>
               <p className="text-sm leading-6 text-violet-800">
-                Seya pourra proposer automatiquement un créneau selon la
-                cabine, la praticienne, le soin et les disponibilités.
+                Seya suit les briefs, horaires et rendez-vous du centre. Une
+                pause, une formation ou une fermeture se pose aussi ici.
               </p>
             </div>
             <div className="grid gap-3 md:grid-cols-3">
-              <Suggestion text="Relancer les nouveaux leads pour placer un créneau libre cette semaine." />
-              <Suggestion text="Cabine 4 libre à 14:30 pour un bilan court." />
-              <Suggestion text="Samantha a 2 créneaux disponibles avant 16:00." />
+              {seyaSuggestions.map((text) => (
+                <Suggestion key={text} text={text} />
+              ))}
             </div>
             <div className="flex flex-col gap-2 rounded-xl bg-white/70 p-3 md:flex-row xl:col-span-2">
               <Input
                 value={seyaCommand}
                 onChange={(event) => setSeyaCommand(event.target.value)}
-                placeholder="Ex : pause pendant 5 semaines sur toutes les cabines entre 14h et 15h"
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    void submitSeyaAgenda();
+                  }
+                }}
+                placeholder="Ex : un créneau cryo jeudi après-midi, ou pause 14h-15h toutes les cabines"
                 className="bg-white"
+                disabled={seyaAsking}
               />
               <Button
                 type="button"
-                onClick={createSeyaBlock}
+                onClick={() => void submitSeyaAgenda()}
+                disabled={seyaAsking || !seyaCommand.trim()}
                 className="shrink-0 bg-violet-700 hover:bg-violet-800"
               >
-                Créer le bloc
+                {seyaAsking ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Seya…
+                  </>
+                ) : (
+                  "Parler à Seya"
+                )}
               </Button>
             </div>
             {seyaFeedback && (
-              <p className="rounded-xl bg-white/70 px-3 py-2 text-sm font-semibold text-violet-800 xl:col-span-2">
+              <p className="whitespace-pre-line rounded-xl bg-white/70 px-3 py-2 text-sm font-semibold text-violet-800 xl:col-span-2">
                 {seyaFeedback}
               </p>
             )}
@@ -2104,8 +2609,11 @@ export default function AgendaBoard() {
       </div>
 
         {activeTab === "agenda" && agendaView === "day" ? (
-        <section className="sticky top-0 z-30 flex h-dvh flex-col bg-slate-100 px-4 pb-3 pt-1 lg:px-8">
-          <div className="mx-auto flex h-full min-w-0 max-w-[1800px] flex-col">
+        <section
+          ref={boardSectionRef}
+          className="sticky top-0 z-30 flex h-dvh flex-col overflow-hidden overscroll-none bg-slate-100 px-4 pb-3 pt-1 lg:px-8"
+        >
+          <div className="mx-auto flex h-full w-full min-w-0 max-w-[1800px] flex-col">
           <div className="mb-1 flex shrink-0 flex-wrap items-center gap-2">
             <div className="flex items-center gap-1 rounded-xl border border-slate-200 bg-white p-1 shadow-sm">
               <button
@@ -2146,17 +2654,25 @@ export default function AgendaBoard() {
               sont enregistrés.
             </p>
           </div>
-          <Card className="relative z-0 min-h-0 flex-1 overflow-hidden border-slate-200 py-0 shadow-sm">
-            <CardContent className="relative h-full min-w-0 p-0">
+          <Card className="relative z-0 min-h-0 w-full flex-1 overflow-hidden border-slate-200 py-0 shadow-sm">
+            <CardContent className="relative h-full min-w-0 w-full p-0">
               <div
                 ref={boardScrollRef}
-                className="isolate h-full overflow-auto overscroll-contain"
+                className="isolate h-full w-full overflow-auto overscroll-none"
+                style={{
+                  scrollPaddingLeft: TIME_COLUMN_PX,
+                  scrollSnapType: "x mandatory",
+                }}
               >
               <div
                 className="min-w-full"
-                style={{ minWidth: cabinBoardMinWidth }}
+                style={{
+                  minWidth: cabinBoardMinWidth,
+                  width: cabinBoardMinWidth,
+                }}
               >
               <div
+                data-agenda-header
                 className="sticky top-0 z-30 grid border-b border-slate-200 bg-white text-sm font-bold text-slate-500 shadow-[0_8px_16px_-10px_rgba(15,23,42,0.45)]"
                 style={{
                   gridTemplateColumns: cabinBoardColumns,
@@ -2169,6 +2685,7 @@ export default function AgendaBoard() {
                   <div
                     key={cabin.id}
                     className={`relative z-50 border-r border-slate-100 bg-gradient-to-br ${cabin.color} px-2.5 py-1.5 text-white last:border-r-0`}
+                    style={{ scrollSnapAlign: "start" }}
                     onMouseDown={(event) => event.stopPropagation()}
                     onPointerDown={(event) => event.stopPropagation()}
                   >
@@ -2211,7 +2728,7 @@ export default function AgendaBoard() {
                   className="grid"
                   style={{
                     gridTemplateColumns: cabinBoardColumns,
-                    gridTemplateRows: `repeat(${agendaSlots.length}, ${SLOT_ROW_HEIGHT_REM}rem)`,
+                    gridTemplateRows: `repeat(${agendaSlots.length}, ${slotRowSize})`,
                   }}
                 >
                   {agendaSlots.map((hour, slotIndex) => (
@@ -2295,7 +2812,6 @@ export default function AgendaBoard() {
                                 setEditingClient(false);
                                 applyReminderDefaults();
                                 setSelectedDepositLinkId("");
-                                setSendBirthdaySms(true);
                                 setIsModalOpen(true);
                                 void refreshAgendaContacts();
                               }}
@@ -2536,17 +3052,20 @@ export default function AgendaBoard() {
                     "Indisponible",
                   ]}
                   onChange={(value) =>
-                    setAppointmentForm((form) => ({
-                      ...form,
-                      kind: value as AppointmentKind,
-                      source: value === "Rendez-vous" ? form.source : "Seya",
-                      treatment:
-                        value === "Rendez-vous" ? form.treatment : value,
-                      personName:
-                        value === "Rendez-vous"
-                          ? form.personName
-                          : form.personName || value,
-                    }))
+                    setAppointmentForm((form) =>
+                      applyClientPositionStatus({
+                        ...form,
+                        kind: value as AppointmentKind,
+                        status: isAgendaBlockKind(value)
+                          ? "Confirmé"
+                          : form.status,
+                        source: value === "Rendez-vous" ? form.source : "Seya",
+                        treatment:
+                          value === "Rendez-vous" ? form.treatment : value,
+                        personName:
+                          value === "Rendez-vous" ? form.personName : value,
+                      }),
+                    )
                   }
                 />
               </Field>
@@ -2821,7 +3340,10 @@ export default function AgendaBoard() {
               <Field label="Durée">
                 <Select
                   value={String(appointmentForm.duration)}
-                  options={durationSelectOptions(appointmentForm.duration)}
+                  options={durationSelectOptions(
+                    appointmentForm.duration,
+                    appointmentForm.kind,
+                  )}
                   labels={appointmentDurationLabels}
                   onChange={(value) =>
                     setAppointmentForm((form) => ({
@@ -2857,14 +3379,14 @@ export default function AgendaBoard() {
                 <input
                   type="checkbox"
                   checked={sendSmsNow}
-                  disabled={!appointmentForm.phone.trim()}
                   onChange={(event) => setSendSmsNow(event.target.checked)}
                   className="mt-1 h-4 w-4"
                 />
                 <span>
                   Envoyer le SMS dès que le RDV est posé
                   <span className="mt-1 block text-xs font-semibold text-slate-500">
-                    Uniquement ce SMS. Les autres cases ci-dessous partent seulement si tu les coches aussi.
+                    Pré-coché. Décoche si tu ne veux pas l’envoyer. Il faut un
+                    téléphone sur la fiche.
                   </span>
                 </span>
               </label>
@@ -2874,14 +3396,14 @@ export default function AgendaBoard() {
                 <input
                   type="checkbox"
                   checked={sendEmailNow}
-                  disabled={!appointmentForm.email.trim()}
                   onChange={(event) => setSendEmailNow(event.target.checked)}
                   className="mt-1 h-4 w-4"
                 />
                 <span>
                   Envoyer le mail de confirmation
                   <span className="mt-1 block text-xs font-semibold text-slate-500">
-                    Part sur l’email de la fiche client. Même texte que le SMS de confirmation.
+                    Pré-coché. Décoche si tu ne veux pas l’envoyer. Il part sur
+                    l’email de la fiche.
                   </span>
                 </span>
               </label>
@@ -2891,14 +3413,14 @@ export default function AgendaBoard() {
                   <input
                     type="checkbox"
                     checked={sendSmsJ7}
-                    disabled={!appointmentForm.phone.trim()}
                     onChange={(event) => setSendSmsJ7(event.target.checked)}
                     className="mt-1 h-4 w-4"
                   />
                   <span>
                     Envoyer les contre-indications laser à J-7
                     <span className="mt-1 block text-xs font-semibold text-slate-500">
-                      Uniquement pour un RDV laser. Programmé 7 jours avant.
+                      Uniquement pour un RDV laser. Pré-coché. Décoche si tu ne
+                      veux pas l’envoyer.
                     </span>
                   </span>
                 </label>
@@ -2908,14 +3430,14 @@ export default function AgendaBoard() {
                 <input
                   type="checkbox"
                   checked={sendSmsJ5}
-                  disabled={!appointmentForm.phone.trim()}
                   onChange={(event) => setSendSmsJ5(event.target.checked)}
                   className="mt-1 h-4 w-4"
                 />
                 <span>
                   Envoyer un SMS de rappel J-5
                   <span className="mt-1 block text-xs font-semibold text-slate-500">
-                    5 jours avant le RDV. Pré-coché si tu l’actives dans Envoi SMS.
+                    5 jours avant le RDV. Pré-coché. Décoche si tu ne veux pas
+                    l’envoyer.
                   </span>
                 </span>
               </label>
@@ -2925,14 +3447,14 @@ export default function AgendaBoard() {
                 <input
                   type="checkbox"
                   checked={sendSms48h}
-                  disabled={!appointmentForm.phone.trim()}
                   onChange={(event) => setSendSms48h(event.target.checked)}
                   className="mt-1 h-4 w-4"
                 />
                 <span>
                   Envoyer un SMS de rappel 48h avant
                   <span className="mt-1 block text-xs font-semibold text-slate-500">
-                    Programmé seulement si tu coches. Si le RDV est supprimé avant, le SMS ne part pas.
+                    Pré-coché. Décoche si tu ne veux pas l’envoyer. Si le RDV
+                    est supprimé avant, le SMS ne part pas.
                   </span>
                 </span>
               </label>
@@ -2942,33 +3464,14 @@ export default function AgendaBoard() {
                 <input
                   type="checkbox"
                   checked={sendSms24h}
-                  disabled={!appointmentForm.phone.trim()}
                   onChange={(event) => setSendSms24h(event.target.checked)}
                   className="mt-1 h-4 w-4"
                 />
                 <span>
                   Envoyer un SMS de rappel 24h avant / la veille
                   <span className="mt-1 block text-xs font-semibold text-slate-500">
-                    La veille du RDV. Pré-coché si tu l’actives dans Envoi SMS.
-                  </span>
-                </span>
-              </label>
-              ) : null}
-              {smsSettings?.birthdaySmsEnabled !== false ? (
-              <label className="flex items-start gap-3 text-sm font-bold text-slate-800">
-                <input
-                  type="checkbox"
-                  checked={sendBirthdaySms}
-                  disabled={
-                    !appointmentForm.phone.trim() || !appointmentForm.birthDate
-                  }
-                  onChange={(event) => setSendBirthdaySms(event.target.checked)}
-                  className="mt-1 h-4 w-4"
-                />
-                <span>
-                  Envoyer le SMS anniversaire le jour J
-                  <span className="mt-1 block text-xs font-semibold text-slate-500">
-                    Utilise le modèle Anniversaire. Envoyé automatiquement le jour de son anniversaire.
+                    La veille du RDV. Pré-coché. Décoche si tu ne veux pas
+                    l’envoyer.
                   </span>
                 </span>
               </label>
@@ -3428,7 +3931,19 @@ function WeekSchedule({
                         <div className="flex items-start justify-between gap-2">
                           <div>
                             <p className="flex items-center gap-1.5 font-semibold">
-                              {appointment.start} · {appointment.personName}
+                              {appointment.start} ·{" "}
+                              {isAgendaBlockKind(
+                                appointment.kind,
+                                appointment.treatment,
+                                appointment.personName,
+                              )
+                                ? agendaBlockTitle(
+                                    appointment.kind,
+                                    appointment.treatment,
+                                    appointment.personName,
+                                    appointment.notes,
+                                  )
+                                : appointment.personName}
                               {tone ? (
                                 <PaymentStatusMark tone={tone} />
                               ) : null}
@@ -3450,9 +3965,15 @@ function WeekSchedule({
                             <Trash2 className="h-4 w-4" />
                           </button>
                         </div>
+                        {isAgendaBlockKind(
+                          appointment.kind,
+                          appointment.treatment,
+                          appointment.personName,
+                        ) ? null : (
                         <p className="mt-2 text-xs font-bold">
                           {appointment.treatment}
                         </p>
+                        )}
                       </article>
                     );
                   })
@@ -4225,10 +4746,6 @@ function addTeamAbsence(
   });
 }
 
-function isAgendaBlockKind(kind?: AppointmentKind | string) {
-  return kind === "Pause" || kind === "Formation" || kind === "Indisponible";
-}
-
 function isAppointmentSource(value: string): value is AppointmentSource {
   return ["Prospect", "Client", "Seya", "Organique"].includes(value);
 }
@@ -4259,9 +4776,11 @@ function getRdvPrefill(searchParams: Pick<URLSearchParams, "get">) {
   return {
     personName: searchParams.get("name") ?? "",
     phone: searchParams.get("phone") ?? "",
+    email: searchParams.get("email") ?? "",
     treatment: searchParams.get("treatment") ?? "",
     date: searchParams.get("date") ?? todayIso(),
     source: isAppointmentSource(source) ? source : "Prospect",
+    clientId: searchParams.get("clientId") ?? "",
   };
 }
 
@@ -4296,6 +4815,10 @@ function parseSeyaBlockCommand(
   centerStartTime: string,
   centerEndTime: string
 ): ParsedSeyaBlock | null {
+  if (!isSeyaAgendaBlockCommand(command)) {
+    return null;
+  }
+
   const normalized = normalize(command);
 
   if (!normalized) {
@@ -4315,9 +4838,12 @@ function parseSeyaBlockCommand(
       : "create";
   const kind: AppointmentKind = normalized.includes("formation")
     ? "Formation"
-    : normalized.includes("pause")
-      ? "Pause"
-      : "Indisponible";
+    : normalized.includes("indisponible") ||
+        normalized.includes("nondisponible")
+      ? "Indisponible"
+      : normalized.includes("pause")
+        ? "Pause"
+        : "Indisponible";
   const label =
     normalized.includes("ferme") || normalized.includes("fermer")
       ? "Fermeture"
@@ -4860,7 +5386,20 @@ function AppointmentCard({
       <div className="mb-1 flex items-start justify-between gap-1">
         <div className="min-w-0 flex-1">
           <p className="flex items-start gap-1 break-words font-semibold leading-tight">
-            <span className="min-w-0">{appointment.personName}</span>
+            <span className="min-w-0">
+              {isAgendaBlockKind(
+                appointment.kind,
+                appointment.treatment,
+                appointment.personName,
+              )
+                ? agendaBlockTitle(
+                    appointment.kind,
+                    appointment.treatment,
+                    appointment.personName,
+                    appointment.notes,
+                  )
+                : appointment.personName}
+            </span>
             {paymentTone ? (
               <PaymentStatusMark tone={paymentTone} />
             ) : null}
@@ -4880,9 +5419,34 @@ function AppointmentCard({
               aria-label={
                 paymentTone
                   ? paymentToneStyles[paymentTone].label
-                  : `Statut ${appointment.status}`
+                  : isAgendaBlockKind(
+                      appointment.kind,
+                      appointment.treatment,
+                      appointment.personName,
+                    )
+                    ? agendaBlockTitle(
+                        appointment.kind,
+                        appointment.treatment,
+                        appointment.personName,
+                        appointment.notes,
+                      )
+                    : `Statut ${appointment.status}`
               }
             />
+              {isAgendaBlockKind(
+                appointment.kind,
+                appointment.treatment,
+                appointment.personName,
+              ) ? (
+              <span className="rounded-md border border-white/60 bg-white/80 px-1 py-0.5 text-[10px] font-bold text-slate-700">
+                {agendaBlockTitle(
+                  appointment.kind,
+                  appointment.treatment,
+                  appointment.personName,
+                  appointment.notes,
+                )}
+              </span>
+            ) : (
             <select
               value={appointment.status}
               onClick={(event) => event.stopPropagation()}
@@ -4899,6 +5463,7 @@ function AppointmentCard({
                 </option>
               ))}
             </select>
+            )}
           </div>
           <button
             type="button"
@@ -4924,7 +5489,13 @@ function AppointmentCard({
           </button>
         </div>
       </div>
+      {isAgendaBlockKind(
+        appointment.kind,
+        appointment.treatment,
+        appointment.personName,
+      ) ? null : (
       <p className="text-sm font-semibold">{appointment.treatment}</p>
+      )}
       {appointment.notes && (
         <p className="mt-2 line-clamp-2 text-xs font-medium opacity-70">
           {appointment.notes}
@@ -4938,45 +5509,19 @@ function AppointmentCard({
   );
 }
 
-const CLIENT_AUTO_CONFIRM_HOURS = 48;
-
-function appointmentLocalDate(date: string, start: string) {
-  const [year, month, day] = date.split("-").map(Number);
-  const [hours, minutes] = (start || "00:00").split(":").map(Number);
-
-  if (!year || !month || !day) {
-    return null;
-  }
-
-  const when = new Date(year, month - 1, day, hours || 0, minutes || 0, 0, 0);
-  return Number.isNaN(when.getTime()) ? null : when;
+function applyClientPositionStatus<
+  T extends {
+    kind?: AppointmentKind;
+    date: string;
+    start: string;
+    status: AppointmentStatus;
+  },
+>(item: T): T {
+  return applyPositionedAppointmentStatus(item);
 }
 
-function isAppointmentMoreThanHoursAhead(
-  date: string,
-  start: string,
-  hours: number,
-) {
-  const when = appointmentLocalDate(date, start);
-  if (!when) {
-    return false;
-  }
-
-  return when.getTime() - Date.now() > hours * 60 * 60 * 1000;
-}
-
-function isAppointmentWithinHoursAhead(
-  date: string,
-  start: string,
-  hours: number,
-) {
-  const when = appointmentLocalDate(date, start);
-  if (!when) {
-    return false;
-  }
-
-  const delta = when.getTime() - Date.now();
-  return delta >= 0 && delta <= hours * 60 * 60 * 1000;
+function withClientPositionStatus(appointment: Appointment): Appointment {
+  return applyClientPositionStatus(appointment);
 }
 
 function formatConfirmChipDay(date: string) {
@@ -4990,58 +5535,6 @@ function formatConfirmChipDay(date: string) {
     day: "numeric",
     month: "numeric",
   });
-}
-
-function statusWhenClientAppointmentPositioned(
-  date: string,
-  start: string,
-): AppointmentStatus {
-  return isAppointmentMoreThanHoursAhead(
-    date,
-    start,
-    CLIENT_AUTO_CONFIRM_HOURS,
-  )
-    ? "Confirmé"
-    : "À confirmer";
-}
-
-function applyClientPositionStatus<
-  T extends {
-    source: AppointmentSource;
-    kind?: AppointmentKind;
-    date: string;
-    start: string;
-    status: AppointmentStatus;
-    clientId?: string;
-  },
->(item: T): T {
-  const isClientRdv =
-    item.source === "Client" || Boolean(item.clientId);
-
-  if (!isClientRdv) {
-    return item;
-  }
-
-  if ((item.kind ?? "Rendez-vous") !== "Rendez-vous") {
-    return item;
-  }
-
-  if (
-    item.status !== "Confirmé" &&
-    item.status !== "À confirmer" &&
-    item.status !== emptyAppointment.status
-  ) {
-    return item;
-  }
-
-  return {
-    ...item,
-    status: statusWhenClientAppointmentPositioned(item.date, item.start),
-  };
-}
-
-function withClientPositionStatus(appointment: Appointment): Appointment {
-  return applyClientPositionStatus(appointment);
 }
 
 function getAppointmentSlotSpan(duration: number) {
@@ -5082,8 +5575,6 @@ async function notifyCreatedAppointment(
     sendSms48h: boolean;
     sendSms24h: boolean;
     selectedDepositLinkId: string;
-    sendBirthdaySms: boolean;
-    birthDate?: string;
     email?: string;
     cabinList: Cabin[];
     smsSettings: CenterSmsSettings | null;
@@ -5092,11 +5583,13 @@ async function notifyCreatedAppointment(
   },
 ) {
   const notices: string[] = [];
+  const notifyPref = await loadClientNotifyPref(savedAppointment.clientId);
   const appointmentEmail = String(
     savedAppointment.email || plan.email || "",
   ).trim();
   const shouldSendConfirmationEmail =
     plan.sendEmailNow &&
+    notifyPref.email &&
     plan.smsSettings?.confirmationEmailEnabled !== false &&
     Boolean(appointmentEmail);
   const canNotifyAppointment = isBookableNotifyKind(savedAppointment);
@@ -5122,6 +5615,7 @@ async function notifyCreatedAppointment(
 
   if (
     savedAppointment.phone &&
+    notifyPref.sms &&
     plan.sendSmsJ7 &&
     plan.smsSettings?.reminderJ7Enabled !== false &&
     isLaserRdv(
@@ -5137,7 +5631,7 @@ async function notifyCreatedAppointment(
     });
   }
 
-  if (savedAppointment.phone && plan.sendSmsJ5 && plan.smsSettings?.reminderJ5Enabled) {
+  if (savedAppointment.phone && notifyPref.sms && plan.sendSmsJ5 && plan.smsSettings?.reminderJ5Enabled) {
     reminderJobs.push({
       kind: "reminder_j5",
       templateId: plan.smsSettings?.reminderJ5TemplateId,
@@ -5145,7 +5639,7 @@ async function notifyCreatedAppointment(
     });
   }
 
-  if (savedAppointment.phone && plan.sendSms48h && plan.smsSettings?.reminder48hEnabled) {
+  if (savedAppointment.phone && notifyPref.sms && plan.sendSms48h && plan.smsSettings?.reminder48hEnabled) {
     reminderJobs.push({
       kind: "reminder_48h",
       templateId: plan.smsSettings?.reminder48hTemplateId,
@@ -5153,7 +5647,7 @@ async function notifyCreatedAppointment(
     });
   }
 
-  if (savedAppointment.phone && plan.sendSms24h && plan.smsSettings?.reminder24hEnabled) {
+  if (savedAppointment.phone && notifyPref.sms && plan.sendSms24h && plan.smsSettings?.reminder24hEnabled) {
     reminderJobs.push({
       kind: "reminder_24h",
       templateId: plan.smsSettings?.reminder24hTemplateId,
@@ -5163,6 +5657,7 @@ async function notifyCreatedAppointment(
 
   if (
     (plan.sendSmsNow &&
+      notifyPref.sms &&
       plan.smsSettings?.confirmationEnabled !== false &&
       savedAppointment.phone) ||
     shouldSendConfirmationEmail ||
@@ -5179,6 +5674,7 @@ async function notifyCreatedAppointment(
 
   if (
     savedAppointment.phone &&
+    notifyPref.sms &&
     plan.sendSmsNow &&
     plan.smsSettings?.confirmationEnabled !== false
   ) {
@@ -5238,26 +5734,6 @@ async function notifyCreatedAppointment(
     );
   }
 
-  if (savedAppointment.phone && plan.birthDate) {
-    const birthday = await syncBirthdaySms({
-      clientId: savedAppointment.clientId,
-      birthDate: plan.birthDate,
-      phone: savedAppointment.phone,
-      firstName: smsVars.firstName,
-      lastName: smsVars.lastName,
-      enabled: plan.sendBirthdaySms && plan.smsSettings?.birthdaySmsEnabled !== false,
-    });
-    notices.push(
-      plan.sendBirthdaySms
-        ? birthday.ok
-          ? birthday.sent
-            ? "SMS anniversaire envoyé."
-            : "SMS anniversaire programmé pour le jour J."
-          : "Le SMS anniversaire n'a pas pu être programmé."
-        : "Date d'anniversaire enregistrée.",
-    );
-  }
-
   return notices;
 }
 
@@ -5274,13 +5750,16 @@ async function sendAppointmentConfirmations(
   }
 
   const notices: string[] = [];
+  const notifyPref = await loadClientNotifyPref(appointment.clientId);
   const appointmentEmail = String(appointment.email || "").trim();
   const sendSms =
     options.sms &&
+    notifyPref.sms &&
     options.settings?.confirmationEnabled !== false &&
     Boolean(appointment.phone?.trim());
   const sendEmail =
     options.email &&
+    notifyPref.email &&
     options.settings?.confirmationEmailEnabled !== false &&
     Boolean(appointmentEmail);
 
@@ -5476,17 +5955,19 @@ function AppointmentDetailsModal({
   function saveAppointment(event?: React.FormEvent<HTMLFormElement>) {
     event?.preventDefault();
 
-    const isBlock = isAgendaBlockKind(form.kind);
+    const isBlock = isAgendaBlockKind(form.kind, form.treatment, form.personName);
+    const nextAppointment = withClientPositionStatus({
+      ...appointment,
+      ...form,
+      personName: form.personName.trim() || (isBlock ? form.kind : ""),
+      phone: form.phone.trim(),
+      treatment: form.treatment.trim() || (isBlock ? form.kind : ""),
+      email: form.email.trim() || undefined,
+      notes: form.notes.trim() || undefined,
+      status: isBlock ? "Confirmé" : form.status,
+    });
     onSave(
-      withClientPositionStatus({
-        ...appointment,
-        ...form,
-        personName: form.personName.trim() || (isBlock ? form.kind : ""),
-        phone: form.phone.trim(),
-        treatment: form.treatment.trim() || (isBlock ? form.kind : ""),
-        email: form.email.trim() || undefined,
-        notes: form.notes.trim() || undefined,
-      }),
+      isBlock ? withAgendaBlockIdentity(nextAppointment) : nextAppointment,
       {
         sms: sendSms,
         email: sendEmail,
@@ -5552,13 +6033,21 @@ function AppointmentDetailsModal({
               value={form.kind}
               options={["Rendez-vous", "Pause", "Formation", "Indisponible"]}
               onChange={(value) =>
-                setForm((currentForm) => ({
-                  ...currentForm,
-                  kind: value as AppointmentKind,
-                  source: value === "Rendez-vous" ? currentForm.source : "Seya",
-                  treatment:
-                    value === "Rendez-vous" ? currentForm.treatment : value,
-                }))
+                setForm((currentForm) =>
+                  applyClientPositionStatus({
+                    ...currentForm,
+                    kind: value as AppointmentKind,
+                    status: isAgendaBlockKind(value)
+                      ? "Confirmé"
+                      : currentForm.status,
+                    source:
+                      value === "Rendez-vous" ? currentForm.source : "Seya",
+                    treatment:
+                      value === "Rendez-vous" ? currentForm.treatment : value,
+                    personName:
+                      value === "Rendez-vous" ? currentForm.personName : value,
+                  }),
+                )
               }
             />
           </Field>
@@ -5712,7 +6201,7 @@ function AppointmentDetailsModal({
           <Field label="Durée">
             <Select
               value={String(form.duration)}
-              options={durationSelectOptions(form.duration)}
+              options={durationSelectOptions(form.duration, form.kind)}
               labels={appointmentDurationLabels}
               onChange={(value) =>
                 setForm((currentForm) => ({
@@ -6063,12 +6552,13 @@ function Field({
 const NEW_TREATMENT_VALUE = "__new_treatment__";
 const CUSTOM_TREATMENT_VALUE = "__custom_treatment__";
 
-function durationSelectOptions(current: number) {
+function durationSelectOptions(current: number, kind?: AppointmentKind) {
+  const options = isAgendaBlockKind(kind)
+    ? blockDurationOptions
+    : appointmentDurationOptions;
   const value = String(current);
 
-  return appointmentDurationOptions.includes(value)
-    ? appointmentDurationOptions
-    : [...appointmentDurationOptions, value];
+  return options.includes(value) ? options : [...options, value];
 }
 
 function TreatmentPicker({
@@ -6115,10 +6605,28 @@ function TreatmentPicker({
   }, []);
 
   const matchedService = services.find((service) => service.name === value);
+
+  useEffect(() => {
+    if (mode === "new") {
+      return;
+    }
+
+    if (matchedService) {
+      if (mode !== "list") {
+        setMode("list");
+      }
+      return;
+    }
+
+    if (value.trim() && mode === "list") {
+      setMode("custom");
+    }
+  }, [matchedService, mode, value]);
+
   const selectValue =
     mode === "new"
       ? NEW_TREATMENT_VALUE
-      : mode === "custom"
+      : mode === "custom" || (value.trim() && !matchedService)
         ? CUSTOM_TREATMENT_VALUE
         : matchedService?.name ?? "";
 
@@ -6127,7 +6635,6 @@ function TreatmentPicker({
       setMode("new");
       setNewName(value && !matchedService ? value : "");
       setNewDuration(String(duration || 60));
-      onChange({ treatment: "" });
       return;
     }
 
@@ -6147,7 +6654,9 @@ function TreatmentPicker({
     });
   }
 
-  function addNewTreatment() {
+  function addNewTreatment(event?: { preventDefault(): void; stopPropagation(): void }) {
+    event?.preventDefault();
+    event?.stopPropagation();
     const name = newName.trim();
 
     if (!name) {
@@ -6158,8 +6667,13 @@ function TreatmentPicker({
       name,
       duration: Number(newDuration) || 60,
     });
-    setServices(getCenterServices());
-    setMode("list");
+    const nextServices = getCenterServices();
+    setServices(nextServices);
+    setMode(
+      nextServices.some((service) => service.name === created.name)
+        ? "list"
+        : "custom",
+    );
     onChange({
       treatment: created.name,
       duration: created.duration,
@@ -6204,6 +6718,11 @@ function TreatmentPicker({
                 duration: Number(newDuration) || 60,
               });
             }}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                addNewTreatment(event);
+              }
+            }}
           />
           <Select
             value={newDuration}
@@ -6217,13 +6736,17 @@ function TreatmentPicker({
               });
             }}
           />
-          <Button type="button" variant="outline" onClick={addNewTreatment}>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={(event) => addNewTreatment(event)}
+          >
             Ajouter
           </Button>
         </div>
       ) : null}
 
-      {mode === "custom" ? (
+      {mode === "custom" || (value.trim() && !matchedService && mode !== "new") ? (
         <Input
           required
           placeholder="Nom du soin ou motif"
@@ -6288,7 +6811,7 @@ function findPractitionerIdForService(
 }
 
 function formatDurationLabel(minutes: number) {
-  return appointmentDurationLabels[String(minutes)] ?? `${minutes} min`;
+  return appointmentDurationLabels[String(minutes)] ?? durationLabel(minutes);
 }
 
 function activeDepositLinks() {

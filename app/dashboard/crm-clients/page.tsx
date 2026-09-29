@@ -59,7 +59,13 @@ import {
   paymentToneFromClient,
   paymentToneStyles,
 } from "@/lib/client-balance";
-import { syncBirthdaySms } from "@/lib/send-sms";
+import {
+  defaultClientNotifyPref,
+  loadClientNotifyPref,
+  saveClientNotifyPref,
+  type ClientNotifyPref,
+} from "@/lib/client-notify";
+import { loadBirthdaySmsStatus, syncBirthdaySms } from "@/lib/send-sms";
 
 const statusStyles: Record<ClientStatus, string> = {
   Actif: "bg-emerald-50 text-emerald-700 border-emerald-100",
@@ -324,8 +330,10 @@ export default function CRMClientsPage() {
       newRdv: "1",
       name: `${client.firstName} ${client.lastName}`,
       phone: client.phone,
+      email: client.email,
       treatment: client.mainCare,
       source: "Client",
+      clientId: client.id,
     });
 
     window.open(`/dashboard/agenda?${params.toString()}`, "_blank", "noopener,noreferrer");
@@ -389,15 +397,18 @@ export default function CRMClientsPage() {
     try {
       await updateCrmClient(updatedClient);
       if (updatedClient.phone) {
+        const birthdayStatus = await loadBirthdaySmsStatus(updatedClient.id);
         void syncBirthdaySms({
           clientId: updatedClient.id,
           birthDate: updatedClient.birthDate,
           phone: updatedClient.phone,
           firstName: updatedClient.firstName,
           lastName: updatedClient.lastName,
-          enabled: Boolean(
-            updatedClient.birthDate && updatedClient.birthDate !== "À compléter",
-          ),
+          enabled:
+            birthdayStatus.enabled &&
+            Boolean(
+              updatedClient.birthDate && updatedClient.birthDate !== "À compléter",
+            ),
         }).catch(() => null);
       }
     } catch (error) {
@@ -429,13 +440,14 @@ export default function CRMClientsPage() {
     try {
       await updateCrmClient(updatedClient);
       if (updatedClient.phone) {
+        const birthdayStatus = await loadBirthdaySmsStatus(updatedClient.id);
         void syncBirthdaySms({
           clientId: updatedClient.id,
           birthDate,
           phone: updatedClient.phone,
           firstName: updatedClient.firstName,
           lastName: updatedClient.lastName,
-          enabled: Boolean(birthDate),
+          enabled: Boolean(birthDate) && birthdayStatus.enabled,
         }).catch(() => null);
       }
     } catch (error) {
@@ -909,7 +921,10 @@ function ClientPanel({
             className="h-10 bg-white"
             aria-label="Date d'anniversaire"
           />
+          <BirthdaySmsToggle client={client} />
         </section>
+
+        <ClientNotifyToggles client={client} />
 
         <section className="rounded-xl border border-slate-100 bg-slate-50 p-4">
           <div className="mb-3 flex items-center justify-between gap-3">
@@ -1249,6 +1264,8 @@ function FullClientModal({
                 onChange={setForm}
                 sourceOptions={sourceOptions}
               />
+              <ClientNotifyToggles client={form} />
+              <BirthdaySmsToggle client={form} />
             </section>
 
             <section className="rounded-2xl border border-slate-200 bg-white p-4">
@@ -2271,6 +2288,196 @@ function toBirthDateInputValue(value: string) {
 function fromBirthDateInputValue(value: string) {
   if (!value) return "";
   return formatDisplayDate(value);
+}
+
+function hasClientBirthDate(value?: string) {
+  const birthDate = String(value || "").trim();
+  return Boolean(birthDate) && birthDate !== "À compléter";
+}
+
+function BirthdaySmsToggle({ client }: { client: Client }) {
+  const hasDate = hasClientBirthDate(client.birthDate);
+  const hasPhone = Boolean(client.phone?.trim());
+  const [checked, setChecked] = useState(true);
+  const [smsAllowed, setSmsAllowed] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const canToggle = hasDate && hasPhone && smsAllowed;
+
+  useEffect(() => {
+    let cancelled = false;
+    setChecked(true);
+    setSmsAllowed(true);
+    if (!client.id) {
+      return;
+    }
+
+    void Promise.all([
+      loadClientNotifyPref(client.id),
+      loadBirthdaySmsStatus(client.id),
+    ])
+      .then(([notifyPref, status]) => {
+        if (cancelled) {
+          return;
+        }
+        setSmsAllowed(notifyPref.sms);
+        setChecked(notifyPref.sms && status.enabled);
+      })
+      .catch(() => null);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [client.id]);
+
+  async function toggle(next: boolean) {
+    setChecked(next);
+    if (!client.id || !canToggle) {
+      return;
+    }
+
+    setSaving(true);
+    try {
+      const result = await syncBirthdaySms({
+        clientId: client.id,
+        birthDate: client.birthDate,
+        phone: client.phone,
+        firstName: client.firstName,
+        lastName: client.lastName,
+        enabled: next,
+      });
+      if (!result.ok) {
+        setChecked(!next);
+      }
+    } catch {
+      setChecked(!next);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <label className="mt-3 flex items-start gap-3 text-sm font-semibold text-slate-800">
+      <input
+        type="checkbox"
+        checked={checked && smsAllowed}
+        disabled={saving || !canToggle}
+        onChange={(event) => void toggle(event.target.checked)}
+        className="mt-1 h-4 w-4"
+      />
+      <span>
+        Envoyer le SMS anniversaire le jour J
+        <span className="mt-1 block text-xs font-semibold text-slate-500">
+          {!smsAllowed
+            ? "Réactive d’abord les SMS dans Envois."
+            : !hasDate
+              ? "Renseigne d’abord la date d’anniversaire."
+              : !hasPhone
+                ? "Ajoute un téléphone pour pouvoir l’envoyer ou le décocher."
+                : "Pré-coché. Décoche si tu ne veux pas l’envoyer."}
+        </span>
+      </span>
+    </label>
+  );
+}
+
+function ClientNotifyToggles({ client }: { client: Client }) {
+  const [pref, setPref] = useState<ClientNotifyPref>(defaultClientNotifyPref);
+  const [saving, setSaving] = useState<"sms" | "email" | null>(null);
+  const hasPhone = Boolean(client.phone?.trim());
+  const hasEmail = Boolean(client.email?.trim());
+
+  useEffect(() => {
+    let cancelled = false;
+    setPref(defaultClientNotifyPref);
+    if (!client.id) {
+      return;
+    }
+
+    void loadClientNotifyPref(client.id)
+      .then((next) => {
+        if (!cancelled) {
+          setPref(next);
+        }
+      })
+      .catch(() => null);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [client.id]);
+
+  async function toggle(field: "sms" | "email", next: boolean) {
+    const previous = pref;
+    const updated = { ...pref, [field]: next };
+    setPref(updated);
+    if (!client.id) {
+      return;
+    }
+
+    setSaving(field);
+    try {
+      const saved = await saveClientNotifyPref(client.id, updated);
+      setPref(saved);
+      if (field === "sms" && !saved.sms && client.phone) {
+        void syncBirthdaySms({
+          clientId: client.id,
+          birthDate: client.birthDate,
+          phone: client.phone,
+          firstName: client.firstName,
+          lastName: client.lastName,
+          enabled: false,
+        }).catch(() => null);
+      }
+    } catch {
+      setPref(previous);
+    } finally {
+      setSaving(null);
+    }
+  }
+
+  return (
+    <section className="rounded-xl border border-slate-100 bg-slate-50 p-4">
+      <h3 className="mb-3 text-xs font-medium uppercase tracking-wide text-slate-500">
+        Envois
+      </h3>
+      <div className="grid gap-3">
+        <label className="flex items-start gap-3 text-sm font-semibold text-slate-800">
+          <input
+            type="checkbox"
+            checked={pref.sms}
+            disabled={saving === "sms"}
+            onChange={(event) => void toggle("sms", event.target.checked)}
+            className="mt-1 h-4 w-4"
+          />
+          <span>
+            Envoyer les SMS
+            <span className="mt-1 block text-xs font-semibold text-slate-500">
+              {hasPhone
+                ? "Confirmation, rappels et anniversaire. Décoche si la cliente ne veut plus de SMS."
+                : "Ajoute un téléphone. Tu peux déjà décocher pour bloquer les envois plus tard."}
+            </span>
+          </span>
+        </label>
+        <label className="flex items-start gap-3 text-sm font-semibold text-slate-800">
+          <input
+            type="checkbox"
+            checked={pref.email}
+            disabled={saving === "email"}
+            onChange={(event) => void toggle("email", event.target.checked)}
+            className="mt-1 h-4 w-4"
+          />
+          <span>
+            Envoyer les mails
+            <span className="mt-1 block text-xs font-semibold text-slate-500">
+              {hasEmail
+                ? "Confirmation de RDV et mailings. Décoche si la cliente ne veut plus de mail."
+                : "Ajoute un email. Tu peux déjà décocher pour bloquer les envois plus tard."}
+            </span>
+          </span>
+        </label>
+      </div>
+    </section>
+  );
 }
 
 function getBirthdayGift(birthDate: string) {

@@ -7,6 +7,8 @@ const {
   normalizePhone,
   parseCenterSmsSettings,
   personalize,
+  clientAllowsSms,
+  findClientByPhone,
   readSmsQuota,
   sendBrevoSms,
   withConfirmationLink,
@@ -173,7 +175,8 @@ module.exports = async function handler(req, res) {
       throw new Error(centerError.message);
     }
 
-    const quota = readSmsQuota(parseCenterSmsSettings(centerRow?.settings));
+    const sms = parseCenterSmsSettings(centerRow?.settings);
+    const quota = readSmsQuota(sms);
 
     if (quota.remaining <= 0) {
       return res.status(402).json({
@@ -192,6 +195,16 @@ module.exports = async function handler(req, res) {
 
     for (const recipient of allowedRecipients) {
       try {
+        const matchedClient = await findClientByPhone(supabase, recipient.phone);
+        if (matchedClient && !clientAllowsSms(sms, matchedClient.id)) {
+          results.push({
+            phone: recipient.phone,
+            ok: false,
+            skipped: true,
+            error: "client_opt_out",
+          });
+          continue;
+        }
         const vars = await withConfirmationLink(recipient, appointmentId);
         const sent = await sendBrevoSms({
           sender,

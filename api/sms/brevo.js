@@ -163,6 +163,42 @@ function withDefaultTemplates(templates) {
   return [...byId.values()];
 }
 
+function parseClientNotifyMap(value) {
+  const record = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  const next = {};
+
+  for (const [clientId, pref] of Object.entries(record)) {
+    const id = String(clientId || "").trim();
+    if (!id) {
+      continue;
+    }
+    next[id] = {
+      sms: pref?.sms !== false,
+      email: pref?.email !== false,
+    };
+  }
+
+  return next;
+}
+
+function clientAllowsSms(sms, clientId) {
+  const id = String(clientId || "").trim();
+  if (!id) {
+    return true;
+  }
+  const pref = parseClientNotifyMap(sms?.clientNotify)[id];
+  return !pref || pref.sms !== false;
+}
+
+function clientAllowsEmail(sms, clientId) {
+  const id = String(clientId || "").trim();
+  if (!id) {
+    return true;
+  }
+  const pref = parseClientNotifyMap(sms?.clientNotify)[id];
+  return !pref || pref.email !== false;
+}
+
 function parseCenterSmsSettings(settings) {
   const sms =
     settings && typeof settings === "object" && settings.sms && typeof settings.sms === "object"
@@ -218,6 +254,7 @@ function parseCenterSmsSettings(settings) {
       templates[0]?.id,
     birthdaySmsEnabled: sms.birthdaySmsEnabled !== false,
     jobs: Array.isArray(sms.jobs) ? sms.jobs : [],
+    clientNotify: parseClientNotifyMap(sms.clientNotify),
     inbox: Array.isArray(sms.inbox) ? sms.inbox : [],
     history: sms.history && typeof sms.history === "object" ? sms.history : null,
     quota: sms.quota && typeof sms.quota === "object" ? sms.quota : null,
@@ -540,6 +577,7 @@ function mergeCenterSmsSettings(currentSettings, smsPatch) {
       ...smsPatch,
       templates: smsPatch.templates ?? sms.templates,
       jobs: smsPatch.jobs ?? sms.jobs,
+      clientNotify: smsPatch.clientNotify ?? sms.clientNotify,
       inbox: smsPatch.inbox ?? sms.inbox,
       history: smsPatch.history ?? sms.history,
       quota: smsPatch.quota ?? sms.quota,
@@ -770,6 +808,9 @@ module.exports = {
   nextBirthdaySendAt,
   normalizePhone,
   parseCenterSmsSettings,
+  parseClientNotifyMap,
+  clientAllowsSms,
+  clientAllowsEmail,
   personalize,
   readSmsQuota,
   reminderHoursForKind,

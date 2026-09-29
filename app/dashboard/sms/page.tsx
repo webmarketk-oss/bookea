@@ -659,7 +659,7 @@ export default function SmsPage() {
           />
           <AutomationRow
             title="7. Anniversaire"
-            hint="Le jour J, si la date de naissance est enregistrée. Indépendant du RDV."
+            hint="Se coche sur la fiche cliente, pas à la prise de RDV. Le jour J, si la date de naissance est enregistrée."
             templateId={smsSettings.birthdayTemplateId}
             templates={smsSettings.templates}
             enabled={smsSettings.birthdaySmsEnabled}

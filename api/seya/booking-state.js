@@ -30,6 +30,7 @@ function emptyBookingState(centerId) {
     dayPart: null,
     rejectedDates: [],
     rejectedWeekdays: [],
+    rejectedSlots: [],
     lastOfferedSlots: [],
     pendingQuestion: null,
     appointmentStatus: "none",
@@ -48,6 +49,9 @@ function normalizeBookingState(value, centerId) {
     ...current,
     rejectedDates: unique(current.rejectedDates || []),
     rejectedWeekdays: unique(current.rejectedWeekdays || []),
+    rejectedSlots: Array.isArray(current.rejectedSlots)
+      ? current.rejectedSlots.filter((slot) => slot?.date && slot?.time)
+      : [],
     lastOfferedSlots: Array.isArray(current.lastOfferedSlots)
       ? current.lastOfferedSlots
       : [],
@@ -369,6 +373,13 @@ function guardSlots(slots, state, extras = {}) {
     if (rejected.has(slot.date) || rejectedDays.has(weekdayOf(slot.date))) {
       return false;
     }
+    if (
+      (state.rejectedSlots || []).some(
+        (item) => item.date === slot.date && item.time === slot.time,
+      )
+    ) {
+      return false;
+    }
     if (alreadyOffered.has(`${slot.date}|${slot.time}`) && extras.allowRepeat !== true) {
       return false;
     }
@@ -613,11 +624,33 @@ function unique(list) {
   return [...new Set((list || []).filter((item) => item || item === 0))];
 }
 
+function dbStatusWhenSlotPositioned(date, start) {
+  const [year, month, day] = String(date || "").split("-").map(Number);
+  const [hours, minutes] = String(start || "00:00")
+    .slice(0, 5)
+    .split(":")
+    .map(Number);
+
+  if (!year || !month || !day) {
+    return "to_confirm";
+  }
+
+  const when = new Date(year, month - 1, day, hours || 0, minutes || 0, 0, 0);
+  if (Number.isNaN(when.getTime())) {
+    return "to_confirm";
+  }
+
+  return when.getTime() - Date.now() > 48 * 60 * 60 * 1000
+    ? "confirmed"
+    : "to_confirm";
+}
+
 module.exports = {
   WEEKDAYS,
   applyBookingMessage,
   asksLocation,
   asksPrice,
+  dbStatusWhenSlotPositioned,
   emptyBookingState,
   emptySlotFallback,
   enforceOutgoingText,

@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { Card, CardContent } from "@/components/ui/card";
-import { getLeadRdvTakenDates } from "@/lib/crm-stats";
+import { getLeadRdvTakenDates, isRdvBookedStatus } from "@/lib/crm-stats";
 import { inactiveLeadStatuses } from "@/lib/lead-statuses";
 import { Lead } from "@/types/lead";
 import {
@@ -72,7 +72,7 @@ export default function KPIDashboard({ leads }: KPIDashboardProps) {
   );
 
   const totalProspects = periodLeads.length;
-  const rdvCount = countByStatus(periodLeads, rdvStatuses);
+  const rdvCount = periodLeads.filter(leadHasTakenRdv).length;
   const devisCount = countByStatus(periodLeads, ["Devis"]);
   const soldCount = countByStatus(periodLeads, soldStatuses);
   const presentCount = countByStatus(periodLeads, presentStatuses);
@@ -97,6 +97,8 @@ export default function KPIDashboard({ leads }: KPIDashboardProps) {
   const depositRate = ratio(depositCount, Math.max(soldCount + rdvCount, 1));
   const redRate = ratio(lostCount, totalProspects);
   const remainingRate = ratio(remainingCount, totalProspects);
+  const outOfZoneCount = countByStatus(periodLeads, ["Hors zone"]);
+  const outOfZoneRate = ratio(outOfZoneCount, totalProspects);
 
   const campaignRows = getCampaignRows(periodLeads);
   const campaignStats = getCampaignDiagramRows(periodLeads);
@@ -125,7 +127,7 @@ export default function KPIDashboard({ leads }: KPIDashboardProps) {
     {
       title: "NB RDV pris",
       value: rdvCount,
-      subtitle: "RDV programmés",
+      subtitle: "RDV et acomptes posés",
       icon: CalendarDays,
       color: "text-blue-600",
     },
@@ -160,7 +162,7 @@ export default function KPIDashboard({ leads }: KPIDashboardProps) {
     {
       title: "Perdus",
       value: lostCount,
-      subtitle: "Classés en bas",
+      subtitle: "Leads rouge",
       icon: XCircle,
       color: "text-red-600",
     },
@@ -268,7 +270,8 @@ export default function KPIDashboard({ leads }: KPIDashboardProps) {
               <Rate label="Taux de présentiel" value={attendanceRate} color="text-cyan-600" />
               <Rate label="Taux de prise RDV" value={rdvRate} color="text-blue-600" />
               <Rate label="% prise d'acompte" value={depositRate} color="text-green-600" />
-              <Rate label="% classés en bas" value={redRate} color="text-red-600" />
+              <Rate label="% leads rouge" value={redRate} color="text-red-600" />
+              <Rate label="Taux hors zone" value={outOfZoneRate} color="text-rose-600" />
               <Rate label="% reste à traiter" value={remainingRate} color="text-violet-600" />
             </div>
           </CardContent>
@@ -362,56 +365,9 @@ export default function KPIDashboard({ leads }: KPIDashboardProps) {
           </CardContent>
         </Card>
 
-        <Card className="border-slate-200 py-0 shadow-sm xl:col-span-7">
+        <Card className="border-slate-200 py-0 shadow-sm xl:col-span-12">
           <CardContent className="p-5">
-            <div className="mb-5 flex items-center justify-between">
-              <h3 className="text-sm font-black uppercase text-slate-700">
-                Évolution des KPI dans le temps
-              </h3>
-              <TrendingUp className="h-5 w-5 text-violet-600" />
-            </div>
-            <div className="flex h-72 items-end gap-4 rounded-xl bg-slate-50 p-5">
-              {["S1", "S2", "S3", "S4", "S5"].map((week, index) => {
-                const prospectHeight = 30 + index * 8;
-                const revenueHeight = Math.min(90, 22 + index * 14 + soldCount * 5);
-
-                return (
-                  <div key={week} className="flex flex-1 flex-col items-center gap-2">
-                    <div className="flex h-48 items-end gap-1">
-                      <div
-                        className="w-4 rounded-t bg-violet-500"
-                        style={{ height: `${prospectHeight}%` }}
-                      />
-                      <div
-                        className="w-4 rounded-t bg-blue-500"
-                        style={{ height: `${20 + rdvCount * 8}%` }}
-                      />
-                      <div
-                        className="w-4 rounded-t bg-emerald-500"
-                        style={{ height: `${revenueHeight}%` }}
-                      />
-                    </div>
-                    <span className="text-xs font-semibold text-slate-500">
-                      {week}
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
-            <div className="mt-4 flex gap-5 text-xs font-semibold text-slate-500">
-              <span className="flex items-center gap-2">
-                <i className="h-2 w-2 rounded-full bg-violet-500" />
-                Prospects
-              </span>
-              <span className="flex items-center gap-2">
-                <i className="h-2 w-2 rounded-full bg-blue-500" />
-                RDV pris
-              </span>
-              <span className="flex items-center gap-2">
-                <i className="h-2 w-2 rounded-full bg-emerald-500" />
-                CA généré
-              </span>
-            </div>
+            <YearlyKpiCurves leads={leads} />
           </CardContent>
         </Card>
       </div>
@@ -461,6 +417,335 @@ export default function KPIDashboard({ leads }: KPIDashboardProps) {
       </Card>
     </div>
   );
+}
+
+function YearlyKpiCurves({ leads }: { leads: Lead[] }) {
+  const series = useMemo(() => getYearlyMonthlySeries(leads), [leads]);
+  const [hiddenYears, setHiddenYears] = useState<number[]>([]);
+  const visibleSeries = series.filter((row) => !hiddenYears.includes(row.year));
+  const chartMax = niceChartMax(
+    Math.max(1, ...visibleSeries.flatMap((row) => [...row.leads, ...row.rdv])),
+  );
+  const ticks = [0, 0.25, 0.5, 0.75, 1].map((step) =>
+    Math.round(chartMax * step),
+  );
+
+  function toggleYear(year: number) {
+    setHiddenYears((current) =>
+      current.includes(year)
+        ? current.filter((item) => item !== year)
+        : [...current, year],
+    );
+  }
+
+  return (
+    <div>
+      <div className="mb-5 flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <div className="flex items-center gap-2">
+            <h3 className="text-sm font-black uppercase text-slate-700">
+              Évolution annuelle
+            </h3>
+            <TrendingUp className="h-5 w-5 text-violet-600" />
+          </div>
+          <p className="mt-1 text-sm font-medium text-slate-500">
+            Leads et RDV pris par mois, une courbe par année
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {series.map((row, index) => {
+            const hidden = hiddenYears.includes(row.year);
+            const colors = yearCurveColors(index);
+            return (
+              <button
+                key={row.year}
+                type="button"
+                onClick={() => toggleYear(row.year)}
+                className={`rounded-full border px-3 py-1.5 text-xs font-black ${
+                  hidden
+                    ? "border-slate-200 bg-white text-slate-400"
+                    : "border-slate-200 bg-slate-50 text-slate-800"
+                }`}
+              >
+                <span className="mr-2 inline-flex items-center gap-1">
+                  <i
+                    className="inline-block h-2 w-2 rounded-full"
+                    style={{ background: colors.leads }}
+                  />
+                  <i
+                    className="inline-block h-2 w-2 rounded-full"
+                    style={{ background: colors.rdv }}
+                  />
+                </span>
+                {row.year}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {visibleSeries.length === 0 ? (
+        <p className="rounded-xl bg-slate-50 p-5 text-sm font-medium text-slate-500">
+          Aucune année sélectionnée.
+        </p>
+      ) : (
+        <>
+          <YearlyLineChart
+            series={visibleSeries}
+            allYears={series.map((row) => row.year)}
+            max={chartMax}
+            ticks={ticks}
+          />
+          <div className="mt-4 flex flex-wrap gap-x-6 gap-y-2 text-xs font-semibold text-slate-500">
+            {visibleSeries.map((row) => {
+              const colors = yearCurveColors(
+                series.findIndex((item) => item.year === row.year),
+              );
+              return (
+                <span key={row.year} className="flex items-center gap-3">
+                  <span className="font-black text-slate-700">{row.year}</span>
+                  <span className="inline-flex items-center gap-1.5">
+                    <i
+                      className="inline-block h-2 w-4 rounded-full"
+                      style={{ background: colors.leads }}
+                    />
+                    Leads
+                  </span>
+                  <span className="inline-flex items-center gap-1.5">
+                    <i
+                      className="inline-block h-1.5 w-4 rounded-full"
+                      style={{ background: colors.rdv }}
+                    />
+                    RDV pris
+                  </span>
+                </span>
+              );
+            })}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+const MONTH_LABELS = [
+  "Jan",
+  "Fév",
+  "Mar",
+  "Avr",
+  "Mai",
+  "Juin",
+  "Juil",
+  "Août",
+  "Sep",
+  "Oct",
+  "Nov",
+  "Déc",
+];
+
+const YEAR_CURVE_PALETTE = [
+  { leads: "#7c3aed", rdv: "#2563eb" },
+  { leads: "#c026d3", rdv: "#0f766e" },
+  { leads: "#ea580c", rdv: "#4f46e5" },
+  { leads: "#e11d48", rdv: "#0284c7" },
+];
+
+function yearCurveColors(index: number) {
+  return YEAR_CURVE_PALETTE[Math.max(0, index) % YEAR_CURVE_PALETTE.length];
+}
+
+function YearlyLineChart({
+  series,
+  allYears,
+  max,
+  ticks,
+}: {
+  series: Array<{ year: number; leads: number[]; rdv: number[] }>;
+  allYears: number[];
+  max: number;
+  ticks: number[];
+}) {
+  const width = 720;
+  const height = 280;
+  const pad = { left: 42, right: 12, top: 18, bottom: 34 };
+  const innerWidth = width - pad.left - pad.right;
+  const innerHeight = height - pad.top - pad.bottom;
+
+  function point(index: number, value: number) {
+    return {
+      x: pad.left + (index * innerWidth) / 11,
+      y: pad.top + innerHeight - (value / max) * innerHeight,
+    };
+  }
+
+  function pathFor(values: number[]) {
+    return values
+      .map((value, index) => {
+        const { x, y } = point(index, value);
+        return `${index === 0 ? "M" : "L"} ${x.toFixed(1)} ${y.toFixed(1)}`;
+      })
+      .join(" ");
+  }
+
+  return (
+    <div className="overflow-x-auto rounded-2xl border border-slate-100 bg-slate-50/70 p-3">
+      <svg
+        viewBox={`0 0 ${width} ${height}`}
+        className="h-72 w-full min-w-[640px]"
+        role="img"
+        aria-label="Courbes mensuelles des leads et des RDV pris par année"
+      >
+        {ticks.map((tick) => {
+          const y = pad.top + innerHeight - (tick / max) * innerHeight;
+          return (
+            <g key={tick}>
+              <line
+                x1={pad.left}
+                x2={width - pad.right}
+                y1={y}
+                y2={y}
+                stroke="#e2e8f0"
+                strokeDasharray="4 4"
+              />
+              <text
+                x={pad.left - 8}
+                y={y + 4}
+                textAnchor="end"
+                className="fill-slate-400 text-[11px] font-semibold"
+              >
+                {tick}
+              </text>
+            </g>
+          );
+        })}
+
+        {MONTH_LABELS.map((label, index) => {
+          const x = pad.left + (index * innerWidth) / 11;
+          return (
+            <text
+              key={label}
+              x={x}
+              y={height - 10}
+              textAnchor="middle"
+              className="fill-slate-500 text-[11px] font-semibold"
+            >
+              {label}
+            </text>
+          );
+        })}
+
+        {series.map((row) => {
+          const palette = yearCurveColors(allYears.indexOf(row.year));
+          return (
+            <g key={row.year}>
+              <path
+                d={pathFor(row.leads)}
+                fill="none"
+                stroke={palette.leads}
+                strokeWidth="2.5"
+                strokeLinejoin="round"
+                strokeLinecap="round"
+              />
+              <path
+                d={pathFor(row.rdv)}
+                fill="none"
+                stroke={palette.rdv}
+                strokeWidth="2.5"
+                strokeDasharray="6 4"
+                strokeLinejoin="round"
+                strokeLinecap="round"
+              />
+              {row.leads.map((value, index) => {
+                const { x, y } = point(index, value);
+                return (
+                  <circle
+                    key={`${row.year}-leads-${index}`}
+                    cx={x}
+                    cy={y}
+                    r="3.5"
+                    fill={palette.leads}
+                  >
+                    <title>
+                      {row.year} · {MONTH_LABELS[index]} · {value} lead
+                      {value > 1 ? "s" : ""}
+                    </title>
+                  </circle>
+                );
+              })}
+              {row.rdv.map((value, index) => {
+                const { x, y } = point(index, value);
+                return (
+                  <circle
+                    key={`${row.year}-rdv-${index}`}
+                    cx={x}
+                    cy={y}
+                    r="3.5"
+                    fill="#fff"
+                    stroke={palette.rdv}
+                    strokeWidth="2"
+                  >
+                    <title>
+                      {row.year} · {MONTH_LABELS[index]} · {value} RDV
+                    </title>
+                  </circle>
+                );
+              })}
+            </g>
+          );
+        })}
+      </svg>
+    </div>
+  );
+}
+
+function getYearlyMonthlySeries(leads: Lead[]) {
+  const byYear = new Map<number, { leads: number[]; rdv: number[] }>();
+
+  function emptyMonths() {
+    return Array.from({ length: 12 }, () => 0);
+  }
+
+  function ensure(year: number) {
+    const current = byYear.get(year);
+    if (current) {
+      return current;
+    }
+    const next = { leads: emptyMonths(), rdv: emptyMonths() };
+    byYear.set(year, next);
+    return next;
+  }
+
+  ensure(new Date().getFullYear());
+
+  for (const lead of leads) {
+    const created = parseDate(lead.createdDate);
+    if (created) {
+      ensure(created.getFullYear()).leads[created.getMonth()] += 1;
+    }
+
+    const rdvMonths = new Set<string>();
+    const takenDates = getLeadRdvTakenDates(lead);
+
+    if (takenDates.length > 0) {
+      for (const iso of takenDates) {
+        const [year, month] = iso.split("-").map(Number);
+        if (year && month >= 1 && month <= 12) {
+          rdvMonths.add(`${year}-${month - 1}`);
+        }
+      }
+    } else if (leadHasTakenRdv(lead) && created) {
+      rdvMonths.add(`${created.getFullYear()}-${created.getMonth()}`);
+    }
+
+    for (const key of rdvMonths) {
+      const [year, month] = key.split("-").map(Number);
+      ensure(year).rdv[month] += 1;
+    }
+  }
+
+  return [...byYear.entries()]
+    .sort((left, right) => left[0] - right[0])
+    .map(([year, values]) => ({ year, ...values }));
 }
 
 function CampaignBarChart({
@@ -643,7 +928,9 @@ function formatCurrency(value: number) {
 
 function leadHasTakenRdv(lead: Lead) {
   return (
-    rdvStatuses.includes(lead.status) || getLeadRdvTakenDates(lead).length > 0
+    isRdvBookedStatus(lead.status) ||
+    rdvStatuses.includes(lead.status) ||
+    getLeadRdvTakenDates(lead).length > 0
   );
 }
 

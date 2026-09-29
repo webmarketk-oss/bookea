@@ -1,4 +1,13 @@
 import { cabins, cabinVisuals, practitioners } from "@/lib/agenda-data";
+import {
+  applyPositionedAppointmentStatus,
+  agendaBlockTitle,
+  isAgendaBlockKind,
+  resolveAgendaBlockKind,
+  stripAgendaKindNote,
+  withAgendaBlockIdentity,
+  withAgendaKindNote,
+} from "@/lib/appointment-position-status";
 import { markPastAppointmentsPresent } from "@/lib/appointment-presence";
 import { getActiveCenterContext } from "@/lib/center-access";
 import { normalizeLeadStatus } from "@/lib/lead-statuses";
@@ -81,7 +90,12 @@ export async function loadCrmAppointments() {
   const appointments = ((data ?? []) as unknown as AppointmentRow[]).map(
     toAppointment,
   );
-  const markedAppointments = markPastAppointmentsPresent(appointments);
+  const positionedAppointments = appointments.map(
+    applyPositionedAppointmentStatus,
+  );
+  const markedAppointments = markPastAppointmentsPresent(
+    positionedAppointments,
+  );
 
   void persistPastAppointmentPresence(appointments, markedAppointments);
 
@@ -109,12 +123,17 @@ async function persistPastAppointmentPresence(
   );
 }
 
+function prepareAgendaAppointment(appointment: Appointment) {
+  return applyPositionedAppointmentStatus(withAgendaBlockIdentity(appointment));
+}
+
 export async function createCrmAppointment(appointment: Appointment) {
   const supabase = createClient();
-  const links = await ensureAppointmentLinks(supabase, appointment);
+  const positioned = prepareAgendaAppointment(appointment);
+  const links = await ensureAppointmentLinks(supabase, positioned);
   const { data, error } = await supabase
     .from("appointments")
-    .insert(toAppointmentFields(appointment, links))
+    .insert(toAppointmentFields(positioned, links))
     .select(
       `
         id,
@@ -142,7 +161,10 @@ export async function createCrmAppointment(appointment: Appointment) {
     throw new Error(error.message);
   }
 
-  return toAppointment(data as unknown as AppointmentRow);
+  return withSavedAppointmentIdentity(
+    toAppointment(data as unknown as AppointmentRow),
+    positioned,
+  );
 }
 
 export function isPersistedAppointmentId(id: string) {
@@ -152,12 +174,14 @@ export function isPersistedAppointmentId(id: string) {
 }
 
 export async function persistCrmAppointment(appointment: Appointment) {
-  if (isPersistedAppointmentId(appointment.id)) {
-    await updateCrmAppointment(appointment);
-    return appointment;
+  const positioned = prepareAgendaAppointment(appointment);
+
+  if (isPersistedAppointmentId(positioned.id)) {
+    await updateCrmAppointment(positioned);
+    return positioned;
   }
 
-  return createCrmAppointment(appointment);
+  return createCrmAppointment(positioned);
 }
 
 async function appointmentMoveHistoryFields(
@@ -212,15 +236,16 @@ async function appointmentMoveHistoryFields(
 
 export async function updateCrmAppointment(appointment: Appointment) {
   const supabase = createClient();
-  const links = await ensureAppointmentLinks(supabase, appointment);
-  const moveHistory = await appointmentMoveHistoryFields(supabase, appointment);
+  const positioned = prepareAgendaAppointment(appointment);
+  const links = await ensureAppointmentLinks(supabase, positioned);
+  const moveHistory = await appointmentMoveHistoryFields(supabase, positioned);
   const { error } = await supabase
     .from("appointments")
     .update({
-      ...toAppointmentFields(appointment, links),
+      ...toAppointmentFields(positioned, links),
       ...moveHistory,
     })
-    .eq("id", appointment.id);
+    .eq("id", positioned.id);
 
   if (error) {
     throw new Error(error.message);
@@ -521,14 +546,12 @@ async function ensureAppointmentClient(
 
   if (existingId) {
     if (isBookableAppointment(appointment)) {
-      const [firstName, ...lastNameParts] = appointment.personName
-        .trim()
-        .split(/\s+/);
+      const names = clientNameFields(appointment);
       const { data, error } = await supabase
         .from("clients")
         .update({
-          first_name: firstName || "Cliente",
-          last_name: lastNameParts.join(" ") || "Bookea",
+          first_name: names.first_name,
+          last_name: names.last_name,
           email: appointment.email?.trim() || null,
           phone: appointment.phone.trim() || null,
           ...(appointment.birthDate ? { birthdate: appointment.birthDate } : {}),
@@ -548,13 +571,13 @@ async function ensureAppointmentClient(
     return existingId;
   }
 
-  const [firstName, ...lastNameParts] = appointment.personName.trim().split(/\s+/);
+  const names = clientNameFields(appointment);
   const { data, error } = await supabase
     .from("clients")
     .insert({
       center_id: centerId,
-      first_name: firstName || "Cliente",
-      last_name: lastNameParts.join(" ") || "Bookea",
+      first_name: names.first_name,
+      last_name: names.last_name,
       email: appointment.email?.trim() || null,
       phone: appointment.phone.trim() || null,
       ...(appointment.birthDate ? { birthdate: appointment.birthDate } : {}),
@@ -705,8 +728,42 @@ async function findAppointmentLead(
   );
 }
 
+function appointmentPersonName(
+  client?: { first_name?: string | null; last_name?: string | null } | null,
+  serviceName?: string | null,
+  notes?: string | null,
+) {
+  const joined = [client?.first_name, client?.last_name].filter(Boolean).join(" ");
+  const kind = resolveAgendaBlockKind(undefined, serviceName, joined, notes);
+
+  if (kind) {
+    return agendaBlockTitle(kind, serviceName, joined, notes);
+  }
+
+  return joined || "Cliente Bookea";
+}
+
 function isBookableAppointment(appointment: Appointment) {
-  return !appointment.kind || appointment.kind === "Rendez-vous";
+  return !isAgendaBlockKind(appointment.kind, appointment.treatment);
+}
+
+function clientNameFields(appointment: Appointment) {
+  if (isAgendaBlockKind(appointment.kind, appointment.treatment)) {
+    return {
+      first_name: agendaBlockTitle(
+        appointment.kind,
+        appointment.treatment,
+        appointment.personName,
+      ),
+      last_name: "",
+    };
+  }
+
+  const [firstName, ...lastNameParts] = appointment.personName.trim().split(/\s+/);
+  return {
+    first_name: firstName || "Cliente",
+    last_name: lastNameParts.join(" ") || "Bookea",
+  };
 }
 
 function shouldMarkLeadAsBooked(status: string) {
@@ -886,6 +943,28 @@ async function resolvePractitionerName(
   return name || "Praticienne";
 }
 
+function withSavedAppointmentIdentity(
+  saved: Appointment,
+  original: Appointment,
+): Appointment {
+  const originalName = original.personName.trim();
+
+  return applyPositionedAppointmentStatus({
+    ...saved,
+    personName:
+      originalName && originalName !== "Cliente Bookea"
+        ? original.personName
+        : saved.personName,
+    phone: original.phone.trim() || saved.phone,
+    email: original.email || saved.email,
+    kind: original.kind ?? saved.kind,
+    birthDate: original.birthDate || saved.birthDate,
+    treatment: original.treatment.trim() || saved.treatment,
+    clientId: saved.clientId || original.clientId,
+    source: original.source || saved.source,
+  });
+}
+
 function toAppointmentFields(
   appointment: Appointment,
   links: AppointmentLinks,
@@ -903,7 +982,7 @@ function toAppointmentFields(
     duration_minutes: appointment.duration,
     status: toAppointmentStatusValue(appointment.status),
     origin: appointment.source.toLowerCase(),
-    notes: appointment.notes ?? null,
+    notes: withAgendaKindNote(appointment.notes, appointment.kind) ?? null,
     updated_at: new Date().toISOString(),
   };
 }
@@ -913,16 +992,24 @@ function toAppointment(row: AppointmentRow): Appointment {
   const service = relationObject(row.services);
   const room = relationObject(row.rooms);
   const practitioner = relationObject(row.practitioners);
+  const joinedName = [client?.first_name, client?.last_name]
+    .filter(Boolean)
+    .join(" ");
+  const kind = resolveAgendaBlockKind(
+    undefined,
+    service?.name,
+    joinedName,
+    row.notes,
+  );
+  const notes = stripAgendaKindNote(row.notes) || undefined;
 
   return {
     id: row.id,
     clientId: row.client_id || undefined,
-    personName:
-      [client?.first_name, client?.last_name].filter(Boolean).join(" ") ||
-      "Cliente Bookea",
+    personName: appointmentPersonName(client, service?.name, row.notes),
     phone: client?.phone ?? "",
     email: client?.email ?? undefined,
-    treatment: service?.name ?? "Soin à préciser",
+    treatment: kind || service?.name || "Soin à préciser",
     practitionerId: getPractitionerIdByName(practitionerDisplayName(practitioner)),
     practitionerName: practitionerDisplayName(practitioner) ?? undefined,
     cabinId: row.room_id || getCabinIdByName(room?.name),
@@ -931,7 +1018,8 @@ function toAppointment(row: AppointmentRow): Appointment {
     duration: row.duration_minutes,
     status: fromAppointmentStatusValue(row.status),
     source: row.origin === "client" ? "Client" : row.origin === "seya" ? "Seya" : "Prospect",
-    notes: row.notes ?? undefined,
+    kind,
+    notes,
   };
 }
 

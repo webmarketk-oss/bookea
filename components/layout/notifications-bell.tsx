@@ -85,9 +85,28 @@ export function NotificationsBell({
   }, [refresh]);
 
   useEffect(() => {
-    if (open) {
-      void refresh();
+    if (!open) {
+      return;
     }
+
+    let cancelled = false;
+    void (async () => {
+      await refresh();
+      if (cancelled) {
+        return;
+      }
+      setItems((list) => {
+        const ids = list.filter((entry) => entry.unread).map((entry) => entry.id);
+        if (ids.length > 0) {
+          void markCenterNotificationsRead(ids).catch(() => null);
+        }
+        return list.map((entry) => ({ ...entry, unread: false }));
+      });
+    })();
+
+    return () => {
+      cancelled = true;
+    };
   }, [open, refresh]);
 
   useLayoutEffect(() => {

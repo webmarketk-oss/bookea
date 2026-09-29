@@ -10,6 +10,7 @@ const {
   normalizePhone,
   parseCenterSmsSettings,
   personalize,
+  clientAllowsSms,
   readSmsQuota,
   sendBrevoSms,
   storeIncomingSms,
@@ -117,7 +118,7 @@ module.exports = async function handler(req, res) {
         }
 
         if (job?.kind === "birthday") {
-          if (!scanBirthdays) {
+          if (!scanBirthdays || !clientAllowsSms(sms, job.clientId)) {
             nextJobs.push(job);
             continue;
           }
@@ -178,7 +179,7 @@ module.exports = async function handler(req, res) {
 
         const { data: appointment, error: appointmentError } = await supabase
           .from("appointments")
-          .select("id,status")
+          .select("id,status,client_id")
           .eq("id", job.appointmentId)
           .maybeSingle();
 
@@ -199,6 +200,17 @@ module.exports = async function handler(req, res) {
             status: "cancelled",
             cancelledAt: new Date().toISOString(),
             reason: appointment ? "appointment_cancelled" : "appointment_deleted",
+          });
+          cancelled += 1;
+          continue;
+        }
+
+        if (!clientAllowsSms(sms, appointment.client_id)) {
+          nextJobs.push({
+            ...job,
+            status: "cancelled",
+            cancelledAt: new Date().toISOString(),
+            reason: "client_opt_out",
           });
           cancelled += 1;
           continue;
@@ -257,7 +269,7 @@ module.exports = async function handler(req, res) {
         for (const client of birthdayClients ?? []) {
           const phone = normalizePhone(client.phone);
 
-          if (!phone || !isBirthdayToday(client.birthdate)) {
+          if (!phone || !isBirthdayToday(client.birthdate) || !clientAllowsSms(sms, client.id)) {
             continue;
           }
 
@@ -268,8 +280,16 @@ module.exports = async function handler(req, res) {
               ((job.clientId && job.clientId === client.id) ||
                 normalizePhone(job.phone) === phone),
           );
+          const optedOut = nextJobs.some(
+            (job) =>
+              job?.kind === "birthday" &&
+              job?.status === "cancelled" &&
+              job?.reason === "opt_out" &&
+              ((job.clientId && job.clientId === client.id) ||
+                normalizePhone(job.phone) === phone),
+          );
 
-          if (hasJobThisYear) {
+          if (hasJobThisYear || optedOut) {
             continue;
           }
 

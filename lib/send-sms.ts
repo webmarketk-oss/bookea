@@ -122,6 +122,32 @@ export async function sendSavedTemplateSms(
   });
 }
 
+export async function loadBirthdaySmsStatus(clientId?: string) {
+  if (!clientId) {
+    return { enabled: true, scheduled: false };
+  }
+
+  const response = await fetch("/api/sms/schedule", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    signal: AbortSignal.timeout(8000),
+    body: JSON.stringify({
+      action: "status",
+      kind: "birthday",
+      clientId,
+    }),
+  });
+  const result = (await response.json().catch(() => ({}))) as {
+    enabled?: boolean;
+    scheduled?: boolean;
+  };
+
+  return {
+    enabled: result.enabled !== false,
+    scheduled: Boolean(result.scheduled),
+  };
+}
+
 export async function syncBirthdaySms(input: {
   clientId?: string;
   birthDate?: string;

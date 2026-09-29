@@ -1029,6 +1029,7 @@ export default function CRMLeadsPage() {
                 setFilters((currentFilters) => ({
                   ...currentFilters,
                   status: "Tous",
+                  search: currentFilters.search,
                 }));
                 scrollToLeadList();
               }}
@@ -1037,6 +1038,7 @@ export default function CRMLeadsPage() {
                 setFilters((currentFilters) => ({
                   ...currentFilters,
                   status,
+                  search: currentFilters.search,
                 }));
                 scrollToLeadList();
               }}

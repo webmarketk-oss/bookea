@@ -839,10 +839,10 @@ function mergeLocalAndRemote(
       remote.photoPreviews && remote.photoPreviews.length > 0
         ? remote.photoPreviews
         : local?.photoPreviews,
-    services: remote.services ?? local?.services,
+    services: mergeCatalogByName(remote.services, local?.services),
     serviceCategories: remote.serviceCategories ?? local?.serviceCategories,
     sources: remote.sources ?? local?.sources,
-    products: remote.products ?? local?.products,
+    products: mergeCatalogByName(remote.products, local?.products),
     productCategories: remote.productCategories ?? local?.productCategories,
     depositLinks: remote.depositLinks ?? local?.depositLinks,
     externalReviews: remote.externalReviews ?? local?.externalReviews,
@@ -897,6 +897,30 @@ function asRecord(value: unknown): Record<string, unknown> {
 
 function asArray<T>(value: unknown): T[] | undefined {
   return Array.isArray(value) ? (value as T[]) : undefined;
+}
+
+export function mergeCatalogByName<T extends { name?: string }>(
+  remote?: T[] | null,
+  local?: T[] | null,
+): T[] | undefined {
+  if (!remote?.length) {
+    return local ?? undefined;
+  }
+  if (!local?.length) {
+    return remote;
+  }
+
+  const seen = new Set(
+    remote
+      .map((item) => String(item.name || "").trim().toLowerCase())
+      .filter(Boolean),
+  );
+  const extras = local.filter((item) => {
+    const key = String(item.name || "").trim().toLowerCase();
+    return Boolean(key) && !seen.has(key);
+  });
+
+  return extras.length > 0 ? [...remote, ...extras] : remote;
 }
 
 function asStringArray(value: unknown): string[] | undefined {
@@ -970,6 +994,7 @@ export function addCenterService(input: {
         service.id === already.id ? { ...service, visible: true } : service
       );
       mergeCenterSettings({ services: nextServices });
+      persistCenterSettingsCatalog();
       return { ...already, visible: true };
     }
 
@@ -996,8 +1021,18 @@ export function addCenterService(input: {
   };
 
   mergeCenterSettings({ services: [nextService, ...existing] });
+  persistCenterSettingsCatalog();
 
   return nextService;
+}
+
+function persistCenterSettingsCatalog() {
+  const settings = readCenterSettings();
+  if (!settings) {
+    return;
+  }
+
+  void savePublicCenterProfile(settings).catch(() => null);
 }
 
 export function getSourceNames(settings: StoredCenterSettings | null) {

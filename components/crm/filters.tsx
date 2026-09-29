@@ -2,7 +2,6 @@ import { Search, SlidersHorizontal, Plus } from "lucide-react";
 import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { leadStatuses } from "@/lib/lead-statuses";
 import { Lead, LeadStatus } from "@/types/lead";
 
@@ -20,7 +19,9 @@ export type ProspectFilters = {
 
 type FiltersProps = {
   filters: ProspectFilters;
-  onFiltersChange: (filters: ProspectFilters) => void;
+  onFiltersChange: (
+    filters: ProspectFilters | ((current: ProspectFilters) => ProspectFilters),
+  ) => void;
   onNewLead: () => void;
 };
 
@@ -59,10 +60,10 @@ export default function Filters({
     key: Key,
     value: ProspectFilters[Key]
   ) {
-    onFiltersChange({
-      ...filters,
+    onFiltersChange((current) => ({
+      ...current,
       [key]: value,
-    });
+    }));
   }
 
   return (
@@ -73,9 +74,11 @@ export default function Filters({
 
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
 
-          <Input
+          <input
+            type="search"
             placeholder="Rechercher un prospect..."
-            className="pl-10 h-11"
+            className="h-11 w-full rounded-lg border border-slate-200 bg-white pl-10 pr-3 text-sm font-semibold text-slate-800 outline-none transition-colors placeholder:font-medium placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+            autoComplete="off"
             value={filters.search}
             onChange={(event) => updateFilter("search", event.target.value)}
           />
@@ -92,7 +95,7 @@ export default function Filters({
           Filtres
         </Button>
 
-        <Button onClick={onNewLead}>
+        <Button type="button" onClick={onNewLead}>
           <Plus className="mr-2 h-4 w-4" />
           Nouveau
         </Button>

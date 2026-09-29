@@ -4,6 +4,7 @@ import { BookeaLogo } from "@/components/bookea-logo";
 import {
   clearPasswordRecoveryPending,
   parseAuthRedirect,
+  waitForAuthSession,
 } from "@/lib/auth-recovery";
 import { createClient } from "@/lib/supabase";
 import { useRouter } from "next/navigation";
@@ -15,6 +16,7 @@ export default function ResetPasswordPage() {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [ready, setReady] = useState(false);
+  const [checking, setChecking] = useState(true);
   const [feedback, setFeedback] = useState<{
     type: "error" | "success";
     message: string;
@@ -31,6 +33,7 @@ export default function ResetPasswordPage() {
 
       if (event === "PASSWORD_RECOVERY" || session) {
         setReady(true);
+        setChecking(false);
         setFeedback(null);
       }
     });
@@ -39,6 +42,7 @@ export default function ResetPasswordPage() {
       const auth = parseAuthRedirect();
 
       if (auth.url.searchParams.get("error") === "expired") {
+        setChecking(false);
         setFeedback({
           type: "error",
           message:
@@ -48,54 +52,33 @@ export default function ResetPasswordPage() {
       }
 
       if (auth.code) {
-        const { error } = await supabase.auth.exchangeCodeForSession(auth.code);
-        if (error) {
-          const { data: existing } = await supabase.auth.getSession();
-          if (!existing.session) {
-            setFeedback({
-              type: "error",
-              message:
-                "Ce lien de réinitialisation est invalide ou a expiré. Demandez-en un nouveau.",
-            });
-            return;
-          }
-        }
+        await supabase.auth.exchangeCodeForSession(auth.code);
       } else if (auth.tokenHash) {
-        const { error } = await supabase.auth.verifyOtp({
+        await supabase.auth.verifyOtp({
           type: "recovery",
           token_hash: auth.tokenHash,
         });
-        if (error) {
-          const { data: existing } = await supabase.auth.getSession();
-          if (!existing.session) {
-            setFeedback({
-              type: "error",
-              message:
-                "Ce lien de réinitialisation est invalide ou a expiré. Demandez-en un nouveau.",
-            });
-            return;
-          }
-        }
       }
 
-      for (let attempt = 0; attempt < 8 && !cancelled; attempt += 1) {
-        const { data: sessionData } = await supabase.auth.getSession();
-        if (sessionData.session) {
-          setReady(true);
-          setFeedback(null);
-          return;
-        }
+      const session = await waitForAuthSession(() => supabase.auth.getSession());
 
-        await new Promise((resolve) => window.setTimeout(resolve, 250));
+      if (cancelled) {
+        return;
       }
 
-      if (!cancelled) {
-        setFeedback({
-          type: "error",
-          message:
-            "Ce lien de réinitialisation est invalide ou a expiré. Demandez-en un nouveau.",
-        });
+      if (session) {
+        setReady(true);
+        setChecking(false);
+        setFeedback(null);
+        return;
       }
+
+      setChecking(false);
+      setFeedback({
+        type: "error",
+        message:
+          "Ce lien de réinitialisation est invalide ou a expiré. Demandez-en un nouveau depuis la page de connexion.",
+      });
     }
 
     void prepareReset();
@@ -161,6 +144,12 @@ export default function ResetPasswordPage() {
         <p className="mt-3 text-base font-medium leading-7 text-slate-500">
           Choisissez un nouveau mot de passe pour votre espace Bookea.
         </p>
+
+        {checking && !feedback ? (
+          <p className="mt-6 text-sm font-medium text-slate-500">
+            Validation du lien en cours…
+          </p>
+        ) : null}
 
         {feedback ? (
           <div

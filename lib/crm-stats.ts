@@ -275,7 +275,9 @@ function isRdvTakenActivity(activity: LeadActivity) {
     return true;
   }
 
-  return /réservation publique confirmée|rdv posé dans l'agenda/i.test(text);
+  return /réservation publique confirmée|rdv posé dans l'agenda|acompte\s+(envoyé|reçu|validé|posé|en attente)|posé\s+acompte/i.test(
+    text,
+  );
 }
 
 function activityDateToIso(activity: LeadActivity) {

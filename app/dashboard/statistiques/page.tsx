@@ -20,16 +20,20 @@ import {
 } from "lucide-react";
 
 import { loadCrmAppointments } from "@/lib/agenda-supabase";
-import { isRdvBookedStatus, todayIso } from "@/lib/crm-stats";
+import { todayIso } from "@/lib/crm-stats";
 import { loadCrmLeads } from "@/lib/crm-supabase";
+import {
+  buildPractitionerStats,
+  isLeadWithBookedRdv,
+  practitionerSoldStatuses as soldStatuses,
+  summarizePractitionerStats,
+} from "@/lib/practitioner-stats";
 import { findDuplicateLeadGroups } from "@/lib/public-bookings";
 import { loadTeamPlanning } from "@/lib/team-planning";
 import { practitioners as defaultPractitioners } from "@/lib/agenda-data";
 import { Lead } from "@/types/lead";
 import type { Appointment, Practitioner } from "@/types/agenda";
 
-const bookedStatuses = ["RDV programmé", "RDV pris", "RDV fixé", "RDV confirmé"];
-const soldStatuses = ["Vendu", "Client", "Client converti"];
 const redStatuses = ["Perdu", "Prospect perdu", "Numéro invalide", "Doublon", "Hors zone", "No show"];
 
 type StatsTab = "overview" | "practitioners";
@@ -84,7 +88,7 @@ export default function StatisticsPage() {
       appointment.status !== "Annulation",
   );
   const leadCount = leads.length;
-  const rdvLeads = leads.filter((lead) => bookedStatuses.includes(lead.status)).length;
+  const rdvLeads = leads.filter(isLeadWithBookedRdv).length;
   const soldLeads = leads.filter((lead) => soldStatuses.includes(lead.status)).length;
   const redLeads = leads.filter((lead) => redStatuses.includes(lead.status)).length;
   const revenue = leads.reduce((total, lead) => total + lead.dealAmount, 0);
@@ -135,29 +139,10 @@ export default function StatisticsPage() {
     () => buildPractitionerStats(appointments, leads, practitionerList),
     [appointments, leads, practitionerList],
   );
-  const practitionerTotals = useMemo(() => {
-    const leadTotal = practitionerStats.reduce((sum, row) => sum + row.leads, 0);
-    const rdvLeadTotal = practitionerStats.reduce(
-      (sum, row) => sum + row.rdvLeads,
-      0,
-    );
-    const soldTotal = practitionerStats.reduce((sum, row) => sum + row.sold, 0);
-    const appointmentTotal = practitionerStats.reduce(
-      (sum, row) => sum + row.appointments,
-      0,
-    );
-    const revenueTotal = practitionerStats.reduce(
-      (sum, row) => sum + row.revenue,
-      0,
-    );
-
-    return {
-      appointments: appointmentTotal,
-      rdvRate: ratio(rdvLeadTotal, leadTotal),
-      conversionRate: ratio(soldTotal, leadTotal),
-      revenue: revenueTotal,
-    };
-  }, [practitionerStats]);
+  const practitionerTotals = useMemo(
+    () => summarizePractitionerStats(practitionerStats),
+    [practitionerStats],
+  );
   const reminderCount = leads.filter((lead) => lead.reminderDate === today).length;
   const unconfirmedCount = todayAppointments.filter(
     (appointment) => appointment.status === "À confirmer",
@@ -264,36 +249,13 @@ export default function StatisticsPage() {
               Statistiques
             </h1>
             <p className="mt-3 max-w-4xl text-sm text-slate-500">
-              Activité Bookea, performance des prestations, comportement des
-              clientes, remplissage planning et recommandations Seya.
+              Statistiques globales du centre, puis statistiques équipes avec
+              les taux de chaque praticien(ne) : transformation, présentiel et
+              RDV posés.
             </p>
           </div>
 
           <div className="flex flex-wrap gap-3">
-            <div className="flex h-12 items-center rounded-2xl border border-slate-200 bg-white p-1 shadow-sm">
-              <button
-                type="button"
-                onClick={() => setActiveTab("overview")}
-                className={`h-10 rounded-xl px-4 text-sm font-semibold transition-colors ${
-                  activeTab === "overview"
-                    ? "bg-violet-600 text-white"
-                    : "text-slate-500 hover:bg-slate-50 hover:text-slate-900"
-                }`}
-              >
-                Vue d&apos;ensemble
-              </button>
-              <button
-                type="button"
-                onClick={() => setActiveTab("practitioners")}
-                className={`h-10 rounded-xl px-4 text-sm font-semibold transition-colors ${
-                  activeTab === "practitioners"
-                    ? "bg-violet-600 text-white"
-                    : "text-slate-500 hover:bg-slate-50 hover:text-slate-900"
-                }`}
-              >
-                Praticien(ne)
-              </button>
-            </div>
             <select className="h-12 rounded-2xl border border-slate-200 bg-white px-4 font-semibold text-slate-700 shadow-sm outline-none">
               <option>Ce mois-ci</option>
               <option>15 derniers jours</option>
@@ -307,13 +269,28 @@ export default function StatisticsPage() {
           </div>
         </header>
 
+        <div className="flex flex-wrap items-center gap-2 border-b border-slate-200">
+          <StatsTabButton
+            active={activeTab === "overview"}
+            onClick={() => setActiveTab("overview")}
+          >
+            Statistiques globales
+          </StatsTabButton>
+          <StatsTabButton
+            active={activeTab === "practitioners"}
+            onClick={() => setActiveTab("practitioners")}
+          >
+            Statistiques équipes
+          </StatsTabButton>
+        </div>
+
         {activeTab === "practitioners" ? (
           <>
             <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
               <MetricCard
-                title="RDV planning"
+                title="RDV posés"
                 value={practitionerTotals.appointments}
-                detail="Rendez-vous attribués aux praticien(ne)s"
+                detail="Rendez-vous de toute l'équipe"
                 icon={<CalendarClock />}
                 color="text-violet-600"
               />
@@ -332,17 +309,17 @@ export default function StatisticsPage() {
                 tone={rateTone(practitionerTotals.conversionRate)}
               />
               <MetricCard
-                title="CA converti"
-                value={formatCurrency(practitionerTotals.revenue)}
-                detail="Montants des fiches vendues"
-                icon={<Euro />}
-                color="text-emerald-600"
+                title="Taux de présentiel"
+                value={`${practitionerTotals.attendanceRate}%`}
+                detail={`${practitionerTotals.honored} RDV honorés`}
+                icon={<CheckCircle2 />}
+                tone={rateTone(practitionerTotals.attendanceRate)}
               />
             </section>
 
             <Panel
-              title="Performance par praticien(ne)"
-              subtitle="RDV du planning, taux de RDV posé sur les leads suivis, et taux de transformation."
+              title="Statistiques par praticien(ne)"
+              subtitle="Chaque praticien(ne) a son taux de transformation, son taux de présentiel et ses RDV posés."
               icon={<Users className="h-6 w-6 text-violet-600" />}
             >
               {practitionerStats.length === 0 ? (
@@ -350,36 +327,85 @@ export default function StatisticsPage() {
                   Aucun RDV ni lead attribué pour le moment.
                 </p>
               ) : (
-                <div className="grid gap-3">
+                <div className="grid gap-4 xl:grid-cols-2">
                   {practitionerStats.map((row) => (
-                    <div
+                    <article
                       key={row.id}
-                      className="rounded-3xl border border-slate-200 bg-slate-50 p-4"
+                      className="rounded-3xl border border-slate-200 bg-slate-50 p-5"
                     >
-                      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                      <div className="flex items-start justify-between gap-3">
                         <div className="flex items-center gap-3">
                           <span
                             className={`h-3.5 w-3.5 shrink-0 rounded-full ${row.color}`}
                           />
                           <div>
-                            <h3 className="text-base font-semibold">{row.name}</h3>
+                            <h3 className="text-lg font-semibold">{row.name}</h3>
                             <p className="mt-1 text-sm font-bold text-slate-500">
-                              {row.appointments} RDV · {row.leads} lead
-                              {row.leads > 1 ? "s" : ""} ·{" "}
+                              {row.appointments} RDV posé
+                              {row.appointments > 1 ? "s" : ""} · {row.leads}{" "}
+                              lead{row.leads > 1 ? "s" : ""} ·{" "}
                               {formatCurrency(row.revenue)}
                             </p>
                           </div>
                         </div>
-                        <div className="flex flex-wrap gap-2">
-                          <Badge tone={row.leads ? rateTone(row.rdvRate) : "orange"}>
-                            {row.leads ? `${row.rdvRate}% RDV posé` : "Pas encore de lead"}
+                        <div className="flex flex-wrap justify-end gap-2">
+                          <Badge
+                            tone={row.appointments ? rateTone(row.attendanceRate) : "orange"}
+                          >
+                            {row.appointments
+                              ? `${row.attendanceRate}% présentiel`
+                              : "Pas encore de RDV"}
                           </Badge>
                           <Badge tone={row.leads ? rateTone(row.conversionRate) : "orange"}>
-                            {row.leads ? `${row.conversionRate}% transfo` : "Pas encore de vente"}
+                            {row.leads
+                              ? `${row.conversionRate}% transfo`
+                              : "Pas encore de vente"}
                           </Badge>
                         </div>
                       </div>
-                      <div className="mt-4 grid gap-3 md:grid-cols-2">
+
+                      <div className="mt-5 grid gap-3 sm:grid-cols-3">
+                        <div className="rounded-2xl border border-white bg-white p-3">
+                          <p className="text-xs font-bold uppercase text-slate-400">
+                            RDV posés
+                          </p>
+                          <p className="mt-2 text-2xl font-semibold text-violet-600">
+                            {row.appointments}
+                          </p>
+                          <p className="mt-1 text-xs font-semibold text-slate-500">
+                            {row.honored} honoré{row.honored > 1 ? "s" : ""}
+                          </p>
+                        </div>
+                        <div className="rounded-2xl border border-white bg-white p-3">
+                          <p className="text-xs font-bold uppercase text-slate-400">
+                            Taux de transfo
+                          </p>
+                          <p
+                            className={`mt-2 text-2xl font-semibold ${toneTextClass[rateTone(row.conversionRate)]}`}
+                          >
+                            {row.conversionRate}%
+                          </p>
+                          <p className="mt-1 text-xs font-semibold text-slate-500">
+                            {row.sold}/{row.leads || 0} vendu
+                            {row.sold > 1 ? "s" : ""}
+                          </p>
+                        </div>
+                        <div className="rounded-2xl border border-white bg-white p-3">
+                          <p className="text-xs font-bold uppercase text-slate-400">
+                            Taux de présentiel
+                          </p>
+                          <p
+                            className={`mt-2 text-2xl font-semibold ${toneTextClass[rateTone(row.attendanceRate)]}`}
+                          >
+                            {row.attendanceRate}%
+                          </p>
+                          <p className="mt-1 text-xs font-semibold text-slate-500">
+                            sur les RDV posés
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="mt-4 grid gap-3">
                         <div>
                           <div className="mb-1 flex items-center justify-between text-sm font-bold text-slate-500">
                             <span>Taux de RDV posé</span>
@@ -404,8 +430,20 @@ export default function StatisticsPage() {
                             color={toneBarClass[rateTone(row.conversionRate)]}
                           />
                         </div>
+                        <div>
+                          <div className="mb-1 flex items-center justify-between text-sm font-bold text-slate-500">
+                            <span>Taux de présentiel</span>
+                            <span>
+                              {row.honored}/{row.appointments || 0}
+                            </span>
+                          </div>
+                          <Progress
+                            value={row.attendanceRate}
+                            color={toneBarClass[rateTone(row.attendanceRate)]}
+                          />
+                        </div>
                       </div>
-                    </div>
+                    </article>
                   ))}
                 </div>
               )}
@@ -945,146 +983,28 @@ function groupByLeadField(leadsList: Lead[], field: "source" | "campaign") {
     .sort((a, b) => b.count - a.count);
 }
 
-function isLeadWithBookedRdv(lead: Lead) {
+function StatsTabButton({
+  active,
+  children,
+  onClick,
+}: {
+  active: boolean;
+  children: ReactNode;
+  onClick: () => void;
+}) {
   return (
-    bookedStatuses.includes(lead.status) ||
-    soldStatuses.includes(lead.status) ||
-    isRdvBookedStatus(lead.status)
+    <button
+      type="button"
+      onClick={onClick}
+      className={`border-b-2 px-4 py-3 text-sm font-bold transition-colors ${
+        active
+          ? "border-violet-600 text-violet-700"
+          : "border-transparent text-slate-500 hover:text-slate-900"
+      }`}
+    >
+      {children}
+    </button>
   );
-}
-
-function normalizePersonName(value: string) {
-  return value
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .trim()
-    .toLowerCase()
-    .replace(/\s+/g, " ");
-}
-
-function namesMatch(left: string, right: string) {
-  const first = normalizePersonName(left);
-  const second = normalizePersonName(right);
-  if (!first || !second) {
-    return false;
-  }
-  return first === second || first.startsWith(second) || second.startsWith(first);
-}
-
-function buildPractitionerStats(
-  appointments: Appointment[],
-  leads: Lead[],
-  team: Practitioner[],
-) {
-  type Row = {
-    id: string;
-    name: string;
-    color: string;
-    leads: number;
-    rdvLeads: number;
-    sold: number;
-    appointments: number;
-    revenue: number;
-    rdvRate: number;
-    conversionRate: number;
-  };
-
-  const rows = new Map<string, Row>();
-
-  function ensure(id: string, name: string, color: string) {
-    const existing = rows.get(id);
-    if (existing) {
-      return existing;
-    }
-    const row: Row = {
-      id,
-      name,
-      color,
-      leads: 0,
-      rdvLeads: 0,
-      sold: 0,
-      appointments: 0,
-      revenue: 0,
-      rdvRate: 0,
-      conversionRate: 0,
-    };
-    rows.set(id, row);
-    return row;
-  }
-
-  for (const practitioner of team) {
-    ensure(practitioner.id, practitioner.name, practitioner.color);
-  }
-
-  for (const lead of leads) {
-    const commercial = lead.commercial.trim() || "Non attribué";
-    const matched = team.find((practitioner) =>
-      namesMatch(practitioner.name, commercial),
-    );
-    const row = matched
-      ? ensure(matched.id, matched.name, matched.color)
-      : ensure(
-          `lead:${normalizePersonName(commercial)}`,
-          commercial,
-          "bg-slate-400",
-        );
-    row.leads += 1;
-    if (isLeadWithBookedRdv(lead)) {
-      row.rdvLeads += 1;
-    }
-    if (soldStatuses.includes(lead.status)) {
-      row.sold += 1;
-      row.revenue += Number(lead.dealAmount) || 0;
-    }
-  }
-
-  for (const appointment of appointments) {
-    if (appointment.kind && appointment.kind !== "Rendez-vous") {
-      continue;
-    }
-    if (appointment.status === "Annulation") {
-      continue;
-    }
-
-    const byId = team.find(
-      (practitioner) => practitioner.id === appointment.practitionerId,
-    );
-    const byName = appointment.practitionerName
-      ? team.find((practitioner) =>
-          namesMatch(practitioner.name, appointment.practitionerName || ""),
-        )
-      : undefined;
-    const matched = byId ?? byName;
-    const fallbackName =
-      appointment.practitionerName?.trim() ||
-      matched?.name ||
-      "Non attribué";
-    const row = matched
-      ? ensure(matched.id, matched.name, matched.color)
-      : ensure(
-          `rdv:${normalizePersonName(fallbackName)}`,
-          fallbackName,
-          "bg-slate-400",
-        );
-    row.appointments += 1;
-  }
-
-  return [...rows.values()]
-    .map((row) => ({
-      ...row,
-      rdvRate: ratio(row.rdvLeads, row.leads),
-      conversionRate: ratio(row.sold, row.leads),
-    }))
-    .filter(
-      (row) =>
-        team.some((practitioner) => practitioner.id === row.id) ||
-        row.leads > 0 ||
-        row.appointments > 0,
-    )
-    .sort(
-      (left, right) =>
-        right.appointments - left.appointments || right.leads - left.leads,
-    );
 }
 
 function ratio(value: number, total: number) {

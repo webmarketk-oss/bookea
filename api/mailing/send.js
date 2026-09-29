@@ -1,4 +1,4 @@
-const { createServiceClient } = require("../sms/brevo");
+const { createServiceClient, parseCenterSmsSettings, clientAllowsEmail } = require("../sms/brevo");
 
 const MAX_RECIPIENTS = 80;
 
@@ -259,7 +259,7 @@ module.exports = async function handler(req, res) {
     const supabase = createServiceClient();
     const { data: center, error: centerError } = await supabase
       .from("centers")
-      .select("id,name,email")
+      .select("id,name,email,settings")
       .eq("id", centerId)
       .maybeSingle();
 
@@ -283,7 +283,10 @@ module.exports = async function handler(req, res) {
       });
     }
 
-    const allowed = await loadAllowedRecipients(supabase, centerId, recipientsInput);
+    const sms = parseCenterSmsSettings(center.settings);
+    const allowed = (await loadAllowedRecipients(supabase, centerId, recipientsInput)).filter(
+      (recipient) => clientAllowsEmail(sms, recipient.rawId),
+    );
 
     if (allowed.length === 0) {
       return res.status(400).json({
