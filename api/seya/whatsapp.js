@@ -192,6 +192,38 @@ function alreadyHandledInbound(conversation, incoming) {
   return Number.isFinite(at) && Date.now() - at < 120000;
 }
 
+function outgoingWhatsAppTexts(followUps, draftedReply, previousSeya) {
+  const outgoing = followUps.length ? [...followUps] : draftedReply ? [draftedReply] : [];
+  return outgoing.filter((text, index) => {
+    if (!text) {
+      return false;
+    }
+    if (/rendez-vous est confirmé/i.test(text)) {
+      return outgoing.findIndex((item) => item === text) === index;
+    }
+    const sameAsPrevious = String(text).trim() === String(previousSeya || "").trim();
+    return (
+      !sameAsPrevious &&
+      outgoing.findIndex((item) => isNearDuplicate(item, text)) === index
+    );
+  });
+}
+
+function replaceDraftWithSent(conversation, sentTexts) {
+  const messages = [...(conversation?.messages || [])];
+  const lastSeyaIndex = [...messages].map((item) => item.author).lastIndexOf("seya");
+  if (lastSeyaIndex >= 0) {
+    messages.splice(lastSeyaIndex, 1);
+  }
+  return {
+    ...conversation,
+    messages: [
+      ...messages,
+      ...sentTexts.filter(Boolean).map((text) => message("seya", text)),
+    ],
+  };
+}
+
 function extractIncomingMessages(body) {
   const entries = Array.isArray(body?.entry) ? body.entry : [];
   return entries.flatMap((entry) =>
@@ -318,13 +350,14 @@ async function handleIncoming(supabase, incoming) {
         {
           ...(next.bookingState || {}),
           lastOfferedSlots: [],
-          requestedDate: null,
+          requestedDate: wantedSlot.date,
         },
         new Date(),
       );
       next.proposedSlots = alternatives;
       if (next.bookingState) {
         next.bookingState.lastOfferedSlots = alternatives;
+        next.bookingState.requestedDate = wantedSlot.date;
       }
       followUps.push(
         alternatives.length
@@ -334,12 +367,15 @@ async function handleIncoming(supabase, incoming) {
     }
   }
 
-  if (followUps.length) {
-    next.messages = [
-      ...(next.messages || []),
-      ...followUps.map((text) => message("seya", text)),
-    ];
-  }
+  const previousSeya = [...(existing.messages || [])]
+    .reverse()
+    .find((item) => item.author === "seya")?.text || "";
+  const uniqueOutgoing = outgoingWhatsAppTexts(
+    followUps,
+    draftedReply,
+    previousSeya,
+  );
+  Object.assign(next, replaceDraftWithSent(next, uniqueOutgoing));
 
   const saved = persistableConversations([
     next,
@@ -348,24 +384,6 @@ async function handleIncoming(supabase, incoming) {
 
   await writeSeyaConversations(supabase, center.id, saved);
 
-  const previousSeya = [...(existing.messages || [])]
-    .reverse()
-    .find((item) => item.author === "seya")?.text || "";
-  const outgoing = followUps.length ? [...followUps] : draftedReply ? [draftedReply] : [];
-  const uniqueOutgoing = outgoing.filter((text, index) => {
-    if (!text) {
-      return false;
-    }
-    if (/rendez-vous est confirmé/i.test(text)) {
-      return outgoing.findIndex((item) => item === text) === index;
-    }
-    const sameAsPrevious =
-      String(text).trim() === String(previousSeya).trim();
-    return (
-      !sameAsPrevious &&
-      outgoing.findIndex((item) => isNearDuplicate(item, text)) === index
-    );
-  });
   for (const text of uniqueOutgoing) {
     await sendSharedWhatsApp(incoming.phone, text, {
       firstName: context.firstName,
@@ -1107,4 +1125,6 @@ async function sendSharedWhatsApp(phone, text, extras = {}) {
 }
 
 handler.sendSharedWhatsApp = sendSharedWhatsApp;
+handler.outgoingWhatsAppTexts = outgoingWhatsAppTexts;
+handler.replaceDraftWithSent = replaceDraftWithSent;
 module.exports = handler;
