@@ -25,7 +25,6 @@ import { inactiveLeadStatuses } from "@/lib/lead-statuses";
 import {
   applyLeadReply,
   lastSeyaMessage,
-  startSeyaConversation,
   suggestAvailableSlots,
   whatsappHref,
 } from "@/lib/seya-agent";
@@ -198,42 +197,6 @@ function buildSeyaTasks({
   return tasks;
 }
 
-function shouldStartConversation(
-  lead: Lead,
-  conversations: SeyaConversation[],
-  autoStart = true,
-) {
-  if (!autoStart || !lead.phone.trim()) {
-    return false;
-  }
-
-  const phoneKey = lead.phone.replace(/\D/g, "").slice(-9);
-  if (
-    conversations.some(
-      (item) =>
-        item.leadId === lead.id ||
-        (phoneKey.length === 9 &&
-          item.phone.replace(/\D/g, "").slice(-9) === phoneKey),
-    )
-  ) {
-    return false;
-  }
-
-  if (inactiveLeadStatuses.includes(lead.status)) {
-    return false;
-  }
-
-  if (
-    ["RDV pris", "RDV confirmé", "Client converti", "Vendu", "Acompte reçu"].includes(
-      lead.status,
-    )
-  ) {
-    return false;
-  }
-
-  return lead.status === "Nouveau" || lead.nextAction === "À contacter";
-}
-
 function hoursSinceLastLead(conversation: SeyaConversation) {
   const last = [...(conversation.messages || [])]
     .reverse()
@@ -362,33 +325,7 @@ export default function SeyaCrmPage() {
           : seya.centerId
             ? readLocalSeyaConversations(seya.centerId)
             : [];
-        const nextConversations = seya.settings.whatsappAgentEnabled
-          ? [
-              ...storedConversations,
-              ...leadData.leads
-                .filter((lead) =>
-                  shouldStartConversation(
-                    lead,
-                    storedConversations,
-                    seya.settings.autoMessageOnNewLead,
-                  ),
-                )
-                .map((lead) => {
-                  try {
-                    return startSeyaConversation({
-                      lead,
-                      centerName: seya.centerName,
-                      settings: seya.settings,
-                      centerId: seya.centerId,
-                    });
-                  } catch (error) {
-                    console.error("[seya] start conversation failed", error);
-                    return null;
-                  }
-                })
-                .filter((item): item is SeyaConversation => Boolean(item)),
-            ]
-          : storedConversations;
+        const nextConversations = storedConversations;
 
         if (seya.centerId) {
           writeLocalSeyaConversations(seya.centerId, nextConversations);

@@ -210,3 +210,29 @@ test("un fil fermé peut être réouvert à la réinscription", () => {
   };
   assert.equal(isActiveWhatsAppThread(closed), false);
 });
+
+test("un vrai fil WhatsApp n’est pas évincé par 90 ouvertures automatiques", () => {
+  const { persistableConversations } = require("./agent");
+  const live = {
+    leadId: "live-collegue",
+    phone: "0611223344",
+    messages: [
+      { author: "seya", text: "hello", at: "2026-09-28T12:00:00.000Z" },
+      { author: "lead", text: "prix", at: "2026-09-29T09:45:00.000Z" },
+    ],
+    updatedAt: "2026-09-28T12:31:00.000Z",
+  };
+  const synthetics = Array.from({ length: 90 }, (_, index) => ({
+    leadId: `new-${index}`,
+    messages: [
+      {
+        author: "seya",
+        text: "ouverture",
+        at: new Date().toISOString(),
+      },
+    ],
+    updatedAt: new Date().toISOString(),
+  }));
+  const kept = persistableConversations([...synthetics, live]);
+  assert.ok(kept.some((item) => item.leadId === "live-collegue"));
+});

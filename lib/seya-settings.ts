@@ -561,20 +561,16 @@ function lastActivityAt(conversation: SeyaConversation) {
   return String(last?.at || conversation.updatedAt || "");
 }
 
-export function sortSeyaInbox(conversations: SeyaConversation[]) {
-  const rank: Record<SeyaInboxTag, number> = {
-    court: 0,
-    chaud: 1,
-    humain: 2,
-    rdv: 3,
-    sans_reponse: 4,
-    ferme: 5,
-  };
+function isLiveSeyaThread(item: SeyaConversation) {
+  const messages = item.messages || [];
+  return messages.some((entry) => entry.author === "lead") || messages.length > 2;
+}
 
+export function sortSeyaInbox(conversations: SeyaConversation[]) {
   return [...conversations].sort((a, b) => {
-    const tagGap = rank[inboxTag(a)] - rank[inboxTag(b)];
-    if (tagGap !== 0) {
-      return tagGap;
+    const liveGap = Number(isLiveSeyaThread(b)) - Number(isLiveSeyaThread(a));
+    if (liveGap !== 0) {
+      return liveGap;
     }
     return lastActivityAt(b).localeCompare(lastActivityAt(a));
   });
@@ -949,9 +945,14 @@ export function mergeSeyaConversations(
     }
   }
 
-  return [...merged.values()]
-    .sort((a, b) => lastActivityAt(b).localeCompare(lastActivityAt(a)))
-    .slice(0, 80);
+  const all = [...merged.values()];
+  const live = all
+    .filter(isLiveSeyaThread)
+    .sort((a, b) => lastActivityAt(b).localeCompare(lastActivityAt(a)));
+  const rest = all
+    .filter((item) => !isLiveSeyaThread(item))
+    .sort((a, b) => lastActivityAt(b).localeCompare(lastActivityAt(a)));
+  return [...live.slice(0, 200), ...rest.slice(0, 40)];
 }
 
 export async function saveSeyaConversations(

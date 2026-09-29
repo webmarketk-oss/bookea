@@ -234,8 +234,10 @@ async function handleIncoming(supabase, incoming) {
   }
 
   const conversations = Array.isArray(seya.conversations) ? seya.conversations : [];
+  const phoneKey = last9Phone(incoming.phone);
   const existing =
     conversations.find((item) => item.leadId === context.leadId) ||
+    conversations.find((item) => last9Phone(item.phone) === phoneKey) ||
     startConversation({ ...context, centerId: center.id }, center.name, seya);
   existing.centerId = existing.centerId || center.id;
   if (alreadyHandledInbound(existing, incoming)) {
@@ -385,6 +387,66 @@ async function handleIncoming(supabase, incoming) {
   };
 }
 
+async function resolveCenterFromLeadPhone(supabase, phone, last9) {
+  const { data: leads, error } = await supabase
+    .from("leads")
+    .select(
+      "id,center_id,client_id,status,next_action,service_id,updated_at,last_activity_at,phone,campaigns(name)",
+    )
+    .or(`phone.eq.${phone},phone.eq.0${last9},phone.ilike.%${last9}%`)
+    .order("last_activity_at", { ascending: false })
+    .limit(12);
+
+  if (error || !leads?.length) {
+    return null;
+  }
+
+  const matched = leads.filter((row) => last9Phone(row.phone) === last9);
+  const lead = matched[0] || leads[0];
+  if (!lead?.id || !lead.center_id) {
+    return null;
+  }
+
+  let firstName = "bonjour";
+  let lastName = "";
+  let clientPhone = lead.phone || phone;
+  if (lead.client_id) {
+    const { data: client } = await supabase
+      .from("clients")
+      .select("first_name,last_name,phone")
+      .eq("id", lead.client_id)
+      .maybeSingle();
+    if (client) {
+      const person = sanitizePersonName(client.first_name, client.last_name);
+      firstName = person.firstName || firstName;
+      lastName = person.lastName;
+      clientPhone = client.phone || clientPhone;
+    }
+  }
+
+  const { data: service } = lead.service_id
+    ? await supabase
+        .from("services")
+        .select("name")
+        .eq("id", lead.service_id)
+        .maybeSingle()
+    : { data: null };
+
+  return {
+    centerId: lead.center_id,
+    clientId: lead.client_id,
+    leadId: lead.id,
+    firstName,
+    lastName,
+    phone: clientPhone,
+    treatment: service?.name || "",
+    campaign: Array.isArray(lead.campaigns)
+      ? lead.campaigns[0]?.name || ""
+      : lead.campaigns?.name || "",
+    status: lead.status || "Nouveau",
+  };
+}
+
 async function resolveCenterFromPhone(supabase, phone) {
   const last9 = last9Phone(phone);
   if (last9.length < 9) {
@@ -406,6 +468,10 @@ async function resolveCenterFromPhone(supabase, phone) {
     (row) => last9Phone(row.phone) === last9,
   );
   if (matched.length === 0) {
+    const fromLead = await resolveCenterFromLeadPhone(supabase, phone, last9);
+    if (fromLead) {
+      return fromLead;
+    }
     return null;
   }
 
