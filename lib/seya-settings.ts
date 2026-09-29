@@ -555,6 +555,12 @@ export function inboxTag(conversation: SeyaConversation): SeyaInboxTag {
   return (conversation.messages || []).length <= 4 ? "court" : "chaud";
 }
 
+function lastActivityAt(conversation: SeyaConversation) {
+  const messages = conversation.messages || [];
+  const last = messages[messages.length - 1];
+  return String(last?.at || conversation.updatedAt || "");
+}
+
 export function sortSeyaInbox(conversations: SeyaConversation[]) {
   const rank: Record<SeyaInboxTag, number> = {
     court: 0,
@@ -570,7 +576,7 @@ export function sortSeyaInbox(conversations: SeyaConversation[]) {
     if (tagGap !== 0) {
       return tagGap;
     }
-    return a.messages.length - b.messages.length;
+    return lastActivityAt(b).localeCompare(lastActivityAt(a));
   });
 }
 
@@ -903,6 +909,23 @@ function conversationsForCenter(
   );
 }
 
+function conversationIsFresher(
+  next: SeyaConversation,
+  current: SeyaConversation,
+) {
+  const nextCount = next.messages?.length || 0;
+  const currentCount = current.messages?.length || 0;
+  if (nextCount !== currentCount) {
+    return nextCount > currentCount;
+  }
+  const nextAt = lastActivityAt(next);
+  const currentAt = lastActivityAt(current);
+  if (nextAt !== currentAt) {
+    return nextAt > currentAt;
+  }
+  return String(next.updatedAt || "") >= String(current.updatedAt || "");
+}
+
 export function mergeSeyaConversations(
   ...lists: SeyaConversation[][]
 ): SeyaConversation[] {
@@ -914,7 +937,7 @@ export function mergeSeyaConversations(
         continue;
       }
       const current = merged.get(item.leadId);
-      if (!current || String(item.updatedAt || "") >= String(current.updatedAt || "")) {
+      if (!current || conversationIsFresher(item, current)) {
         const person = sanitizePersonName(item.firstName, item.lastName);
         const { _seya, ...rest } = item as SeyaConversation & { _seya?: unknown };
         merged.set(item.leadId, {
@@ -927,7 +950,7 @@ export function mergeSeyaConversations(
   }
 
   return [...merged.values()]
-    .sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)))
+    .sort((a, b) => lastActivityAt(b).localeCompare(lastActivityAt(a)))
     .slice(0, 80);
 }
 
@@ -937,11 +960,6 @@ export async function saveSeyaConversations(
 ) {
   const context = await getActiveCenterContext();
   assertExpectedCenter(expectedCenterId, context.centerId);
-  const next = conversationsForCenter(
-    mergeSeyaConversations(conversations),
-    context.centerId,
-  );
-  writeLocalSeyaConversations(context.centerId, next);
 
   const supabase = createClient();
   const { data } = await supabase
@@ -955,9 +973,19 @@ export async function saveSeyaConversations(
   const remoteConversations = Array.isArray(currentSeya.conversations)
     ? (currentSeya.conversations as SeyaConversation[])
     : [];
+  const next = conversationsForCenter(
+    mergeSeyaConversations(remoteConversations, conversations),
+    context.centerId,
+  );
   if (next.length === 0 && remoteConversations.length > 0) {
-    return mergeSeyaConversations(remoteConversations);
+    const kept = conversationsForCenter(
+      mergeSeyaConversations(remoteConversations),
+      context.centerId,
+    );
+    writeLocalSeyaConversations(context.centerId, kept);
+    return kept;
   }
+  writeLocalSeyaConversations(context.centerId, next);
   const { error } = await supabase
     .from("centers")
     .update({

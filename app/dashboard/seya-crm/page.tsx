@@ -32,10 +32,12 @@ import {
 import {
   defaultSeyaAgentSettings,
   loadSeyaAgentSettings,
+  mergeSeyaConversations,
   readLocalSeyaConversations,
   saveSeyaAgentSettings,
   saveSeyaConversations,
   markSeyaHealthReviewed,
+  SEYA_CONVERSATIONS_UPDATED_EVENT,
   sortSeyaInbox,
   writeLocalSeyaConversations,
   writeLocalSeyaSettings,
@@ -266,6 +268,7 @@ export default function SeyaCrmPage() {
   const agentSettingsRef = useRef(agentSettings);
   agentSettingsRef.current = agentSettings;
   const persistSeqRef = useRef(0);
+  const persistConversationsSeqRef = useRef(0);
   const [conversations, setConversations] = useState<SeyaConversation[]>([]);
   const [selectedConversationId, setSelectedConversationId] = useState<string | null>(
     null,
@@ -332,6 +335,7 @@ export default function SeyaCrmPage() {
 
   useEffect(() => {
     let cancelled = false;
+    let loaded = false;
 
     async function load() {
       try {
@@ -388,9 +392,6 @@ export default function SeyaCrmPage() {
 
         if (seya.centerId) {
           writeLocalSeyaConversations(seya.centerId, nextConversations);
-              void saveSeyaConversations(nextConversations, seya.centerId).catch(
-            () => null,
-          );
         }
 
         setCenterId(seya.centerId);
@@ -417,6 +418,7 @@ export default function SeyaCrmPage() {
             ? "Aucune action prioritaire détectée sur ce centre pour aujourd'hui."
             : `${nextTasks.length} action${nextTasks.length > 1 ? "s" : ""} détectée${nextTasks.length > 1 ? "s" : ""} à partir des leads, rendez-vous et soldes du centre.`,
         );
+        loaded = true;
       } catch {
         if (!cancelled) {
           setTasks([]);
@@ -425,11 +427,49 @@ export default function SeyaCrmPage() {
       }
     }
 
+    async function refreshConversations() {
+      if (cancelled || !loaded) {
+        return;
+      }
+      try {
+        const seya = await loadSeyaAgentSettings();
+        if (cancelled || !seya.centerId) {
+          return;
+        }
+        setConversations((current) => {
+          const merged = mergeSeyaConversations(
+            seya.conversations || [],
+            current,
+          );
+          writeLocalSeyaConversations(seya.centerId, merged);
+          return merged;
+        });
+      } catch {
+        return;
+      }
+    }
+
     void load();
+    const poll = window.setInterval(() => {
+      if (document.visibilityState === "visible") {
+        void refreshConversations();
+      }
+    }, 4000);
+    const refreshIfVisible = () => {
+      if (document.visibilityState === "visible") {
+        void refreshConversations();
+      }
+    };
     const reloadOnCenterChange = () => {
       window.location.reload();
     };
     window.addEventListener("bookea-active-center-changed", reloadOnCenterChange);
+    window.addEventListener("focus", refreshConversations);
+    document.addEventListener("visibilitychange", refreshIfVisible);
+    window.addEventListener(
+      SEYA_CONVERSATIONS_UPDATED_EVENT,
+      refreshConversations,
+    );
     void fetch("/api/seya/whatsapp")
       .then((response) => response.json())
       .then((payload) => {
@@ -448,9 +488,16 @@ export default function SeyaCrmPage() {
 
     return () => {
       cancelled = true;
+      window.clearInterval(poll);
       window.removeEventListener(
         "bookea-active-center-changed",
         reloadOnCenterChange,
+      );
+      window.removeEventListener("focus", refreshConversations);
+      document.removeEventListener("visibilitychange", refreshIfVisible);
+      window.removeEventListener(
+        SEYA_CONVERSATIONS_UPDATED_EVENT,
+        refreshConversations,
       );
     };
   }, []);
@@ -462,10 +509,19 @@ export default function SeyaCrmPage() {
 
   function persistConversations(next: SeyaConversation[]) {
     setConversations(next);
-    if (centerId) {
-      writeLocalSeyaConversations(centerId, next);
-      void saveSeyaConversations(next, centerId).catch(() => null);
+    if (!centerId) {
+      return;
     }
+    writeLocalSeyaConversations(centerId, next);
+    const seq = ++persistConversationsSeqRef.current;
+    void saveSeyaConversations(next, centerId)
+      .then((saved) => {
+        if (seq !== persistConversationsSeqRef.current) {
+          return;
+        }
+        setConversations((current) => mergeSeyaConversations(saved, current));
+      })
+      .catch(() => null);
   }
 
   function updateConversation(next: SeyaConversation) {

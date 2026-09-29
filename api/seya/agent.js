@@ -1139,7 +1139,7 @@ function applyLeadReply(conversation, text, seya, slots, extras = {}) {
   const pool = offeredSlots(conversation, slots);
   const confirmYes = isConfirmingOfferedTime(intentText, conversation);
   const chosenSlot =
-    isAppointmentConfirmed(conversation) ||
+    (isAppointmentConfirmed(conversation) && !confirmYes) ||
     (lastSeyaAskedToSearch(conversation) && isShortYes(intentText)) ||
     (bookingState.pendingQuestion === "no_slots" && !lastSeyaOfferedToBook(conversation))
       ? null
@@ -1171,7 +1171,7 @@ function applyLeadReply(conversation, text, seya, slots, extras = {}) {
     isThanks(text, conversation) ||
     isHesitation(text) ||
     refusesSlots(text) ||
-    (isAppointmentConfirmed(conversation) && isShortYes(text))
+    (isAppointmentConfirmed(conversation) && isShortYes(text) && !confirmYes)
   ) {
     const confirmed = isAppointmentConfirmed(conversation);
     const pause = !confirmed && (refusesSlots(text) || isHesitation(text));

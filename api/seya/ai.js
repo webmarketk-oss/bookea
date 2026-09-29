@@ -101,12 +101,22 @@ async function generateSeyaReply({
     guarded,
   };
   const fallback = applyLeadReply(conversationWithState, text, seya, resolvedSlots, extras);
-  if (!hasAiKey() || health.personal) {
-    return { ...fallback, via: "rules" };
+  const draft = lastSeyaText(fallback.conversation);
+  const previousSeya = lastSeyaText(conversation);
+  if (
+    !hasAiKey() ||
+    health.personal ||
+    fallback.shouldBook ||
+    asksPrice(text) ||
+    classifyPriceQuestion(text) ||
+    isPriceRepeatComplaint(text) ||
+    /je vérifie le créneau|rendez-vous est confirmé/i.test(draft || "") ||
+    (replyClosesThread(previousSeya) && !replyClosesThread(draft))
+  ) {
+    return { ...fallback, via: fallback.shouldBook ? "book" : "rules" };
   }
 
   try {
-    const draft = lastSeyaText(fallback.conversation);
     const polishSlots = resolvedSlots.length
       ? resolvedSlots
       : offeredSlots(fallback.conversation, conversation.proposedSlots);
@@ -151,7 +161,7 @@ async function polishSeyaText({
   const price = resolveTreatmentPrice(seya, careHint, conversation);
   const client = new OpenAI({
     apiKey: process.env.OPENAI_API_KEY,
-    timeout: 12000,
+    timeout: 6000,
   });
   const history = (conversation.messages || [])
     .filter((item, index, list) => !(index === list.length - 1 && item.author === "seya"))
@@ -225,7 +235,9 @@ function polishPrompt({
     "Si elle dit oui toujours après « l’horaire vous convient », tu confirmes l’horaire déjà vu. Tu ne clôtures pas.",
     "Si elle dit oui, ok, d’accord ou merci après qu’on lui a proposé de regarder les disponibilités, tu proposes des créneaux autorisés. Tu ne répètes pas « plus de place ».",
     "Si elle dit fin de journée, tu proposes des horaires en fin de journée parmi les créneaux autorisés, pas 12h.",
-    "Si elle préfère recontacter elle-même, tu dis seulement : « D’accord, aucun souci, je vous laisse revenir vers nous quand ça sera le moment pour vous. Je vous souhaite une belle journée / une bonne soirée :) ». Pas de créneau, pas de jour.",
+    "Si elle dit qu’elle ne veut pas qu’on la recontacte mais demande un créneau, une proposition ou un prix, tu réponds à ÇA. Tu ne clôtures pas.",
+    "Si elle a réfléchi et demande le prix, tu donnes le tarif autorisé. Tu n’envoies pas « écrivez-moi quand vous voulez reprendre ».",
+    "Si elle préfère recontacter elle-même, sans autre demande, tu dis seulement : « D’accord, aucun souci, je vous laisse revenir vers nous quand ça sera le moment pour vous. Je vous souhaite une belle journée / une bonne soirée :) ». Pas de créneau, pas de jour.",
     "Si Bookea cite des horaires ou demande un jour, tu gardes cette étape. Tu ne remplaces jamais ça par un au revoir.",
     "Tu ne changes aucun fait. Tu n’inventes ni jour, ni heure, ni prix, ni adresse, ni résultat médical.",
     "Pas de liste 1) 2) 3). Pas de « Lead Meta ». Un smiley au plus, pas à chaque message. Tu ne termines pas chaque phrase par une question.",
@@ -353,7 +365,7 @@ function pickSafeReply(draft, polished, bookingState, conversation) {
 }
 
 function replyClosesThread(text) {
-  return /reviendrai vers vous|vous recontacte|je vous laisse|je clos le sujet|une conseill[eè]re du centre, elle|ecrivez[- ]moi quand|reprendre (la conversation|contact)|quand vous (voulez|souhaitez) reprendre|je vous prie[,.]|pas de creneaux disponibles/i.test(
+  return /reviendrai vers vous|vous recontacte|je vous laisse|je clos le sujet|une conseill[eè]re du centre, elle|ecrivez[- ]moi quand|reprendre (la conversation|contact)|quand vous (voulez|souhaitez) reprendre|je vous prie[,.]|pas de creneaux disponibles|ravie que cela vous convienne|reste disponible si vous avez|d['’]autres questions/i.test(
     String(text || ""),
   );
 }

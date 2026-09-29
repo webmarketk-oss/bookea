@@ -270,6 +270,9 @@ async function handleIncoming(supabase, incoming) {
   next.relanceCount = 0;
   next.welcomeSendAt = null;
 
+  const draftedReply = [...(result.conversation.messages || [])]
+    .reverse()
+    .find((item) => item.author === "seya")?.text || "";
   const followUps = [];
   const wantedSlot = result.shouldBook;
   if (wantedSlot) {
@@ -343,23 +346,24 @@ async function handleIncoming(supabase, incoming) {
 
   await writeSeyaConversations(supabase, center.id, saved);
 
-  const outgoing = [];
-  const reply = [...(result.conversation.messages || [])]
-    .reverse()
-    .find((item) => item.author === "seya");
-  if (reply?.text) {
-    outgoing.push(reply.text);
-  }
-  outgoing.push(...followUps);
   const previousSeya = [...(existing.messages || [])]
     .reverse()
     .find((item) => item.author === "seya")?.text || "";
-  const uniqueOutgoing = outgoing.filter(
-    (text, index) =>
-      text &&
-      !isNearDuplicate(text, previousSeya) &&
-      outgoing.findIndex((item) => isNearDuplicate(item, text)) === index,
-  );
+  const outgoing = followUps.length ? [...followUps] : draftedReply ? [draftedReply] : [];
+  const uniqueOutgoing = outgoing.filter((text, index) => {
+    if (!text) {
+      return false;
+    }
+    if (/rendez-vous est confirmé/i.test(text)) {
+      return outgoing.findIndex((item) => item === text) === index;
+    }
+    const sameAsPrevious =
+      String(text).trim() === String(previousSeya).trim();
+    return (
+      !sameAsPrevious &&
+      outgoing.findIndex((item) => isNearDuplicate(item, text)) === index
+    );
+  });
   for (const text of uniqueOutgoing) {
     await sendSharedWhatsApp(incoming.phone, text, {
       firstName: context.firstName,

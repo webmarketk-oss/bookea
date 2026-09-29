@@ -380,6 +380,60 @@ test("bonjour oui toujours après la relance horaire : elle vérifie le créneau
   );
 });
 
+test("Oui après jeudi 16h30 : elle réserve, elle ne reste pas muette", async () => {
+  const slots = [
+    { date: "2026-10-08", time: "16:30", label: "jeu. 08/10 à 16h30" },
+  ];
+  let conversation = startConversation(
+    {
+      leadId: "lead-oui-1630",
+      centerId: "jfg-clinique-clermont",
+      firstName: "Samantha",
+      lastName: "Test",
+      phone: "0611223344",
+      treatment: "Soin minceur",
+    },
+    "JFG Clinique Clermont",
+    seya,
+  );
+  conversation.proposedSlots = slots;
+  conversation.status = "RDV proposé";
+  conversation.qualification = {
+    need: "Soin minceur",
+    zone: "",
+    delay: "",
+    availability: "",
+  };
+  conversation.bookingState = {
+    ...(conversation.bookingState || {}),
+    lastOfferedSlots: slots,
+    appointmentStatus: "proposed",
+  };
+  conversation.messages.push({
+    author: "seya",
+    text: "Parfait, je peux vous proposer un rendez-vous le jeudi 08/10 à 16h30. Est-ce que cela vous conviendrait ?",
+  });
+
+  const result = await generateSeyaReply({
+    conversation,
+    text: "Oui",
+    seya,
+    appointments: [],
+    hours: hours(),
+    centerName: "JFG Clinique Clermont",
+    centerAddress: "3 rue Eugène Gilbert",
+    centerId: "jfg-clinique-clermont",
+    now: NOW,
+  });
+  assert.equal(result.shouldBook?.time, "16:30");
+  assert.equal(result.shouldBook?.date, "2026-10-08");
+  assert.match(lastSeya(result.conversation), /je vérifie le créneau/i);
+  assert.doesNotMatch(
+    lastSeya(result.conversation),
+    /ravie|reprendre contact|je reste disponible/i,
+  );
+});
+
 test("oui merci après proposition de créneau : elle propose des horaires, elle ne clôt pas", async () => {
   let conversation = startConversation(
     {
@@ -854,3 +908,69 @@ test("fin de journée après midi : des horaires en fin de journée, pas « aucu
     assert.ok(h >= 16, slot.label);
   }
 });
+
+test("pas te recontacter + proposition après-midi : elle cherche un créneau, elle ne clôt pas", async () => {
+  let conversation = startConversation(
+    {
+      leadId: "lead-collegue",
+      centerId: "jfg-clinique-clermont",
+      firstName: "Léa",
+      lastName: "Test",
+      phone: "0611223344",
+      treatment: "Soin minceur",
+    },
+    "JFG Clinique Clermont",
+    seya,
+  );
+  conversation = await reply(conversation, "C’est pour le ventre");
+  conversation = await reply(
+    conversation,
+    "Non je veux pas te recontacter je veux que tu me fasse une proposition pour une après midi",
+  );
+  const answer = lastSeya(conversation);
+  assert.doesNotMatch(
+    answer,
+    /navrée|gêne occasionnée|écrivez-moi quand|reprendre le rendez-vous|j’arrête ici|pas intéressé/i,
+  );
+  assert.match(answer, /14h|15h|16h|après-midi|apres-midi|créneau|creneau|jeudi|vendredi|samedi|semaine/i);
+});
+
+test("j’ai réfléchi, je veux le prix : elle répond, même après un message de clôture", async () => {
+  let conversation = startConversation(
+    {
+      leadId: "lead-prix-silence",
+      centerId: "jfg-clinique-clermont",
+      firstName: "Léa",
+      lastName: "Test",
+      phone: "0611223344",
+      treatment: "Soin minceur",
+    },
+    "JFG Clinique Clermont",
+    seya,
+  );
+  conversation.qualification = {
+    need: "Soin minceur",
+    zone: "ventre",
+    delay: "",
+    availability: "",
+  };
+  conversation.status = "Pas intéressé";
+  conversation.messages.push({
+    author: "seya",
+    text: "Je suis navrée pour la gêne occasionnée. Je reste disponible pour vous aider. Écrivez-moi quand vous souhaitez reprendre le rendez-vous.",
+    at: "2026-09-28T12:31:00.000Z",
+  });
+
+  conversation = await reply(
+    conversation,
+    "Bonjour jai réfléchis je veux savoir le prix avant toute chose",
+  );
+  const answer = lastSeya(conversation);
+  assert.match(answer, /prix|tarif|offert|gratuit|bilan|fourchette|€/i);
+  assert.doesNotMatch(
+    answer,
+    /navrée|écrivez-moi quand|reprendre le rendez-vous|prenez le temps/i,
+  );
+  assert.notEqual(conversation.status, "Pas intéressé");
+});
+

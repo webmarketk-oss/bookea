@@ -12,6 +12,9 @@
   "functions": {
     "api/health/repair-seya.js": {
       "maxDuration": 60
+    },
+    "api/seya/whatsapp.js": {
+      "maxDuration": 30
     }
   },
   "rewrites": [

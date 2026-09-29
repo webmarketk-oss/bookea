@@ -272,6 +272,14 @@ test("gpt-4o peut reformuler, mais un lundi fuité est jeté au profit du brouil
     ),
     "Le lun. 28/09 je peux vous proposer 09h00, 09h30 ou 10h00 — lequel vous irait le mieux ?",
   );
+  assert.equal(
+    pickSafeReply(
+      "Parfait, je vérifie le créneau dont nous avions parlé et je reviens vers vous tout de suite 😊",
+      "Je suis ravie que cela vous convienne ! Je reste disponible si vous avez d'autres questions ou si vous souhaitez reprendre contact pour un rendez-vous.",
+      emptyBookingState(CENTER_ID),
+    ),
+    "Parfait, je vérifie le créneau dont nous avions parlé et je reviens vers vous tout de suite 😊",
+  );
 });
 
 test("la reformulation ne recolle pas le dernier message Seya", () => {

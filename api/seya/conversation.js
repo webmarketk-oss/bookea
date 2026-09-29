@@ -70,7 +70,7 @@ function lastSeyaOfferedToBook(conversation) {
     return false;
   }
   const value = normalize(last);
-  return /propose(r)? (un )?(creneau|horaire|rdv)|je (peux |vais )?(vous )?(regarder|proposer)|quel jour|lequel vous (irait|conviendrait)|quand (etes|seriez)|debut de semaine|fin de semaine|je peux vous proposer|autre journee|autre jour|lundi suivant|(l['’])?horaire.*(convient|irait)|convient toujours|pas de disponibilite|je (vous )propose/.test(
+  return /propose(r)? (un )?(creneau|horaire|rdv)|je (peux |vais )?(vous )?(regarder|proposer)|quel jour|lequel vous (irait|conviendrait)|cela vous conviendrait|quand (etes|seriez)|debut de semaine|fin de semaine|je peux vous proposer|autre journee|autre jour|lundi suivant|(l['’])?horaire.*(convient|irait)|convient toujours|pas de disponibilite|je (vous )propose/.test(
     value,
   );
 }
@@ -132,7 +132,10 @@ function isAppointmentConfirmed(conversation) {
 }
 
 function isConfirmingOfferedTime(text, conversation) {
-  if (!conversation || isAppointmentConfirmed(conversation)) {
+  if (!conversation) {
+    return false;
+  }
+  if (isAppointmentConfirmed(conversation) && !offeredSlots(conversation).length) {
     return false;
   }
   if (isHesitation(text) || refusesSlots(text) || classifyPriceQuestion(text)) {
@@ -144,7 +147,9 @@ function isConfirmingOfferedTime(text, conversation) {
   const hasOffered = offeredSlots(conversation).length > 0;
   const lastAsked =
     lastSeyaOfferedToBook(conversation) ||
-    /convient toujours|horaire vu ensemble/i.test(lastSeyaText(conversation));
+    /convient toujours|horaire vu ensemble|cela vous conviendrait/i.test(
+      lastSeyaText(conversation),
+    );
   const clock = parseClockMinutes(text).length > 0;
   if (!hasOffered) {
     return false;
@@ -197,8 +202,33 @@ function isThanks(text, conversation) {
   );
 }
 
+function asksForHelpNow(text) {
+  const value = normalize(text);
+  if (classifyPriceQuestion(text) || isPriceRepeatComplaint(text)) {
+    return true;
+  }
+  if (
+    /prix|tarif|combien/.test(value) &&
+    !/combien de (temps|seance|seances|rdv|fois|jours)/.test(value)
+  ) {
+    return true;
+  }
+  if (weekHalfFromText(text) || dayPartFromText(text) || asksOtherDay(text)) {
+    return true;
+  }
+  return /proposition|creneau|horaire|\brdv\b|rendez-vous|dispo|apres[- ]?midi/.test(
+    value,
+  );
+}
+
 function isWillCallBack(text) {
   const value = normalize(text);
+  if (asksForHelpNow(text)) {
+    return false;
+  }
+  if (/pas (te |vous )?(re)?contacter|ne (me |te |vous )?(re)?contacte/.test(value)) {
+    return true;
+  }
   return /je (prefere|vais|aimerais) (vous |te )?(re)?contacter|recontacter moi[- ]meme|c[' ]est moi qui (vous |te )?(re)?contacte|je (vous|te) (re)?contacterai|je (vous|te) rappellerai|je prefere (rappeler|vous rappeler)/.test(
     value,
   );
@@ -206,6 +236,9 @@ function isWillCallBack(text) {
 
 function isAwayForNow(text) {
   const value = normalize(text);
+  if (asksForHelpNow(text)) {
+    return false;
+  }
   return (
     isWillCallBack(text) ||
     /pas sur place|pour l[' ]instant pas|je (ne )?suis pas (la|sur place)/.test(value)
@@ -269,6 +302,9 @@ function willCallBackReply(now) {
 
 function isHesitation(text) {
   const value = normalize(text);
+  if (asksForHelpNow(text) || /j[' ]?ai reflechi/.test(value)) {
+    return false;
+  }
   return (
     isAwayForNow(text) ||
     /je (reflechis|vais reflechir)|pas maintenant|on verra|je sais pas encore|je ne sais pas encore|pas sure|pas certain|plus tard|je vais voir|laisse[- ]moi|je (reviendrai|reviens) vers|je (te|vous) (recontacte|reviendrai)|on se reparle|je te (dis|tiens)/.test(
