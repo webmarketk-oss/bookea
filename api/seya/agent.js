@@ -400,11 +400,18 @@ function confirmedAppointmentReply({
   brief,
 } = {}) {
   const parts = formatConfirmedSlot(slot);
-  const fromBrief = fillConfirmationTemplate(brief, parts);
+  const name = String(centerName || "").trim();
+  const address = String(centerAddress || "").trim();
+  const where = formatConfirmationPlace(name, address);
+  const fromBrief = fillConfirmationTemplate(brief, {
+    ...parts,
+    centerName: name,
+    address,
+    place: where,
+  });
   if (fromBrief) {
-    return fromBrief;
+    return applyCenterPlace(fromBrief, where, Boolean(address));
   }
-  const where = formatConfirmationPlace(centerName, centerAddress);
   return [
     "Parfait, votre rendez-vous est confirmé ✅",
     `📅 ${parts.day} ${parts.date} à ${parts.time}`.replace(/\s+/g, " ").trim(),
@@ -427,6 +434,13 @@ function formatConfirmationPlace(centerName, centerAddress) {
   return address || name || "le centre";
 }
 
+function applyCenterPlace(text, where, hasAddress) {
+  if (!hasAddress || !where || !/📍/.test(text)) {
+    return text;
+  }
+  return String(text).replace(/📍[^\n]*/g, `📍 ${where}`);
+}
+
 function fillConfirmationTemplate(brief, parts) {
   const raw = String(brief || "");
   const quoted = raw.match(
@@ -439,9 +453,13 @@ function fillConfirmationTemplate(brief, parts) {
     return "";
   }
   return block
-    .replace(/\[Jour\]/gi, parts.day)
-    .replace(/\[date\]/gi, parts.date)
-    .replace(/\[heure\]/gi, parts.time)
+    .replace(/\[Jour\]/gi, parts.day || "")
+    .replace(/\[date\]/gi, parts.date || "")
+    .replace(/\[heure\]/gi, parts.time || "")
+    .replace(/\[nom du centre\]/gi, parts.centerName || parts.place || "")
+    .replace(/\[centre\]/gi, parts.centerName || parts.place || "")
+    .replace(/\[adresse\]/gi, parts.address || parts.place || "")
+    .replace(/\[lieu\]/gi, parts.place || "")
     .trim();
 }
 

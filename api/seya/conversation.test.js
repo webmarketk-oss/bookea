@@ -542,25 +542,60 @@ test("ok merci après un RDV déjà confirmé : elle ne reprend pas le créneau"
   assert.match(lastSeya(result.conversation), /plaisir|très bien|à bientôt/i);
 });
 
+const CONFIRMATION_BRIEF = `Dès qu’un rendez-vous est enregistré et confirmé dans l’agenda, envoie ce message en renseignant le jour, la date et l’heure exacts :
+« Parfait, votre rendez-vous est confirmé ✅
+📅 [Jour] [date] à [heure]
+📍 JFG Clinic Clermont-Ferrand, 3 rue Eugène Gilbert
+Vous recevrez un SMS 48 h avant avec un lien pour confirmer ou modifier votre rendez-vous. En cas d’empêchement, merci de nous prévenir.
+À très bientôt,
+Seya »`;
+
 test("le message de confirmation reprend le modèle des consignes", () => {
   const { confirmedAppointmentReply } = require("./agent");
   const text = confirmedAppointmentReply({
     slot: { date: "2026-09-29", time: "09:00" },
     centerName: "JFG Clinic Clermont-Ferrand",
     centerAddress: "3 rue Eugène Gilbert",
-    brief: `Dès qu’un rendez-vous est enregistré et confirmé dans l’agenda, envoie ce message en renseignant le jour, la date et l’heure exacts :
-« Parfait, votre rendez-vous est confirmé ✅
-📅 [Jour] [date] à [heure]
-📍 JFG Clinic Clermont-Ferrand, 3 rue Eugène Gilbert
-Vous recevrez un SMS 48 h avant avec un lien pour confirmer ou modifier votre rendez-vous. En cas d’empêchement, merci de nous prévenir.
-À très bientôt,
-Seya »`,
+    brief: CONFIRMATION_BRIEF,
   });
   assert.match(text, /Parfait, votre rendez-vous est confirmé/);
   assert.match(text, /Mardi 29\/09 à 09h00/);
   assert.match(text, /JFG Clinic Clermont-Ferrand, 3 rue Eugène Gilbert/);
   assert.match(text, /SMS 48 h avant/);
   assert.doesNotMatch(text, /\[Jour\]|\[date\]|\[heure\]|bien bloqué/);
+});
+
+test("le même modèle de consignes prend l’adresse du centre qui parle", () => {
+  const { confirmedAppointmentReply } = require("./agent");
+  const clermont = confirmedAppointmentReply({
+    slot: { date: "2026-09-29", time: "09:00" },
+    centerName: "JFG Clinic Clermont-Ferrand",
+    centerAddress: "3 rue Eugène Gilbert",
+    brief: CONFIRMATION_BRIEF,
+  });
+  const gap = confirmedAppointmentReply({
+    slot: { date: "2026-09-29", time: "09:00" },
+    centerName: "JFG Gap",
+    centerAddress: "12 avenue des Alpes, 05000 Gap",
+    brief: CONFIRMATION_BRIEF,
+  });
+  const placeholders = confirmedAppointmentReply({
+    slot: { date: "2026-09-30", time: "14:30" },
+    centerName: "Institut Lyon",
+    centerAddress: "8 rue de la République, 69001 Lyon",
+    brief: `« Parfait, votre rendez-vous est confirmé ✅
+📅 [Jour] [date] à [heure]
+📍 [centre], [adresse]
+À très bientôt,
+Seya »`,
+  });
+  assert.match(clermont, /JFG Clinic Clermont-Ferrand, 3 rue Eugène Gilbert/);
+  assert.doesNotMatch(clermont, /Gap|Lyon/);
+  assert.match(gap, /JFG Gap, 12 avenue des Alpes, 05000 Gap/);
+  assert.doesNotMatch(gap, /Clermont|Eugène Gilbert/);
+  assert.match(placeholders, /Mercredi 30\/09 à 14h30/);
+  assert.match(placeholders, /Institut Lyon, 8 rue de la République, 69001 Lyon/);
+  assert.doesNotMatch(placeholders, /\[centre\]|\[adresse\]|Clermont/);
 });
 
 test("début de semaine après un oui : elle propose des horaires de début de semaine", async () => {
