@@ -85,6 +85,7 @@ import {
   readPublicBookingsForCenter,
   removePublicBooking,
 } from "@/lib/public-bookings";
+import { getActiveCenterContext } from "@/lib/center-access";
 import { loadClientNotifyPref } from "@/lib/client-notify";
 import { loadCenterHours, saveCenterHours } from "@/lib/center-hours";
 import {
@@ -834,6 +835,8 @@ export default function AgendaBoard() {
       return;
     }
 
+    const scrollBoard = board;
+
     function onWheel(event: WheelEvent) {
       event.preventDefault();
       event.stopPropagation();
@@ -843,17 +846,17 @@ export default function AgendaBoard() {
         event.deltaMode === 1
           ? event.deltaY * line
           : event.deltaMode === 2
-            ? event.deltaY * board.clientHeight
+            ? event.deltaY * scrollBoard.clientHeight
             : event.deltaY;
       const deltaX =
         event.deltaMode === 1
           ? event.deltaX * line
           : event.deltaMode === 2
-            ? event.deltaX * board.clientWidth
+            ? event.deltaX * scrollBoard.clientWidth
             : event.deltaX;
 
-      board.scrollTop += deltaY;
-      board.scrollLeft += deltaX;
+      scrollBoard.scrollTop += deltaY;
+      scrollBoard.scrollLeft += deltaX;
     }
 
     section.addEventListener("wheel", onWheel, { capture: true, passive: false });
