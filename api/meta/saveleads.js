@@ -134,7 +134,25 @@ function mapIncomingLead(payload, query) {
     ...flattenFields(queryFields(query)),
     ...flattenFields(payload),
   };
-  const person = resolvePersonName(fields, pickExact);
+  const person = resolvePersonName(
+    {
+      ...fields,
+      first_name: pickLeadValue(fields, [
+        "member_first_name",
+        "first_name",
+        "prenom",
+        "firstname",
+      ]),
+      last_name: pickLeadValue(fields, ["member_last_name", "last_name", "lastname"]),
+      full_name: pickLeadValue(fields, [
+        "member_name",
+        "full_name",
+        "nom_complet",
+        "prenom_nom",
+      ]),
+    },
+    pickExact,
+  );
   const formName = pickUseful(fields, [
     "form_name",
     "form",
@@ -164,8 +182,15 @@ function mapIncomingLead(payload, query) {
   return {
     firstName: person.firstName || "Prospect",
     lastName: person.lastName,
-    email: pick(fields, ["email", "email_address", "mail"]),
-    phone: pick(fields, ["phone", "phone_number", "telephone", "tel", "mobile"]),
+    email: pickLeadEmail(fields),
+    phone: pickLeadValue(fields, [
+      "contact_phone_number",
+      "phone",
+      "phone_number",
+      "telephone",
+      "tel",
+      "mobile",
+    ]),
     treatment,
     campaign:
       offer ||
@@ -523,17 +548,60 @@ function buildLeadNote(lead) {
     .join(" ");
 }
 
-function pick(fields, names) {
-  const keys = Object.keys(fields || {});
-  for (const name of names) {
-    if (fields[name]) {
-      return String(fields[name]).trim();
+function isAffiliateField(key) {
+  return /affiliate/.test(String(key || "").toLowerCase());
+}
+
+function normalizeEmail(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function affiliateEmailsFrom(fields) {
+  return new Set(
+    Object.entries(fields || {})
+      .filter(([key, value]) => isAffiliateField(key) && /email/.test(key) && value)
+      .map(([, value]) => normalizeEmail(value)),
+  );
+}
+
+function pickLeadEmail(fields) {
+  const blocked = affiliateEmailsFrom(fields);
+  const candidates = [
+    pickLeadValue(fields, ["member_email"]),
+    pickLeadValue(fields, ["contact_email"]),
+    pickLeadValue(fields, ["email", "email_address", "mail"]),
+  ];
+
+  for (const candidate of candidates) {
+    const email = String(candidate || "").trim();
+    if (email && !blocked.has(normalizeEmail(email))) {
+      return email;
     }
-    const match = keys.find(
-      (key) => key === name || key.endsWith(`_${name}`) || key.endsWith(`.${name}`),
-    );
-    if (match && fields[match]) {
-      return String(fields[match]).trim();
+  }
+
+  return "";
+}
+
+function pick(fields, names) {
+  return pickLeadValue(fields, names);
+}
+
+function pickLeadValue(fields, names) {
+  const keys = Object.keys(fields || {}).filter((key) => !isAffiliateField(key));
+  const preferred = keys.filter((key) => /(?:^|_)(member|contact)(?:_|$)/.test(key));
+
+  for (const name of names) {
+    for (const group of [preferred, keys]) {
+      if (fields[name] && group.includes(name)) {
+        return String(fields[name]).trim();
+      }
+      const match = group.find(
+        (key) =>
+          key === name || key.endsWith(`_${name}`) || key.endsWith(`.${name}`),
+      );
+      if (match && fields[match]) {
+        return String(fields[match]).trim();
+      }
     }
   }
 

@@ -40,6 +40,46 @@ test("l’offre fonctionne avec key/value", () => {
   assert.equal(mapped.campaign, "Hydrafacial");
 });
 
+test("Systeme.io : même si email = mail affilié, on garde le mail du membre", () => {
+  const mapped = mapIncomingLead({
+    email: "webmarket.k@gmail.com",
+    payload_affiliate_user_email: "webmarket.k@gmail.com",
+    payload_member_email: "cliente.test@outlook.com",
+    payload_member_first_name: "Clara",
+    payload_contact_phone_number: "0611111111",
+  });
+
+  assert.equal(mapped.email, "cliente.test@outlook.com");
+});
+
+test("Systeme.io : un mail affilié tout seul n’est pas collé sur le lead", () => {
+  const mapped = mapIncomingLead({
+    email: "webmarket.k@gmail.com",
+    payload_affiliate_user_email: "webmarket.k@gmail.com",
+    payload_contact_phone_number: "0611111111",
+  });
+
+  assert.equal(mapped.email, "");
+});
+
+test("Systeme.io : le mail du membre, pas celui de l’affilié", () => {
+  const mapped = mapIncomingLead({
+    payload_affiliate_user_email: "sami@bookea.fr",
+    payload_affiliate_user_name: "Sami",
+    payload_member_email: "marie@cliente.fr",
+    payload_member_first_name: "Marie",
+    payload_member_last_name: "Dupont",
+    payload_contact_phone_number: "06 12 34 56 78",
+    payload_offer_title: "Laser jumelles",
+  });
+
+  assert.equal(mapped.email, "marie@cliente.fr");
+  assert.equal(mapped.firstName, "Marie");
+  assert.equal(mapped.lastName, "Dupont");
+  assert.match(mapped.phone.replace(/\D/g, ""), /612345678/);
+  assert.equal(mapped.campaign, "Laser jumelles");
+});
+
 test("payload_offer_title est lu comme campagne", () => {
   const mapped = mapIncomingLead({
     email: "a@b.fr",
