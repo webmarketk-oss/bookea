@@ -91,24 +91,51 @@ function mergeConversationPair(current, next) {
   };
 }
 
+function identityKeys(item) {
+  const keys = [];
+  const leadId = String(item?.leadId || "").trim();
+  if (leadId) {
+    keys.push(`lead:${leadId}`);
+  }
+  const phone = last9Phone(item?.phone);
+  if (phone.length >= 9) {
+    keys.push(`phone:${phone}`);
+  }
+  const id = String(item?.id || "").trim();
+  if (id) {
+    keys.push(`id:${id}`);
+  }
+  return keys;
+}
+
 function mergeSeyaConversationLists(...lists) {
   const merged = [];
+  const indexByKey = new Map();
 
   for (const list of lists) {
     for (const item of list || []) {
       if (!item || typeof item !== "object") {
         continue;
       }
-      if (!seyaConversationKey(item)) {
+      const keys = identityKeys(item);
+      if (!keys.length) {
         continue;
       }
-      const index = merged.findIndex((current) =>
-        isSameSeyaConversation(current, item),
-      );
+      let index = -1;
+      for (const key of keys) {
+        if (indexByKey.has(key)) {
+          index = indexByKey.get(key);
+          break;
+        }
+      }
       if (index === -1) {
+        index = merged.length;
         merged.push(item);
       } else {
         merged[index] = mergeConversationPair(merged[index], item);
+      }
+      for (const key of identityKeys(merged[index])) {
+        indexByKey.set(key, index);
       }
     }
   }

@@ -18,6 +18,28 @@ export type ActiveCenterContext = {
 
 export const ACTIVE_CENTER_STORAGE_KEY = "bookea-active-center-id";
 
+const CENTERS_CACHE_MS = 15000;
+const CENTERS_LOAD_TIMEOUT_MS = 8000;
+
+let cachedCenters: { at: number; value: AccessibleCenter[] } | null = null;
+let centersInFlight: Promise<AccessibleCenter[]> | null = null;
+
+function withTimeout<T>(promise: Promise<T>, ms: number, message: string) {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(message)), ms);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+}
+
 type CenterRelation =
   | {
       id: string | null;
@@ -55,6 +77,29 @@ type CenterRow = {
 
 export async function loadAccessibleCenters(
   supabase: SupabaseClient = createClient(),
+): Promise<AccessibleCenter[]> {
+  if (cachedCenters && Date.now() - cachedCenters.at < CENTERS_CACHE_MS) {
+    return cachedCenters.value;
+  }
+  if (!centersInFlight) {
+    centersInFlight = fetchAccessibleCenters(supabase)
+      .then((value) => {
+        cachedCenters = { at: Date.now(), value };
+        return value;
+      })
+      .finally(() => {
+        centersInFlight = null;
+      });
+  }
+  return withTimeout(
+    centersInFlight,
+    CENTERS_LOAD_TIMEOUT_MS,
+    "timeout loading centers",
+  );
+}
+
+async function fetchAccessibleCenters(
+  supabase: SupabaseClient,
 ): Promise<AccessibleCenter[]> {
   const {
     data: { user },
@@ -130,14 +175,22 @@ export async function getActiveCenterContext(
     centers.find((center) => center.id === savedCenterId) ?? centers[0];
 
   if (activeCenter) {
-    if (savedCenterId !== activeCenter.id) {
-      saveActiveCenterId(activeCenter.id);
+    if (savedCenterId !== activeCenter.id && typeof window !== "undefined") {
+      window.localStorage.setItem(ACTIVE_CENTER_STORAGE_KEY, activeCenter.id);
     }
 
     return {
       centerId: activeCenter.id,
       centerName: activeCenter.name,
       centerSlug: activeCenter.slug,
+    };
+  }
+
+  if (savedCenterId) {
+    return {
+      centerId: savedCenterId,
+      centerName: "le centre",
+      centerSlug: "",
     };
   }
 
@@ -159,6 +212,7 @@ export function saveActiveCenterId(centerId: string) {
     return;
   }
 
+  cachedCenters = null;
   window.localStorage.setItem(ACTIVE_CENTER_STORAGE_KEY, centerId);
   window.dispatchEvent(new CustomEvent("bookea-active-center-changed"));
 }

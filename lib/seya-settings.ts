@@ -813,6 +813,7 @@ export function readLocalSeyaConversations(centerId: string): SeyaConversation[]
 export function writeLocalSeyaConversations(
   centerId: string,
   conversations: SeyaConversation[],
+  options?: { notify?: boolean },
 ) {
   if (typeof window === "undefined" || !centerId) {
     return;
@@ -823,7 +824,9 @@ export function writeLocalSeyaConversations(
       seyaConversationsStorageKey(centerId),
       JSON.stringify(conversations),
     );
-    window.dispatchEvent(new Event(SEYA_CONVERSATIONS_UPDATED_EVENT));
+    if (options?.notify !== false) {
+      window.dispatchEvent(new Event(SEYA_CONVERSATIONS_UPDATED_EVENT));
+    }
   } catch (error) {
     console.error("[seya] local conversations too large, skipped cache", error);
   }
@@ -888,7 +891,7 @@ export async function loadSeyaAgentSettings() {
     readLocalSeyaConversations(context.centerId),
   );
   const conversations = merged.length > 0 ? merged : remoteConversations;
-  writeLocalSeyaConversations(context.centerId, conversations);
+  writeLocalSeyaConversations(context.centerId, conversations, { notify: false });
 
   return {
     centerId: context.centerId,
@@ -943,10 +946,12 @@ export async function saveSeyaConversations(
     : [];
   const next = mergeSeyaConversations(remoteConversations, conversations);
   if (next.length === 0 && remoteConversations.length > 0) {
-    writeLocalSeyaConversations(context.centerId, remoteConversations);
+    writeLocalSeyaConversations(context.centerId, remoteConversations, {
+      notify: false,
+    });
     return remoteConversations;
   }
-  writeLocalSeyaConversations(context.centerId, next);
+  writeLocalSeyaConversations(context.centerId, next, { notify: false });
   const { error } = await supabase
     .from("centers")
     .update({

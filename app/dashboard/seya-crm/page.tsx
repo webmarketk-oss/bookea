@@ -13,6 +13,7 @@ import {
   type CenterDepositLinkSetting,
 } from "@/lib/center-settings";
 import { defaultCenterDayHours, loadCenterHours } from "@/lib/center-hours";
+import { readActiveCenterId } from "@/lib/center-access";
 import { todayIso } from "@/lib/crm-stats";
 import {
   addCrmLeadActivity,
@@ -37,7 +38,6 @@ import {
   saveSeyaAgentSettings,
   saveSeyaConversations,
   markSeyaHealthReviewed,
-  SEYA_CONVERSATIONS_UPDATED_EVENT,
   sortSeyaInbox,
   writeLocalSeyaConversations,
   writeLocalSeyaSettings,
@@ -306,51 +306,66 @@ export default function SeyaCrmPage() {
   useEffect(() => {
     let cancelled = false;
     let loaded = false;
+    let refreshInFlight = false;
 
-    async function load() {
+    const savedCenterId = readActiveCenterId();
+    if (savedCenterId) {
+      const localConversations = readLocalSeyaConversations(savedCenterId);
+      if (localConversations.length > 0) {
+        setCenterId(savedCenterId);
+        setConversations(localConversations);
+        setSelectedConversationId(localConversations[0]?.id ?? null);
+      }
+    }
+
+    async function loadInbox() {
       try {
-        const [leadData, appointmentData, clientData, seya, centerHours] =
-          await Promise.all([
-            loadCrmLeads().catch(() => ({ leads: [] as Lead[] })),
-            loadCrmAppointments().catch(() => [] as Appointment[]),
-            loadCrmClients().catch(() => ({ clients: [] })),
-            loadSeyaAgentSettings().catch(() => ({
-              centerId: "",
-              centerName: "le centre",
-              settings: defaultSeyaAgentSettings,
-              conversations: [] as SeyaConversation[],
-            })),
-            loadCenterHours().catch(() => defaultCenterDayHours),
-          ]);
-
+        const seya = await loadSeyaAgentSettings();
         if (cancelled) {
           return;
         }
-
         const storedConversations = seya.conversations?.length
           ? seya.conversations
           : seya.centerId
             ? readLocalSeyaConversations(seya.centerId)
             : [];
-        const nextConversations = storedConversations;
-
         if (seya.centerId) {
-          writeLocalSeyaConversations(seya.centerId, nextConversations);
+          writeLocalSeyaConversations(seya.centerId, storedConversations, {
+            notify: false,
+          });
         }
-
         setCenterId(seya.centerId);
         setCenterName(seya.centerName);
+        setAgentSettings(seya.settings);
+        setConversations(storedConversations);
+        setSelectedConversationId((current) =>
+          current && storedConversations.some((item) => item.id === current)
+            ? current
+            : (storedConversations[0]?.id ?? null),
+        );
+        loaded = true;
+      } catch {
+        if (!cancelled) {
+          setSummary("Impossible de charger les conversations Seya de ce centre.");
+        }
+      }
+    }
+
+    async function loadTasks() {
+      try {
+        const [leadData, appointmentData, clientData, centerHours] =
+          await Promise.all([
+            loadCrmLeads().catch(() => ({ leads: [] as Lead[] })),
+            loadCrmAppointments().catch(() => [] as Appointment[]),
+            loadCrmClients().catch(() => ({ clients: [] })),
+            loadCenterHours().catch(() => defaultCenterDayHours),
+          ]);
+        if (cancelled) {
+          return;
+        }
         setLeads(leadData.leads);
         setAppointments(appointmentData);
         setHours(centerHours);
-        setAgentSettings(seya.settings);
-        setConversations(nextConversations);
-        setSelectedConversationId((current) =>
-          current && nextConversations.some((item) => item.id === current)
-            ? current
-            : (nextConversations[0]?.id ?? null),
-        );
-
         const nextTasks = buildSeyaTasks({
           leads: leadData.leads,
           appointments: appointmentData,
@@ -362,19 +377,18 @@ export default function SeyaCrmPage() {
             ? "Aucune action prioritaire détectée sur ce centre pour aujourd'hui."
             : `${nextTasks.length} action${nextTasks.length > 1 ? "s" : ""} détectée${nextTasks.length > 1 ? "s" : ""} à partir des leads, rendez-vous et soldes du centre.`,
         );
-        loaded = true;
       } catch {
         if (!cancelled) {
           setTasks([]);
-          setSummary("Impossible de charger les actions Seya de ce centre.");
         }
       }
     }
 
     async function refreshConversations() {
-      if (cancelled || !loaded) {
+      if (cancelled || !loaded || refreshInFlight) {
         return;
       }
+      refreshInFlight = true;
       try {
         const seya = await loadSeyaAgentSettings();
         if (cancelled || !seya.centerId) {
@@ -385,20 +399,23 @@ export default function SeyaCrmPage() {
             seya.conversations || [],
             current,
           );
-          writeLocalSeyaConversations(seya.centerId, merged);
+          writeLocalSeyaConversations(seya.centerId, merged, { notify: false });
           return merged;
         });
       } catch {
         return;
+      } finally {
+        refreshInFlight = false;
       }
     }
 
-    void load();
+    void loadInbox();
+    void loadTasks();
     const poll = window.setInterval(() => {
       if (document.visibilityState === "visible") {
         void refreshConversations();
       }
-    }, 4000);
+    }, 12000);
     const refreshIfVisible = () => {
       if (document.visibilityState === "visible") {
         void refreshConversations();
@@ -410,10 +427,6 @@ export default function SeyaCrmPage() {
     window.addEventListener("bookea-active-center-changed", reloadOnCenterChange);
     window.addEventListener("focus", refreshConversations);
     document.addEventListener("visibilitychange", refreshIfVisible);
-    window.addEventListener(
-      SEYA_CONVERSATIONS_UPDATED_EVENT,
-      refreshConversations,
-    );
     void fetch("/api/seya/whatsapp")
       .then((response) => response.json())
       .then((payload) => {
@@ -439,10 +452,6 @@ export default function SeyaCrmPage() {
       );
       window.removeEventListener("focus", refreshConversations);
       document.removeEventListener("visibilitychange", refreshIfVisible);
-      window.removeEventListener(
-        SEYA_CONVERSATIONS_UPDATED_EVENT,
-        refreshConversations,
-      );
     };
   }, []);
 
@@ -456,7 +465,7 @@ export default function SeyaCrmPage() {
     if (!centerId) {
       return;
     }
-    writeLocalSeyaConversations(centerId, next);
+    writeLocalSeyaConversations(centerId, next, { notify: false });
     const seq = ++persistConversationsSeqRef.current;
     void saveSeyaConversations(next, centerId)
       .then((saved) => {
