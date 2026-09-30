@@ -63,6 +63,28 @@ function humanizeOfferTitle(value) {
   return text;
 }
 
+function phraseFromCareTitle(value) {
+  let text = String(value || "")
+    .replace(/\s+[-–—]\s+.+$/u, "")
+    .replace(/\s*\([^)]*sans chirurgie[^)]*\)/gi, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!text) {
+    return "";
+  }
+  text = text.charAt(0).toLowerCase() + text.slice(1);
+  if (/^(un|une|le|la|les|des|l['’]|votre|notre)\b/i.test(text)) {
+    return text;
+  }
+  if (/^soins\b/i.test(text) || /^séances\b/i.test(text) || /^seances\b/i.test(text)) {
+    return `des ${text}`;
+  }
+  if (/^épilation\b/i.test(text) || /^epilation\b/i.test(text) || /^séance\b/i.test(text) || /^seance\b/i.test(text)) {
+    return `une ${text}`;
+  }
+  return `un ${text}`;
+}
+
 function naturalOfferPhrase(family, rawOffer) {
   const humanized = humanizeOfferTitle(rawOffer);
   if (humanized) {
@@ -156,6 +178,7 @@ module.exports = {
   inferCareFamily,
   isGenericWelcomeTemplate,
   naturalOfferPhrase,
+  phraseFromCareTitle,
   pickApprovedTemplate,
   templateFitsFamily,
   welcomeTemplateNames,

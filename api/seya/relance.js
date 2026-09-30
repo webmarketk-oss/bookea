@@ -11,6 +11,11 @@ const {
 const { sendDueWelcomes } = require("./welcome");
 const { sendSharedWhatsApp } = require("./whatsapp");
 const { isNearDuplicate } = require("./price");
+const {
+  conversationHasStaffBooking,
+  conversationMatchesBookedVisit,
+  bookedVisitKeysFromAppointments,
+} = require("./booking-close");
 const { isSeyaOff, readCenterSeya, writeSeyaConversations } = require("./store");
 
 const FIRST_RELANCE_HOURS = 15;
@@ -86,9 +91,17 @@ async function relanceCenter(supabase, center) {
   const nextConversations = [];
   const sent = [];
   const now = new Date();
+  const bookedKeys = await loadBookedVisitKeys(supabase, center.id);
 
   for (const conversation of conversations) {
     const updated = { ...conversation };
+    if (
+      conversationHasStaffBooking(conversation) ||
+      conversationMatchesBookedVisit(conversation, bookedKeys)
+    ) {
+      nextConversations.push(updated);
+      continue;
+    }
     const round = pickRelanceRound(conversation, now);
     if (!round) {
       nextConversations.push(updated);
@@ -172,6 +185,9 @@ function shouldSkipRelance(conversation) {
   ) {
     return true;
   }
+  if (conversationHasStaffBooking(conversation)) {
+    return true;
+  }
   return (
     conversation?.healthReview?.status === "awaiting_human_health_review" ||
     conversation?.bookingState?.pendingQuestion === "no_slots" ||
@@ -179,6 +195,24 @@ function shouldSkipRelance(conversation) {
       status,
     )
   );
+}
+
+async function loadBookedVisitKeys(supabase, centerId) {
+  const today = new Date().toISOString().slice(0, 10);
+  try {
+    const { data, error } = await supabase
+      .from("appointments")
+      .select("lead_id,status,appointment_date,clients(phone)")
+      .eq("center_id", centerId)
+      .gte("appointment_date", today);
+    if (error) {
+      throw new Error(error.message);
+    }
+    return bookedVisitKeysFromAppointments(data);
+  } catch (error) {
+    console.error("[seya/relance] booked visits lookup skipped", error);
+    return new Set();
+  }
 }
 
 function hoursSince(iso, now = new Date()) {

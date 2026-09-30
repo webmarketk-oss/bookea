@@ -1,4 +1,4 @@
-import { naturalOfferPhrase } from "@/api/seya/care-family";
+import { naturalOfferPhrase, phraseFromCareTitle } from "@/api/seya/care-family";
 import {
   mergeSeyaConversationLists,
   persistableConversations,
@@ -29,6 +29,8 @@ export type SeyaPricePolicy = {
 
 export type SeyaTreatmentBrief = {
   name: string;
+  title?: string;
+  url?: string;
   brief: string;
   opening?: string;
   price?: string;
@@ -41,6 +43,30 @@ export type SeyaOfferMap = {
   label: string;
 };
 
+export type SeyaCenterProfile = {
+  activity: string;
+  extras: string;
+  audience: string;
+  problem: string;
+  differentiation: string;
+  promise: string;
+  positioning: string;
+  supportPhone: string;
+  supportEmail: string;
+};
+
+export const emptySeyaCenterProfile: SeyaCenterProfile = {
+  activity: "",
+  extras: "",
+  audience: "",
+  problem: "",
+  differentiation: "",
+  promise: "",
+  positioning: "",
+  supportPhone: "",
+  supportEmail: "",
+};
+
 export type SeyaAgentSettings = {
   whatsappAgentEnabled: boolean;
   autoMessageOnNewLead: boolean;
@@ -51,6 +77,7 @@ export type SeyaAgentSettings = {
   relanceEnabled: boolean;
   relanceDays: number[];
   brief: string;
+  centerProfile: SeyaCenterProfile;
   treatmentBriefs: SeyaTreatmentBrief[];
   offerMaps: SeyaOfferMap[];
 };
@@ -260,6 +287,7 @@ export const defaultSeyaAgentSettings: SeyaAgentSettings = {
   relanceDays: [1, 5, 30],
   brief:
     "Tu es Seya, au standard du centre. Chaleureuse, naturelle, vouvoiement. Tu réponds clairement au dernier message, tu relis le fil (ce qui a été demandé, déjà dit, les disponibilités évoquées), tu n’insistes pas et tu ne répètes pas une question ou une réponse déjà donnée. Tu accompagnes jusqu’au rendez-vous, une chose à la fois. Prix, cure ou paiement : seulement si on te le demande, et alors tu dis le tarif paramétré. Pacemaker, grossesse ou doute santé : tu transmets à l’équipe, tu ne poses pas de rendez-vous. Jamais « Lead Meta ».",
+  centerProfile: { ...emptySeyaCenterProfile },
   treatmentBriefs: defaultTreatmentBriefs,
   offerMaps: defaultSeyaOfferMaps,
 };
@@ -376,10 +404,7 @@ export function resolveSeyaOpening(
 ) {
   const hay = `${campaign || ""} ${treatment || ""}`;
   const family = inferFamilyFromSettings(settings, campaign, treatment);
-  const offer = naturalOfferPhrase(
-    family,
-    resolveOfferLabel(settings, campaign, treatment) || campaign || treatment,
-  );
+  const offer = openingOfferFromSettings(settings, campaign, treatment);
   const brief =
     findTreatmentBrief(settings, hay) ||
     findTreatmentBrief(
@@ -536,6 +561,46 @@ export function resolveOfferLabel(
   return found?.label.trim() || "";
 }
 
+export function openingOfferFromSettings(
+  settings: SeyaAgentSettings,
+  campaign?: string | null,
+  treatment?: string | null,
+) {
+  const family = inferFamilyFromSettings(settings, campaign, treatment);
+  const mapped = resolveOfferLabel(settings, campaign, treatment);
+  if (mapped) {
+    return naturalOfferPhrase(family, mapped);
+  }
+  const brief =
+    findTreatmentBrief(settings, `${campaign || ""} ${treatment || ""}`) ||
+    findTreatmentBrief(
+      settings,
+      family === "minceur"
+        ? "Soin minceur"
+        : family === "visage"
+          ? "Soin visage"
+          : family === "epilation"
+            ? "Épilation définitive"
+            : "",
+    );
+  const fromTitle = phraseFromCareTitle(brief?.title);
+  if (fromTitle) {
+    return fromTitle;
+  }
+  return naturalOfferPhrase(family, campaign || treatment);
+}
+
+export function resolveTreatmentUrl(
+  settings: SeyaAgentSettings,
+  campaign?: string | null,
+  treatment?: string | null,
+) {
+  const brief =
+    findTreatmentBrief(settings, `${campaign || ""} ${treatment || ""}`) ||
+    findTreatmentBrief(settings, treatment);
+  return String(brief?.url || "").trim();
+}
+
 export function inboxTag(conversation: SeyaConversation): SeyaInboxTag {
   const status = conversation.status;
   if (status === "Pas intéressé" || status === "Terminé") {
@@ -673,8 +738,26 @@ export function normalizeSeyaAgentSettings(
     relanceEnabled: value?.relanceEnabled !== false,
     relanceDays: days.length ? days : [1, 5, 30],
     brief: normalizeGeneralBrief(value?.brief),
+    centerProfile: normalizeCenterProfile(value?.centerProfile),
     treatmentBriefs: normalizeTreatmentBriefs(value?.treatmentBriefs),
     offerMaps: normalizeOfferMaps(value?.offerMaps),
+  };
+}
+
+export function normalizeCenterProfile(
+  value?: Partial<SeyaCenterProfile> | null,
+): SeyaCenterProfile {
+  const current = value && typeof value === "object" ? value : {};
+  return {
+    activity: String(current.activity || "").trim(),
+    extras: String(current.extras || "").trim(),
+    audience: String(current.audience || "").trim(),
+    problem: String(current.problem || "").trim(),
+    differentiation: String(current.differentiation || "").trim(),
+    promise: String(current.promise || "").trim(),
+    positioning: String(current.positioning || "").trim(),
+    supportPhone: String(current.supportPhone || "").trim(),
+    supportEmail: String(current.supportEmail || "").trim(),
   };
 }
 
@@ -690,6 +773,8 @@ function normalizeTreatmentBriefs(value?: SeyaTreatmentBrief[] | null) {
     const previous = merged.get(normalizeTreatmentName(name));
     merged.set(normalizeTreatmentName(name), {
       name,
+      title: String(item?.title || previous?.title || "").trim(),
+      url: String(item?.url || previous?.url || "").trim(),
       brief: refreshLegacyTreatmentBrief(name, String(item?.brief || "").trim()),
       opening: String(item?.opening || previous?.opening || "").trim(),
       price: String(item?.price || previous?.price || "").trim(),
@@ -839,6 +924,7 @@ export function bindSeyaSettingsToCenter(
   if (remote != null) {
     return normalizeSeyaAgentSettings({
       ...remote,
+      centerProfile: remote.centerProfile,
       treatmentBriefs: Array.isArray(remote.treatmentBriefs)
         ? remote.treatmentBriefs
         : [],

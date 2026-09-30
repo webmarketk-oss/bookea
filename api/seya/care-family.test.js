@@ -80,3 +80,24 @@ test("l’offre se dit naturellement, jamais « le minceur »", () => {
   );
   assert.doesNotMatch(naturalOfferPhrase("minceur", "le minceur"), /le minceur/);
 });
+
+test("un titre de soin se dit naturellement, sans copier l’enseigne", () => {
+  const { phraseFromCareTitle } = require("./care-family");
+  assert.match(
+    phraseFromCareTitle(
+      "Soins Visage anti-âge (sans chirurgie) - JFG Clinic Saint-Gilles-Croix-de-Vie",
+    ),
+    /des soins visage anti-âge/i,
+  );
+  assert.doesNotMatch(
+    phraseFromCareTitle(
+      "Soins Visage anti-âge (sans chirurgie) - JFG Clinic Saint-Gilles-Croix-de-Vie",
+    ),
+    /JFG|Saint-Gilles/i,
+  );
+  assert.match(
+    phraseFromCareTitle("Épilation définitive (laser Triwave) - JFG Clinic Saint-Gilles"),
+    /une épilation définitive/i,
+  );
+  assert.equal(phraseFromCareTitle(""), "");
+});

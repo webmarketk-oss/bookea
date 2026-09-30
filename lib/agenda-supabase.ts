@@ -10,7 +10,9 @@ import {
 } from "@/lib/appointment-position-status";
 import { markPastAppointmentsPresent } from "@/lib/appointment-presence";
 import { getActiveCenterContext } from "@/lib/center-access";
+import { leadStatusAfterAgendaBooking } from "@/lib/appointment-lead-status";
 import { normalizeLeadStatus } from "@/lib/lead-statuses";
+import { closeSeyaThreadsForBookedLead } from "@/lib/seya-close-booking";
 import { createClient } from "@/lib/supabase";
 import type { Appointment, AppointmentStatus, Cabin, Practitioner } from "@/types/agenda";
 
@@ -529,6 +531,14 @@ async function ensureAppointmentLinks(
     clientId,
     appointment,
   );
+  if (isBookableAppointment(appointment)) {
+    await closeSeyaThreadsForBookedLead(supabase, centerId, {
+      leadId,
+      phone: appointment.phone,
+      date: appointment.date,
+      start: appointment.start,
+    });
+  }
 
   return { centerId, clientId, leadId, serviceId, roomId, practitionerId };
 }
@@ -655,9 +665,10 @@ async function linkAppointmentLead(
   }
 
   const currentStatus = normalizeLeadStatus(lead.status);
-  const nextStatus = shouldMarkLeadAsBooked(currentStatus)
-    ? "RDV pris"
-    : currentStatus;
+  const nextStatus = leadStatusAfterAgendaBooking(
+    appointment.source,
+    currentStatus,
+  );
 
   const { error } = await supabase
     .from("leads")
@@ -672,14 +683,16 @@ async function linkAppointmentLead(
 
   if (error) throw new Error(error.message);
 
-  await supabase.from("lead_events").insert({
-    center_id: centerId,
-    lead_id: lead.id,
-    event_type: "status",
-    from_value: lead.status,
-    to_value: nextStatus,
-    note: `RDV posé dans l'agenda : ${lead.status} → ${nextStatus}.`,
-  });
+  if (nextStatus !== lead.status) {
+    await supabase.from("lead_events").insert({
+      center_id: centerId,
+      lead_id: lead.id,
+      event_type: "status",
+      from_value: lead.status,
+      to_value: nextStatus,
+      note: `RDV posé dans l'agenda : ${lead.status} → ${nextStatus}.`,
+    });
+  }
 
   return lead.id as string;
 }
@@ -764,19 +777,6 @@ function clientNameFields(appointment: Appointment) {
     first_name: firstName || "Cliente",
     last_name: lastNameParts.join(" ") || "Bookea",
   };
-}
-
-function shouldMarkLeadAsBooked(status: string) {
-  return ![
-    "RDV pris",
-    "RDV confirmé",
-    "Acompte envoyé",
-    "Acompte reçu",
-    "Acompte en attente",
-    "Devis",
-    "Vendu",
-    "Client converti",
-  ].includes(status);
 }
 
 function lastPhoneDigits(value: string) {

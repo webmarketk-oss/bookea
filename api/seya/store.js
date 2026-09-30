@@ -40,6 +40,20 @@ function isolateSeyaFromRemote(remote, local) {
   if (remote != null && typeof remote === "object") {
     return {
       ...remote,
+      centerProfile:
+        remote.centerProfile && typeof remote.centerProfile === "object"
+          ? remote.centerProfile
+          : {
+              activity: "",
+              extras: "",
+              audience: "",
+              problem: "",
+              differentiation: "",
+              promise: "",
+              positioning: "",
+              supportPhone: "",
+              supportEmail: "",
+            },
       treatmentBriefs: Array.isArray(remote.treatmentBriefs)
         ? remote.treatmentBriefs
         : [],

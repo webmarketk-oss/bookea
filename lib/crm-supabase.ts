@@ -7,6 +7,7 @@ import {
   toLocalIsoDate,
 } from "@/lib/crm-stats";
 import { sanitizePersonName } from "@/lib/seya-person-name";
+import { closeSeyaThreadsForBookedLead } from "@/lib/seya-close-booking";
 import { createClient } from "@/lib/supabase";
 import { normalizeLeadStatus } from "@/lib/lead-statuses";
 import type { Lead, LeadActivity, LeadStatus } from "@/types/lead";
@@ -376,6 +377,13 @@ export async function updateCrmLeadStatus(
   if (clientLeadStatuses.includes(status)) {
     await ensureClientForConvertedLead(supabase, centerId, lead.id, lead);
   }
+
+  if (status === "RDV pris" || status === "RDV confirmé") {
+    await closeSeyaThreadsForBookedLead(supabase, centerId, {
+      leadId: lead.id,
+      phone: lead.phone,
+    });
+  }
 }
 
 export async function addCrmLeadActivity(leadId: string, text: string) {
@@ -664,6 +672,13 @@ export async function updateCrmLeadDetails(lead: Lead, input: NewCrmLeadInput) {
         ...lead,
         ...input,
         status: nextStatus,
+      });
+    }
+
+    if (nextStatus === "RDV pris" || nextStatus === "RDV confirmé") {
+      await closeSeyaThreadsForBookedLead(supabase, centerId, {
+        leadId: lead.id,
+        phone: input.phone || lead.phone,
       });
     }
   }

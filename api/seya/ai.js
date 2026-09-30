@@ -12,13 +12,17 @@ const {
   humanSlotReply,
   isJunkTreatment,
   isOptOut,
-  locationReply,
+  asksAccess,
+  centerPlaceReply,
+  formatCenterProfilePrompt,
   pickSlotsForState,
   matchProposedSlot,
   mergeQualification,
   message,
   priceReply,
   resolveOfferLabel,
+  resolveOpeningOffer,
+  resolveTreatmentUrl,
   resolveTreatmentBrief,
   resolveTreatmentPrice,
   threadHasMedical,
@@ -100,6 +104,7 @@ async function generateSeyaReply({
     bookingState,
     guarded,
     appointments,
+    centerProfile: agentSettings(seya).centerProfile,
   };
   const fallback = applyLeadReply(conversationWithState, text, seya, resolvedSlots, extras);
   const draft = lastSeyaText(fallback.conversation);
@@ -153,7 +158,12 @@ async function polishSeyaText({
 }) {
   const settings = agentSettings(seya);
   const careHint = `${conversation.qualification?.need || ""} ${conversation.qualification?.zone || ""} ${conversation.treatment || ""}`;
-  const offer = resolveOfferLabel(
+  const offer = resolveOpeningOffer(
+    seya,
+    conversation.campaign,
+    conversation.qualification?.need || conversation.treatment,
+  );
+  const careUrl = resolveTreatmentUrl(
     seya,
     conversation.campaign,
     conversation.qualification?.need || conversation.treatment,
@@ -185,6 +195,7 @@ async function polishSeyaText({
           slots,
           centerName,
           offer,
+          careUrl,
           brief,
           price,
           centerAddress,
@@ -213,6 +224,7 @@ function polishPrompt({
   slots,
   centerName,
   offer,
+  careUrl,
   brief,
   price,
   centerAddress,
@@ -222,6 +234,7 @@ function polishPrompt({
     .map((slot) => slot.label)
     .filter(Boolean)
     .join(" · ");
+  const centerCard = formatCenterProfilePrompt(settings.centerProfile);
 
   return [
     "Tu es Seya, au standard WhatsApp. Chaleureuse, naturelle, claire, vouvoiement. Tu parles comme une réceptionniste au téléphone, 1 à 3 phrases.",
@@ -245,7 +258,14 @@ function polishPrompt({
     `Centre : ${centerName || "le centre"}.`,
     `Prospect : ${conversation.firstName || "le prospect"}.`,
     offer ? `Offre à nommer : ${offer}.` : "Ne nomme pas une offre inventée.",
+    careUrl
+      ? `Lien du soin (seulement si on te le demande, jamais dans le premier message) : ${careUrl}`
+      : "",
     settings.brief || seya.brief ? `Consignes du centre : ${settings.brief || seya.brief}` : "",
+    centerCard
+      ? `Fiche de CE centre uniquement (jamais JFG Clinic ni un autre établissement) :\n${centerCard}`
+      : "Aucune fiche centre : tu ne parles que du nom et de l’adresse fournis. Interdit d’inventer une enseigne, un parking, un concept ou une autre clinique.",
+    "Tu n’énumères pas cette fiche. Tu t’en sers seulement si on te pose une question sur le centre, l’accès, le concept, ou pour rassurer avant le rendez-vous.",
     brief ? `Consignes pour ce soin : ${brief}` : "",
     price ? `Tarif autorisé (seulement si le brouillon en parle) : ${price}` : "Aucun tarif. N’en invente pas.",
     centerAddress
@@ -440,7 +460,7 @@ function applyAiDecision(conversation, text, seya, slots, decision, extras = {})
     action = "handoff";
   }
   if (
-    (asksPrice(text) || classifyPriceQuestion(text) || isPriceRepeatComplaint(text) || asksLocation(text) || faqReply(text)) &&
+    (asksPrice(text) || classifyPriceQuestion(text) || isPriceRepeatComplaint(text) || asksLocation(text) || asksAccess(text) || faqReply(text)) &&
     (action === "stop" || action === "propose_slots" || action === "book")
   ) {
     action = "continue";
@@ -541,13 +561,13 @@ function applyAiDecision(conversation, text, seya, slots, decision, extras = {})
 
   const fallbackReply =
     faqReply(text) ||
-    (asksLocation(text)
-      ? locationReply(extras.centerAddress, extras.centerName)
+    (asksLocation(text) || asksAccess(text)
+      ? centerPlaceReply(text, extras, seya)
       : asksPrice(text) || classifyPriceQuestion(text) || isPriceRepeatComplaint(text)
         ? priceReply(seya, qualification, { ...conversation, bookingState }, text)
         : "Merci. Dites-moi le soin ou la zone, je m’occupe de la suite.");
   const reply =
-    faqReply(text) || asksLocation(text) || asksPrice(text) || classifyPriceQuestion(text) || isPriceRepeatComplaint(text)
+    faqReply(text) || asksLocation(text) || asksAccess(text) || asksPrice(text) || classifyPriceQuestion(text) || isPriceRepeatComplaint(text)
       ? fallbackReply
       : decision.reply || fallbackReply;
 

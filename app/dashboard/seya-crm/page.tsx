@@ -32,6 +32,7 @@ import {
 } from "@/lib/seya-agent";
 import {
   defaultSeyaAgentSettings,
+  emptySeyaCenterProfile,
   loadSeyaAgentSettings,
   mergeSeyaConversations,
   readLocalSeyaConversations,
@@ -42,6 +43,7 @@ import {
   writeLocalSeyaConversations,
   writeLocalSeyaSettings,
   type SeyaAgentSettings,
+  type SeyaCenterProfile,
   type SeyaConversation,
   type SeyaHealthSheet,
   type SeyaPricePolicy,
@@ -102,6 +104,86 @@ function patchBriefHealth(
   health[field] = value;
   return { ...brief, health };
 }
+
+function patchCenterProfile(
+  settings: SeyaAgentSettings,
+  field: keyof SeyaCenterProfile,
+  value: string,
+): SeyaAgentSettings {
+  return {
+    ...settings,
+    centerProfile: {
+      ...emptySeyaCenterProfile,
+      ...settings.centerProfile,
+      [field]: value,
+    },
+  };
+}
+
+const CENTER_PROFILE_FIELDS: Array<{
+  key: keyof SeyaCenterProfile;
+  label: string;
+  hint: string;
+  placeholder: string;
+  rows?: number;
+}> = [
+  {
+    key: "activity",
+    label: "Résumé de l’activité",
+    hint: "Ce que fait CE centre, pas un autre.",
+    placeholder:
+      "Centre de technologies minceur, soins visage et épilation définitive, avec un suivi personnalisé.",
+    rows: 3,
+  },
+  {
+    key: "extras",
+    label: "Autres informations",
+    hint: "Parking, accès, bâtiment, bornes… Seya le dit si on lui demande.",
+    placeholder:
+      "Parking devant l’établissement, bâtiment au 1er étage avec ascenseur.",
+    rows: 3,
+  },
+  {
+    key: "audience",
+    label: "Vos cibles",
+    hint: "À qui s’adresse le centre.",
+    placeholder:
+      "Femmes et hommes qui souhaitent perdre du poids, raffermir, ou une épilation définitive.",
+    rows: 3,
+  },
+  {
+    key: "problem",
+    label: "Le problème que vous résolvez",
+    hint: "Objectifs pris en charge ici.",
+    placeholder:
+      "Silhouette, rétention d’eau, cellulite, imperfections visage, poils indésirables.",
+    rows: 3,
+  },
+  {
+    key: "differentiation",
+    label: "Votre différenciation",
+    hint: "Ce qui distingue CE centre.",
+    placeholder:
+      "Accompagnement en centre, technologies ciblées et suivi personnalisé.",
+    rows: 3,
+  },
+  {
+    key: "promise",
+    label: "Vos résultats ou promesse",
+    hint: "Sans inventer de résultat médical.",
+    placeholder:
+      "Programmes personnalisés après un diagnostic, pour des résultats visibles et durables.",
+    rows: 3,
+  },
+  {
+    key: "positioning",
+    label: "Votre positionnement",
+    hint: "Comment le centre se présente.",
+    placeholder:
+      "Centre de technologies et de bien-être, solutions non invasives.",
+    rows: 3,
+  },
+];
 
 function isBirthdayToday(value?: string | null) {
   if (!value) {
@@ -960,6 +1042,80 @@ export default function SeyaCrmPage() {
           </p>
         </div>
 
+        <div className="mt-5">
+          <p className="text-xs font-medium text-slate-500">
+            Description du centre
+          </p>
+          <p className="mt-1 text-xs font-medium leading-4 text-slate-400">
+            Fiche de {centerName || "ce centre"} uniquement. Seya ne recopie
+            pas tout ça à chaque message : elle s’en sert pour parler de CET
+            établissement, jamais d’un autre. Les horaires viennent du
+            Planning.
+          </p>
+          <div className="mt-3 grid gap-3 md:grid-cols-2">
+            {CENTER_PROFILE_FIELDS.map((field) => (
+              <label key={field.key} className="grid gap-1">
+                <span className="text-xs font-semibold text-slate-600">
+                  {field.label}
+                </span>
+                <span className="text-[11px] font-medium leading-4 text-slate-400">
+                  {field.hint}
+                </span>
+                <textarea
+                  value={agentSettings.centerProfile?.[field.key] || ""}
+                  onChange={(event) =>
+                    setAgentSettings((current) =>
+                      patchCenterProfile(current, field.key, event.target.value),
+                    )
+                  }
+                  onBlur={persistCurrentAgentSettings}
+                  rows={field.rows || 3}
+                  placeholder={field.placeholder}
+                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-medium leading-5 text-slate-700 outline-none focus:border-violet-500"
+                />
+              </label>
+            ))}
+            <label className="grid gap-1">
+              <span className="text-xs font-semibold text-slate-600">
+                Téléphone du centre
+              </span>
+              <span className="text-[11px] font-medium leading-4 text-slate-400">
+                Uniquement si on lui demande un numéro.
+              </span>
+              <input
+                value={agentSettings.centerProfile?.supportPhone || ""}
+                onChange={(event) =>
+                  setAgentSettings((current) =>
+                    patchCenterProfile(current, "supportPhone", event.target.value),
+                  )
+                }
+                onBlur={persistCurrentAgentSettings}
+                placeholder="02 28 10 79 76"
+                className="h-11 rounded-2xl border border-slate-200 bg-slate-50 px-3 text-sm font-medium outline-none focus:border-violet-500"
+              />
+            </label>
+            <label className="grid gap-1">
+              <span className="text-xs font-semibold text-slate-600">
+                Email du centre
+              </span>
+              <span className="text-[11px] font-medium leading-4 text-slate-400">
+                Uniquement si on lui demande un email.
+              </span>
+              <input
+                value={agentSettings.centerProfile?.supportEmail || ""}
+                onChange={(event) =>
+                  setAgentSettings((current) =>
+                    patchCenterProfile(current, "supportEmail", event.target.value),
+                  )
+                }
+                onBlur={persistCurrentAgentSettings}
+                placeholder="contact@centre.fr"
+                className="h-11 rounded-2xl border border-slate-200 bg-slate-50 px-3 text-sm font-medium outline-none focus:border-violet-500"
+              />
+            </label>
+          </div>
+        </div>
+
         <div className="mt-5 grid gap-3">
           <ToggleRow
             title="WhatsApp Seya activé"
@@ -1164,6 +1320,61 @@ export default function SeyaCrmPage() {
                   >
                     Retirer
                   </button>
+                </div>
+                <div className="grid gap-3 rounded-2xl border border-slate-200 bg-white p-3 md:grid-cols-2">
+                  <label className="grid gap-1">
+                    <span className="text-xs font-semibold text-slate-600">
+                      Titre pour WhatsApp
+                    </span>
+                    <span className="text-[11px] font-medium leading-4 text-slate-400">
+                      Si un lead arrive pour ce soin, Seya s’en sert dans le
+                      premier message. Pas besoin de coller tout le texte
+                      produit.
+                    </span>
+                    <input
+                      value={item.title || ""}
+                      onChange={(event) =>
+                        setAgentSettings((current) => ({
+                          ...current,
+                          treatmentBriefs: current.treatmentBriefs.map(
+                            (brief, briefIndex) =>
+                              briefIndex === index
+                                ? { ...brief, title: event.target.value }
+                                : brief,
+                          ),
+                        }))
+                      }
+                      onBlur={persistCurrentAgentSettings}
+                      placeholder="Soins visage anti-âge"
+                      className="h-11 rounded-2xl border border-slate-200 bg-white px-3 text-sm font-medium outline-none focus:border-violet-500"
+                    />
+                  </label>
+                  <label className="grid gap-1">
+                    <span className="text-xs font-semibold text-slate-600">
+                      URL du soin
+                    </span>
+                    <span className="text-[11px] font-medium leading-4 text-slate-400">
+                      Seya ne l’envoie que si on lui demande le site ou le
+                      lien.
+                    </span>
+                    <input
+                      value={item.url || ""}
+                      onChange={(event) =>
+                        setAgentSettings((current) => ({
+                          ...current,
+                          treatmentBriefs: current.treatmentBriefs.map(
+                            (brief, briefIndex) =>
+                              briefIndex === index
+                                ? { ...brief, url: event.target.value }
+                                : brief,
+                          ),
+                        }))
+                      }
+                      onBlur={persistCurrentAgentSettings}
+                      placeholder="https://…"
+                      className="h-11 rounded-2xl border border-slate-200 bg-white px-3 text-sm font-medium outline-none focus:border-violet-500"
+                    />
+                  </label>
                 </div>
                 <div className="grid gap-3 rounded-2xl border border-violet-100 bg-white p-3">
                   <p className="text-xs font-semibold text-violet-900">
@@ -1418,6 +1629,8 @@ export default function SeyaCrmPage() {
                   ...current.treatmentBriefs,
                   {
                     name: "Nouveau soin",
+                    title: "",
+                    url: "",
                     price: "",
                     brief:
                       "Prix seulement si on te le demande. Si on te le demande, tu dis le tarif comme au comptoir.",

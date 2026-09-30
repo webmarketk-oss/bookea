@@ -145,6 +145,26 @@ test("pas de relance si stop, refus ou RDV confirmé", () => {
   assert.equal(shouldSkipRelance(conversation({ status: "RDV confirmé" })), true);
   assert.equal(shouldSkipRelance(conversation({ status: "Pas intéressé" })), true);
   assert.equal(pickRelanceRound(conversation({ status: "RDV pris" }), NOW), 0);
+  assert.equal(
+    shouldSkipRelance(
+      conversation({
+        status: "En cours",
+        bookedSlot: { date: "2026-10-05", time: "17:30", label: "dim. 17h30" },
+      }),
+    ),
+    true,
+  );
+  assert.equal(
+    pickRelanceRound(
+      conversation({
+        status: "En cours",
+        bookingState: { appointmentStatus: "confirmed" },
+        messages: [{ id: "m1", author: "seya", text: "Bonjour Léa", at: hoursAgo(16) }],
+      }),
+      NOW,
+    ),
+    0,
+  );
 });
 
 test("pas de deuxième relance identique, ni avant 20 h", () => {

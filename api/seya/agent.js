@@ -53,7 +53,7 @@ const {
   wantsSlots,
   asksOtherDay,
 } = require("./conversation");
-const { inferCareFamily, naturalOfferPhrase } = require("./care-family");
+const { inferCareFamily, naturalOfferPhrase, phraseFromCareTitle } = require("./care-family");
 const { sanitizePersonName } = require("../../lib/seya-person-name");
 
 const BILAN_DURATION_MINUTES = 75;
@@ -213,8 +213,56 @@ function faqReply(text) {
   return "";
 }
 
+function emptyCenterProfile() {
+  return {
+    activity: "",
+    extras: "",
+    audience: "",
+    problem: "",
+    differentiation: "",
+    promise: "",
+    positioning: "",
+    supportPhone: "",
+    supportEmail: "",
+  };
+}
+
+function normalizeCenterProfile(value) {
+  const current = value && typeof value === "object" ? value : {};
+  const next = emptyCenterProfile();
+  for (const key of Object.keys(next)) {
+    next[key] = String(current[key] || "").trim();
+  }
+  return next;
+}
+
+function formatCenterProfilePrompt(profile) {
+  const current = normalizeCenterProfile(profile);
+  const rows = [
+    ["Activité", current.activity],
+    ["Accès et infos pratiques", current.extras],
+    ["Cibles", current.audience],
+    ["Problème résolu", current.problem],
+    ["Différenciation", current.differentiation],
+    ["Promesse", current.promise],
+    ["Positionnement", current.positioning],
+    ["Téléphone", current.supportPhone],
+    ["Email", current.supportEmail],
+  ].filter(([, value]) => value);
+  if (!rows.length) {
+    return "";
+  }
+  return rows.map(([label, value]) => `${label} : ${value}`).join("\n");
+}
+
 function asksLocation(text) {
   return /ou (etes|etes[- ]vous|se trouve)|situ[eé]|adresse|\bc['’]est ou\b|vous etes ou|tu es (ou|situ)/i.test(
+    String(text || ""),
+  );
+}
+
+function asksAccess(text) {
+  return /parking|stationn|acces|accès|ascenseur|borne|comment venir|s['’]y rendre|ou (se )?garer/i.test(
     String(text || ""),
   );
 }
@@ -227,6 +275,21 @@ function locationReply(address, centerName) {
     /\s+/g,
     " ",
   );
+}
+
+function centerPlaceReply(text, extras, seya) {
+  const profile = normalizeCenterProfile(
+    extras?.centerProfile || agentSettings(seya).centerProfile,
+  );
+  const address = String(extras?.centerAddress || "").trim();
+  const centerName = String(extras?.centerName || "").trim();
+  if (asksAccess(text) && profile.extras) {
+    if (asksLocation(text) && address) {
+      return `Nous sommes au ${address}. ${profile.extras}`;
+    }
+    return profile.extras;
+  }
+  return locationReply(address, centerName);
 }
 
 function hasMedicalFlag(text) {
@@ -516,6 +579,7 @@ function agentSettings(seya) {
     handoffToHuman: record.handoffToHuman !== false,
     treatmentBriefs: briefs,
     offerMaps: offers,
+    centerProfile: normalizeCenterProfile(record.centerProfile),
     brief: String(record.brief || ""),
     relanceEnabled: record.relanceEnabled !== false,
     relanceDays: Array.isArray(record.relanceDays)
@@ -574,6 +638,38 @@ function resolveTreatmentBrief(seya, treatment) {
 function inferFamily(seya, campaign, treatment) {
   const offer = resolveOfferLabel(seya, campaign, treatment);
   return familyFromTreatment(`${campaign || ""} ${treatment || ""} ${offer}`);
+}
+
+function resolveOpeningOffer(seya, campaign, treatment) {
+  const family = inferFamily(seya, campaign, treatment);
+  const mapped = resolveOfferLabel(seya, campaign, treatment);
+  if (mapped) {
+    return naturalOfferPhrase(family, mapped);
+  }
+  const brief =
+    findTreatmentBrief(seya, `${campaign || ""} ${treatment || ""}`) ||
+    findTreatmentBrief(
+      seya,
+      family === "minceur"
+        ? "Soin minceur"
+        : family === "visage"
+          ? "Soin visage"
+          : family === "epilation"
+            ? "Épilation définitive"
+            : "",
+    );
+  const fromTitle = phraseFromCareTitle(brief?.title);
+  if (fromTitle) {
+    return fromTitle;
+  }
+  return naturalOfferPhrase(family, campaign || treatment);
+}
+
+function resolveTreatmentUrl(seya, campaign, treatment) {
+  const brief =
+    findTreatmentBrief(seya, `${campaign || ""} ${treatment || ""}`) ||
+    findTreatmentBrief(seya, treatment);
+  return String(brief?.url || "").trim();
 }
 
 function familyFromTreatment(treatment) {
@@ -637,12 +733,7 @@ function findTreatmentBrief(seya, treatment) {
 function buildOpeningMessage(context, centerName, seya) {
   const hay = `${context.campaign || ""} ${context.treatment || ""}`;
   const family = inferFamily(seya, context.campaign, context.treatment);
-  const offer = naturalOfferPhrase(
-    family,
-    resolveOfferLabel(seya, context.campaign, context.treatment) ||
-      context.campaign ||
-      context.treatment,
-  );
+  const offer = resolveOpeningOffer(seya, context.campaign, context.treatment);
   const brief =
     findTreatmentBrief(seya, hay) ||
     findTreatmentBrief(
@@ -1244,8 +1335,8 @@ function applyLeadReply(conversation, text, seya, slots, extras = {}) {
         stripBookingCta(priceReply(seya, qualification, conversation, text)),
       );
     }
-    if (asksLocation(text)) {
-      parts.push(locationReply(extras.centerAddress, extras.centerName || ""));
+    if (asksLocation(text) || asksAccess(text)) {
+      parts.push(centerPlaceReply(text, extras, seya));
     }
     parts.push(personalHealthReply(resolvedHealth));
     const review = startHealthReview(
@@ -1291,11 +1382,11 @@ function applyLeadReply(conversation, text, seya, slots, extras = {}) {
         },
       );
     }
-    if (asksLocation(text) || asksPrice(text) || classifyPriceQuestion(text) || faqReply(text)) {
+    if (asksLocation(text) || asksAccess(text) || asksPrice(text) || classifyPriceQuestion(text) || faqReply(text)) {
       const admin =
         faqReply(text) ||
-        (asksLocation(text)
-          ? locationReply(extras.centerAddress, extras.centerName || "")
+        (asksLocation(text) || asksAccess(text)
+          ? centerPlaceReply(text, extras, seya)
           : priceReply(seya, qualification, conversation, text));
       return finishLeadReply(
         conversation,
@@ -1348,13 +1439,13 @@ function applyLeadReply(conversation, text, seya, slots, extras = {}) {
     );
   }
 
-  if (asksLocation(text)) {
+  if (asksLocation(text) || asksAccess(text)) {
     return finishLeadReply(
       conversation,
       qualification,
       qualification.need ? "Qualifié" : "En cours",
       text,
-      locationReply(extras.centerAddress, extras.centerName || ""),
+      centerPlaceReply(text, extras, seya),
       { ...bookingState, pendingQuestion: "address" },
     );
   }
@@ -1460,6 +1551,7 @@ function applyLeadReply(conversation, text, seya, slots, extras = {}) {
     !isPriceRepeatComplaint(text) &&
     !bookingState.unansweredPriceIntent &&
     !asksLocation(text) &&
+    !asksAccess(text) &&
     !faqReply(text) &&
     !threadHasMedical(conversation, text) &&
     Boolean(qualification.need || conversation.treatment) &&
@@ -1522,13 +1614,13 @@ function applyLeadReply(conversation, text, seya, slots, extras = {}) {
         review,
       );
     }
-    if (asksLocation(previous)) {
+    if (asksLocation(previous) || asksAccess(previous)) {
       return finishLeadReply(
         conversation,
         qualification,
         qualification.need ? "Qualifié" : "En cours",
         text,
-        `Vous avez raison. ${locationReply(extras.centerAddress, extras.centerName || "")}`,
+        `Vous avez raison. ${centerPlaceReply(previous, extras, seya)}`,
         { ...bookingState, pendingQuestion: "address" },
       );
     }
@@ -1855,10 +1947,14 @@ module.exports = {
   readHours,
   relanceCopy,
   asksLocation,
+  asksAccess,
   asksPrice,
   faqReply,
   displayCareLabel,
   locationReply,
+  centerPlaceReply,
+  formatCenterProfilePrompt,
+  normalizeCenterProfile,
   pickSlotsForMessage,
   pickSlotsForState,
   hasMedicalFlag,
@@ -1868,6 +1964,8 @@ module.exports = {
   priceReply,
   threadHasMedical,
   resolveOfferLabel,
+  resolveOpeningOffer,
+  resolveTreatmentUrl,
   resolveTreatmentBrief,
   resolveTreatmentPrice,
   startConversation,

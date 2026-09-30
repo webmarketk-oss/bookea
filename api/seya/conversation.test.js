@@ -1034,3 +1034,30 @@ test("j’ai réfléchi, je veux le prix : elle répond, même après un message
   assert.notEqual(conversation.status, "Pas intéressé");
 });
 
+test("un lead visage reprend le titre du soin, pas l’enseigne", () => {
+  const conversation = startConversation(
+    {
+      leadId: "lead-visage-title",
+      firstName: "Léa",
+      lastName: "Test",
+      phone: "0611223344",
+      treatment: "Soin visage",
+    },
+    "Institut Gap",
+    {
+      treatmentBriefs: [
+        {
+          name: "Soin visage",
+          title:
+            "Soins Visage anti-âge (sans chirurgie) - JFG Clinic Saint-Gilles-Croix-de-Vie",
+          url: "https://www.jfg-clinic.com/visage",
+          brief: "Prix seulement si on te le demande.",
+        },
+      ],
+    },
+  );
+  const opening = conversation.messages[0].text;
+  assert.match(opening, /soins visage anti-âge/i);
+  assert.doesNotMatch(opening, /JFG Clinic Saint-Gilles|https?:\/\//i);
+});
+

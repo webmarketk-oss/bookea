@@ -153,3 +153,20 @@ test("deux centres à la suite : chaque réponse reste sur son tarif", async () 
   assert.doesNotMatch(lastSeya(clermontReply.conversation), /99€/);
   assert.equal(clermontReply.conversation.centerId, "center-clermont");
 });
+
+test("la fiche JFG de Clermont ne remplit jamais Gap", () => {
+  const clermontWithProfile = {
+    ...clermont,
+    centerProfile: {
+      activity: "JFG Clinic Clermont-Ferrand, technologies minceur",
+      extras: "Parking Clermont rue Eugène Gilbert",
+      positioning: "JFG Clinic Clermont",
+    },
+  };
+  const isolated = isolateSeyaFromRemote(
+    { whatsappAgentEnabled: false, conversations: [] },
+    clermontWithProfile,
+  );
+  assert.equal(isolated.centerProfile.activity, "");
+  assert.doesNotMatch(JSON.stringify(isolated.centerProfile), /JFG|Clermont|Eugène/i);
+});
