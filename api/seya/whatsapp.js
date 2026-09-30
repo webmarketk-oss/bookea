@@ -12,6 +12,7 @@ const {
   message,
   persistableConversations,
   pickSlotsForState,
+  remainingOfferedSlots,
   readHours,
   startConversation,
   pickSlotsForMessage,
@@ -336,40 +337,38 @@ async function handleIncoming(supabase, incoming) {
       result.shouldBook = null;
       next.status = "RDV proposé";
       next.bookedSlot = undefined;
+      const latestOccupancy = await loadCenterAppointments(supabase, center.id);
+      const remaining = remainingOfferedSlots(
+        existing.proposedSlots || existing.bookingState?.lastOfferedSlots || [],
+        latestOccupancy,
+        wantedSlot,
+      );
+      const alternatives = remaining.length
+        ? remaining.slice(0, 3)
+        : pickSlotsForState(
+            latestOccupancy,
+            hours,
+            {
+              ...(next.bookingState || {}),
+              lastOfferedSlots: [],
+              requestedDate: wantedSlot.date,
+              rejectedSlots: [
+                ...((next.bookingState && next.bookingState.rejectedSlots) || []),
+                { date: wantedSlot.date, time: wantedSlot.time },
+              ],
+            },
+            new Date(),
+          );
       if (next.bookingState) {
         next.bookingState.appointmentStatus = "proposed";
-        next.bookingState.lastOfferedSlots = [];
+        next.bookingState.lastOfferedSlots = alternatives;
+        next.bookingState.requestedDate = wantedSlot.date;
         next.bookingState.rejectedSlots = [
           ...(next.bookingState.rejectedSlots || []),
           { date: wantedSlot.date, time: wantedSlot.time },
         ];
       }
-      const alternatives = pickSlotsForState(
-        [
-          ...appointments,
-          {
-            date: wantedSlot.date,
-            start: wantedSlot.time,
-            duration: BILAN_DURATION_MINUTES,
-          },
-        ],
-        hours,
-        {
-          ...(next.bookingState || {}),
-          lastOfferedSlots: [],
-          requestedDate: wantedSlot.date,
-          rejectedSlots: [
-            ...((next.bookingState && next.bookingState.rejectedSlots) || []),
-            { date: wantedSlot.date, time: wantedSlot.time },
-          ],
-        },
-        new Date(),
-      );
       next.proposedSlots = alternatives;
-      if (next.bookingState) {
-        next.bookingState.lastOfferedSlots = alternatives;
-        next.bookingState.requestedDate = wantedSlot.date;
-      }
       followUps.push(
         alternatives.length
           ? `Ce créneau n’est plus disponible. ${humanSlotReply(alternatives)}`

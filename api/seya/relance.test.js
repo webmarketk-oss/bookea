@@ -181,8 +181,10 @@ test("le texte de relance s’adapte et ne recopie pas un message déjà envoyé
   );
   assert.match(first, /Léa/);
   assert.match(first, /Clermont/);
-  assert.match(first, /disponibilités|horaire|créneau/i);
+  assert.match(first, /rendez-vous|créneau|horaire/i);
   assert.doesNotMatch(first, /Je ne veux pas vous relancer/);
+  assert.doesNotMatch(first, /pour Soin minceur chez/i);
+  assert.doesNotMatch(first, /😊/);
 
   const already = conversation({
     messages: [
@@ -198,7 +200,7 @@ test("le texte de relance s’adapte et ne recopie pas un message déjà envoyé
   assert.notEqual(secondTry, first);
 
   const mid = relanceCopy(conversation(), 2, "JFG Clinique Clermont");
-  assert.match(mid, /horaire|créneau/i);
+  assert.match(mid, /rendez-vous|horaire|créneau/i);
   const last = relanceCopy(conversation(), 3, "JFG Clinique Clermont");
   assert.match(last, /dernière fois|clos le sujet/);
 });

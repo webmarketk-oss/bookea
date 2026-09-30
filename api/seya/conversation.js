@@ -197,7 +197,14 @@ function isThanks(text, conversation) {
     return false;
   }
   const value = compactText(text);
-  return /^(merci beaucoup d'avance|merci d'avance|merci beaucoup|super merci|ok merci|c'est gentil|je vous remercie|merci)$/.test(
+  if (
+    /^(merci beaucoup d'avance|merci d'avance|merci beaucoup|super merci|ok merci|c'est gentil|je vous remercie|merci)$/.test(
+      value,
+    )
+  ) {
+    return true;
+  }
+  return /merci( beaucoup)? (et )?a bientot|a bientot merci|^a bientot$|^merci a bientot$/.test(
     value,
   );
 }
@@ -400,10 +407,13 @@ function conversationalReply(text, conversation, qualification, now) {
   if (isIdentityQuestion(text)) {
     return identityReply();
   }
-  if (
-    isThanks(text, conversation) ||
-    (isAppointmentConfirmed(conversation) && isShortYes(text))
-  ) {
+  if (isAppointmentConfirmed(conversation) && (isThanks(text, conversation) || isShortYes(text))) {
+    return pickFresh(
+      ["Avec plaisir, à bientôt.", "Avec plaisir.", "Très bien, à bientôt."],
+      conversation,
+    );
+  }
+  if (isThanks(text, conversation) || (isAppointmentConfirmed(conversation) && isShortYes(text))) {
     return pickFresh(["Avec plaisir.", "Très bien.", "Avec plaisir, à bientôt."], conversation);
   }
   if (isAwayForNow(text) || isWillCallBack(text)) {

@@ -393,9 +393,6 @@ function isBlockingAppointment(appointment, date) {
   if (appointment.date && appointment.date !== date) {
     return false;
   }
-  if (appointment.kind === "Pause") {
-    return false;
-  }
   if (/annul|cancel/i.test(String(appointment.status || ""))) {
     return false;
   }
@@ -1222,7 +1219,7 @@ function applyLeadReply(conversation, text, seya, slots, extras = {}) {
       conversation,
       qualification,
       confirmed
-        ? conversation.status || "RDV confirmé"
+        ? "Terminé"
         : qualification.need
           ? "Qualifié"
           : conversation.status || "En cours",
@@ -1394,6 +1391,30 @@ function applyLeadReply(conversation, text, seya, slots, extras = {}) {
     !threadHasMedical(conversation, text) &&
     slotAllowed(chosenSlot, bookingState)
   ) {
+    const occupancy = extras.appointments || [];
+    if (occupancy.length && isSlotBusy(occupancy, chosenSlot.date, chosenSlot.time)) {
+      const remaining = remainingOfferedSlots(
+        offeredSlots(conversation, slots),
+        occupancy,
+        chosenSlot,
+      );
+      return finishLeadReply(
+        conversation,
+        qualification,
+        "RDV proposé",
+        text,
+        remaining.length
+          ? `Ce créneau n’est plus disponible. ${humanSlotReply(remaining)}`
+          : "Ce créneau n’est plus disponible. Souhaitez-vous que je regarde un autre horaire ?",
+        {
+          ...bookingState,
+          lastOfferedSlots: remaining,
+          appointmentStatus: "proposed",
+          pendingQuestion: "offer_slots",
+        },
+        { proposedSlots: remaining },
+      );
+    }
     return finishLeadReply(
       conversation,
       qualification,
@@ -1575,6 +1596,9 @@ function withRereadPrefix(reread, text) {
 }
 
 function fallbackAfterNote(qualification, conversation) {
+  if (isAppointmentConfirmed(conversation)) {
+    return "Avec plaisir, à bientôt.";
+  }
   if (
     conversation?.bookingState?.pendingQuestion === "no_slots" &&
     !isBookingThread(conversation)
@@ -1692,24 +1716,39 @@ function daysSince(iso) {
   return Math.floor((Date.now() - then) / 86400000);
 }
 
+function remainingOfferedSlots(offered, appointments, taken) {
+  const takenKey = `${taken?.date || ""}|${String(taken?.time || "").slice(0, 5)}`;
+  return (Array.isArray(offered) ? offered : []).filter((slot) => {
+    const key = `${slot.date}|${String(slot.time || "").slice(0, 5)}`;
+    if (key === takenKey) {
+      return false;
+    }
+    return !isSlotBusy(appointments, slot.date, slot.time);
+  });
+}
+
 function relanceCopy(conversation, round = 1, centerName = "") {
-  const firstName = String(conversation.firstName || "").trim();
-  const hello = firstName ? `Bonjour ${firstName}` : "Bonjour";
+  const firstName = greetingName(conversation.firstName);
+  const named = firstName
+    ? `Bonjour ${firstName.charAt(0).toUpperCase()}${firstName.slice(1)}`
+    : "Bonjour";
+  const hello = named;
   const centre = String(centerName || "").trim() || "le centre";
   const care = relanceCareLabel(conversation);
+  const about = /^une?\s/i.test(care) ? `d’${care}` : `de ${care}`;
   const lastLead = lastLeadText(conversation);
   const candidates =
     Number(round) >= 3
       ? [
-          `${hello}, je reviens une dernière fois pour ${care} chez ${centre}. Dites-moi si vous voulez que je regarde un créneau, sinon je vous laisse tranquille.`,
-          `${hello}, je clos le sujet de mon côté. Revenez vers moi si vous voulez avancer pour ${care}.`,
+          `${hello}, je me permets de revenir une dernière fois au sujet ${about} à ${centre}. Souhaitez-vous que je vous propose un rendez-vous, ou préférez-vous que je clôture le sujet ?`,
+          `${hello}, je clos le sujet de mon côté. N’hésitez pas à me réécrire si vous souhaitez avancer au sujet ${about}.`,
         ]
       : Number(round) === 2
         ? [
-            `${hello}, je reviens vers vous pour ${care} chez ${centre}. Vous voulez que je regarde un horaire, ou on arrête là ?`,
-            `${hello}, toujours là pour ${care} chez ${centre}. Dites-moi simplement si je dois regarder un créneau.`,
+            `${hello}, je me permets de revenir vers vous au sujet ${about} à ${centre}. Souhaitez-vous que je vous propose un rendez-vous, ou préférez-vous en rester là ?`,
+            `${hello}, je reste à votre disposition au sujet ${about} à ${centre}. Puis-je vous proposer un créneau ?`,
           ]
-        : relanceFirstCandidates(hello, care, centre, lastLead, conversation);
+        : relanceFirstCandidates(hello, about, centre, lastLead, conversation);
   const previous = (conversation.messages || [])
     .filter((item) => item.author === "seya")
     .map((item) => String(item.text || ""));
@@ -1720,12 +1759,12 @@ function relanceCopy(conversation, round = 1, centerName = "") {
   );
 }
 
-function relanceFirstCandidates(hello, care, centre, lastLead, conversation) {
+function relanceFirstCandidates(hello, about, centre, lastLead, conversation) {
   const lead = String(lastLead || "");
   if (/prix|tarif|combien/i.test(lead)) {
     return [
-      `${hello}, je reviens vers vous pour ${care} chez ${centre}. Vous voulez que je précise le tarif, ou que je regarde un créneau ?`,
-      `${hello}, je reviens vers vous pour ${care}. Le point tarif est noté, je peux aussi regarder un horaire si vous voulez.`,
+      `${hello}, je me permets de revenir vers vous au sujet ${about} à ${centre}. Souhaitez-vous que je vous précise le tarif, ou que je vous propose un rendez-vous ?`,
+      `${hello}, je reviens vers vous au sujet ${about}. Le tarif est noté ; je peux également vous proposer un créneau si vous le souhaitez.`,
     ];
   }
   if (
@@ -1733,38 +1772,38 @@ function relanceFirstCandidates(hello, care, centre, lastLead, conversation) {
     conversation.proposedSlots.length > 0
   ) {
     return [
-      `${hello}, je reviens vers vous pour ${care} chez ${centre} 😊 L’horaire vu ensemble vous convient toujours, ou je regarde autre chose ?`,
-      `${hello}, je reviens vers vous pour ${care} chez ${centre}. Vous souhaitez que je regarde d’autres disponibilités ?`,
+      `${hello}, je me permets de revenir vers vous au sujet ${about} à ${centre}. L’horaire évoqué vous convient-il toujours, ou préférez-vous une autre disponibilité ?`,
+      `${hello}, je reviens vers vous au sujet ${about} à ${centre}. Souhaitez-vous que je vous propose un autre rendez-vous ?`,
     ];
   }
   return [
-    `${hello}, je reviens vers vous pour ${care} chez ${centre} 😊 Vous souhaitez que je regarde les disponibilités pour vous ?`,
-    `${hello}, je reviens vers vous au sujet de ${care} chez ${centre}. Je peux regarder un horaire avec vous, si vous le souhaitez.`,
+    `${hello}, je me permets de revenir vers vous au sujet ${about} à ${centre}. Souhaitez-vous que je vous propose un rendez-vous ?`,
+    `${hello}, je reviens vers vous au sujet ${about} à ${centre}. Puis-je vous proposer un créneau ?`,
   ];
 }
 
 function relanceCareLabel(conversation) {
-  const offer = String(conversation.offerLabel || "").trim();
-  if (offer && !isJunkTreatment(offer) && !/^offre\s*\d+/i.test(offer)) {
-    return offer;
-  }
-  const need = String(
-    conversation.qualification?.need || conversation.treatment || "",
-  ).trim();
-  if (need && !isJunkTreatment(need)) {
-    return need;
-  }
   const family = familyFromTreatment(
-    `${conversation.treatment || ""} ${conversation.campaign || ""}`,
+    `${conversation.treatment || ""} ${conversation.campaign || ""} ${conversation.qualification?.need || ""} ${conversation.offerLabel || ""}`,
   );
+  const phrase = naturalOfferPhrase(
+    family,
+    conversation.offerLabel ||
+      conversation.qualification?.need ||
+      conversation.treatment ||
+      "",
+  );
+  if (phrase) {
+    return phrase;
+  }
   if (family === "minceur") {
-    return "votre bilan minceur";
+    return "un soin minceur";
   }
   if (family === "visage") {
-    return "votre soin visage";
+    return "un soin visage";
   }
   if (family === "epilation") {
-    return "votre épilation";
+    return "une épilation définitive";
   }
   return "votre soin";
 }
@@ -1803,6 +1842,7 @@ module.exports = {
   familyFromTreatment,
   guardSlots,
   isSlotBusy,
+  remainingOfferedSlots,
   BILAN_DURATION_MINUTES,
   lastLeadAt,
   lastSeyaAt,

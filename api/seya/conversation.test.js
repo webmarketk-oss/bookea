@@ -588,12 +588,72 @@ test("ok merci après un RDV déjà confirmé : elle ne reprend pas le créneau"
     now: NOW,
   });
   assert.equal(result.shouldBook, null);
-  assert.equal(result.conversation.status, "RDV confirmé");
+  assert.equal(result.conversation.status, "Terminé");
   assert.doesNotMatch(
     lastSeya(result.conversation),
-    /n['’]est plus disponible|zone souhaitez-vous|je peux vous proposer|10h30|11h00/i,
+    /n['’]est plus disponible|zone souhaitez-vous|je peux vous proposer|10h30|11h00|dites-moi un jour/i,
   );
   assert.match(lastSeya(result.conversation), /plaisir|très bien|à bientôt/i);
+});
+
+test("merci à bientôt après un RDV confirmé : elle clôture, elle ne redemande pas un jour", async () => {
+  let conversation = startConversation(
+    {
+      leadId: "lead-merci-bientot",
+      centerId: "jfg-clinique-clermont",
+      firstName: "Samantha",
+      lastName: "Test",
+      phone: "0611223344",
+      treatment: "Soin minceur",
+    },
+    "JFG Clinique Clermont",
+    seya,
+  );
+  conversation.status = "RDV confirmé";
+  conversation.bookedSlot = {
+    date: "2026-10-05",
+    time: "17:30",
+    label: "lun. 05/10 à 17h30",
+  };
+  conversation.qualification = {
+    need: "Soin minceur",
+    zone: "",
+    delay: "",
+    availability: "",
+  };
+  conversation.bookingState = {
+    ...(conversation.bookingState || {}),
+    appointmentStatus: "confirmed",
+    lastOfferedSlots: [],
+  };
+  conversation.messages.push(
+    {
+      author: "seya",
+      text: "Vous êtes plutôt disponible en début de semaine, ou plutôt en fin de semaine ?",
+    },
+    {
+      author: "seya",
+      text: "Parfait, votre rendez-vous est confirmé ✅ Lundi 5 octobre à 17h30",
+    },
+  );
+  const result = await generateSeyaReply({
+    conversation,
+    text: "Merci à bientôt",
+    seya,
+    appointments: [],
+    hours: hours(),
+    centerName: "JFG Clinique Clermont",
+    centerAddress: "3 rue Eugène Gilbert",
+    centerId: "jfg-clinique-clermont",
+    now: NOW,
+  });
+  assert.equal(result.shouldBook, null);
+  assert.equal(result.conversation.status, "Terminé");
+  assert.match(lastSeya(result.conversation), /à bientôt|plaisir/i);
+  assert.doesNotMatch(
+    lastSeya(result.conversation),
+    /dites-moi un jour|je regarde tout de suite|créneau|horaire/i,
+  );
 });
 
 const CONFIRMATION_BRIEF = `Dès qu’un rendez-vous est enregistré et confirmé dans l’agenda, envoie ce message en renseignant le jour, la date et l’heure exacts :

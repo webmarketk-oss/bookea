@@ -99,6 +99,7 @@ async function generateSeyaReply({
     now,
     bookingState,
     guarded,
+    appointments,
   };
   const fallback = applyLeadReply(conversationWithState, text, seya, resolvedSlots, extras);
   const draft = lastSeyaText(fallback.conversation);

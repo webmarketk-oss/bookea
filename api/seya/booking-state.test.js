@@ -333,6 +333,29 @@ test("un RDV de 75 min à 15h bloque 16h, comme à la réservation", () => {
   assert.equal(slots.some((slot) => slot.time === "16:00"), false);
 });
 
+test("une pause occupe le planning : Seya ne propose pas ce créneau", () => {
+  const { isSlotBusy, remainingOfferedSlots } = require("./agent");
+  const date = "2026-10-05";
+  assert.equal(
+    isSlotBusy(
+      [{ date, start: "16:00", duration: 60, kind: "Pause", status: "Confirmé" }],
+      date,
+      "16:00",
+    ),
+    true,
+  );
+  const offered = [
+    { date, time: "15:00", label: "lun. 05/10 à 15h00" },
+    { date, time: "15:30", label: "lun. 05/10 à 15h30" },
+    { date, time: "16:00", label: "lun. 05/10 à 16h00" },
+  ];
+  const remaining = remainingOfferedSlots(offered, [], offered[2]);
+  assert.deepEqual(
+    remaining.map((slot) => slot.time),
+    ["15:00", "15:30"],
+  );
+});
+
 test("un créneau déjà refusé n’est pas reproposé", () => {
   const { pickSlotsForState } = require("./agent");
   const date = "2026-10-15";
