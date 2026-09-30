@@ -24,6 +24,7 @@ import {
 import { inactiveLeadStatuses } from "@/lib/lead-statuses";
 import {
   applyLeadReply,
+  createSeyaMessage,
   lastSeyaMessage,
   suggestAvailableSlots,
   whatsappHref,
@@ -49,6 +50,7 @@ import {
 import {
   BOOKEA_SHARED_WHATSAPP_NUMBER,
   formatSharedWhatsAppNumber,
+  newTextsFromAuthor,
 } from "@/lib/seya-whatsapp";
 import { displayPersonName } from "@/lib/seya-person-name";
 import { SeyaInbox } from "@/components/seya/seya-inbox";
@@ -197,16 +199,21 @@ function buildSeyaTasks({
   return tasks;
 }
 
-function hoursSinceLastLead(conversation: SeyaConversation) {
-  const last = [...(conversation.messages || [])]
+function lastOutgoingMessage(conversation: SeyaConversation) {
+  return [...(conversation.messages || [])]
     .reverse()
-    .find((item) => item.author === "lead");
-  const at = last?.at || conversation.updatedAt;
-  if (!at) {
-    return 999;
+    .find((item) => item.author === "seya" || item.author === "centre");
+}
+
+function prefersWelcomeTemplate(conversation: SeyaConversation, text: string) {
+  const leadReplied = (conversation.messages || []).some(
+    (item) => item.author === "lead",
+  );
+  if (leadReplied) {
+    return false;
   }
-  const hours = (Date.now() - new Date(at).getTime()) / 3600000;
-  return Number.isFinite(hours) ? hours : 999;
+  const opening = lastSeyaMessage(conversation)?.text?.trim() || "";
+  return Boolean(opening) && opening === text.trim();
 }
 
 export default function SeyaCrmPage() {
@@ -519,65 +526,98 @@ export default function SeyaCrmPage() {
     });
   }
 
-  async function sendWhatsApp(conversation: SeyaConversation) {
-    const message = lastSeyaMessage(conversation);
-    if (!message || !conversation.phone.trim()) {
+  async function postWhatsAppSend(
+    conversation: SeyaConversation,
+    text: string,
+    preferTemplate: boolean,
+  ) {
+    const response = await fetch("/api/seya/whatsapp", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "send",
+        phone: conversation.phone,
+        text,
+        firstName: conversation.firstName,
+        centerName,
+        treatment:
+          conversation.qualification?.need || conversation.treatment || "",
+        preferTemplate,
+      }),
+    });
+    return (await response.json().catch(() => ({}))) as {
+      sent?: boolean;
+      reason?: string;
+      error?: string;
+    };
+  }
+
+  function explainWhatsAppFailure(payload: {
+    reason?: string;
+    error?: string;
+  }) {
+    if (payload.reason === "template_required") {
+      return "WhatsApp n’accepte un texte libre que si le prospect a écrit dans les 24 h. Le message n’est pas parti.";
+    }
+    return payload.error || "L’envoi Bookea a échoué. Réessaie dans une minute.";
+  }
+
+  async function deliverWhatsAppTexts(
+    conversation: SeyaConversation,
+    texts: string[],
+  ) {
+    if (!conversation.phone.trim()) {
       setAgentFeedback("Ce prospect n’a pas de numéro WhatsApp.");
-      return;
+      return false;
+    }
+    const outgoing = texts.map((item) => item.trim()).filter(Boolean);
+    if (outgoing.length === 0) {
+      return true;
     }
 
-    if (whatsappConnected) {
-      setAgentFeedback("Envoi depuis le numéro Bookea…");
-      try {
-        const response = await fetch("/api/seya/whatsapp", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            action: "send",
-            phone: conversation.phone,
-            text: message.text,
-            firstName: conversation.firstName,
-            centerName,
-            treatment:
-              conversation.qualification?.need || conversation.treatment || "",
-            preferTemplate:
-              conversation.status === "À envoyer" ||
-              Boolean(conversation.sendError) ||
-              !conversation.messages.some((item) => item.author === "lead") ||
-              hoursSinceLastLead(conversation) >= 24,
-          }),
-        });
-        const payload = (await response.json().catch(() => ({}))) as {
-          sent?: boolean;
-          reason?: string;
-          error?: string;
-        };
+    if (!whatsappConnected) {
+      window.open(whatsappHref(conversation.phone, outgoing.join("\n\n")), "_blank");
+      return true;
+    }
+
+    setAgentFeedback("Envoi depuis le numéro Bookea…");
+    try {
+      for (const text of outgoing) {
+        const payload = await postWhatsAppSend(
+          conversation,
+          text,
+          prefersWelcomeTemplate(conversation, text),
+        );
         if (!payload.sent) {
           updateConversation({
             ...conversation,
             sendError: payload.error || payload.reason || "échec WhatsApp",
             updatedAt: new Date().toISOString(),
           });
-          if (payload.reason === "template_required") {
-            setAgentFeedback(
-              "Meta exige un modèle pour le premier message. On le crée ensuite dans le Gestionnaire WhatsApp.",
-            );
-          } else {
-            setAgentFeedback(
-              payload.error || "L’envoi Bookea a échoué. Réessaie dans une minute.",
-            );
-          }
-          return;
+          setAgentFeedback(explainWhatsAppFailure(payload));
+          return false;
         }
-        setAgentFeedback(
-          `Message envoyé depuis ${formatSharedWhatsAppNumber()} (Bookea).`,
-        );
-      } catch {
-        setAgentFeedback("Impossible de joindre l’API WhatsApp Bookea.");
-        return;
       }
-    } else {
-      window.open(whatsappHref(conversation.phone, message.text), "_blank");
+      setAgentFeedback(
+        `Message envoyé depuis ${formatSharedWhatsAppNumber()} (Bookea).`,
+      );
+      return true;
+    } catch {
+      setAgentFeedback("Impossible de joindre l’API WhatsApp Bookea.");
+      return false;
+    }
+  }
+
+  async function sendWhatsApp(conversation: SeyaConversation) {
+    const message = lastOutgoingMessage(conversation);
+    if (!message || !conversation.phone.trim()) {
+      setAgentFeedback("Ce prospect n’a pas de numéro WhatsApp.");
+      return;
+    }
+
+    const sent = await deliverWhatsAppTexts(conversation, [message.text]);
+    if (!sent) {
+      return;
     }
 
     const next: SeyaConversation = {
@@ -601,6 +641,59 @@ export default function SeyaCrmPage() {
       }
     } catch {
       // The WhatsApp window still opens even if the CRM note fails.
+    }
+  }
+
+  async function sendCentreReply() {
+    if (!selectedConversation || replying) {
+      return;
+    }
+
+    const text = reply.trim();
+    if (!text) {
+      return;
+    }
+
+    setReplying(true);
+    setReply("");
+    const sent = await deliverWhatsAppTexts(selectedConversation, [text]);
+    setReplying(false);
+    if (!sent) {
+      setReply(text);
+      return;
+    }
+
+    const next: SeyaConversation = {
+      ...selectedConversation,
+      messages: [
+        ...selectedConversation.messages,
+        createSeyaMessage("centre", text),
+      ],
+      status:
+        selectedConversation.status === "À envoyer"
+          ? "En cours"
+          : selectedConversation.status,
+      sendError: null,
+      sentVia: "whatsapp",
+      updatedAt: new Date().toISOString(),
+    };
+    updateConversation(next);
+
+    const lead = leads.find((item) => item.id === selectedConversation.leadId);
+    try {
+      await addCrmLeadActivity(
+        selectedConversation.leadId,
+        `Seya WhatsApp : ${text}`,
+      );
+      await updateCrmLeadNextAction(
+        selectedConversation.leadId,
+        "Agent Seya WhatsApp",
+      );
+      if (lead && lead.status === "Nouveau") {
+        await updateCrmLeadStatus(lead, "Message WhatsApp envoyé");
+      }
+    } catch {
+      // The WhatsApp send already succeeded.
     }
   }
 
@@ -671,6 +764,23 @@ export default function SeyaCrmPage() {
     }
 
     updateConversation(result.conversation);
+
+    const seyaTexts = newTextsFromAuthor(
+      selectedConversation.messages,
+      result.conversation.messages,
+      "seya",
+    );
+    if (seyaTexts.length > 0) {
+      const sent = await deliverWhatsAppTexts(result.conversation, seyaTexts);
+      if (sent) {
+        updateConversation({
+          ...result.conversation,
+          sendError: null,
+          sentVia: "whatsapp",
+          updatedAt: new Date().toISOString(),
+        });
+      }
+    }
 
     if (!result.shouldBook) {
       return;
@@ -794,7 +904,7 @@ export default function SeyaCrmPage() {
             setReply("");
           }}
           onReplyChange={setReply}
-          onSendReply={() => void submitLeadReply()}
+          onSendReply={() => void sendCentreReply()}
           onSendWhatsApp={() => {
             if (selectedConversation) {
               void sendWhatsApp(selectedConversation);

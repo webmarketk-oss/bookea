@@ -360,7 +360,7 @@ export function SeyaInbox({
                       }
                     }}
                     placeholder={
-                      busy ? "Seya réfléchit…" : "Écrire une réponse au prospect…"
+                      busy ? "Envoi WhatsApp…" : "Écrire au prospect sur WhatsApp…"
                     }
                     disabled={busy}
                     className="h-12 flex-1 bg-transparent text-sm font-medium outline-none disabled:opacity-60"

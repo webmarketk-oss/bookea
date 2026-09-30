@@ -1070,15 +1070,22 @@ async function sendSharedWhatsApp(phone, text, extras = {}) {
     }
 
     textError = textResult.data?.error || {};
-    if (!isTemplateRequired(textError)) {
+    if (isTemplateRequired(textError)) {
       return {
         sent: false,
-        reason: "send_failed",
+        reason: "template_required",
         code: textError.code || null,
         error: frenchSendError(textError),
         to: intl,
       };
     }
+    return {
+      sent: false,
+      reason: "send_failed",
+      code: textError.code || null,
+      error: frenchSendError(textError),
+      to: intl,
+    };
   }
 
   const listed = await listTemplates();

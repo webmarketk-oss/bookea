@@ -30,3 +30,29 @@ export function formatSharedWhatsAppNumber(value = sharedWhatsAppNumber()) {
   }
   return value || "Numéro Bookea unique";
 }
+
+export function newTextsFromAuthor(
+  previous: { author?: string; text?: string }[] = [],
+  next: { author?: string; text?: string }[] = [],
+  author: string,
+) {
+  const seen = new Set(
+    previous
+      .filter((item) => item?.author === author)
+      .map((item) => String(item?.text || "").trim())
+      .filter(Boolean),
+  );
+  const texts: string[] = [];
+  for (const item of next) {
+    if (item?.author !== author) {
+      continue;
+    }
+    const text = String(item?.text || "").trim();
+    if (!text || seen.has(text)) {
+      continue;
+    }
+    seen.add(text);
+    texts.push(text);
+  }
+  return texts;
+}
