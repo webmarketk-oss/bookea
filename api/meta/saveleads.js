@@ -41,6 +41,7 @@ module.exports = async function handler(req, res) {
     }
 
     const mapped = mapIncomingLead(payload, req.query);
+    const sourceName = resolveIncomingSource(payload, req.query, "Facebook");
 
     if (!mapped.phone && !mapped.email) {
       return res.status(400).json({ ok: false, error: "missing_contact" });
@@ -64,6 +65,7 @@ module.exports = async function handler(req, res) {
     );
     const leadId = await importPostedLead(supabase, center.id, mapped, {
       possibleDuplicate: Boolean(existingId),
+      sourceName,
     });
 
     let whatsapp = { sent: false, skipped: "no_phone" };
@@ -101,6 +103,10 @@ module.exports = async function handler(req, res) {
 function parsePayload(body) {
   if (!body) {
     return {};
+  }
+
+  if (Array.isArray(body)) {
+    return parsePayload(body[0]);
   }
 
   if (typeof body === "string") {
@@ -238,8 +244,9 @@ function cleanIncomingTreatment(value, fields) {
 }
 
 async function importPostedLead(supabase, centerId, mapped, options = {}) {
+  const sourceName = options.sourceName || "Facebook";
   const [sourceId, campaignId, serviceId] = await Promise.all([
-    ensureLeadSource(supabase, centerId, "Facebook"),
+    ensureLeadSource(supabase, centerId, sourceName),
     ensureCampaign(supabase, centerId, mapped.campaign),
     ensureService(supabase, centerId, mapped.treatment),
   ]);
@@ -253,8 +260,8 @@ async function importPostedLead(supabase, centerId, mapped, options = {}) {
   );
   const now = new Date().toISOString();
   const comment = mapped.pageName
-    ? `Lead Meta importé depuis ${mapped.pageName}.`
-    : `Lead importé depuis ${mapped.formName || "Meta"}.`;
+    ? `Lead importé depuis ${mapped.pageName}.`
+    : `Lead importé depuis ${mapped.formName || sourceName}.`;
 
   const { data: crmLead, error: leadError } = await supabase
     .from("leads")
@@ -265,7 +272,9 @@ async function importPostedLead(supabase, centerId, mapped, options = {}) {
       campaign_id: campaignId,
       service_id: serviceId,
       status: "Nouveau",
-      next_action: mapped.pageName ? `Lead Meta — ${mapped.pageName}` : "À contacter",
+      next_action: mapped.pageName
+        ? `Lead ${sourceName} — ${mapped.pageName}`
+        : "À contacter",
       latest_comment: comment,
       amount_cure_ttc: 0,
       created_at: now,
@@ -544,9 +553,38 @@ function flattenFields(raw, prefix = "") {
   return result;
 }
 
+function resolveIncomingSource(payload, query, fallback = "Facebook") {
+  const raw = firstValue(
+    query?.source,
+    query?.origin,
+    payload?.source,
+    payload?.origin,
+    payload?.via,
+  );
+  const needle = String(raw || fallback || "facebook")
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+  if (/systeme/.test(needle)) {
+    return "Systeme.io";
+  }
+  if (/make/.test(needle)) {
+    return "Make";
+  }
+  if (/savemyleads|save.?my.?leads/.test(needle)) {
+    return "SaveMyLeads";
+  }
+  if (/facebook|meta/.test(needle)) {
+    return "Facebook";
+  }
+  const label = String(raw || fallback || "Facebook").trim();
+  return label || "Facebook";
+}
+
 function buildLeadNote(lead) {
   return [
-    "Lead reçu via webhook Meta.",
+    "Lead reçu via webhook Bookea.",
     lead.pageName ? `Page : ${lead.pageName}.` : null,
     lead.formName ? `Formulaire : ${lead.formName}.` : null,
     lead.phone ? `Téléphone : ${lead.phone}.` : null,
@@ -771,3 +809,4 @@ function firstValue(...values) {
 }
 
 module.exports.mapIncomingLead = mapIncomingLead;
+module.exports.resolveIncomingSource = resolveIncomingSource;

@@ -114,3 +114,13 @@ test("payload_offer_title est lu comme campagne", () => {
 
   assert.equal(mapped.campaign, "Laser jumelles");
 });
+
+test("Make / Systeme.io : la source n’est pas Facebook", () => {
+  const { resolveIncomingSource } = require("./saveleads");
+  assert.equal(resolveIncomingSource({}, { source: "make" }, "Facebook"), "Make");
+  assert.equal(
+    resolveIncomingSource({ source: "systeme.io" }, {}, "Facebook"),
+    "Systeme.io",
+  );
+  assert.equal(resolveIncomingSource({}, {}, "Facebook"), "Facebook");
+});

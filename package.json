@@ -7,7 +7,7 @@
     "build": "next build --webpack && rm -rf dist .output && cp -R out dist && node scripts/create-static-route-indexes.mjs && mkdir -p dist/server dist/.openai .output/server .output/public && cp .openai/hosting.json dist/.openai/hosting.json && cp scripts/static-worker.js dist/server/index.js && cp scripts/static-worker.js .output/server/index.js && cp -R dist/. .output/public/",
     "start": "next start",
     "lint": "eslint",
-    "test": "node --test --experimental-strip-types api/seya/*.test.js api/meta/*.test.js lib/auth-recovery.test.js lib/appointment-lead-status.test.ts lib/appointment-position-status.test.ts lib/client-balance.test.ts lib/seya-agenda.test.ts lib/client-notify.test.ts lib/practitioner-stats.test.ts lib/seya-whatsapp.test.ts"
+    "test": "node --test --experimental-strip-types api/seya/*.test.js api/meta/*.test.js api/make/*.test.js lib/auth-recovery.test.js lib/appointment-lead-status.test.ts lib/appointment-position-status.test.ts lib/client-balance.test.ts lib/seya-agenda.test.ts lib/client-notify.test.ts lib/practitioner-stats.test.ts lib/seya-whatsapp.test.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.6.0",
