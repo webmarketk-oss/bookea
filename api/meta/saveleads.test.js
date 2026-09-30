@@ -40,6 +40,31 @@ test("l’offre fonctionne avec key/value", () => {
   assert.equal(mapped.campaign, "Hydrafacial");
 });
 
+test("Systeme.io : un prénom de formulaire n’est pas écrasé par un member_first_name vide", () => {
+  const mapped = mapIncomingLead({
+    first_name: "Clara",
+    last_name: "Martin",
+    payload_member_first_name: "",
+    payload_member_last_name: "",
+    payload_member_email: "clara@test.fr",
+    payload_contact_phone_number: "0611111111",
+  });
+
+  assert.equal(mapped.firstName, "Clara");
+  assert.equal(mapped.lastName, "Martin");
+});
+
+test("Systeme.io : le nom complet du membre suffit", () => {
+  const mapped = mapIncomingLead({
+    payload_member_name: "Léa Bernard",
+    payload_member_email: "lea@test.fr",
+    payload_contact_phone_number: "0622222222",
+  });
+
+  assert.equal(mapped.firstName, "Léa");
+  assert.equal(mapped.lastName, "Bernard");
+});
+
 test("Systeme.io : même si email = mail affilié, on garde le mail du membre", () => {
   const mapped = mapIncomingLead({
     email: "webmarket.k@gmail.com",

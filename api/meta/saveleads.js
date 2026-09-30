@@ -137,18 +137,27 @@ function mapIncomingLead(payload, query) {
   const person = resolvePersonName(
     {
       ...fields,
-      first_name: pickLeadValue(fields, [
+      ...pickedField(fields, "first_name", [
         "member_first_name",
+        "contact_first_name",
         "first_name",
         "prenom",
         "firstname",
       ]),
-      last_name: pickLeadValue(fields, ["member_last_name", "last_name", "lastname"]),
-      full_name: pickLeadValue(fields, [
+      ...pickedField(fields, "last_name", [
+        "member_last_name",
+        "contact_last_name",
+        "last_name",
+        "lastname",
+        "surname",
+      ]),
+      ...pickedField(fields, "full_name", [
         "member_name",
+        "contact_name",
         "full_name",
         "nom_complet",
         "prenom_nom",
+        "name",
       ]),
     },
     pickExact,
@@ -589,23 +598,51 @@ function pick(fields, names) {
 function pickLeadValue(fields, names) {
   const keys = Object.keys(fields || {}).filter((key) => !isAffiliateField(key));
   const preferred = keys.filter((key) => /(?:^|_)(member|contact)(?:_|$)/.test(key));
+  const blockedNames = affiliateNamesFrom(fields);
 
   for (const name of names) {
     for (const group of [preferred, keys]) {
       if (fields[name] && group.includes(name)) {
-        return String(fields[name]).trim();
+        const value = String(fields[name]).trim();
+        if (value && !blockedNames.has(normalizeNameValue(value))) {
+          return value;
+        }
       }
-      const match = group.find(
+      const matches = group.filter(
         (key) =>
           key === name || key.endsWith(`_${name}`) || key.endsWith(`.${name}`),
       );
-      if (match && fields[match]) {
-        return String(fields[match]).trim();
+      for (const match of matches) {
+        const value = String(fields[match] || "").trim();
+        if (value && !blockedNames.has(normalizeNameValue(value))) {
+          return value;
+        }
       }
     }
   }
 
   return "";
+}
+
+function pickedField(fields, key, names) {
+  const value = pickLeadValue(fields, names);
+  return value ? { [key]: value } : {};
+}
+
+function normalizeNameValue(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+}
+
+function affiliateNamesFrom(fields) {
+  return new Set(
+    Object.entries(fields || {})
+      .filter(([key, value]) => isAffiliateField(key) && /name/.test(key) && value)
+      .map(([, value]) => normalizeNameValue(value)),
+  );
 }
 
 function pickUseful(fields, names) {
