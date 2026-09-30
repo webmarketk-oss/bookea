@@ -17,6 +17,7 @@ const {
   pickSlotsForMessage,
 } = require("./agent");
 const { dbStatusWhenSlotPositioned } = require("./booking-state");
+const { isSameSeyaConversation } = require("./conversation-key");
 const { isSeyaOff, writeSeyaConversations } = require("./store");
 
 const GRAPH_VERSION = "v21.0";
@@ -389,7 +390,7 @@ async function handleIncoming(supabase, incoming) {
 
   const saved = persistableConversations([
     next,
-    ...conversations.filter((item) => item.leadId !== next.leadId),
+    ...conversations.filter((item) => !isSameSeyaConversation(item, next)),
   ]);
 
   await writeSeyaConversations(supabase, center.id, saved);

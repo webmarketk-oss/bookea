@@ -1,4 +1,8 @@
 const {
+  persistableConversation,
+  persistableConversations,
+} = require("./conversation-key");
+const {
   applyBookingMessage,
   emptyBookingState,
   emptySlotFallback,
@@ -1595,36 +1599,6 @@ function fallbackAfterNote(qualification, conversation) {
     return "Vous voulez que je vous propose un créneau, ou vous avez une autre question ?";
   }
   return "Vous cherchez plutôt un soin minceur, un soin visage ou une épilation ?";
-}
-
-function persistableConversation(item) {
-  if (!item || typeof item !== "object") {
-    return item;
-  }
-  const { _seya, ...rest } = item;
-  return rest;
-}
-
-function lastActivityAt(item) {
-  const messages = item?.messages || [];
-  const last = messages[messages.length - 1];
-  return String(last?.at || item?.updatedAt || "");
-}
-
-function isLiveSeyaThread(item) {
-  const messages = item?.messages || [];
-  return messages.some((entry) => entry?.author === "lead") || messages.length > 2;
-}
-
-function persistableConversations(list) {
-  const items = (Array.isArray(list) ? list : []).map(persistableConversation);
-  const live = items
-    .filter(isLiveSeyaThread)
-    .sort((a, b) => lastActivityAt(b).localeCompare(lastActivityAt(a)));
-  const rest = items
-    .filter((item) => !isLiveSeyaThread(item))
-    .sort((a, b) => lastActivityAt(b).localeCompare(lastActivityAt(a)));
-  return [...live.slice(0, 200), ...rest.slice(0, 40)];
 }
 
 function finishLeadReply(

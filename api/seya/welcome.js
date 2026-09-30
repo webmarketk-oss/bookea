@@ -1,4 +1,5 @@
 const { familyFromTreatment, inferFamily, persistableConversations, startConversation } = require("./agent");
+const { isSameSeyaConversation } = require("./conversation-key");
 const { isSeyaOff, isSeyaWelcomeOff, readCenterSeya, writeSeyaConversations } = require("./store");
 const { sendSharedWhatsApp } = require("./whatsapp");
 
@@ -71,11 +72,7 @@ async function welcomeNewLead(supabase, center, context, now = new Date()) {
     center.id,
     persistableConversations([
       next,
-      ...conversations.filter(
-        (item) =>
-          item.leadId !== next.leadId &&
-          !(phoneKey && last9(item.phone) === phoneKey),
-      ),
+      ...conversations.filter((item) => !isSameSeyaConversation(item, next)),
     ]),
   );
 

@@ -36,7 +36,6 @@ const statusStyles: Record<SeyaConversation["status"], string> = {
 };
 
 type FilterId = "toutes" | "agir" | "attente" | "fermees";
-let savedInboxQuery = "";
 
 function timeAgo(iso?: string | null) {
   if (!iso) return "";
@@ -162,7 +161,7 @@ export function SeyaInbox({
   onPickSlot: (index: string) => void;
   onMarkHealthReviewed?: () => void;
 }) {
-  const [query, setQuery] = useState(savedInboxQuery);
+  const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<FilterId>("toutes");
   const threadRef = useRef<HTMLDivElement>(null);
 
@@ -215,7 +214,6 @@ export function SeyaInbox({
               <input
                 value={query}
                 onChange={(event) => {
-                  savedInboxQuery = event.target.value;
                   setQuery(event.target.value);
                 }}
                 placeholder="Rechercher un prospect…"

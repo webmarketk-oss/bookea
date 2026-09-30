@@ -166,6 +166,32 @@ test("sauver une conversation ne réactive pas Seya", async () => {
   assert.equal(supabase.stored().seya.conversations[0].leadId, "lead-1");
 });
 
+test("écrire un accueil ne doit pas effacer un fil WhatsApp déjà en base", async () => {
+  const supabase = mockCenterClient({
+    whatsappAgentEnabled: true,
+    conversations: [
+      {
+        phone: "0611223344",
+        firstName: "Camille",
+        messages: [
+          { author: "seya", text: "Bonjour", at: "2026-09-20T10:00:00.000Z" },
+          { author: "lead", text: "Oui", at: "2026-09-20T10:01:00.000Z" },
+        ],
+      },
+    ],
+  });
+  await writeSeyaConversations(supabase, "center-1", [
+    {
+      leadId: "lead-new",
+      phone: "0699999999",
+      messages: [{ author: "seya", text: "ouverture" }],
+    },
+  ]);
+  const stored = supabase.stored().seya.conversations;
+  assert.ok(stored.some((item) => item.phone === "0611223344"));
+  assert.ok(stored.some((item) => item.leadId === "lead-new"));
+});
+
 test("un fil de plus de 24 h n’est plus considéré comme actif", () => {
   const stale = {
     status: "En cours",

@@ -1,4 +1,8 @@
 import { naturalOfferPhrase } from "@/api/seya/care-family";
+import {
+  mergeSeyaConversationLists,
+  persistableConversations,
+} from "@/api/seya/conversation-key";
 import { getActiveCenterContext } from "@/lib/center-access";
 import { sanitizePersonName } from "@/lib/seya-person-name";
 import { createClient } from "@/lib/supabase";
@@ -879,13 +883,11 @@ export async function loadSeyaAgentSettings() {
   const remoteConversations = Array.isArray(remote.conversations)
     ? (remote.conversations as SeyaConversation[])
     : [];
-  const conversations = conversationsForCenter(
-    mergeSeyaConversations(
-      remoteConversations,
-      readLocalSeyaConversations(context.centerId),
-    ),
-    context.centerId,
+  const merged = mergeSeyaConversations(
+    remoteConversations,
+    readLocalSeyaConversations(context.centerId),
   );
+  const conversations = merged.length > 0 ? merged : remoteConversations;
   writeLocalSeyaConversations(context.centerId, conversations);
 
   return {
@@ -896,63 +898,28 @@ export async function loadSeyaAgentSettings() {
   };
 }
 
-function conversationsForCenter(
-  conversations: SeyaConversation[],
-  centerId: string,
-) {
-  return conversations.filter(
-    (item) => !item.centerId || item.centerId === centerId,
-  );
-}
-
-function conversationIsFresher(
-  next: SeyaConversation,
-  current: SeyaConversation,
-) {
-  const nextCount = next.messages?.length || 0;
-  const currentCount = current.messages?.length || 0;
-  if (nextCount !== currentCount) {
-    return nextCount > currentCount;
-  }
-  const nextAt = lastActivityAt(next);
-  const currentAt = lastActivityAt(current);
-  if (nextAt !== currentAt) {
-    return nextAt > currentAt;
-  }
-  return String(next.updatedAt || "") >= String(current.updatedAt || "");
-}
-
 export function mergeSeyaConversations(
   ...lists: SeyaConversation[][]
 ): SeyaConversation[] {
-  const merged = new Map<string, SeyaConversation>();
-
-  for (const list of lists) {
-    for (const item of list) {
-      if (!item?.leadId) {
-        continue;
+  const cleaned = lists.map((list) =>
+    (list || []).flatMap((item) => {
+      if (!item) {
+        return [];
       }
-      const current = merged.get(item.leadId);
-      if (!current || conversationIsFresher(item, current)) {
-        const person = sanitizePersonName(item.firstName, item.lastName);
-        const { _seya, ...rest } = item as SeyaConversation & { _seya?: unknown };
-        merged.set(item.leadId, {
+      const person = sanitizePersonName(item.firstName, item.lastName);
+      const { _seya, ...rest } = item as SeyaConversation & { _seya?: unknown };
+      return [
+        {
           ...rest,
           firstName: person.firstName,
           lastName: person.lastName,
-        });
-      }
-    }
-  }
-
-  const all = [...merged.values()];
-  const live = all
-    .filter(isLiveSeyaThread)
-    .sort((a, b) => lastActivityAt(b).localeCompare(lastActivityAt(a)));
-  const rest = all
-    .filter((item) => !isLiveSeyaThread(item))
-    .sort((a, b) => lastActivityAt(b).localeCompare(lastActivityAt(a)));
-  return [...live.slice(0, 200), ...rest.slice(0, 40)];
+        } as SeyaConversation,
+      ];
+    }),
+  );
+  return persistableConversations(
+    mergeSeyaConversationLists(...cleaned),
+  ) as SeyaConversation[];
 }
 
 export async function saveSeyaConversations(
@@ -974,17 +941,10 @@ export async function saveSeyaConversations(
   const remoteConversations = Array.isArray(currentSeya.conversations)
     ? (currentSeya.conversations as SeyaConversation[])
     : [];
-  const next = conversationsForCenter(
-    mergeSeyaConversations(remoteConversations, conversations),
-    context.centerId,
-  );
+  const next = mergeSeyaConversations(remoteConversations, conversations);
   if (next.length === 0 && remoteConversations.length > 0) {
-    const kept = conversationsForCenter(
-      mergeSeyaConversations(remoteConversations),
-      context.centerId,
-    );
-    writeLocalSeyaConversations(context.centerId, kept);
-    return kept;
+    writeLocalSeyaConversations(context.centerId, remoteConversations);
+    return remoteConversations;
   }
   writeLocalSeyaConversations(context.centerId, next);
   const { error } = await supabase

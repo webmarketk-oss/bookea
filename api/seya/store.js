@@ -1,3 +1,8 @@
+const {
+  mergeSeyaConversationLists,
+  persistableConversations,
+} = require("./conversation-key");
+
 function asRecord(value) {
   return value && typeof value === "object" ? value : {};
 }
@@ -46,6 +51,10 @@ function isolateSeyaFromRemote(remote, local) {
 
 async function writeSeyaConversations(supabase, centerId, conversations) {
   const { settings, seya } = await readCenterSeya(supabase, centerId);
+  const existing = Array.isArray(seya.conversations) ? seya.conversations : [];
+  const next = persistableConversations(
+    mergeSeyaConversationLists(existing, conversations),
+  );
   const { error } = await supabase
     .from("centers")
     .update({
@@ -53,7 +62,7 @@ async function writeSeyaConversations(supabase, centerId, conversations) {
         ...settings,
         seya: {
           ...seya,
-          conversations,
+          conversations: next,
         },
       },
     })
