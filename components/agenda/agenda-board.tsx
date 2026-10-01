@@ -21,6 +21,10 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { cabins, practitioners } from "@/lib/agenda-data";
 import {
+  CABIN_COLUMN_MIN_PX,
+  cabinColumnWidth,
+} from "@/lib/agenda-board-layout";
+import {
   alignAppointmentCabinId,
   alignAppointmentPractitionerId,
   createCenterCabin,
@@ -164,7 +168,6 @@ const VISIBLE_AGENDA_HOURS = 3;
 const SLOT_STEP_MINUTES = 15;
 const VISIBLE_SLOT_COUNT = (VISIBLE_AGENDA_HOURS * 60) / SLOT_STEP_MINUTES;
 const TIME_COLUMN_PX = 92;
-const CABIN_COLUMN_MIN_PX = 260;
 const MAX_BLOCK_DURATION_MINUTES = 9 * 60;
 const MAX_APPOINTMENT_DURATION_MINUTES = 2 * 60;
 const ALL_DAY_DURATION_MINUTES = 720;
@@ -696,9 +699,9 @@ export default function AgendaBoard() {
         return;
       }
 
-      const nextCabinWidth = Math.max(
-        1,
-        Math.floor(currentBoard.clientWidth - TIME_COLUMN_PX),
+      const nextCabinWidth = cabinColumnWidth(
+        currentBoard.clientWidth - TIME_COLUMN_PX,
+        visibleCabinList.length,
       );
       setCabinColumnWidthPx((current) =>
         current != null && Math.abs(current - nextCabinWidth) < 1
@@ -737,18 +740,6 @@ export default function AgendaBoard() {
     agendaSlots.length,
     visibleCabinList.length,
   ]);
-
-  useLayoutEffect(() => {
-    const board = boardScrollRef.current;
-    if (!board || !cabinColumnWidthPx) {
-      return;
-    }
-
-    const maxIndex = Math.max(0, visibleCabinList.length - 1);
-    const index = Math.round(board.scrollLeft / cabinColumnWidthPx);
-    const nextIndex = Math.min(maxIndex, Math.max(0, index));
-    board.scrollLeft = nextIndex * cabinColumnWidthPx;
-  }, [cabinColumnWidthPx, visibleCabinList.length]);
 
   useLayoutEffect(() => {
     if (activeTab !== "agenda" || agendaView !== "day") {
@@ -826,43 +817,6 @@ export default function AgendaBoard() {
     selectedDate,
     slotRowHeightPx,
   ]);
-
-  useEffect(() => {
-    const section = boardSectionRef.current;
-    const board = boardScrollRef.current;
-
-    if (!section || !board) {
-      return;
-    }
-
-    const scrollBoard = board;
-
-    function onWheel(event: WheelEvent) {
-      event.preventDefault();
-      event.stopPropagation();
-
-      const line = 16;
-      const deltaY =
-        event.deltaMode === 1
-          ? event.deltaY * line
-          : event.deltaMode === 2
-            ? event.deltaY * scrollBoard.clientHeight
-            : event.deltaY;
-      const deltaX =
-        event.deltaMode === 1
-          ? event.deltaX * line
-          : event.deltaMode === 2
-            ? event.deltaX * scrollBoard.clientWidth
-            : event.deltaX;
-
-      scrollBoard.scrollTop += deltaY;
-      scrollBoard.scrollLeft += deltaX;
-    }
-
-    section.addEventListener("wheel", onWheel, { capture: true, passive: false });
-    return () =>
-      section.removeEventListener("wheel", onWheel, { capture: true });
-  }, [activeTab, agendaView, isSelectedDayClosed]);
 
   useEffect(() => {
     function syncPublicBookings() {
@@ -2576,7 +2530,7 @@ export default function AgendaBoard() {
         {activeTab === "agenda" && agendaView === "day" ? (
         <section
           ref={boardSectionRef}
-          className="sticky top-0 z-30 flex h-dvh flex-col overflow-hidden overscroll-none bg-slate-100 px-4 pb-3 pt-1 lg:px-8"
+          className="sticky top-0 z-30 flex h-dvh flex-col overflow-hidden bg-slate-100 px-4 pb-3 pt-1 lg:px-8"
         >
           <div className="mx-auto flex h-full w-full min-w-0 max-w-[1800px] flex-col">
           <div className="mb-1 flex shrink-0 flex-wrap items-center gap-2">
@@ -2623,10 +2577,9 @@ export default function AgendaBoard() {
             <CardContent className="relative h-full min-w-0 w-full p-0">
               <div
                 ref={boardScrollRef}
-                className="isolate h-full w-full overflow-auto overscroll-none"
+                className="isolate h-full w-full overflow-auto"
                 style={{
                   scrollPaddingLeft: TIME_COLUMN_PX,
-                  scrollSnapType: "x mandatory",
                 }}
               >
               <div
@@ -2650,7 +2603,6 @@ export default function AgendaBoard() {
                   <div
                     key={cabin.id}
                     className={`relative z-50 border-r border-slate-100 bg-gradient-to-br ${cabin.color} px-2.5 py-1.5 text-white last:border-r-0`}
-                    style={{ scrollSnapAlign: "start" }}
                     onMouseDown={(event) => event.stopPropagation()}
                     onPointerDown={(event) => event.stopPropagation()}
                   >
