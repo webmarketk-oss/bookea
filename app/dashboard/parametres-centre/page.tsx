@@ -365,6 +365,10 @@ export default function CenterSettingsPage() {
           vatRate: service.vatRate ?? 20,
           onQuote: service.onQuote === true,
           photo: service.photo ?? "",
+          depositAmount: Number(service.depositAmount) || 0,
+          depositEnabled:
+            service.depositEnabled === true ||
+            Number(service.depositAmount) > 0,
         })),
       );
     }
@@ -2154,10 +2158,20 @@ export default function CenterSettingsPage() {
                     label="Acompte"
                     value={service.depositAmount}
                     suffix="€"
-                    disabled={!service.depositEnabled}
-                    onChange={(value) =>
-                      updateService(service.id, "depositAmount", value)
-                    }
+                    onChange={(value) => {
+                      const amount = Number.isFinite(value) ? Math.max(0, value) : 0;
+                      setServices((current) =>
+                        current.map((item) =>
+                          item.id === service.id
+                            ? {
+                                ...item,
+                                depositAmount: amount,
+                                depositEnabled: amount > 0,
+                              }
+                            : item,
+                        ),
+                      );
+                    }}
                   />
                   <AssignmentSelect
                     compact
