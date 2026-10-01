@@ -415,6 +415,7 @@ export default function AgendaBoard() {
   const centerIdRef = useRef("");
   const teamSaveTimerRef = useRef<number | null>(null);
   const cabinSaveTimerRef = useRef<number | null>(null);
+  const agendaNoticeTimerRef = useRef(0);
   const cabinListRef = useRef(cabins);
   const teamPlanningRef = useRef({
     practitioners,
@@ -534,6 +535,22 @@ export default function AgendaBoard() {
   useEffect(() => {
     setPortalTarget(document.body);
   }, []);
+
+  useEffect(() => {
+    if (!agendaNotice) {
+      return;
+    }
+    window.clearTimeout(agendaNoticeTimerRef.current);
+    agendaNoticeTimerRef.current = window.setTimeout(
+      () => setAgendaNotice(""),
+      2600,
+    );
+    return () => window.clearTimeout(agendaNoticeTimerRef.current);
+  }, [agendaNotice]);
+
+  useEffect(() => {
+    setAgendaNotice("");
+  }, [activeTab]);
 
   useEffect(() => {
     if (isLoadingAgenda) {
@@ -1543,8 +1560,6 @@ export default function AgendaBoard() {
         void rescheduleAppointmentSmsJobs(savedAppointment.id);
         if (canOfferAppointmentNotify(savedAppointment, smsSettings)) {
           setMoveNotifyAppointment(savedAppointment);
-        } else {
-          setAgendaNotice("RDV déplacé.");
         }
       })
       .catch((error) => {
@@ -1569,14 +1584,11 @@ export default function AgendaBoard() {
   async function sendSelectedConfirmations(
     appointment: Appointment,
     notify: { email: boolean; sms: boolean },
-    prefix = "",
   ) {
-    const notices = await sendAppointmentConfirmations(appointment, {
+    await sendAppointmentConfirmations(appointment, {
       ...notify,
       settings: smsSettings,
     });
-
-    setAgendaNotice([prefix, ...notices].filter(Boolean).join(" ").trim());
   }
 
   function startMoveAppointment(appointmentId: string) {
@@ -2213,12 +2225,6 @@ export default function AgendaBoard() {
         {agendaError && (
           <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm font-semibold text-amber-800">
             {agendaError}
-          </div>
-        )}
-
-        {agendaNotice && !agendaError && (
-          <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm font-semibold text-emerald-800">
-            {agendaNotice}
           </div>
         )}
 
@@ -3450,6 +3456,20 @@ export default function AgendaBoard() {
           portalTarget,
         )}
 
+      {agendaNotice && !agendaError && portalTarget
+        ? createPortal(
+            <div
+              role="status"
+              className="pointer-events-none fixed bottom-6 left-1/2 z-[240] -translate-x-1/2"
+            >
+              <div className="rounded-2xl border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-800 shadow-2xl">
+                {agendaNotice}
+              </div>
+            </div>,
+            portalTarget,
+          )
+        : null}
+
       {moveNotifyAppointment &&
         portalTarget &&
         createPortal(
@@ -3462,7 +3482,6 @@ export default function AgendaBoard() {
                 return;
               }
               setMoveNotifyAppointment(null);
-              setAgendaNotice("RDV déplacé.");
             }}
             onSend={async (notify) => {
               setIsSendingMoveNotify(true);
@@ -3470,7 +3489,6 @@ export default function AgendaBoard() {
                 await sendSelectedConfirmations(
                   moveNotifyAppointment,
                   notify,
-                  "RDV déplacé.",
                 );
               } finally {
                 setIsSendingMoveNotify(false);
