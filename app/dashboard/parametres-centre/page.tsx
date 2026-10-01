@@ -3237,7 +3237,7 @@ function AssignmentSelect({
       return;
     }
 
-    const onPointerDown = (event: PointerEvent) => {
+    const onPointerDown = (event: Event) => {
       if (!rootRef.current?.contains(event.target as Node)) {
         setOpen(false);
       }

@@ -13,6 +13,7 @@ export function servicePhotoByName(
   );
 }
 export const defaultCoverPosition = { x: 50, y: 50 };
+export const MAX_BANNER_PHOTOS = 8;
 const MAX_STORED_DATA_URL = 220_000;
 
 export type CoverPosition = {
@@ -117,7 +118,7 @@ function isReviewCsvHeader(cells: string[]) {
 
 export async function prepareCenterImage(
   file: File,
-  kind: "cover" | "logo" | "photo",
+  kind: "cover" | "logo" | "photo" | "service",
 ) {
   const maxDim = kind === "logo" ? 640 : 1600;
   const keepPng = kind === "logo" && /png$/i.test(file.type);
@@ -157,7 +158,7 @@ export async function prepareCenterImage(
 
 export async function uploadCenterImage(options: {
   centerId: string;
-  kind: "cover" | "logo" | "photo";
+  kind: "cover" | "logo" | "photo" | "service";
   file: File;
 }) {
   const prepared = await prepareCenterImage(options.file, options.kind);
