@@ -416,7 +416,14 @@ const mostBookedByCategory = [
   },
 ];
 
-const currentOffers = [
+const currentOffers: Array<{
+  title: string;
+  center: string;
+  price: string;
+  oldPrice: string;
+  category: string;
+  photo?: string;
+}> = [
   {
     title: "Hydrafacial découverte",
     center: "JFG Clinique Clermont-Ferrand",
@@ -440,7 +447,13 @@ const currentOffers = [
   },
 ];
 
-const endingSoonOffers = [
+const endingSoonOffers: Array<{
+  title: string;
+  until: string;
+  discount: string;
+  category: string;
+  photo?: string;
+}> = [
   {
     title: "Laser jambes",
     until: "Termine ce soir",
