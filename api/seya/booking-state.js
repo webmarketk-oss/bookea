@@ -2,8 +2,11 @@ const { classifyPriceQuestion, isPriceRepeatComplaint } = require("./price");
 const {
   asksOtherDay,
   dayPartFromText,
+  isAskToWriteBack,
   isHesitation,
+  isOutOfZone,
   isShortYes,
+  isWillComeBack,
   lastSeyaAskedToSearch,
   refusesSlots,
   wantsSlots,
@@ -219,7 +222,13 @@ function applyBookingMessage(state, text, extras = {}) {
     next.lastPriceIntent = priceIntent;
     next.unansweredPriceIntent = priceIntent;
     next.lastLeadPriceText = String(text || "").trim();
-  } else if (refusesSlots(text) || isHesitation(text)) {
+  } else if (
+    refusesSlots(text) ||
+    isHesitation(text) ||
+    isAskToWriteBack(text) ||
+    isOutOfZone(text) ||
+    isWillComeBack(text)
+  ) {
     next.pendingQuestion = "no_slots";
   } else if (asksLocation(text)) {
     next.pendingQuestion = "address";
@@ -246,7 +255,10 @@ function shouldSearchSlots(state, text, conversation) {
     isPriceRepeatComplaint(text) ||
     state.unansweredPriceIntent ||
     refusesSlots(text) ||
-    isHesitation(text)
+    isHesitation(text) ||
+    isAskToWriteBack(text) ||
+    isOutOfZone(text) ||
+    isWillComeBack(text)
   ) {
     return false;
   }

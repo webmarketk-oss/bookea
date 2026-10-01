@@ -40,6 +40,7 @@ const {
   isIdentityQuestion,
   isWrongCenter,
   wrongCenterReply,
+  crmUpdateFromLeadMessage,
   isOffTopicComplaint,
   isRereadAsk,
   isAppointmentConfirmed,
@@ -1296,6 +1297,26 @@ function applyLeadReply(conversation, text, seya, slots, extras = {}) {
       text,
       wrongCenterReply(extras.now),
       bookingState,
+    );
+  }
+
+  const crmIntent = crmUpdateFromLeadMessage(text, extras.now);
+  const alreadyBooked =
+    isAppointmentConfirmed(conversation) ||
+    /rdv pris|rdv confirm/i.test(String(conversation.status || ""));
+  if (crmIntent && crmIntent.conversationStatus && !alreadyBooked) {
+    return finishLeadReply(
+      conversation,
+      qualification,
+      crmIntent.conversationStatus,
+      text,
+      conversationalReply(text, conversation, qualification, extras.now),
+      {
+        ...bookingState,
+        pendingQuestion: "no_slots",
+        lastOfferedSlots: [],
+      },
+      { proposedSlots: [] },
     );
   }
 

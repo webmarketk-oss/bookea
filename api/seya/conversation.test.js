@@ -180,6 +180,7 @@ test("je reviendrai : plus de créneaux ni « noté pour le ventre »", async ()
   conversation = await reply(conversation, "Je reviendrai vers toi");
   assert.match(lastSeya(conversation), /temps|disponible|d’accord|reprendre/i);
   assert.doesNotMatch(lastSeya(conversation), /09h00|lun\.|noté pour le ventre/i);
+  assert.equal(conversation.status, "Terminé");
 
   conversation = await reply(conversation, "ok");
   assert.doesNotMatch(lastSeya(conversation), /09h00|lun\.|bloque|confirm/i);
@@ -1141,5 +1142,79 @@ test("mauvais centre : elle clôt et ne propose plus de rendez-vous", async () =
     lastSeya(conversation),
     /rendez-vous|créneau|creneau|lequel vous irait|faites-le moi savoir|si vous souhaitez/i,
   );
+});
+
+test("hors zone, reviendra et rappel lundi ferment le fil sans créneaux", async () => {
+  const {
+    crmUpdateFromLeadMessage,
+    parseNextWeekdayIso,
+    wantsSlots,
+  } = require("./conversation");
+  const thursday = new Date("2026-10-01T12:00:00");
+
+  assert.deepEqual(crmUpdateFromLeadMessage("Je suis hors zone", thursday), {
+    status: "Hors zone",
+    conversationStatus: "Terminé",
+    reminderDate: null,
+  });
+  assert.deepEqual(
+    crmUpdateFromLeadMessage("Je reviendrai vers vous", thursday),
+    {
+      status: "Reviendra vers nous",
+      conversationStatus: "Terminé",
+      reminderDate: null,
+    },
+  );
+  assert.deepEqual(
+    crmUpdateFromLeadMessage("Renvoyez-moi un message lundi", thursday),
+    {
+      status: "À relancer",
+      conversationStatus: "À recontacter",
+      reminderDate: "2026-10-05",
+    },
+  );
+  assert.equal(parseNextWeekdayIso("rappelez-moi mardi", thursday), "2026-10-06");
+  assert.equal(parseNextWeekdayIso("recontactez-moi", thursday), null);
+  assert.equal(
+    wantsSlots("Renvoyez-moi un message lundi", { messages: [] }),
+    false,
+  );
+
+  let conversation = startConversation(
+    {
+      leadId: "lead-zone",
+      centerId: "jfg-clinique-clermont",
+      firstName: "Léa",
+      lastName: "Test",
+      phone: "0611223344",
+      treatment: "Soin minceur",
+    },
+    "JFG Clinique Clermont",
+    seya,
+  );
+  conversation = await reply(conversation, "C’est pour le ventre");
+  conversation = await reply(conversation, "Je suis trop loin, c’est hors zone");
+  assert.equal(conversation.status, "Terminé");
+  assert.match(lastSeya(conversation), /secteur|belle journée/i);
+  assert.equal((conversation.proposedSlots || []).length, 0);
+
+  conversation = startConversation(
+    {
+      leadId: "lead-lundi",
+      centerId: "jfg-clinique-clermont",
+      firstName: "Léa",
+      lastName: "Test",
+      phone: "0611223344",
+      treatment: "Soin minceur",
+    },
+    "JFG Clinique Clermont",
+    seya,
+  );
+  conversation = await reply(conversation, "C’est pour le ventre");
+  conversation = await reply(conversation, "Renvoyez-moi un message lundi");
+  assert.equal(conversation.status, "À recontacter");
+  assert.match(lastSeya(conversation), /recontacte lundi/i);
+  assert.doesNotMatch(lastSeya(conversation), SLOT_PUSH);
+  assert.equal((conversation.proposedSlots || []).length, 0);
 });
 

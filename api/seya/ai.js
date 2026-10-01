@@ -39,6 +39,7 @@ const {
   asksOtherDay,
   isRereadAsk,
   isWrongCenter,
+  crmUpdateFromLeadMessage,
   offeredSlots,
   wantsSlots,
 } = require("./conversation");
@@ -121,7 +122,10 @@ async function generateSeyaReply({
     fallback.shouldBook ||
     isOptOut(text) ||
     isWrongCenter(text) ||
-    /pas int[eé]ress/i.test(String(fallback.conversation?.status || "")) ||
+    crmUpdateFromLeadMessage(text, now) ||
+    /pas int[eé]ress|termin[eé]|recontacter/i.test(
+      String(fallback.conversation?.status || ""),
+    ) ||
     asksPrice(text) ||
     classifyPriceQuestion(text) ||
     isPriceRepeatComplaint(text) ||

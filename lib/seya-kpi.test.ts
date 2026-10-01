@@ -268,3 +268,56 @@ test("le délai moyen jusqu’au premier RDV Seya", () => {
   assert.equal(formatSeyaKpiDelay(4), "4 h");
   assert.equal(formatSeyaKpiDelay(36), "1,5 j");
 });
+
+test("un contact Meta sans réponse n’est pas qualifié, et reviendra se lit dans le fil", () => {
+  const kpi = buildSeyaKpi(
+    [
+      conversation({
+        id: "meta",
+        leadId: "m1",
+        qualification: { need: "Cryolipolyse", zone: "" },
+        status: "Qualifié",
+        messages: [{ author: "seya", text: "Bonjour", at: "2026-10-01T10:00:00.000Z" }],
+      }),
+      conversation({
+        id: "back",
+        leadId: "b1",
+        status: "Terminé",
+        qualification: { need: "Cryolipolyse", zone: "ventre" },
+        messages: [
+          { author: "seya", text: "Bonjour", at: "2026-10-01T10:00:00.000Z" },
+          {
+            author: "lead",
+            text: "Je reviendrai vers vous",
+            at: "2026-10-01T10:10:00.000Z",
+          },
+        ],
+      }),
+      conversation({
+        id: "zone",
+        leadId: "z1",
+        status: "Terminé",
+        messages: [
+          { author: "seya", text: "Bonjour", at: "2026-10-01T11:00:00.000Z" },
+          {
+            author: "lead",
+            text: "Je suis hors zone",
+            at: "2026-10-01T11:10:00.000Z",
+          },
+        ],
+      }),
+    ],
+    [
+      lead({ id: "m1", status: "Nouveau" }),
+      lead({ id: "b1", status: "Nouveau" }),
+      lead({ id: "z1", status: "Nouveau" }),
+    ],
+  );
+
+  assert.equal(kpi.contacted, 3);
+  assert.equal(kpi.replied, 2);
+  assert.ok(kpi.qualified <= kpi.replied);
+  assert.equal(kpi.booked, 0);
+  assert.equal(kpi.willComeBack, 1);
+  assert.equal(kpi.outOfZoneOrWrongCenter, 1);
+});

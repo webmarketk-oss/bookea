@@ -93,15 +93,18 @@ export function isSeyaReplied(conversation: SeyaKpiConversation) {
 }
 
 export function isSeyaQualified(conversation: SeyaKpiConversation) {
-  if (!isSeyaContacted(conversation)) {
+  if (!isSeyaReplied(conversation)) {
     return false;
   }
   const need = conversation.qualification?.need;
   const zone = String(conversation.qualification?.zone || "").trim();
-  if (isJunkNeed(need)) {
+  if (isJunkNeed(need) && !zone) {
     return false;
   }
   if (zone) {
+    return true;
+  }
+  if (!isJunkNeed(need)) {
     return true;
   }
   return /qualifi|rdv propos|rdv pris|rdv confirm/i.test(
@@ -110,7 +113,7 @@ export function isSeyaQualified(conversation: SeyaKpiConversation) {
 }
 
 export function isSeyaProposed(conversation: SeyaKpiConversation) {
-  if (!isSeyaContacted(conversation)) {
+  if (!isSeyaReplied(conversation)) {
     return false;
   }
   return (
@@ -118,30 +121,59 @@ export function isSeyaProposed(conversation: SeyaKpiConversation) {
     (conversation.bookingState?.lastOfferedSlots || []).length > 0 ||
     conversation.bookingState?.appointmentStatus === "proposed" ||
     conversation.bookingState?.appointmentStatus === "confirmed" ||
-    Boolean(conversation.bookedSlot) ||
-    /rdv propos|rdv pris|rdv confirm/i.test(String(conversation.status || ""))
+    Boolean(conversation.bookedSlot)
   );
 }
 
 export function isSeyaBooked(conversation: SeyaKpiConversation) {
-  if (!isSeyaContacted(conversation)) {
+  if (!isSeyaReplied(conversation)) {
     return false;
   }
   return (
     Boolean(conversation.bookedSlot) ||
-    conversation.bookingState?.appointmentStatus === "confirmed" ||
-    /rdv pris|rdv confirm/i.test(String(conversation.status || ""))
+    conversation.bookingState?.appointmentStatus === "confirmed"
   );
 }
 
+function compactText(value?: string | null) {
+  return compactIdentity(value)
+    .replace(/['’]/g, " ")
+    .replace(/[.!,;:?…]+/g, " ");
+}
+
 function isWrongCenterText(text: string) {
-  const value = compactIdentity(text).replace(/['’]/g, " ");
+  const value = compactText(text);
   return (
     /je pensais (que )?(c etait)/.test(value) ||
     /trompe de (centre|institut|ville|adresse|numero)/.test(value) ||
     /pas le bon (centre|institut|etablissement|numero)/.test(value) ||
     /mauvais (centre|institut|numero)/.test(value)
   );
+}
+
+function isOutOfZoneText(text: string) {
+  const value = compactText(text);
+  return /hors[- ]?zone|trop loin|pas (dans )?(le |votre )?secteur|pas de votre cote|j habite (trop )?loin/.test(
+    value,
+  );
+}
+
+function isWillComeBackText(text: string) {
+  const value = compactText(text);
+  return /je (vous |te )?(reviendrai|reviens) vers (vous|toi|nous)|reviendrai vers (vous|nous)|je (vous|te) (re)?contacterai|c est moi qui (vous |te )?(re)?contacte/.test(
+    value,
+  );
+}
+
+function isAskToWriteBackText(text: string) {
+  const value = compactText(text);
+  return /renvoy(ez|e) moi|rappelez moi|recontactez moi|un message (lundi|mardi|mercredi|jeudi|vendredi|samedi)|ecrivez moi (lundi|mardi|mercredi|jeudi|vendredi|samedi)/.test(
+    value,
+  );
+}
+
+function bookedCrmStatus(status?: string | null) {
+  return /rdv pris|rdv confirm|vendu|client|acompte|devis/i.test(String(status || ""));
 }
 
 function messageTime(value?: string | null) {
@@ -329,25 +361,34 @@ export function buildSeyaKpi(
   for (const conversation of threads) {
     const lead = matchLead(conversation, leads);
     const lastLeadText = leadMessages(conversation).at(-1)?.text || "";
-    const wrongCenter =
-      isWrongCenterText(lastLeadText) ||
-      leadMessages(conversation).some((item) =>
-        isWrongCenterText(String(item.text || "")),
-      );
+    const leadTexts = leadMessages(conversation).map((item) =>
+      String(item.text || ""),
+    );
+    const booked = isSeyaBooked(conversation) || bookedCrmStatus(lead?.status);
+    const wrongCenter = leadTexts.some((item) => isWrongCenterText(item));
+    const outOfZone =
+      lead?.status === "Hors zone" ||
+      isOutOfZoneText(lastLeadText) ||
+      leadTexts.some((item) => isOutOfZoneText(item));
+    const comesBack =
+      lead?.status === "Reviendra vers nous" ||
+      isWillComeBackText(lastLeadText) ||
+      leadTexts.some((item) => isWillComeBackText(item));
+    const askWriteBack =
+      conversation.status === "À recontacter" ||
+      isAskToWriteBackText(lastLeadText);
 
-    if (
-      conversation.status === "Pas intéressé" ||
-      lead?.status === "Pas intéressé"
-    ) {
-      if (wrongCenter || lead?.status === "Hors zone") {
+    if (!booked) {
+      if (outOfZone || wrongCenter) {
         outOfZoneOrWrongCenter += 1;
-      } else {
+      } else if (comesBack) {
+        willComeBack += 1;
+      } else if (
+        conversation.status === "Pas intéressé" ||
+        lead?.status === "Pas intéressé"
+      ) {
         notInterested += 1;
       }
-    } else if (lead?.status === "Reviendra vers nous") {
-      willComeBack += 1;
-    } else if (lead?.status === "Hors zone" || wrongCenter) {
-      outOfZoneOrWrongCenter += 1;
     }
 
     if (conversation.healthReview?.status === "awaiting_human_health_review") {
@@ -355,7 +396,7 @@ export function buildSeyaKpi(
     } else if (conversation.status === "Revue santé") {
       healthHandoff += 1;
     }
-    if (conversation.status === "À recontacter") {
+    if (askWriteBack && !booked) {
       humanHandoff += 1;
     }
 

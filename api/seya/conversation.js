@@ -263,7 +263,7 @@ function asksForHelpNow(text) {
 
 function isWillCallBack(text) {
   const value = normalize(text);
-  if (asksForHelpNow(text)) {
+  if (asksForHelpNow(text) || isAskToWriteBack(text)) {
     return false;
   }
   if (/pas (te |vous )?(re)?contacter|ne (me |te |vous )?(re)?contacte/.test(value)) {
@@ -272,6 +272,118 @@ function isWillCallBack(text) {
   return /je (prefere|vais|aimerais) (vous |te )?(re)?contacter|recontacter moi[- ]meme|c[' ]est moi qui (vous |te )?(re)?contacte|je (vous|te) (re)?contacterai|je (vous|te) rappellerai|je prefere (rappeler|vous rappeler)/.test(
     value,
   );
+}
+
+function isWillComeBack(text) {
+  const value = normalize(text);
+  if (asksForHelpNow(text) || isAskToWriteBack(text)) {
+    return false;
+  }
+  return /je (vous |te )?(reviendrai|reviens) vers (vous|toi|nous)|je reviendrai vers vous|reviendrai vers (vous|nous)|je (vous |te )?recontacte (plus tard|moi[- ]meme)/.test(
+    value,
+  );
+}
+
+function isOutOfZone(text) {
+  const value = normalize(text);
+  return /hors[- ]?zone|trop loin|pas (dans )?(le |votre )?secteur|pas de votre cote|j[' ]habite (trop )?loin|je (n[' ]?habite|suis) pas (du tout )?(a cote|a proximite|dans le coin|sur (place|votre ville))/.test(
+    value,
+  );
+}
+
+function isAskToWriteBack(text) {
+  const value = normalize(text);
+  if (asksForHelpNow(text)) {
+    return false;
+  }
+  return /renvoy(ez|e)[- ]moi|rappelez[- ]moi|recontactez[- ]moi|recontactez moi|un message (lundi|mardi|mercredi|jeudi|vendredi|samedi)|ecrivez[- ]moi (lundi|mardi|mercredi|jeudi|vendredi|samedi)/.test(
+    value,
+  );
+}
+
+function parseNextWeekdayIso(text, now) {
+  const value = normalize(text);
+  const names = [
+    "dimanche",
+    "lundi",
+    "mardi",
+    "mercredi",
+    "jeudi",
+    "vendredi",
+    "samedi",
+  ];
+  const weekday = names.findIndex((day) => new RegExp(`\\b${day}\\b`).test(value));
+  if (weekday < 0) {
+    return null;
+  }
+
+  const date = now instanceof Date ? now : new Date();
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Europe/Paris",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(date);
+  const year = parts.find((part) => part.type === "year")?.value;
+  const month = parts.find((part) => part.type === "month")?.value;
+  const day = parts.find((part) => part.type === "day")?.value;
+  const paris = new Date(`${year}-${month}-${day}T12:00:00`);
+  const current = paris.getDay();
+  let add = (weekday - current + 7) % 7;
+  if (add === 0) {
+    add = 7;
+  }
+  paris.setDate(paris.getDate() + add);
+  const y = paris.getFullYear();
+  const m = String(paris.getMonth() + 1).padStart(2, "0");
+  const d = String(paris.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+function lockedCrmStatuses() {
+  return [
+    "RDV pris",
+    "RDV confirmé",
+    "Vendu",
+    "Client",
+    "Client converti",
+    "Acompte reçu",
+    "Acompte validé",
+    "Acompte envoyé",
+    "Devis",
+  ];
+}
+
+function crmUpdateFromLeadMessage(text, now) {
+  if (isOutOfZone(text)) {
+    return {
+      status: "Hors zone",
+      conversationStatus: "Terminé",
+      reminderDate: null,
+    };
+  }
+  if (isAskToWriteBack(text)) {
+    return {
+      status: "À relancer",
+      conversationStatus: "À recontacter",
+      reminderDate: parseNextWeekdayIso(text, now),
+    };
+  }
+  if (isWillComeBack(text) || isWillCallBack(text)) {
+    return {
+      status: "Reviendra vers nous",
+      conversationStatus: "Terminé",
+      reminderDate: null,
+    };
+  }
+  if (isWrongCenter(text)) {
+    return {
+      status: "Pas intéressé",
+      conversationStatus: "Pas intéressé",
+      reminderDate: null,
+    };
+  }
+  return null;
 }
 
 function isAwayForNow(text) {
@@ -342,7 +454,12 @@ function willCallBackReply(now) {
 
 function isHesitation(text) {
   const value = normalize(text);
-  if (asksForHelpNow(text) || /j[' ]?ai reflechi/.test(value)) {
+  if (
+    asksForHelpNow(text) ||
+    isAskToWriteBack(text) ||
+    isOutOfZone(text) ||
+    /j[' ]?ai reflechi/.test(value)
+  ) {
     return false;
   }
   return (
@@ -377,6 +494,9 @@ function wantsSlots(text, conversation) {
   if (
     isIdentityQuestion(text) ||
     isWrongCenter(text) ||
+    isOutOfZone(text) ||
+    isAskToWriteBack(text) ||
+    isWillComeBack(text) ||
     isThanks(text, conversation) ||
     isHesitation(text) ||
     refusesSlots(text) ||
@@ -443,6 +563,28 @@ function conversationalReply(text, conversation, qualification, now) {
   }
   if (isWrongCenter(text)) {
     return wrongCenterReply(now);
+  }
+  if (isOutOfZone(text)) {
+    return "D’accord, je note que ce n’est pas dans notre secteur. Je vous souhaite une belle journée.";
+  }
+  if (isAskToWriteBack(text)) {
+    const day = parseNextWeekdayIso(text, now);
+    if (day) {
+      const weekday = [
+        "dimanche",
+        "lundi",
+        "mardi",
+        "mercredi",
+        "jeudi",
+        "vendredi",
+        "samedi",
+      ][new Date(`${day}T12:00:00`).getDay()];
+      return `Très bien, je vous recontacte ${weekday}.`;
+    }
+    return "Très bien, je vous recontacte.";
+  }
+  if (isWillComeBack(text) || isWillCallBack(text)) {
+    return willCallBackReply(now);
   }
   if (isAppointmentConfirmed(conversation) && (isThanks(text, conversation) || isShortYes(text))) {
     return pickFresh(
@@ -556,6 +698,12 @@ module.exports = {
   isIdentityQuestion,
   isWrongCenter,
   wrongCenterReply,
+  isOutOfZone,
+  isWillComeBack,
+  isAskToWriteBack,
+  parseNextWeekdayIso,
+  crmUpdateFromLeadMessage,
+  lockedCrmStatuses,
   isShortYes,
   isThanks,
   lastSeyaOfferedToBook,

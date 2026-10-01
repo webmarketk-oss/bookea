@@ -19,6 +19,10 @@ const {
 } = require("./agent");
 const { dbStatusWhenSlotPositioned } = require("./booking-state");
 const { isSameSeyaConversation } = require("./conversation-key");
+const {
+  crmUpdateFromLeadMessage,
+  lockedCrmStatuses,
+} = require("./conversation");
 const { isSeyaOff, writeSeyaConversations } = require("./store");
 
 const GRAPH_VERSION = "v21.0";
@@ -394,6 +398,17 @@ async function handleIncoming(supabase, incoming) {
 
   await writeSeyaConversations(supabase, center.id, saved);
 
+  if (!result.shouldBook) {
+    await syncCrmFromSeyaIntent(
+      supabase,
+      center.id,
+      context,
+      incoming.text,
+    ).catch((error) => {
+      console.error("[seya/whatsapp] crm intent failed", error);
+    });
+  }
+
   for (const text of uniqueOutgoing) {
     await sendSharedWhatsApp(incoming.phone, text, {
       firstName: context.firstName,
@@ -581,6 +596,53 @@ async function loadCenterAppointments(supabase, centerId) {
     duration: row.duration_minutes,
     status: row.status || "",
   }));
+}
+
+async function syncCrmFromSeyaIntent(supabase, centerId, context, text) {
+  const update = crmUpdateFromLeadMessage(text, new Date());
+  if (!update || !context.leadId) {
+    return;
+  }
+  const current = String(context.status || "");
+  if (
+    lockedCrmStatuses().some(
+      (status) => status.toLowerCase() === current.toLowerCase(),
+    )
+  ) {
+    return;
+  }
+
+  const patch = {
+    status: update.status,
+    last_activity_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+    next_action: update.reminderDate
+      ? `Recontacter le ${update.reminderDate}`
+      : update.status,
+  };
+  if (update.reminderDate) {
+    patch.recall_date = update.reminderDate;
+  }
+
+  const { error } = await supabase
+    .from("leads")
+    .update(patch)
+    .eq("id", context.leadId)
+    .eq("center_id", centerId);
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  await supabase.from("lead_events").insert({
+    center_id: centerId,
+    lead_id: context.leadId,
+    event_type: "status",
+    from_value: current,
+    to_value: update.status,
+    note: update.reminderDate
+      ? `Seya WhatsApp · à recontacter le ${update.reminderDate}.`
+      : "Seya WhatsApp.",
+  });
 }
 
 async function bookSeyaAppointment(supabase, centerId, context, conversation, slot) {
