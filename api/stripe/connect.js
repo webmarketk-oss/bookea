@@ -10,7 +10,7 @@ const {
   sanitizeId,
   stripeRequest,
   stripeStatusFromAccount,
-} = require("./lib");
+} = require("./_lib");
 
 module.exports = async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");

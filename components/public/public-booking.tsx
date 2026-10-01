@@ -520,7 +520,19 @@ export function PublicBooking() {
   const [appointments, setAppointments] = useState(initialClientAppointments);
   const [clientMessages, setClientMessages] = useState(initialClientMessages);
   const [clientMessageDraft, setClientMessageDraft] = useState("");
-  const [bookingStatus, setBookingStatus] = useState("Creneau pret a reserver");
+  const [bookingStatus, setBookingStatus] = useState(() => {
+    if (typeof window === "undefined") {
+      return "Creneau pret a reserver";
+    }
+    const paid = new URLSearchParams(window.location.search).get("paid");
+    if (paid === "1") {
+      return "Reservation confirmee. Acompte payé.";
+    }
+    if (paid === "0") {
+      return "Reservation confirmee. Paiement annulé : le centre peut renvoyer un lien d'acompte.";
+    }
+    return "Creneau pret a reserver";
+  });
   const [activeCategory, setActiveCategory] = useState("Tous");
   const [filtersExpanded, setFiltersExpanded] = useState(false);
   const [storedSettings, setStoredSettings] = useState<StoredCenterSettings | null>(null);
@@ -546,15 +558,6 @@ export function PublicBooking() {
         setStoredSettings(remote);
       }
     });
-
-    const paid = new URLSearchParams(window.location.search).get("paid");
-    if (paid === "1") {
-      setBookingStatus("Reservation confirmee. Acompte payé.");
-    } else if (paid === "0") {
-      setBookingStatus(
-        "Reservation confirmee. Paiement annulé : le centre peut renvoyer un lien d'acompte.",
-      );
-    }
 
     return () => {
       window.removeEventListener("bookea-center-settings-updated", refreshSettings);

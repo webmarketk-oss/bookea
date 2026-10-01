@@ -303,7 +303,15 @@ const serviceColorFallback = (index: number) =>
   serviceColorPresets[index % serviceColorPresets.length];
 
 export default function CenterSettingsPage() {
-  const [activeTab, setActiveTab] = useState("profil");
+  const [activeTab, setActiveTab] = useState(() => {
+    if (typeof window === "undefined") {
+      return "profil";
+    }
+    return new URLSearchParams(window.location.search).get("tab") ===
+      "paiements"
+      ? "paiements"
+      : "profil";
+  });
   const [services, setServices] = useState(initialServices);
   const [serviceCategories, setServiceCategories] = useState(
     defaultServiceCategories,
@@ -480,15 +488,46 @@ export default function CenterSettingsPage() {
   useEffect(() => {
     let cancelled = false;
 
-    void loadPublicCenterProfile().then((loaded) => {
+    void loadPublicCenterProfile().then(async (loaded) => {
       if (cancelled) {
         return;
       }
-      if (loaded.centerId) {
-        setLoadedCenterId(loaded.centerId);
-      }
       if (loaded.settings) {
         applyStoredSettings(loaded.settings as Partial<StoredCenterSettings>);
+      }
+      if (loaded.centerId) {
+        setLoadedCenterId(loaded.centerId);
+        const { json } = await requestStripeConnect(loaded.centerId, "status");
+        if (cancelled) {
+          return;
+        }
+        setStripeConfigured(
+          json.error === "not_configured"
+            ? false
+            : json.configured !== false,
+        );
+        setStripeConnected(json.connected === true);
+        setStripeDetailsSubmitted(json.detailsSubmitted === true);
+        setStripeAccountLabel(json.accountLabel || "");
+        const params = new URLSearchParams(window.location.search);
+        const returned = params.get("stripe") === "return";
+        const refresh = params.get("stripe") === "refresh";
+        if (json.error === "not_configured" && (returned || refresh)) {
+          showNotice(
+            json.message || "Stripe n’est pas encore configuré côté Bookea.",
+            true,
+          );
+        } else if (returned) {
+          showNotice(
+            json.connected
+              ? "Compte Stripe connecté. Les acomptes seront encaissés sur ce compte."
+              : "Inscription Stripe enregistrée. Termine les informations Stripe pour encaisser.",
+          );
+        } else if (refresh) {
+          showNotice(
+            "L’inscription Stripe a été interrompue. Tu peux la reprendre.",
+          );
+        }
       }
     });
 
@@ -509,11 +548,6 @@ export default function CenterSettingsPage() {
     };
     window.addEventListener("bookea-active-center-changed", reloadOnCenterChange);
 
-    const params = new URLSearchParams(window.location.search);
-    if (params.get("tab") === "paiements") {
-      setActiveTab("paiements");
-    }
-
     return () => {
       cancelled = true;
       window.removeEventListener(
@@ -531,43 +565,6 @@ export default function CenterSettingsPage() {
     setStripeDetailsSubmitted(json.detailsSubmitted === true);
     setStripeAccountLabel(json.accountLabel || "");
   };
-
-  useEffect(() => {
-    if (!loadedCenterId) {
-      return;
-    }
-    let cancelled = false;
-    const params = new URLSearchParams(window.location.search);
-    const returned = params.get("stripe") === "return";
-    const refresh = params.get("stripe") === "refresh";
-
-    void requestStripeConnect(loadedCenterId, "status").then(({ json }) => {
-      if (cancelled) {
-        return;
-      }
-      applyStripeStatus(json);
-      if (json.error === "not_configured" && (returned || refresh)) {
-        showNotice(
-          json.message || "Stripe n’est pas encore configuré côté Bookea.",
-          true,
-        );
-        return;
-      }
-      if (returned) {
-        showNotice(
-          json.connected
-            ? "Compte Stripe connecté. Les acomptes seront encaissés sur ce compte."
-            : "Inscription Stripe enregistrée. Termine les informations Stripe pour encaisser.",
-        );
-      } else if (refresh) {
-        showNotice("L’inscription Stripe a été interrompue. Tu peux la reprendre.");
-      }
-    });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [loadedCenterId]);
 
   const startStripeConnect = async (
     action: "start" | "refresh" | "dashboard",
