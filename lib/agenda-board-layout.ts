@@ -1,4 +1,5 @@
 export const CABIN_COLUMN_MIN_PX = 260;
+export const VERTICAL_SCROLLBAR_GUTTER_PX = 16;
 
 export function cabinColumnWidth(availableWidth: number, cabinCount: number) {
   const available = Math.max(1, Math.floor(availableWidth));

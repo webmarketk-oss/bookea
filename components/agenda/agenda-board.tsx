@@ -22,6 +22,7 @@ import { Input } from "@/components/ui/input";
 import { cabins, practitioners } from "@/lib/agenda-data";
 import {
   CABIN_COLUMN_MIN_PX,
+  VERTICAL_SCROLLBAR_GUTTER_PX,
   cabinColumnWidth,
 } from "@/lib/agenda-board-layout";
 import {
@@ -370,6 +371,7 @@ export default function AgendaBoard() {
     null
   );
   const boardScrollRef = useRef<HTMLDivElement>(null);
+  const boardFrameRef = useRef<HTMLDivElement>(null);
   const boardSectionRef = useRef<HTMLElement>(null);
   const [slotRowHeightPx, setSlotRowHeightPx] = useState<number | null>(null);
   const [cabinColumnWidthPx, setCabinColumnWidthPx] = useState<number | null>(
@@ -688,19 +690,21 @@ export default function AgendaBoard() {
       return;
     }
 
+    const frame = boardFrameRef.current;
     const board = boardScrollRef.current;
-    if (!board) {
+    if (!frame || !board) {
       return;
     }
 
     function measureBoardLayout() {
+      const currentFrame = boardFrameRef.current;
       const currentBoard = boardScrollRef.current;
-      if (!currentBoard) {
+      if (!currentFrame || !currentBoard) {
         return;
       }
 
       const nextCabinWidth = cabinColumnWidth(
-        currentBoard.clientWidth - TIME_COLUMN_PX,
+        currentFrame.clientWidth - TIME_COLUMN_PX - VERTICAL_SCROLLBAR_GUTTER_PX,
         visibleCabinList.length,
       );
       setCabinColumnWidthPx((current) =>
@@ -712,7 +716,7 @@ export default function AgendaBoard() {
       const header = currentBoard.querySelector("[data-agenda-header]");
       const headerHeight =
         header instanceof HTMLElement ? header.offsetHeight : 0;
-      const available = currentBoard.clientHeight - headerHeight;
+      const available = currentFrame.clientHeight - headerHeight;
 
       if (available < 160) {
         return;
@@ -728,7 +732,7 @@ export default function AgendaBoard() {
 
     measureBoardLayout();
     const observer = new ResizeObserver(measureBoardLayout);
-    observer.observe(board);
+    observer.observe(frame);
 
     return () => {
       observer.disconnect();
@@ -2573,11 +2577,12 @@ export default function AgendaBoard() {
               sont enregistrés.
             </p>
           </div>
-          <Card className="relative z-0 min-h-0 w-full flex-1 overflow-hidden border-slate-200 py-0 shadow-sm">
-            <CardContent className="relative h-full min-w-0 w-full p-0">
+          <Card className="relative z-0 min-h-0 w-full flex-1 gap-0 overflow-hidden border-slate-200 py-0 shadow-sm">
+            <CardContent className="relative min-h-0 min-w-0 w-full flex-1 overflow-hidden p-0">
+              <div ref={boardFrameRef} className="h-full min-h-0 min-w-0">
               <div
                 ref={boardScrollRef}
-                className="isolate h-full w-full overflow-auto"
+                className="h-full w-full overflow-x-auto overflow-y-scroll [scrollbar-gutter:stable] [scrollbar-width:auto] [&::-webkit-scrollbar]:h-3.5 [&::-webkit-scrollbar]:w-3.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-400 [&::-webkit-scrollbar-track]:bg-slate-100"
                 style={{
                   scrollPaddingLeft: TIME_COLUMN_PX,
                 }}
@@ -2795,6 +2800,7 @@ export default function AgendaBoard() {
                   })}
                 </div>
               )}
+              </div>
               </div>
               </div>
             </CardContent>
