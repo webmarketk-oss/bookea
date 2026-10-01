@@ -4,6 +4,7 @@ import {
   CalendarClock,
   CheckCircle2,
   Gift,
+  Megaphone,
   MessageCircle,
   Send,
   ShoppingCart,
@@ -48,6 +49,16 @@ const recallStatuses = new Set([
   "Apl en abs",
 ]);
 
+const campaignAudienceOptions = [
+  "Leads",
+  "Clients",
+  "Leads RDV pris",
+  "Leads à relancer",
+  "Leads reviendra vers nous",
+] as const;
+
+type CampaignAudience = (typeof campaignAudienceOptions)[number];
+
 export default function SmsPage() {
   const [credits, setCredits] = useState(MONTHLY_SMS_LIMIT);
   const [smsUsed, setSmsUsed] = useState(0);
@@ -74,6 +85,18 @@ export default function SmsPage() {
   const [templateBody, setTemplateBody] = useState("");
   const [editingTemplateId, setEditingTemplateId] = useState<string | null>(null);
   const [savingTemplates, setSavingTemplates] = useState(false);
+  const [campaignName, setCampaignName] = useState("Campagne SMS");
+  const [campaignAudience, setCampaignAudience] =
+    useState<CampaignAudience>("Leads");
+  const [campaignMessage, setCampaignMessage] = useState(
+    "Bonjour {{prenom}}, votre centre vous contacte. Répondez à ce SMS ou appelez-nous pour en parler.",
+  );
+  const [campaignDate, setCampaignDate] = useState(() =>
+    new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Paris" }).format(
+      new Date(),
+    ),
+  );
+  const [campaignTime, setCampaignTime] = useState("10:00");
 
   useEffect(() => {
     let cancelled = false;
@@ -140,6 +163,28 @@ export default function SmsPage() {
   const audienceRecipients = useMemo(
     () => getAudienceRecipients(audience, { leads, clients, appointments }),
     [appointments, audience, clients, leads],
+  );
+
+  const campaignRecipients = useMemo(
+    () =>
+      getAudienceRecipients(campaignAudience, { leads, clients, appointments }),
+    [appointments, campaignAudience, clients, leads],
+  );
+
+  const campaignAudienceCounts = useMemo(
+    () =>
+      Object.fromEntries(
+        campaignAudienceOptions.map((option) => [
+          option,
+          getAudienceRecipients(option, { leads, clients, appointments }).length,
+        ]),
+      ) as Record<CampaignAudience, number>,
+    [appointments, clients, leads],
+  );
+
+  const campaignSegments = useMemo(
+    () => smsSegmentInfo(campaignMessage),
+    [campaignMessage],
   );
 
   const stats = useMemo(
@@ -375,6 +420,133 @@ export default function SmsPage() {
     });
     setIsError(false);
     setConfirmation(`Envoi SMS planifié pour ${recipients} destinataire(s).`);
+  }
+
+  async function sendCampaignNow() {
+    const recipients = campaignRecipients;
+
+    if (!campaignMessage.trim()) {
+      setIsError(true);
+      setConfirmation("Écris le texte de la campagne SMS avant d’envoyer.");
+      return;
+    }
+
+    if (recipients.length === 0) {
+      setIsError(true);
+      setConfirmation(
+        `Aucun numéro pour « ${campaignAudience} ». Vérifie les fiches avec un téléphone.`,
+      );
+      return;
+    }
+
+    setSending(true);
+    setIsError(false);
+    setConfirmation("Envoi de la campagne SMS via Brevo...");
+
+    try {
+      let sent = 0;
+      let failed = 0;
+      let remainingCredits = credits;
+      let used = smsUsed;
+      let monthlyLimit = smsLimit;
+      const chunks = chunkRecipients(recipients, 100);
+
+      for (const chunk of chunks) {
+        const response = await fetch("/api/sms/send", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            message: campaignMessage,
+            type: "marketing",
+            centerId,
+            centerName,
+            recipients: chunk,
+          }),
+        });
+        const result = await response.json();
+
+        if (!response.ok || !result.ok) {
+          throw new Error(
+            result.error || result.results?.[0]?.error || "Envoi SMS refusé",
+          );
+        }
+
+        sent += Number(result.sent) || 0;
+        failed += Number(result.failed) || 0;
+        if (typeof result.remainingCredits === "number") {
+          remainingCredits = result.remainingCredits;
+        }
+        if (typeof result.used === "number") {
+          used = result.used;
+        }
+        if (typeof result.monthlyLimit === "number") {
+          monthlyLimit = result.monthlyLimit;
+        }
+      }
+
+      applyQuota(remainingCredits, used, monthlyLimit);
+
+      const nextCampaign: SmsCampaign = {
+        id: Date.now(),
+        name: campaignName.trim() || "Campagne SMS",
+        audience: campaignAudience,
+        message: campaignMessage,
+        plannedAt: "Envoyé maintenant",
+        recipients: sent,
+        status: "Envoyé",
+      };
+      setCampaigns((current) => {
+        const nextCampaigns = [nextCampaign, ...current];
+        void saveSmsHistory(nextCampaigns, remainingCredits);
+        return nextCampaigns;
+      });
+      setConfirmation(
+        failed
+          ? `${sent} SMS envoyés, ${failed} échec(s).`
+          : `${sent} SMS envoyés via Brevo.`,
+      );
+    } catch (error) {
+      setIsError(true);
+      setConfirmation(
+        error instanceof Error
+          ? error.message
+          : "Impossible d'envoyer la campagne SMS.",
+      );
+    } finally {
+      setSending(false);
+    }
+  }
+
+  function planCampaign() {
+    const recipients = campaignRecipients.length;
+
+    if (!campaignMessage.trim()) {
+      setIsError(true);
+      setConfirmation("Écris le texte de la campagne SMS avant de planifier.");
+      return;
+    }
+
+    const nextCampaign: SmsCampaign = {
+      id: Date.now(),
+      name: campaignName.trim() || "Campagne SMS",
+      audience: campaignAudience,
+      message: campaignMessage,
+      plannedAt: `Le ${new Intl.DateTimeFormat("fr-FR").format(
+        new Date(`${campaignDate}T${campaignTime}`),
+      )} à ${campaignTime}`,
+      recipients,
+      status: "Planifié",
+    };
+
+    setCampaigns((current) => {
+      const nextCampaigns = [nextCampaign, ...current];
+      void saveSmsHistory(nextCampaigns, credits);
+      return nextCampaigns;
+    });
+    setIsError(false);
+    setConfirmation(
+      `Campagne SMS planifiée pour ${recipients} destinataire(s).`,
+    );
   }
 
   return (
@@ -700,6 +872,163 @@ export default function SmsPage() {
         </div>
       </section>
 
+      <section className="mb-6 rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="flex items-start gap-4">
+          <div className="grid h-12 w-12 place-items-center rounded-2xl bg-violet-50 text-violet-600">
+            <Megaphone className="h-6 w-6" />
+          </div>
+          <div>
+            <h2 className="text-base font-semibold">Campagne SMS</h2>
+            <p className="mt-1 max-w-3xl text-sm font-medium text-slate-500">
+              Texte libre, envoyé aux leads ou clients du centre. Variables :{" "}
+              {"{{prenom}}"}. Un SMS simple = {campaignSegments.singleLimit}{" "}
+              caractères {campaignSegments.alphabetHint} ; le texte n’est pas
+              limité.
+            </p>
+          </div>
+        </div>
+
+        <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+          {campaignAudienceOptions.map((option) => {
+            const active = campaignAudience === option;
+            return (
+              <button
+                key={option}
+                type="button"
+                onClick={() => setCampaignAudience(option)}
+                className={`rounded-2xl border px-4 py-3 text-left ${
+                  active
+                    ? "border-violet-300 bg-violet-50"
+                    : "border-slate-200 bg-slate-50"
+                }`}
+              >
+                <p className="text-sm font-semibold">{option}</p>
+                <p className="mt-1 text-xs font-medium text-slate-500">
+                  {campaignAudienceCounts[option]} destinataire
+                  {campaignAudienceCounts[option] > 1 ? "s" : ""}
+                </p>
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="mt-5 grid gap-4 md:grid-cols-2">
+          <Input
+            label="Nom de la campagne"
+            value={campaignName}
+            onChange={setCampaignName}
+            placeholder="Offre de rentrée…"
+          />
+          <label className="space-y-2">
+            <span className="text-xs font-medium text-slate-500">
+              Reprendre un modèle
+            </span>
+            <select
+              value=""
+              onChange={(event) => {
+                const template = smsSettings.templates.find(
+                  (item) => item.id === event.target.value,
+                );
+                if (template) {
+                  setCampaignMessage(template.body);
+                }
+              }}
+              className="h-12 w-full rounded-2xl border border-slate-200 px-4 text-base font-bold outline-none focus:border-blue-500"
+            >
+              <option value="">Texte personnalisé</option>
+              {smsSettings.templates.map((template) => (
+                <option key={template.id} value={template.id}>
+                  {template.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <Input
+            label="Date d'envoi"
+            type="date"
+            value={campaignDate}
+            onChange={setCampaignDate}
+          />
+          <Input
+            label="Heure d'envoi"
+            type="time"
+            value={campaignTime}
+            onChange={setCampaignTime}
+          />
+          <label className="space-y-2 md:col-span-2">
+            <span className="text-xs font-medium text-slate-500">
+              Message de la campagne
+            </span>
+            <textarea
+              value={campaignMessage}
+              onChange={(event) => setCampaignMessage(event.target.value)}
+              className="min-h-36 w-full rounded-2xl border border-slate-200 p-4 text-base font-bold leading-7 outline-none focus:border-blue-500"
+            />
+            <p className="text-sm font-medium text-slate-500">
+              {campaignSegments.length} caractère
+              {campaignSegments.length > 1 ? "s" : ""} · un SMS ={" "}
+              {campaignSegments.singleLimit} caractères{" "}
+              {campaignSegments.alphabetHint} · ce texte ={" "}
+              {campaignSegments.parts} SMS par destinataire.
+            </p>
+          </label>
+        </div>
+
+        <div className="mt-5 flex flex-wrap gap-3">
+          <button
+            type="button"
+            onClick={planCampaign}
+            className="rounded-2xl border border-slate-200 bg-white px-5 py-3 font-semibold text-slate-700"
+          >
+            Planifier la campagne
+          </button>
+          <button
+            type="button"
+            disabled={sending}
+            onClick={() => void sendCampaignNow()}
+            className="rounded-2xl bg-violet-600 px-5 py-3 font-semibold text-white disabled:opacity-60"
+          >
+            {sending ? "Envoi..." : "Envoyer la campagne"}
+          </button>
+        </div>
+
+        <div className="mt-5 rounded-2xl bg-slate-50 p-4">
+          <p className="text-xs font-medium text-slate-500">Aperçu</p>
+          <p className="mt-3 whitespace-pre-wrap text-base font-bold leading-7 text-slate-700">
+            {campaignMessage.replaceAll("{{prenom}}", "Marie")}
+          </p>
+          <p className="mt-3 font-semibold text-violet-600">
+            {campaignRecipients.length} destinataire
+            {campaignRecipients.length > 1 ? "s" : ""} · {campaignAudience}
+          </p>
+        </div>
+
+        {campaigns.length > 0 ? (
+          <div className="mt-5 grid gap-2">
+            <p className="text-xs font-medium text-slate-500">
+              Dernières campagnes
+            </p>
+            {campaigns.slice(0, 6).map((item) => (
+              <article
+                key={item.id}
+                className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3"
+              >
+                <div>
+                  <p className="font-semibold">{item.name}</p>
+                  <p className="text-sm font-medium text-slate-500">
+                    {item.audience} · {item.recipients} destinataire
+                    {item.recipients > 1 ? "s" : ""} · {item.plannedAt}
+                  </p>
+                </div>
+                <p className="text-sm font-semibold text-slate-700">
+                  {item.status}
+                </p>
+              </article>
+            ))}
+          </div>
+        ) : null}
+      </section>
+
       <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
           <div className="flex items-start gap-4">
             <div className="grid h-12 w-12 place-items-center rounded-2xl bg-emerald-50 text-emerald-600">
@@ -785,6 +1114,65 @@ function getAudienceRecipients(
   audience: string,
   data: { leads: Lead[]; clients: CrmClient[]; appointments: Appointment[] },
 ): SmsRecipient[] {
+  if (audience === "Leads") {
+    return uniqueRecipients(
+      data.leads
+        .filter((lead) => lead.phone)
+        .map((lead) => ({
+          phone: lead.phone,
+          firstName: lead.firstName || "vous",
+        })),
+    );
+  }
+
+  if (audience === "Clients") {
+    return uniqueRecipients(
+      data.clients
+        .filter((client) => client.phone)
+        .map((client) => ({
+          phone: client.phone,
+          firstName: client.firstName || "vous",
+        })),
+    );
+  }
+
+  if (audience === "Leads RDV pris") {
+    return uniqueRecipients(
+      data.leads
+        .filter(
+          (lead) =>
+            (lead.status === "RDV pris" || lead.status === "RDV confirmé") &&
+            lead.phone,
+        )
+        .map((lead) => ({
+          phone: lead.phone,
+          firstName: lead.firstName || "vous",
+        })),
+    );
+  }
+
+  if (audience === "Leads à relancer") {
+    return uniqueRecipients(
+      data.leads
+        .filter((lead) => lead.status === "À relancer" && lead.phone)
+        .map((lead) => ({
+          phone: lead.phone,
+          firstName: lead.firstName || "vous",
+        })),
+    );
+  }
+
+  if (audience === "Leads reviendra vers nous") {
+    return uniqueRecipients(
+      data.leads
+        .filter((lead) => lead.status === "Reviendra vers nous" && lead.phone)
+        .map((lead) => ({
+          phone: lead.phone,
+          firstName: lead.firstName || "vous",
+        })),
+    );
+  }
+
   if (audience === "RDV confirmés demain") {
     const tomorrow = addDaysIso(todayIso(), 1);
     return uniqueRecipients(
@@ -836,6 +1224,56 @@ function getAudienceRecipients(
         firstName: lead.firstName || "vous",
       })),
   );
+}
+
+function chunkRecipients(recipients: SmsRecipient[], size: number) {
+  const chunks: SmsRecipient[][] = [];
+  for (let index = 0; index < recipients.length; index += size) {
+    chunks.push(recipients.slice(index, index + size));
+  }
+  return chunks;
+}
+
+function smsSegmentInfo(text: string) {
+  const gsm = gsmSeptetLength(text);
+  if (gsm != null) {
+    const parts = gsm <= 160 ? 1 : Math.ceil(gsm / 153);
+    return {
+      length: gsm,
+      singleLimit: 160,
+      parts,
+      alphabetHint: "(alphabet standard)",
+    };
+  }
+
+  const length = Array.from(text).length;
+  const parts = length <= 70 ? 1 : Math.ceil(length / 67);
+  return {
+    length,
+    singleLimit: 70,
+    parts,
+    alphabetHint: "(accents ou emoji)",
+  };
+}
+
+function gsmSeptetLength(text: string) {
+  const basic =
+    "@£$¥èéùìòÇ\nØø\rÅåΔ_ΦΓΛΩΠΨΣΘΞÆæßÉ !\"#¤%&'()*+,-./0123456789:;<=>?¡ABCDEFGHIJKLMNOPQRSTUVWXYZÄÖÑÜ§¿abcdefghijklmnopqrstuvwxyzäöñüà";
+  const extended = "^{}\\[~]|€";
+  let length = 0;
+
+  for (const char of text) {
+    if (extended.includes(char)) {
+      length += 2;
+      continue;
+    }
+    if (!basic.includes(char)) {
+      return null;
+    }
+    length += 1;
+  }
+
+  return length;
 }
 
 function uniqueRecipients(recipients: SmsRecipient[]) {
