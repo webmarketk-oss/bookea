@@ -109,14 +109,177 @@ function extractNeed(text) {
 }
 
 function slotList(slots) {
-  const labels = (slots || []).slice(0, 3).map((slot) => slot.label).filter(Boolean);
+  const labels = (slots || []).slice(0, 5).map((slot) => slot.label).filter(Boolean);
   if (!labels.length) {
-    return "Aucun créneau libre sur les horaires et le planning actuels.";
+    return "Aucun créneau libre sur les semaines à venir pour ce jour et cet horaire. Je peux regarder un autre jour.";
   }
   if (labels.length === 1) {
     return `Créneau libre : ${labels[0]}.`;
   }
   return `Créneaux libres : ${labels.join(" · ")}.`;
+}
+
+function timeToMinutes(value) {
+  const match = String(value || "").match(/(\d{1,2}):(\d{2})/);
+  if (!match) {
+    return 0;
+  }
+  return Number(match[1]) * 60 + Number(match[2]);
+}
+
+function minutesToTime(value) {
+  const hours = Math.floor(value / 60);
+  const minutes = value % 60;
+  return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
+}
+
+function todayIso(now) {
+  const date = now instanceof Date ? now : new Date();
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Europe/Paris",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(date);
+}
+
+function addDaysIso(date, days) {
+  const next = new Date(`${date}T12:00:00`);
+  next.setDate(next.getDate() + days);
+  const year = next.getFullYear();
+  const month = String(next.getMonth() + 1).padStart(2, "0");
+  const day = String(next.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function formatPlanningSlotLabel(date, time) {
+  const weekday = new Date(`${date}T12:00:00`).getDay();
+  const short = ["dim.", "lun.", "mar.", "mer.", "jeu.", "ven.", "sam."];
+  const [, month, day] = date.split("-");
+  return `${short[weekday]} ${day}/${month} à ${time.replace(":", "h")}`;
+}
+
+function namedWeekdays(text) {
+  const value = normalize(text);
+  return WEEKDAYS.map((day, index) => (value.includes(day) ? index : -1)).filter(
+    (index) => index >= 0,
+  );
+}
+
+function pinsNextWeekday(text) {
+  const value = normalize(text);
+  return /\bce (lundi|mardi|mercredi|jeudi|vendredi|samedi)\b|\b(lundi|mardi|mercredi|jeudi|vendredi|samedi) prochain\b/.test(
+    value,
+  );
+}
+
+function timeWindowFromText(text) {
+  const value = normalize(text).replace(/\bmidi\b/g, "12h");
+  const range = value.match(
+    /(?:entre\s+)?(\d{1,2})\s*h(?:\s*(\d{2}))?\s+(?:et|a|-)\s+(\d{1,2})\s*h(?:\s*(\d{2}))?/,
+  );
+  if (range) {
+    return {
+      from: Number(range[1]) * 60 + Number(range[2] || 0),
+      to: Number(range[3]) * 60 + Number(range[4] || 0),
+    };
+  }
+  const single = value.match(/\b(\d{1,2})\s*h(?:\s*(\d{2}))?\b/);
+  if (single && !/horaire|ouvert/.test(value)) {
+    const from = Number(single[1]) * 60 + Number(single[2] || 0);
+    return { from, to: from + 60 };
+  }
+  return null;
+}
+
+function planningSlotBusy(appointments, date, time, duration) {
+  const start = timeToMinutes(time);
+  const end = start + duration;
+  const onDay = (appointments || []).filter((item) => {
+    if (item.date !== date) {
+      return false;
+    }
+    return !/annul|cancel/i.test(String(item.status || ""));
+  });
+  const overlaps = (item) => {
+    const otherStart = timeToMinutes(String(item.start || "00:00"));
+    const otherEnd = otherStart + (Number(item.duration) > 0 ? Number(item.duration) : 60);
+    return start < otherEnd && otherStart < end;
+  };
+  const cabinIds = [
+    ...new Set((appointments || []).map((item) => String(item.cabinId || "")).filter(Boolean)),
+  ];
+  if (cabinIds.length >= 2) {
+    return cabinIds.every((cabinId) =>
+      onDay.some((item) => String(item.cabinId || "") === cabinId && overlaps(item)),
+    );
+  }
+  return onDay.some(overlaps);
+}
+
+function parisMinutes(now) {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Europe/Paris",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(now);
+  const hour = Number(parts.find((part) => part.type === "hour")?.value || 0);
+  const minute = Number(parts.find((part) => part.type === "minute")?.value || 0);
+  return hour * 60 + minute;
+}
+
+function pickPlanningSlots(appointments, hours, text, extras) {
+  const now = extras?.now instanceof Date ? extras.now : new Date();
+  const duration = extras?.duration || 75;
+  const today = todayIso(now);
+  const weekdays = namedWeekdays(text);
+  const window = timeWindowFromText(text);
+  const pinNext = pinsNextWeekday(text);
+  const week = Array.isArray(hours) && hours.length ? hours : [];
+  const slots = [];
+  const seenDays = new Set();
+  const nowMinutes = parisMinutes(now);
+
+  for (let offset = 0; offset < 56 && slots.length < 4; offset += 1) {
+    const date = addDaysIso(today, offset);
+    const weekday = new Date(`${date}T12:00:00`).getDay();
+    if (weekdays.length && !weekdays.includes(weekday)) {
+      continue;
+    }
+    if (pinNext && weekdays.length === 1 && seenDays.size > 0) {
+      break;
+    }
+    const dayHours = week.find((item) => Number(item.weekday) === weekday);
+    if (!dayHours || dayHours.closed) {
+      continue;
+    }
+    const open = timeToMinutes(String(dayHours.startTime || "09:00").slice(0, 5));
+    const close = timeToMinutes(String(dayHours.endTime || "19:00").slice(0, 5));
+    for (let minutes = open; minutes + duration <= close; minutes += 30) {
+      if (window && (minutes < window.from || minutes >= window.to)) {
+        continue;
+      }
+      if (date === today && minutes < nowMinutes + 60) {
+        continue;
+      }
+      const time = minutesToTime(minutes);
+      if (planningSlotBusy(appointments, date, time, duration)) {
+        continue;
+      }
+      slots.push({
+        date,
+        time,
+        label: formatPlanningSlotLabel(date, time),
+      });
+      seenDays.add(date);
+      if (weekdays.length) {
+        break;
+      }
+    }
+  }
+
+  return slots;
 }
 
 function applyPlanningReply(conversation, text, settings, slots, extras) {
@@ -198,4 +361,5 @@ module.exports = {
   applyPlanningReply,
   formatPlanningHours,
   isPlanningProspectTone,
+  pickPlanningSlots,
 };

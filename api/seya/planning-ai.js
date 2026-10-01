@@ -3,7 +3,6 @@ const {
   agentSettings,
   formatCenterProfilePrompt,
   message,
-  pickSlotsForMessage,
   resolveTreatmentBrief,
   resolveTreatmentPrice,
 } = require("./agent");
@@ -11,6 +10,7 @@ const {
   applyPlanningReply,
   formatPlanningHours,
   isPlanningProspectTone,
+  pickPlanningSlots,
 } = require("./planning-rules");
 
 function seyaPlanningModel() {
@@ -75,6 +75,7 @@ function planningPrompt({
     "Tu parles UNIQUEMENT à l’équipe du centre. Tu n’es pas Seya WhatsApp. Tu ne parles jamais comme à un prospect.",
     "Interdit : « c’est Seya », qualification zone/délai, « lequel vous irait », « je vous laisse revenir », « écrivez-moi quand », « vous recevrez la confirmation », ton réceptionniste WhatsApp.",
     "Tu suis STRICTEMENT toutes les consignes, briefs, tarifs, horaires et créneaux fournis. Tu n’inventes ni prix, ni horaire, ni adresse, ni règle santé.",
+    "Si un jour est demandé sans date (samedi, lundi…), tu regardes plusieurs semaines. Si le prochain est plein, tu cites les suivants fournis. Tu ne conclus pas trop tôt qu’il n’y a rien.",
     "Réponds en 1 à 3 phrases, vouvoiement d’équipe, factuel. Donne le créneau, le tarif fiche ou la règle demandée.",
     `Centre : ${centerName || "le centre"}.`,
     settings.brief || seya.brief
@@ -176,7 +177,7 @@ async function generatePlanningReply({
   centerAddress,
 }) {
   const resolvedSlots = Array.isArray(appointments)
-    ? pickSlotsForMessage(appointments, hours, conversation, text)
+    ? pickPlanningSlots(appointments, hours, text)
     : [];
   const usableSlots = resolvedSlots.length ? resolvedSlots : slots || [];
   const settings = agentSettings(seya);

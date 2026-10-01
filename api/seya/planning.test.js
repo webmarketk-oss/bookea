@@ -1,6 +1,7 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 const { generatePlanningReply, isPlanningProspectTone, planningPrompt } = require("./planning-ai");
+const { pickPlanningSlots } = require("./planning-rules");
 
 const seya = {
   brief: "Toujours vérifier le planning réel.",
@@ -36,6 +37,7 @@ test("le prompt Planning n’est pas le script WhatsApp prospect", () => {
   assert.match(prompt, /équipe/);
   assert.match(prompt, /pas Seya WhatsApp/);
   assert.match(prompt, /89 €/);
+  assert.match(prompt, /plusieurs semaines/);
   assert.doesNotMatch(prompt, /Tu es Seya, au standard WhatsApp/);
 });
 
@@ -73,4 +75,23 @@ test("sans clé IA, Planning répond en langage équipe", async () => {
   if (previous) {
     process.env.OPENAI_API_KEY = previous;
   }
+});
+
+test("Planning cherche d’autres samedis si le prochain est plein à 11h", () => {
+  const hours = [
+    { weekday: 6, label: "Sam", startTime: "09:00", endTime: "19:00", closed: false },
+  ];
+  const slots = pickPlanningSlots(
+    [
+      { date: "2026-10-03", start: "11:00", duration: 75, status: "Confirmé", cabinId: "c1" },
+      { date: "2026-10-03", start: "11:30", duration: 75, status: "Confirmé", cabinId: "c1" },
+    ],
+    hours,
+    "samedi entre 11h et midi",
+    { now: new Date("2026-10-01T10:00:00"), duration: 75 },
+  );
+
+  assert.ok(slots.length > 0);
+  assert.equal(slots.some((slot) => slot.date === "2026-10-03"), false);
+  assert.ok(slots.some((slot) => slot.date === "2026-10-10" && slot.time === "11:00"));
 });

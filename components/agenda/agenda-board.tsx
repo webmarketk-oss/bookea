@@ -106,7 +106,7 @@ import {
   lastSeyaMessage,
   suggestAvailableSlots,
 } from "@/lib/seya-agent";
-import { applyPlanningReply } from "@/lib/seya-planning";
+import { applyPlanningReply, pickPlanningSlots } from "@/lib/seya-planning";
 import {
   defaultSeyaAgentSettings,
   loadSeyaAgentSettings,
@@ -1841,12 +1841,12 @@ export default function AgendaBoard() {
         ? seyaConversation
         : createAgendaDeskConversation(centerId);
     const occupancy = seyaAgendaOccupancyAppointments(appointmentList);
-    const fallbackSlots = suggestAvailableSlots({
-      appointments: appointmentList,
-      hours: centerDayHours,
-      count: 3,
-      duration: AGENDA_SEYA_DURATION_MINUTES,
-    });
+    const fallbackSlots = pickPlanningSlots(
+      occupancy,
+      centerDayHours,
+      command,
+      { duration: AGENDA_SEYA_DURATION_MINUTES },
+    );
     const centerSettings = readCenterSettings();
     const centerAddress = [
       centerSettings?.center?.address,
@@ -2421,8 +2421,7 @@ export default function AgendaBoard() {
               </div>
               <p className="text-sm leading-6 text-violet-800">
                 Assistante interne du planning. Elle suit toutes les consignes,
-                briefs, horaires et le planning du centre — elle ne parle pas
-                comme Seya WhatsApp.
+                briefs, horaires et le planning du centre.
               </p>
             </div>
             <div className="grid gap-3 md:grid-cols-3">

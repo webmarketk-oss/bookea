@@ -4,6 +4,7 @@ import { createAgendaDeskConversation } from "./seya-agenda.ts";
 import {
   applyPlanningReply,
   isPlanningProspectTone,
+  pickPlanningSlots,
 } from "./seya-planning.ts";
 import type { SeyaAgentSettings } from "./seya-settings.ts";
 
@@ -88,4 +89,31 @@ test("Seya Planning pose un RDV seulement si l’équipe le confirme", () => {
   );
   assert.equal(booked.shouldBook?.time, "16:00");
   assert.match(booked.conversation.messages.at(-1)?.text || "", /Marie Dupont/);
+});
+
+test("Seya Planning cherche les samedis suivants si le prochain est plein à l’horaire demandé", () => {
+  const hours = [
+    { weekday: 6, label: "Sam", startTime: "09:00", endTime: "19:00", closed: false },
+    { weekday: 1, label: "Lun", startTime: "09:00", endTime: "19:00", closed: false },
+  ];
+  const now = new Date("2026-10-01T10:00:00");
+  const nextSaturdayBusy = [
+    { date: "2026-10-03", start: "11:00", duration: 75, status: "Confirmé", cabinId: "c1" },
+    { date: "2026-10-03", start: "11:30", duration: 75, status: "Confirmé", cabinId: "c1" },
+  ];
+  const laterFree = pickPlanningSlots(
+    nextSaturdayBusy,
+    hours,
+    "créneaux samedi entre 11h et midi",
+    { now, duration: 75 },
+  );
+
+  assert.ok(laterFree.length > 0);
+  assert.equal(laterFree.some((slot) => slot.date === "2026-10-03"), false);
+  assert.equal(laterFree.every((slot) => slot.date > "2026-10-03"), true);
+  assert.equal(
+    laterFree.every((slot) => slot.time === "11:00" || slot.time === "11:30"),
+    true,
+  );
+  assert.ok(laterFree.some((slot) => slot.date === "2026-10-10"));
 });
