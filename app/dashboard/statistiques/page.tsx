@@ -307,7 +307,11 @@ export default function StatisticsPage() {
               <option>30 derniers jours</option>
               <option>Mois dernier</option>
             </select>
-            <button className="inline-flex h-12 items-center gap-2 rounded-2xl bg-slate-950 px-5 font-semibold text-white shadow-sm">
+            <button
+              type="button"
+              onClick={() => setActiveTab("seya")}
+              className="inline-flex h-12 items-center gap-2 rounded-2xl bg-slate-950 px-5 font-semibold text-white shadow-sm"
+            >
               <Sparkles className="h-5 w-5" />
               Analyse Seya
             </button>
@@ -331,7 +335,7 @@ export default function StatisticsPage() {
             active={activeTab === "seya"}
             onClick={() => setActiveTab("seya")}
           >
-            Seya KPI
+            Analyse Seya
           </StatsTabButton>
         </div>
 
