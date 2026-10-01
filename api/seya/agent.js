@@ -38,6 +38,8 @@ const {
   isBookingThread,
   isHesitation,
   isIdentityQuestion,
+  isWrongCenter,
+  wrongCenterReply,
   isOffTopicComplaint,
   isRereadAsk,
   isAppointmentConfirmed,
@@ -178,6 +180,9 @@ function isOptOut(text) {
     return true;
   }
   if (/ne (me )?(plus )?(e[cç]rire|contacter|d[eé]ranger|appeler)/i.test(raw)) {
+    return true;
+  }
+  if (isWrongCenter(raw)) {
     return true;
   }
   return /^(non merci|plus jamais)$/i.test(raw);
@@ -1282,6 +1287,17 @@ function applyLeadReply(conversation, text, seya, slots, extras = {}) {
         }) ||
         matchProposedSlot(intentText, pool, { date: bookingState.requestedDate });
   const refuses = isOptOut(text);
+
+  if (isWrongCenter(text)) {
+    return finishLeadReply(
+      conversation,
+      qualification,
+      "Pas intéressé",
+      text,
+      wrongCenterReply(extras.now),
+      bookingState,
+    );
+  }
 
   if (refuses) {
     return finishLeadReply(conversation, qualification, "Pas intéressé", text, "Très bien, j’arrête ici. Si vous changez d’avis, écrivez-nous.", bookingState);

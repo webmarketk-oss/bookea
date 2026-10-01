@@ -144,6 +144,22 @@ test("pas de relance si stop, refus ou RDV confirmé", () => {
   );
   assert.equal(shouldSkipRelance(conversation({ status: "RDV confirmé" })), true);
   assert.equal(shouldSkipRelance(conversation({ status: "Pas intéressé" })), true);
+  assert.equal(
+    shouldSkipRelance(
+      conversation({
+        status: "En cours",
+        messages: [
+          {
+            id: "m1",
+            author: "lead",
+            text: "Je pensais que c’était l’institut de Cournon d’Auvergne",
+            at: hoursAgo(20),
+          },
+        ],
+      }),
+    ),
+    true,
+  );
   assert.equal(pickRelanceRound(conversation({ status: "RDV pris" }), NOW), 0);
   assert.equal(
     shouldSkipRelance(

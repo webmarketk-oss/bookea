@@ -31,6 +31,27 @@ function isIdentityQuestion(text) {
   );
 }
 
+function isWrongCenter(text) {
+  const value = normalize(text);
+  if (!value) {
+    return false;
+  }
+  return (
+    /je pensais (que )?(c[' ]?etait|c etait)/.test(value) ||
+    /je me suis tromp[eé]e?( de )?(centre|institut|ville|adresse|numero)/.test(
+      value,
+    ) ||
+    /pas le bon (centre|institut|etablissement|numero)/.test(value) ||
+    /mauvais (centre|institut|numero)/.test(value) ||
+    /c[' ]est (pas|pas du tout) (le |votre )?(centre|institut)/.test(value) ||
+    /je (cherchais|voulais) (l[' ]?institut|le centre) de/.test(value)
+  );
+}
+
+function wrongCenterReply(now) {
+  return `D’accord, aucun souci. Je vous souhaite ${greetingForTime(now)}.`;
+}
+
 function compactText(text) {
   return normalize(text)
     .replace(/[.!,;:?…]+/g, " ")
@@ -355,6 +376,7 @@ function wantsSlots(text, conversation) {
   const value = normalize(text);
   if (
     isIdentityQuestion(text) ||
+    isWrongCenter(text) ||
     isThanks(text, conversation) ||
     isHesitation(text) ||
     refusesSlots(text) ||
@@ -418,6 +440,9 @@ function alreadyTold(conversation, needle) {
 function conversationalReply(text, conversation, qualification, now) {
   if (isIdentityQuestion(text)) {
     return identityReply();
+  }
+  if (isWrongCenter(text)) {
+    return wrongCenterReply(now);
   }
   if (isAppointmentConfirmed(conversation) && (isThanks(text, conversation) || isShortYes(text))) {
     return pickFresh(
@@ -529,6 +554,8 @@ module.exports = {
   willCallBackReply,
   isHesitation,
   isIdentityQuestion,
+  isWrongCenter,
+  wrongCenterReply,
   isShortYes,
   isThanks,
   lastSeyaOfferedToBook,

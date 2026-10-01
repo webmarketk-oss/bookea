@@ -1116,3 +1116,30 @@ test("un lead visage reprend le titre du soin, pas l’enseigne", () => {
   assert.doesNotMatch(opening, /JFG Clinic Saint-Gilles|https?:\/\//i);
 });
 
+test("mauvais centre : elle clôt et ne propose plus de rendez-vous", async () => {
+  let conversation = startConversation(
+    {
+      leadId: "lead-cournon",
+      centerId: "jfg-clinique-clermont",
+      firstName: "Marine",
+      lastName: "Test",
+      phone: "0611223344",
+      treatment: "Soin minceur",
+    },
+    "JFG Clinique Clermont",
+    seya,
+  );
+  conversation = await reply(conversation, "C’est pour le ventre");
+  conversation = await reply(
+    conversation,
+    "Bonjour, Excusez-moi, je pensais que c’était l’institut de Cournon d’Auvergne",
+  );
+
+  assert.equal(conversation.status, "Pas intéressé");
+  assert.match(lastSeya(conversation), /aucun souci|belle journée|bonne soirée/i);
+  assert.doesNotMatch(
+    lastSeya(conversation),
+    /rendez-vous|créneau|creneau|lequel vous irait|faites-le moi savoir|si vous souhaitez/i,
+  );
+});
+

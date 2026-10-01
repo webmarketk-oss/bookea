@@ -35,7 +35,13 @@ const {
 } = require("./booking-state");
 const { classifyHealthMessage, isAwaitingHealthReview } = require("./health");
 const { classifyPriceQuestion, isPriceRepeatComplaint, isNearDuplicate } = require("./price");
-const { asksOtherDay, isRereadAsk, offeredSlots, wantsSlots } = require("./conversation");
+const {
+  asksOtherDay,
+  isRereadAsk,
+  isWrongCenter,
+  offeredSlots,
+  wantsSlots,
+} = require("./conversation");
 
 function seyaModel() {
   const requested = String(process.env.OPENAI_MODEL || "").trim();
@@ -113,6 +119,9 @@ async function generateSeyaReply({
     !hasAiKey() ||
     health.personal ||
     fallback.shouldBook ||
+    isOptOut(text) ||
+    isWrongCenter(text) ||
+    /pas int[eé]ress/i.test(String(fallback.conversation?.status || "")) ||
     asksPrice(text) ||
     classifyPriceQuestion(text) ||
     isPriceRepeatComplaint(text) ||
