@@ -554,6 +554,16 @@ function yearCurveColors(index: number) {
   return YEAR_CURVE_PALETTE[Math.max(0, index) % YEAR_CURVE_PALETTE.length];
 }
 
+type YearlyHoverPoint = {
+  x: number;
+  y: number;
+  year: number;
+  month: string;
+  value: number;
+  kind: "leads" | "rdv";
+  color: string;
+};
+
 function YearlyLineChart({
   series,
   allYears,
@@ -565,9 +575,10 @@ function YearlyLineChart({
   max: number;
   ticks: number[];
 }) {
+  const [hovered, setHovered] = useState<YearlyHoverPoint | null>(null);
   const width = 720;
   const height = 280;
-  const pad = { left: 42, right: 12, top: 18, bottom: 34 };
+  const pad = { left: 42, right: 12, top: 28, bottom: 34 };
   const innerWidth = width - pad.left - pad.right;
   const innerHeight = height - pad.top - pad.bottom;
 
@@ -587,13 +598,34 @@ function YearlyLineChart({
       .join(" ");
   }
 
+  function showPoint(
+    row: { year: number; leads: number[]; rdv: number[] },
+    index: number,
+    kind: "leads" | "rdv",
+  ) {
+    const values = kind === "leads" ? row.leads : row.rdv;
+    const { x, y } = point(index, values[index]);
+    const palette = yearCurveColors(allYears.indexOf(row.year));
+    setHovered({
+      x,
+      y,
+      year: row.year,
+      month: MONTH_LABELS[index],
+      value: values[index],
+      kind,
+      color: kind === "leads" ? palette.leads : palette.rdv,
+    });
+  }
+
   return (
     <div className="overflow-x-auto rounded-2xl border border-slate-100 bg-slate-50/70 p-3">
+      <div className="relative min-w-[640px]">
       <svg
         viewBox={`0 0 ${width} ${height}`}
-        className="h-72 w-full min-w-[640px]"
+        className="h-72 w-full"
         role="img"
         aria-label="Courbes mensuelles des leads et des RDV pris par année"
+        onMouseLeave={() => setHovered(null)}
       >
         {ticks.map((tick) => {
           const y = pad.top + innerHeight - (tick / max) * innerHeight;
@@ -657,43 +689,95 @@ function YearlyLineChart({
               />
               {row.leads.map((value, index) => {
                 const { x, y } = point(index, value);
+                const active =
+                  hovered?.year === row.year &&
+                  hovered.month === MONTH_LABELS[index] &&
+                  hovered.kind === "leads";
                 return (
-                  <circle
-                    key={`${row.year}-leads-${index}`}
-                    cx={x}
-                    cy={y}
-                    r="3.5"
-                    fill={palette.leads}
-                  >
-                    <title>
-                      {row.year} · {MONTH_LABELS[index]} · {value} lead
-                      {value > 1 ? "s" : ""}
-                    </title>
-                  </circle>
+                  <g key={`${row.year}-leads-${index}`}>
+                    <circle
+                      cx={x}
+                      cy={y}
+                      r="14"
+                      fill="transparent"
+                      className="cursor-pointer"
+                      onMouseEnter={() => showPoint(row, index, "leads")}
+                      onFocus={() => showPoint(row, index, "leads")}
+                    />
+                    <circle
+                      cx={x}
+                      cy={y}
+                      r={active ? 5.5 : 3.5}
+                      fill={palette.leads}
+                      className="pointer-events-none"
+                    />
+                  </g>
                 );
               })}
               {row.rdv.map((value, index) => {
                 const { x, y } = point(index, value);
+                const active =
+                  hovered?.year === row.year &&
+                  hovered.month === MONTH_LABELS[index] &&
+                  hovered.kind === "rdv";
                 return (
-                  <circle
-                    key={`${row.year}-rdv-${index}`}
-                    cx={x}
-                    cy={y}
-                    r="3.5"
-                    fill="#fff"
-                    stroke={palette.rdv}
-                    strokeWidth="2"
-                  >
-                    <title>
-                      {row.year} · {MONTH_LABELS[index]} · {value} RDV
-                    </title>
-                  </circle>
+                  <g key={`${row.year}-rdv-${index}`}>
+                    <circle
+                      cx={x}
+                      cy={y}
+                      r="14"
+                      fill="transparent"
+                      className="cursor-pointer"
+                      onMouseEnter={() => showPoint(row, index, "rdv")}
+                      onFocus={() => showPoint(row, index, "rdv")}
+                    />
+                    <circle
+                      cx={x}
+                      cy={y}
+                      r={active ? 5.5 : 3.5}
+                      fill="#fff"
+                      stroke={palette.rdv}
+                      strokeWidth="2"
+                      className="pointer-events-none"
+                    />
+                  </g>
                 );
               })}
             </g>
           );
         })}
       </svg>
+      {hovered ? (
+        <div
+          className={`pointer-events-none absolute z-10 rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-lg ${
+            hovered.y < 56
+              ? "translate-y-3"
+              : "-translate-y-[calc(100%+10px)]"
+          } ${
+            hovered.x < 80
+              ? "translate-x-0"
+              : hovered.x > width - 80
+                ? "-translate-x-full"
+                : "-translate-x-1/2"
+          }`}
+          style={{
+            left: `${(hovered.x / width) * 100}%`,
+            top: `${(hovered.y / height) * 100}%`,
+          }}
+        >
+          <p className="text-[11px] font-semibold text-slate-500">
+            {hovered.month} {hovered.year} ·{" "}
+            {hovered.kind === "leads" ? "Leads" : "RDV pris"}
+          </p>
+          <p
+            className="mt-0.5 text-lg font-black leading-none"
+            style={{ color: hovered.color }}
+          >
+            {hovered.value}
+          </p>
+        </div>
+      ) : null}
+      </div>
     </div>
   );
 }
