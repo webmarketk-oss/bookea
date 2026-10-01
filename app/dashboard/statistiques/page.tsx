@@ -20,8 +20,14 @@ import {
 } from "lucide-react";
 
 import { loadCrmAppointments } from "@/lib/agenda-supabase";
+import {
+  defaultCenterDayHours,
+  loadCenterHours,
+  type CenterDayHours,
+} from "@/lib/center-hours";
 import { todayIso } from "@/lib/crm-stats";
 import { loadCrmLeads } from "@/lib/crm-supabase";
+import { buildRequestedSlots } from "@/lib/requested-slots";
 import {
   buildPractitionerStats,
   isLeadWithBookedRdv,
@@ -46,16 +52,20 @@ export default function StatisticsPage() {
   );
   const [activeTab, setActiveTab] = useState<StatsTab>("overview");
   const [showAllServices, setShowAllServices] = useState(false);
+  const [centerHours, setCenterHours] = useState<CenterDayHours[]>(
+    defaultCenterDayHours,
+  );
 
   useEffect(() => {
     let cancelled = false;
 
     async function load() {
       try {
-        const [leadData, appointmentData, team] = await Promise.all([
+        const [leadData, appointmentData, team, hours] = await Promise.all([
           loadCrmLeads(),
           loadCrmAppointments(),
           loadTeamPlanning().catch(() => null),
+          loadCenterHours().catch(() => defaultCenterDayHours),
         ]);
 
         if (cancelled) {
@@ -64,6 +74,7 @@ export default function StatisticsPage() {
 
         setLeads(leadData.leads);
         setAppointments(appointmentData);
+        setCenterHours(hours);
         if (team?.practitioners.length) {
           setPractitionerList(team.practitioners);
         }
@@ -132,8 +143,8 @@ export default function StatisticsPage() {
     [appointments, leads],
   );
   const requestedSlots = useMemo(
-    () => buildRequestedSlots(appointments),
-    [appointments],
+    () => buildRequestedSlots(appointments, centerHours),
+    [appointments, centerHours],
   );
   const duplicateCount = findDuplicateLeadGroups(leads).length;
   const practitionerStats = useMemo(
@@ -600,7 +611,7 @@ export default function StatisticsPage() {
         <section className="grid gap-6 xl:grid-cols-2 2xl:grid-cols-4">
           <Panel
             title="Créneaux les plus demandés"
-            subtitle="Aide à adapter les horaires, cabines et praticiennes."
+            subtitle="Selon les horaires du planning de ce centre."
             icon={<Clock3 className="h-6 w-6 text-blue-600" />}
           >
             <RankList
@@ -926,52 +937,6 @@ function buildServicePerformance(appointments: Appointment[], leads: Lead[]) {
       };
     })
     .sort((left, right) => right.reservations - left.reservations);
-}
-
-function buildRequestedSlots(appointments: Appointment[]) {
-  const bookable = appointments.filter(
-    (appointment) =>
-      (!appointment.kind || appointment.kind === "Rendez-vous") &&
-      appointment.status !== "Annulation",
-  );
-  const grouped = new Map<
-    string,
-    { bookings: number; missed: number }
-  >();
-
-  for (const appointment of bookable) {
-    const hour = Number(appointment.start.slice(0, 2));
-    const weekday = new Date(`${appointment.date}T12:00:00`).toLocaleDateString(
-      "fr-FR",
-      { weekday: "long" },
-    );
-    const slotHour = `${String(hour).padStart(2, "0")}h-${String(hour + 2).padStart(2, "0")}h`;
-    const label = `${weekday.charAt(0).toUpperCase()}${weekday.slice(1)} ${slotHour}`;
-    const current = grouped.get(label) ?? { bookings: 0, missed: 0 };
-    current.bookings += 1;
-    if (
-      appointment.status === "No show" ||
-      appointment.status === "Pas venu pas prévenu"
-    ) {
-      current.missed += 1;
-    }
-    grouped.set(label, current);
-  }
-
-  const maxBookings = Math.max(
-    1,
-    ...[...grouped.values()].map((item) => item.bookings),
-  );
-
-  return [...grouped.entries()]
-    .map(([slot, item]) => ({
-      slot,
-      demand: Math.round((item.bookings / maxBookings) * 100),
-      bookings: item.bookings,
-      missed: item.missed,
-    }))
-    .sort((left, right) => right.bookings - left.bookings)
-    .slice(0, 4);
 }
 
 function groupByLeadField(leadsList: Lead[], field: "source" | "campaign") {
