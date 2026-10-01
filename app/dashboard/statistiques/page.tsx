@@ -632,7 +632,7 @@ export default function StatisticsPage() {
               rows={campaignRows.map((row) => ({
                 label: row.label,
                 value: `${row.count} lead${row.count > 1 ? "s" : ""}`,
-                sub: `${formatCurrency(row.revenue)} CA · ${row.sold} converti${row.sold > 1 ? "s" : ""} · ${row.conversion}% conversion`,
+                sub: `${formatCurrency(row.revenue)} CA · ${row.sold} converti${row.sold > 1 ? "s" : ""} · ${row.devis} devis · ${row.conversion}% conversion`,
                 percent: row.percent,
                 progressLabel: `${row.percent}% des leads`,
                 tone: rateTone(row.conversion),
@@ -970,6 +970,7 @@ function groupByLeadField(leadsList: Lead[], field: "source" | "campaign") {
   return Object.entries(grouped)
     .map(([label, rows]) => {
       const sold = rows.filter((lead) => soldStatuses.includes(lead.status)).length;
+      const devis = rows.filter((lead) => lead.status === "Devis").length;
       const revenue = rows.reduce((sum, lead) => sum + lead.dealAmount, 0);
 
       return {
@@ -979,6 +980,7 @@ function groupByLeadField(leadsList: Lead[], field: "source" | "campaign") {
         conversion: ratio(sold, rows.length),
         revenue,
         sold,
+        devis,
       };
     })
     .sort((a, b) => b.count - a.count);

@@ -28,6 +28,7 @@ export type BillingInvoice = {
   date: string;
   client: string;
   email: string;
+  phone?: string;
   care: string;
   type: BillingInvoiceType;
   status: BillingInvoiceStatus;
@@ -360,6 +361,7 @@ function toBillingInvoice(row: InvoiceRow): BillingInvoice {
       [client?.first_name, client?.last_name].filter(Boolean).join(" ") ||
       "Cliente Bookea",
     email: client?.email ?? "",
+    phone: client?.phone ?? "",
     care: lines.length === 1 ? lines[0].label : `${lines.length} prestations`,
     type: fromInvoiceTypeValue(row.type),
     status: fromInvoiceStatusValue(row.status),

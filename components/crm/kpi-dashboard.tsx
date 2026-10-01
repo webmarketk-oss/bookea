@@ -1,7 +1,9 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Card, CardContent } from "@/components/ui/card";
+import { loadBillingInvoices, type BillingInvoice } from "@/lib/billing-supabase";
+import { buildCampaignKpiRows } from "@/lib/campaign-kpi";
 import { getLeadRdvTakenDates, isRdvBookedStatus } from "@/lib/crm-stats";
 import { inactiveLeadStatuses } from "@/lib/lead-statuses";
 import { Lead } from "@/types/lead";
@@ -12,6 +14,7 @@ import {
   Clock3,
   Euro,
   FileText,
+  Receipt,
   ShoppingBag,
   TrendingUp,
   Users,
@@ -63,6 +66,13 @@ export default function KPIDashboard({ leads }: KPIDashboardProps) {
   const [period, setPeriod] = useState<KPIPeriod>("month");
   const [customStartDate, setCustomStartDate] = useState(getMonthStartIso());
   const [customEndDate, setCustomEndDate] = useState(todayIso());
+  const [invoices, setInvoices] = useState<BillingInvoice[]>([]);
+
+  useEffect(() => {
+    void loadBillingInvoices()
+      .then(setInvoices)
+      .catch(() => setInvoices([]));
+  }, []);
   const periodLeads = useMemo(
     () =>
       leads.filter((lead) =>
@@ -101,11 +111,21 @@ export default function KPIDashboard({ leads }: KPIDashboardProps) {
   const outOfZoneRate = ratio(outOfZoneCount, totalProspects);
 
   const campaignRows = getCampaignRows(periodLeads);
-  const campaignStats = getCampaignDiagramRows(periodLeads);
+  const periodInvoices = invoices.filter((invoice) =>
+    isInvoiceInPeriod(invoice, period, customStartDate, customEndDate),
+  );
+  const campaignStats = buildCampaignKpiRows(
+    periodLeads,
+    periodInvoices,
+    leads,
+    leadHasTakenRdv,
+  );
   const sourceRows = getSourceRows(periodLeads);
   const campaignChartMax = Math.max(
     1,
-    ...campaignStats.map((row) => Math.max(row.leads, row.rdv)),
+    ...campaignStats.map((row) =>
+      Math.max(row.leads, row.rdv, row.devis, row.invoices),
+    ),
   );
   const campaignLeadTotal = campaignStats.reduce(
     (total, row) => total + row.leads,
@@ -113,6 +133,14 @@ export default function KPIDashboard({ leads }: KPIDashboardProps) {
   );
   const campaignRdvTotal = campaignStats.reduce(
     (total, row) => total + row.rdv,
+    0,
+  );
+  const campaignDevisTotal = campaignStats.reduce(
+    (total, row) => total + row.devis,
+    0,
+  );
+  const campaignInvoiceTotal = campaignStats.reduce(
+    (total, row) => total + row.invoices,
     0,
   );
 
@@ -137,6 +165,13 @@ export default function KPIDashboard({ leads }: KPIDashboardProps) {
       subtitle: "Devis en cours",
       icon: FileText,
       color: "text-amber-600",
+    },
+    {
+      title: "NB factures",
+      value: campaignInvoiceTotal,
+      subtitle: "Factures émises",
+      icon: Receipt,
+      color: "text-cyan-600",
     },
     {
       title: "NB ventes",
@@ -380,7 +415,7 @@ export default function KPIDashboard({ leads }: KPIDashboardProps) {
                 Stats par campagne
               </h3>
               <p className="mt-1 text-sm font-medium text-slate-500">
-                Nombre de leads et de RDV pris pour chaque campagne
+                Leads, RDV pris, devis et factures pour chaque campagne
               </p>
             </div>
             <div className="flex flex-wrap gap-3">
@@ -398,6 +433,22 @@ export default function KPIDashboard({ leads }: KPIDashboardProps) {
                 </p>
                 <p className="mt-1 text-2xl font-black text-blue-600">
                   {campaignRdvTotal}
+                </p>
+              </div>
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                <p className="text-[11px] font-black uppercase text-slate-500">
+                  NB devis
+                </p>
+                <p className="mt-1 text-2xl font-black text-amber-600">
+                  {campaignDevisTotal}
+                </p>
+              </div>
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                <p className="text-[11px] font-black uppercase text-slate-500">
+                  NB factures
+                </p>
+                <p className="mt-1 text-2xl font-black text-cyan-600">
+                  {campaignInvoiceTotal}
                 </p>
               </div>
             </div>
@@ -836,12 +887,18 @@ function CampaignBarChart({
   rows,
   maxValue,
 }: {
-  rows: Array<{ name: string; leads: number; rdv: number }>;
+  rows: Array<{
+    name: string;
+    leads: number;
+    rdv: number;
+    devis: number;
+    invoices: number;
+  }>;
   maxValue: number;
 }) {
   const chartMax = niceChartMax(maxValue);
   const ticks = [0, 0.25, 0.5, 0.75, 1].map((step) => Math.round(chartMax * step));
-  const columnWidth = Math.max(92, Math.min(140, 720 / Math.max(rows.length, 1)));
+  const columnWidth = Math.max(128, Math.min(180, 880 / Math.max(rows.length, 1)));
 
   return (
     <div className="mt-6">
@@ -853,6 +910,14 @@ function CampaignBarChart({
         <span className="flex items-center gap-2">
           <i className="h-2.5 w-2.5 rounded-sm bg-blue-500" />
           RDV pris
+        </span>
+        <span className="flex items-center gap-2">
+          <i className="h-2.5 w-2.5 rounded-sm bg-amber-500" />
+          Devis
+        </span>
+        <span className="flex items-center gap-2">
+          <i className="h-2.5 w-2.5 rounded-sm bg-cyan-500" />
+          Factures
         </span>
       </div>
 
@@ -885,7 +950,7 @@ function CampaignBarChart({
                   style={{ bottom: `${(tick / chartMax) * 100}%` }}
                 />
               ))}
-              <div className="relative z-10 flex h-full items-end justify-center gap-2 pb-0">
+              <div className="relative z-10 flex h-full items-end justify-center gap-1.5 pb-0">
                 <ChartBar
                   value={row.leads}
                   max={chartMax}
@@ -898,6 +963,18 @@ function CampaignBarChart({
                   color="bg-blue-500"
                   label={`${row.rdv} RDV`}
                 />
+                <ChartBar
+                  value={row.devis}
+                  max={chartMax}
+                  color="bg-amber-500"
+                  label={`${row.devis} devis`}
+                />
+                <ChartBar
+                  value={row.invoices}
+                  max={chartMax}
+                  color="bg-cyan-500"
+                  label={`${row.invoices} factures`}
+                />
               </div>
             </div>
           ))}
@@ -909,7 +986,8 @@ function CampaignBarChart({
                 {row.name}
               </p>
               <p className="mt-1 text-[11px] font-medium text-slate-500">
-                {row.leads} leads · {row.rdv} RDV
+                {row.leads} leads · {row.rdv} RDV · {row.devis} devis ·{" "}
+                {row.invoices} factures
               </p>
             </div>
           ))}
@@ -933,7 +1011,7 @@ function ChartBar({
   const height = value > 0 ? Math.max((value / max) * 100, 8) : 0;
 
   return (
-    <div className="flex h-full w-8 items-end justify-center">
+    <div className="flex h-full w-6 items-end justify-center">
       <div
         className={`relative w-full rounded-t-md ${color}`}
         style={{ height: `${height}%` }}
@@ -1018,24 +1096,6 @@ function leadHasTakenRdv(lead: Lead) {
   );
 }
 
-function getCampaignDiagramRows(leads: Lead[]) {
-  const groups = new Map<string, { leads: number; rdv: number }>();
-
-  leads.forEach((lead) => {
-    const name = lead.campaign.trim() || "Sans campagne";
-    const current = groups.get(name) ?? { leads: 0, rdv: 0 };
-    current.leads += 1;
-    if (leadHasTakenRdv(lead)) {
-      current.rdv += 1;
-    }
-    groups.set(name, current);
-  });
-
-  return [...groups.entries()]
-    .map(([name, stats]) => ({ name, ...stats }))
-    .sort((left, right) => right.leads - left.leads);
-}
-
 function getCampaignRows(leads: Lead[]) {
   const counts = new Map<string, number>();
 
@@ -1086,11 +1146,37 @@ function isLeadInPeriod(
   customStartDate: string,
   customEndDate: string
 ) {
+  return isDateInKpiPeriod(
+    parseDate(lead.createdDate),
+    period,
+    customStartDate,
+    customEndDate,
+  );
+}
+
+function isInvoiceInPeriod(
+  invoice: BillingInvoice,
+  period: KPIPeriod,
+  customStartDate: string,
+  customEndDate: string,
+) {
+  return isDateInKpiPeriod(
+    parseInvoiceDate(invoice.date),
+    period,
+    customStartDate,
+    customEndDate,
+  );
+}
+
+function isDateInKpiPeriod(
+  createdDate: Date | null,
+  period: KPIPeriod,
+  customStartDate: string,
+  customEndDate: string,
+) {
   if (period === "all") {
     return true;
   }
-
-  const createdDate = parseDate(lead.createdDate);
 
   if (!createdDate) {
     return false;
@@ -1138,6 +1224,17 @@ function isLeadInPeriod(
     createdDate.getFullYear() === previousMonth.getFullYear() &&
     createdDate.getMonth() === previousMonth.getMonth()
   );
+}
+
+function parseInvoiceDate(value: string) {
+  const parts = value.split("/");
+  if (parts.length === 3) {
+    const [day, month, year] = parts.map(Number);
+    if (year && month && day) {
+      return new Date(year, month - 1, day);
+    }
+  }
+  return parseDate(value);
 }
 
 function parseDate(value: string) {
