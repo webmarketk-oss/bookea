@@ -22,6 +22,7 @@ import {
   Phone,
   Sparkles,
   Users,
+  Wallet,
 } from "lucide-react";
 
 const rdvBookedSubtitle = "RDV pris, acompte envoyé, acompte reçu…";
@@ -120,6 +121,14 @@ export default function DashboardCards({
       color: "text-purple-600",
       quickFilter: "RDV 7 jours",
     },
+    {
+      title: "Acompte envoyé",
+      value: leads.filter((lead) => lead.status === "Acompte envoyé").length,
+      subtitle: "À relancer pour encaisser",
+      icon: Wallet,
+      color: "text-amber-600",
+      status: "Acompte envoyé",
+    },
   ];
 
   const followUpStats: StatCard[] = [
@@ -179,7 +188,7 @@ export default function DashboardCards({
         title="RDV pris"
         hint="Comptés à la date où le rendez-vous a été pris, même si le statut a ensuite changé."
         cards={rdvStats}
-        columns="md:grid-cols-3"
+        columns="xl:grid-cols-4"
       >
         {(stat) =>
           renderStatCard(stat, activeStatus, activeQuickFilter, onStatusFilter, onQuickFilter)
