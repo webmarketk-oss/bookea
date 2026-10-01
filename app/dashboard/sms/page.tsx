@@ -126,6 +126,7 @@ export default function SmsPage() {
           ]);
 
         void fetch("/api/sms/dispatch").catch(() => null);
+        void fetch("/api/sms/campaign-dispatch").catch(() => null);
         void fetch("/api/sms/inbound").catch(() => null);
 
         if (cancelled) {
@@ -517,8 +518,8 @@ export default function SmsPage() {
     }
   }
 
-  function planCampaign() {
-    const recipients = campaignRecipients.length;
+  async function planCampaign() {
+    const recipients = campaignRecipients;
 
     if (!campaignMessage.trim()) {
       setIsError(true);
@@ -526,27 +527,81 @@ export default function SmsPage() {
       return;
     }
 
-    const nextCampaign: SmsCampaign = {
-      id: Date.now(),
-      name: campaignName.trim() || "Campagne SMS",
-      audience: campaignAudience,
-      message: campaignMessage,
-      plannedAt: `Le ${new Intl.DateTimeFormat("fr-FR").format(
-        new Date(`${campaignDate}T${campaignTime}`),
-      )} à ${campaignTime}`,
-      recipients,
-      status: "Planifié",
-    };
+    if (!campaignDate || !campaignTime) {
+      setIsError(true);
+      setConfirmation("Choisis une date et une heure d’envoi.");
+      return;
+    }
 
-    setCampaigns((current) => {
-      const nextCampaigns = [nextCampaign, ...current];
-      void saveSmsHistory(nextCampaigns, credits);
-      return nextCampaigns;
-    });
+    if (recipients.length === 0) {
+      setIsError(true);
+      setConfirmation(
+        `Aucun numéro pour « ${campaignAudience} ». Vérifie les fiches avec un téléphone.`,
+      );
+      return;
+    }
+
+    setSending(true);
     setIsError(false);
-    setConfirmation(
-      `Campagne SMS planifiée pour ${recipients} destinataire(s).`,
-    );
+    setConfirmation("Planification de la campagne SMS…");
+
+    try {
+      const campaignId = Date.now();
+      const response = await fetch("/api/sms/schedule", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "schedule",
+          kind: "campaign",
+          centerId,
+          centerName,
+          campaignId,
+          name: campaignName.trim() || "Campagne SMS",
+          audience: campaignAudience,
+          message: campaignMessage,
+          date: campaignDate,
+          time: campaignTime,
+          recipients,
+        }),
+      });
+      const result = await response.json();
+
+      if (!response.ok || !result.ok) {
+        throw new Error(result.error || "Impossible de planifier la campagne.");
+      }
+
+      const plannedLabel = `Le ${new Intl.DateTimeFormat("fr-FR").format(
+        new Date(`${campaignDate}T${campaignTime}`),
+      )} à ${campaignTime}`;
+      const nextCampaign: SmsCampaign = {
+        id: Number(result.campaignId) || campaignId,
+        name: campaignName.trim() || "Campagne SMS",
+        audience: campaignAudience,
+        message: campaignMessage,
+        plannedAt: plannedLabel,
+        recipients: result.recipients ?? recipients.length,
+        status: "Planifié",
+      };
+
+      setCampaigns((current) => {
+        const nextCampaigns = [nextCampaign, ...current];
+        void saveSmsHistory(nextCampaigns, credits);
+        return nextCampaigns;
+      });
+      setIsError(false);
+      setConfirmation(
+        `Campagne SMS planifiée pour ${result.recipients ?? recipients.length} destinataire(s), ${plannedLabel}.`,
+      );
+    } catch (error) {
+      setIsError(true);
+      setConfirmation(
+        error instanceof Error
+          ? error.message
+          : "Impossible de planifier la campagne SMS.",
+      );
+    } finally {
+      setSending(false);
+    }
   }
 
   return (
@@ -955,6 +1010,9 @@ export default function SmsPage() {
             value={campaignTime}
             onChange={setCampaignTime}
           />
+          <p className="text-sm font-medium text-slate-500 md:col-span-2">
+            L’envoi part à cette date et cette heure (heure de Paris).
+          </p>
           <label className="space-y-2 md:col-span-2">
             <span className="text-xs font-medium text-slate-500">
               Message de la campagne
@@ -977,10 +1035,11 @@ export default function SmsPage() {
         <div className="mt-5 flex flex-wrap gap-3">
           <button
             type="button"
-            onClick={planCampaign}
-            className="rounded-2xl border border-slate-200 bg-white px-5 py-3 font-semibold text-slate-700"
+            disabled={sending}
+            onClick={() => void planCampaign()}
+            className="rounded-2xl border border-slate-200 bg-white px-5 py-3 font-semibold text-slate-700 disabled:opacity-60"
           >
-            Planifier la campagne
+            {sending ? "Planification..." : "Planifier la campagne"}
           </button>
           <button
             type="button"

@@ -1,5 +1,6 @@
 const {
   birthdayYear,
+  campaignSendAt,
   createServiceClient,
   defaultSender,
   getBirthdayTemplate,
@@ -342,6 +343,118 @@ async function handleBirthdayJob(res, payload, action) {
   });
 }
 
+async function handleCampaignSchedule(res, payload, action) {
+  const supabase = createServiceClient();
+  const centerId = String(payload.centerId || "").trim();
+  const message = String(payload.message || "").trim();
+  const date = String(payload.date || "").slice(0, 10);
+  const time = String(payload.time || "").slice(0, 5);
+  const sendAt = campaignSendAt(date, time);
+  const campaignId = Number(payload.campaignId) || Date.now();
+  const name = String(payload.name || "Campagne SMS").trim() || "Campagne SMS";
+  const audience = String(payload.audience || "").trim();
+  const recipients = (Array.isArray(payload.recipients) ? payload.recipients : [])
+    .map((item) => {
+      if (typeof item === "string") {
+        return { phone: normalizePhone(item), firstName: "vous" };
+      }
+      return {
+        phone: normalizePhone(item?.phone),
+        firstName: String(item?.firstName || "vous").trim() || "vous",
+      };
+    })
+    .filter((item) => item.phone);
+
+  if (!centerId) {
+    return res.status(400).json({ ok: false, error: "Centre introuvable." });
+  }
+  if (!message) {
+    return res.status(400).json({ ok: false, error: "Écris le texte de la campagne." });
+  }
+  if (!sendAt) {
+    return res.status(400).json({
+      ok: false,
+      error: "Indique une date et une heure d’envoi.",
+    });
+  }
+  if (recipients.length === 0) {
+    return res.status(400).json({
+      ok: false,
+      error: "Aucun destinataire avec un téléphone pour cette audience.",
+    });
+  }
+
+  const { data: centerRow, error: centerError } = await supabase
+    .from("centers")
+    .select("id,name,settings")
+    .eq("id", centerId)
+    .maybeSingle();
+
+  if (centerError) {
+    throw new Error(centerError.message);
+  }
+  if (!centerRow) {
+    return res.status(404).json({ ok: false, error: "center_not_found" });
+  }
+
+  const sms = parseCenterSmsSettings(centerRow.settings);
+
+  if (action === "cancel") {
+    const jobs = sms.jobs.map((job) =>
+      job?.kind === "campaign" &&
+      job?.status === "pending" &&
+      Number(job.campaignId) === campaignId
+        ? { ...job, status: "cancelled", cancelledAt: new Date().toISOString() }
+        : job,
+    );
+    await supabase
+      .from("centers")
+      .update({ settings: mergeCenterSmsSettings(centerRow.settings, { jobs }) })
+      .eq("id", centerId);
+    return res.status(200).json({ ok: true, cancelled: true, campaignId });
+  }
+
+  const jobs = [
+    ...sms.jobs.filter(
+      (job) =>
+        !(
+          job?.kind === "campaign" &&
+          job?.status === "pending" &&
+          Number(job.campaignId) === campaignId
+        ),
+    ),
+    {
+      id: crypto.randomUUID(),
+      centerId,
+      kind: "campaign",
+      status: "pending",
+      campaignId,
+      name,
+      audience,
+      sendAt,
+      date,
+      time,
+      message,
+      recipients,
+      createdAt: new Date().toISOString(),
+    },
+  ];
+
+  await supabase
+    .from("centers")
+    .update({ settings: mergeCenterSmsSettings(centerRow.settings, { jobs }) })
+    .eq("id", centerId);
+
+  return res.status(200).json({
+    ok: true,
+    sent: 0,
+    scheduled: true,
+    sendAt,
+    campaignId,
+    recipients: recipients.length,
+  });
+}
+
 module.exports = async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
@@ -364,6 +477,10 @@ module.exports = async function handler(req, res) {
 
     if (kind === "birthday") {
       return handleBirthdayJob(res, payload, action);
+    }
+
+    if (kind === "campaign") {
+      return handleCampaignSchedule(res, payload, action);
     }
 
     if (!appointmentId) {

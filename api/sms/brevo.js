@@ -664,6 +664,58 @@ function reminderHoursForKind(kind, hoursBefore) {
   return APPOINTMENT_REMINDER_HOURS[kind] || 48;
 }
 
+function campaignSendAt(date, time) {
+  const day = String(date || "").trim().slice(0, 10);
+  const clock = String(time || "").trim().slice(0, 5);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day) || !/^\d{2}:\d{2}$/.test(clock)) {
+    return "";
+  }
+
+  const [year, month, dayNum] = day.split("-").map(Number);
+  const [hour, minute] = clock.split(":").map(Number);
+  if (
+    !year ||
+    !month ||
+    !dayNum ||
+    hour < 0 ||
+    hour > 23 ||
+    minute < 0 ||
+    minute > 59
+  ) {
+    return "";
+  }
+
+  let utc = Date.UTC(year, month - 1, dayNum, hour, minute, 0);
+  for (let index = 0; index < 4; index += 1) {
+    const parts = new Intl.DateTimeFormat("en-GB", {
+      timeZone: "Europe/Paris",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    }).formatToParts(new Date(utc));
+    const value = (type) =>
+      Number(parts.find((part) => part.type === type)?.value || 0);
+    const got = Date.UTC(
+      value("year"),
+      value("month") - 1,
+      value("day"),
+      value("hour"),
+      value("minute"),
+    );
+    const wanted = Date.UTC(year, month - 1, dayNum, hour, minute);
+    const diff = wanted - got;
+    if (diff === 0) {
+      break;
+    }
+    utc += diff;
+  }
+
+  return new Date(utc).toISOString();
+}
+
 function reminderSendAt(date, time, hoursBefore = 48) {
   const starts = new Date(`${date}T${String(time || "09:00").slice(0, 5)}:00Z`);
 
@@ -814,6 +866,7 @@ module.exports = {
   personalize,
   readSmsQuota,
   reminderHoursForKind,
+  campaignSendAt,
   reminderSendAt,
   sendBrevoSms,
   storeIncomingSms,

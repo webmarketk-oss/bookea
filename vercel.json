@@ -5,6 +5,10 @@
       "schedule": "0 8 * * *"
     },
     {
+      "path": "/api/sms/campaign-dispatch",
+      "schedule": "*/15 * * * *"
+    },
+    {
       "path": "/api/seya/relance",
       "schedule": "* * * * *"
     }
