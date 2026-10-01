@@ -9,7 +9,8 @@ export type CrmQuickFilter =
   | "Ce mois"
   | "RDV aujourd'hui"
   | "RDV hier"
-  | "RDV 7 jours";
+  | "RDV 7 jours"
+  | "Acompte reçu aujourd'hui";
 
 export const rdvBookedStatusList: LeadStatus[] = [
   "RDV pris",
@@ -213,6 +214,36 @@ export function isLeadRdvTakenOn(lead: Lead, date: string) {
   return getLeadRdvTakenDates(lead).includes(date);
 }
 
+function isAcompteReceivedActivity(activity: LeadActivity) {
+  if (activity.type === "comment") {
+    return false;
+  }
+
+  const text = activity.text.trim();
+  const arrowMatch = text.match(/→\s*([^.\n]+)/);
+  const status = normalizeLeadStatus(arrowMatch?.[1]?.trim() || text);
+  if (status === "Acompte reçu") {
+    return true;
+  }
+
+  return /acompte\s+(re[cç]u|valid[eé])/i.test(text);
+}
+
+export function isLeadAcompteReceivedOn(lead: Lead, date: string) {
+  const fromLog = lead.activityLog.some(
+    (activity) =>
+      isAcompteReceivedActivity(activity) && activityDateToIso(activity) === date,
+  );
+  if (fromLog) {
+    return true;
+  }
+
+  return (
+    normalizeLeadStatus(lead.status) === "Acompte reçu" &&
+    lead.createdDate === date
+  );
+}
+
 export function isLeadRdvTakenBetween(
   lead: Lead,
   startDate: string,
@@ -246,6 +277,10 @@ export function matchesCrmQuickFilter(lead: Lead, filter: CrmQuickFilter) {
 
   if (filter === "Ce mois") {
     return isLeadCreatedSince(lead, monthStartIso(today));
+  }
+
+  if (filter === "Acompte reçu aujourd'hui") {
+    return isLeadAcompteReceivedOn(lead, today);
   }
 
   if (filter === "RDV aujourd'hui") {

@@ -5,6 +5,7 @@ import {
   addDaysIso,
   isLeadCreatedBetween,
   isLeadCreatedOn,
+  isLeadAcompteReceivedOn,
   isLeadCreatedSince,
   isLeadRdvTakenBetween,
   isLeadRdvTakenOn,
@@ -157,12 +158,11 @@ export default function DashboardCards({
       status: "À relancer",
     },
     {
-      title: "RDV pris aujourd'hui",
-      value: leads.filter((lead) => isLeadRdvTakenOn(lead, today)).length,
-      subtitle: rdvBookedSubtitle,
+      title: "Acompte reçu aujd",
+      value: leads.filter((lead) => isLeadAcompteReceivedOn(lead, today)).length,
       icon: CircleCheck,
       color: "text-green-600",
-      quickFilter: "RDV aujourd'hui",
+      quickFilter: "Acompte reçu aujourd'hui",
     },
     {
       title: "Perdus",

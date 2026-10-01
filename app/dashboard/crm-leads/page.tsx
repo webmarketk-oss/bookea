@@ -1466,7 +1466,8 @@ function isQuickDateFilter(value: string): value is QuickDateFilter {
     value === "Ce mois" ||
     value === "RDV aujourd'hui" ||
     value === "RDV hier" ||
-    value === "RDV 7 jours"
+    value === "RDV 7 jours" ||
+    value === "Acompte reçu aujourd'hui"
   );
 }
 
