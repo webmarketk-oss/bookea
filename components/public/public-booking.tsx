@@ -547,6 +547,15 @@ export function PublicBooking() {
       }
     });
 
+    const paid = new URLSearchParams(window.location.search).get("paid");
+    if (paid === "1") {
+      setBookingStatus("Reservation confirmee. Acompte payé.");
+    } else if (paid === "0") {
+      setBookingStatus(
+        "Reservation confirmee. Paiement annulé : le centre peut renvoyer un lien d'acompte.",
+      );
+    }
+
     return () => {
       window.removeEventListener("bookea-center-settings-updated", refreshSettings);
       window.removeEventListener("storage", refreshSettings);
@@ -801,7 +810,7 @@ export function PublicBooking() {
     setBookingStatus("Creneau selectionne");
   };
 
-  const reserveAppointment = () => {
+  const reserveAppointment = async () => {
     const firstName = customerForm.firstName.trim();
     const lastName = customerForm.lastName.trim();
     const phone = customerForm.phone.trim();
@@ -847,9 +856,44 @@ export function PublicBooking() {
       ...current,
     ]);
     savePublicBooking(booking);
-    setBookingStatus(
-      "Reservation confirmee : SMS et mail de confirmation envoyes, CRM et planning du centre mis a jour"
-    );
+
+    const slug = storedSettings?.center?.slug?.trim();
+    if (booking.deposit > 0 && storedSettings?.stripeConnected && slug) {
+      setBookingStatus("Redirection vers le paiement de l'acompte…");
+      try {
+        const origin = window.location.origin;
+        const response = await fetch("/api/stripe/checkout", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            slug,
+            amount: booking.deposit,
+            serviceName: booking.treatment,
+            customerEmail: booking.email,
+            customerName: `${firstName} ${lastName}`.trim(),
+            bookingId: booking.id,
+            successUrl: `${origin}/centres/${slug}?paid=1`,
+            cancelUrl: `${origin}/centres/${slug}?paid=0`,
+          }),
+        });
+        const json = (await response.json().catch(() => ({}))) as {
+          url?: string;
+        };
+        if (json.url) {
+          window.location.assign(json.url);
+          return;
+        }
+      } catch {
+        // Keep the reservation even if Checkout cannot start.
+      }
+      setBookingStatus(
+        "Reservation confirmee. Le paiement Stripe n'a pas pu démarrer : le centre peut renvoyer un lien d'acompte.",
+      );
+    } else {
+      setBookingStatus(
+        "Reservation confirmee : SMS et mail de confirmation envoyes, CRM et planning du centre mis a jour",
+      );
+    }
     window.setTimeout(() => {
       document.getElementById("reservation-confirmee")?.scrollIntoView({
         behavior: "smooth",

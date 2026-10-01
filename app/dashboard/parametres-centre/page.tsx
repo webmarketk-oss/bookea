@@ -13,9 +13,11 @@ import {
   CheckCircle2,
   ChevronDown,
   CreditCard,
+  ExternalLink,
   Eye,
   EyeOff,
   ImagePlus,
+  Loader2,
   MapPin,
   Move,
   Package,
@@ -61,7 +63,38 @@ import {
   type CoverPosition,
 } from "@/lib/center-media";
 import { PlaceSuggestField } from "@/components/forms/place-suggest-field";
-import { askConfirm } from "@/components/ui/app-dialog";
+import { askAlert, askConfirm } from "@/components/ui/app-dialog";
+
+type StripeConnectStatus = {
+  ok?: boolean;
+  configured?: boolean;
+  connected?: boolean;
+  detailsSubmitted?: boolean;
+  accountLabel?: string;
+  url?: string;
+  error?: string;
+  message?: string;
+};
+
+async function requestStripeConnect(
+  centerId: string,
+  action: "status" | "start" | "refresh" | "dashboard" | "disconnect" = "status",
+) {
+  const response = await fetch(
+    action === "status"
+      ? `/api/stripe/connect?centerId=${encodeURIComponent(centerId)}`
+      : "/api/stripe/connect",
+    action === "status"
+      ? undefined
+      : {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ centerId, action }),
+        },
+  );
+  const json = (await response.json().catch(() => ({}))) as StripeConnectStatus;
+  return { ok: response.ok, json };
+}
 
 type Service = {
   id: number;
@@ -291,6 +324,12 @@ export default function CenterSettingsPage() {
   const [depositLinks, setDepositLinks] =
     useState<CenterDepositLinkSetting[]>(defaultCenterDepositLinks);
   const [stripeConnected, setStripeConnected] = useState(false);
+  const [stripeConfigured, setStripeConfigured] = useState<boolean | null>(
+    null,
+  );
+  const [stripeDetailsSubmitted, setStripeDetailsSubmitted] = useState(false);
+  const [stripeAccountLabel, setStripeAccountLabel] = useState("");
+  const [stripeBusy, setStripeBusy] = useState(false);
   const [savedMessage, setSavedMessage] = useState("");
   const [saveError, setSaveError] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -470,6 +509,11 @@ export default function CenterSettingsPage() {
     };
     window.addEventListener("bookea-active-center-changed", reloadOnCenterChange);
 
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("tab") === "paiements") {
+      setActiveTab("paiements");
+    }
+
     return () => {
       cancelled = true;
       window.removeEventListener(
@@ -478,6 +522,102 @@ export default function CenterSettingsPage() {
       );
     };
   }, []);
+
+  const applyStripeStatus = (json: StripeConnectStatus) => {
+    setStripeConfigured(
+      json.error === "not_configured" ? false : json.configured !== false,
+    );
+    setStripeConnected(json.connected === true);
+    setStripeDetailsSubmitted(json.detailsSubmitted === true);
+    setStripeAccountLabel(json.accountLabel || "");
+  };
+
+  useEffect(() => {
+    if (!loadedCenterId) {
+      return;
+    }
+    let cancelled = false;
+    const params = new URLSearchParams(window.location.search);
+    const returned = params.get("stripe") === "return";
+    const refresh = params.get("stripe") === "refresh";
+
+    void requestStripeConnect(loadedCenterId, "status").then(({ json }) => {
+      if (cancelled) {
+        return;
+      }
+      applyStripeStatus(json);
+      if (json.error === "not_configured" && (returned || refresh)) {
+        showNotice(
+          json.message || "Stripe n’est pas encore configuré côté Bookea.",
+          true,
+        );
+        return;
+      }
+      if (returned) {
+        showNotice(
+          json.connected
+            ? "Compte Stripe connecté. Les acomptes seront encaissés sur ce compte."
+            : "Inscription Stripe enregistrée. Termine les informations Stripe pour encaisser.",
+        );
+      } else if (refresh) {
+        showNotice("L’inscription Stripe a été interrompue. Tu peux la reprendre.");
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [loadedCenterId]);
+
+  const startStripeConnect = async (
+    action: "start" | "refresh" | "dashboard",
+  ) => {
+    if (!loadedCenterId) {
+      await askAlert("Impossible de trouver le centre actif.");
+      return;
+    }
+    if (stripeBusy) {
+      return;
+    }
+    setStripeBusy(true);
+    try {
+      const { json } = await requestStripeConnect(loadedCenterId, action);
+      applyStripeStatus(json);
+      if (json.url) {
+        window.location.assign(json.url);
+        return;
+      }
+      await askAlert(
+        json.message || "Impossible d’ouvrir Stripe pour le moment.",
+      );
+    } catch {
+      await askAlert("Impossible de contacter Stripe pour le moment.");
+    } finally {
+      setStripeBusy(false);
+    }
+  };
+
+  const disconnectStripe = async () => {
+    if (!loadedCenterId || stripeBusy) {
+      return;
+    }
+    const confirmed = await askConfirm(
+      "Déconnecter Stripe de ce centre ? Les liens d’acompte SMS resteront disponibles.",
+    );
+    if (!confirmed) {
+      return;
+    }
+    setStripeBusy(true);
+    try {
+      const { json } = await requestStripeConnect(loadedCenterId, "disconnect");
+      applyStripeStatus(json);
+      showNotice("Stripe a été déconnecté de Bookea.");
+    } catch {
+      showNotice("Impossible de déconnecter Stripe.", true);
+    } finally {
+      setStripeBusy(false);
+    }
+  };
 
   const updateService = <K extends keyof Service>(
     id: number,
@@ -2595,21 +2735,75 @@ export default function CenterSettingsPage() {
                   <p className="text-base font-semibold">
                     {stripeConnected
                       ? "Compte Stripe connecté"
-                      : "Compte Stripe non connecté"}
+                      : stripeDetailsSubmitted
+                        ? "Compte Stripe en vérification"
+                        : "Compte Stripe non connecté"}
                   </p>
                   <p className="mt-1 font-semibold text-slate-600">
-                    Les acomptes seront encaissés par le centre via Stripe
-                    Connect.
+                    {stripeConnected
+                      ? `Les acomptes de la réservation en ligne iront sur ${stripeAccountLabel || "ce compte"}.`
+                      : "Connecte le Stripe du centre pour encaisser les acomptes. Les liens SMS restent disponibles."}
                   </p>
+                  {stripeAccountLabel ? (
+                    <p className="mt-1 text-sm font-medium text-slate-500">
+                      {stripeAccountLabel}
+                    </p>
+                  ) : null}
                 </div>
               </div>
-              <button
-                type="button"
-                onClick={() => setStripeConnected((value) => !value)}
-                className="mt-5 rounded-xl bg-slate-950 px-4 py-2 text-sm font-medium text-white"
-              >
-                {stripeConnected ? "Déconnecter la maquette" : "Connecter Stripe"}
-              </button>
+              {stripeConfigured === false ? (
+                <p className="mt-4 rounded-2xl border border-orange-200 bg-white px-4 py-3 text-sm font-medium text-orange-700">
+                  Stripe n’est pas encore configuré côté Bookea. Ajoute
+                  STRIPE_SECRET_KEY dans Vercel pour activer Connect.
+                </p>
+              ) : null}
+              <div className="mt-5 flex flex-wrap gap-2">
+                {stripeConnected ? (
+                  <>
+                    <button
+                      type="button"
+                      disabled={stripeBusy}
+                      onClick={() => void startStripeConnect("dashboard")}
+                      className="inline-flex items-center gap-2 rounded-xl bg-slate-950 px-4 py-2 text-sm font-medium text-white disabled:opacity-60"
+                    >
+                      {stripeBusy ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <ExternalLink className="h-4 w-4" />
+                      )}
+                      Ouvrir Stripe
+                    </button>
+                    <button
+                      type="button"
+                      disabled={stripeBusy}
+                      onClick={() => void disconnectStripe()}
+                      className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 disabled:opacity-60"
+                    >
+                      Déconnecter Bookea
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    type="button"
+                    disabled={stripeBusy || stripeConfigured === false}
+                    onClick={() =>
+                      void startStripeConnect(
+                        stripeDetailsSubmitted ? "refresh" : "start",
+                      )
+                    }
+                    className="inline-flex items-center gap-2 rounded-xl bg-slate-950 px-4 py-2 text-sm font-medium text-white disabled:opacity-60"
+                  >
+                    {stripeBusy ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <CreditCard className="h-4 w-4" />
+                    )}
+                    {stripeDetailsSubmitted
+                      ? "Continuer l’inscription Stripe"
+                      : "Connecter Stripe"}
+                  </button>
+                )}
+              </div>
             </div>
           </div>
 

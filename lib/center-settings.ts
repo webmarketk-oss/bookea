@@ -784,10 +784,7 @@ function storedSettingsFromCenterRow(row: CenterProfileRow): StoredCenterSetting
     products: asArray(publicSettings.products),
     productCategories: asStringArray(publicSettings.productCategories),
     depositLinks: asArray(publicSettings.depositLinks),
-    stripeConnected:
-      typeof publicSettings.stripeConnected === "boolean"
-        ? publicSettings.stripeConnected
-        : undefined,
+    stripeConnected: stripeConnectedFromSettings(row.settings, publicSettings),
     coverPreview: asOptionalString(publicSettings.coverPreview),
     coverPosition: parseCoverPosition(publicSettings.coverPosition),
     logoPreview: asOptionalString(publicSettings.logoPreview),
@@ -854,6 +851,23 @@ function mergeLocalAndRemote(
     reviewAutomation: remote.reviewAutomation ?? local?.reviewAutomation,
     stripeConnected: remote.stripeConnected ?? local?.stripeConnected,
   };
+}
+
+function stripeConnectedFromSettings(
+  settings: unknown,
+  publicSettings: Record<string, unknown>,
+) {
+  const stripe = asRecord(asRecord(settings).stripe);
+  if (stripe.chargesEnabled === true) {
+    return true;
+  }
+  if (stripe.chargesEnabled === false || stripe.accountId) {
+    return false;
+  }
+  if (typeof publicSettings.stripeConnected === "boolean") {
+    return publicSettings.stripeConnected;
+  }
+  return undefined;
 }
 
 function hasStoredPublicSettings(settings: unknown) {
