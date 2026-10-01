@@ -172,12 +172,77 @@ function pickApprovedTemplate(templates, family) {
   );
 }
 
+function compactOfferKey(value) {
+  return normalizeCare(value)
+    .replace(/copy/g, "")
+    .replace(/[^a-z0-9]+/g, "");
+}
+
+function findOfferMap(seya, ...parts) {
+  const maps = Array.isArray(seya?.offerMaps) ? seya.offerMaps : [];
+  const campaign = parts[0];
+  const hay = parts.filter(Boolean).join(" ");
+  const needle = normalizeCare(hay);
+  const compactHay = compactOfferKey(hay);
+  const campaignNeedle = normalizeCare(campaign);
+  const compactCampaign = compactOfferKey(campaign);
+  if (!needle) {
+    return null;
+  }
+
+  let best = null;
+  let bestScore = 0;
+  for (const item of maps) {
+    const match = String(item?.match || "").trim();
+    const label = String(item?.label || "").trim();
+    if (!match) {
+      continue;
+    }
+    const nMatch = normalizeCare(match);
+    const cMatch = compactOfferKey(match);
+    if (nMatch.length < 2) {
+      continue;
+    }
+    let score = 0;
+    if (
+      campaignNeedle &&
+      (campaignNeedle === nMatch || compactCampaign === cMatch)
+    ) {
+      score = 5000 + nMatch.length;
+    } else if (needle === nMatch || compactHay === cMatch) {
+      score = 4000 + nMatch.length;
+    } else if (needle.includes(nMatch) || nMatch.includes(needle)) {
+      score = 2000 + nMatch.length;
+    } else if (
+      cMatch.length > 3 &&
+      (compactHay.includes(cMatch) || cMatch.includes(compactHay))
+    ) {
+      score = 500 + cMatch.length;
+    }
+    if (score > bestScore) {
+      bestScore = score;
+      best = { match, label };
+    }
+  }
+  return best;
+}
+
+function phraseConfiguredOffer(value) {
+  const text = String(value || "").replace(/\s+/g, " ").trim();
+  if (!text) {
+    return "";
+  }
+  return text.charAt(0).toLowerCase() + text.slice(1);
+}
+
 module.exports = {
   careLabelForFamily,
+  findOfferMap,
   humanizeOfferTitle,
   inferCareFamily,
   isGenericWelcomeTemplate,
   naturalOfferPhrase,
+  phraseConfiguredOffer,
   phraseFromCareTitle,
   pickApprovedTemplate,
   templateFitsFamily,

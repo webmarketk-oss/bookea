@@ -81,6 +81,35 @@ test("l’offre se dit naturellement, jamais « le minceur »", () => {
   assert.doesNotMatch(naturalOfferPhrase("minceur", "le minceur"), /le minceur/);
 });
 
+test("l’intitulé campagne du centre choisit le texte WhatsApp du 1er message", () => {
+  const { findOfferMap, phraseConfiguredOffer } = require("./care-family");
+  const seya = {
+    offerMaps: [
+      {
+        match: "Soin minceur",
+        label: "offre découverte minceur (bilan + séance découverte offerte)",
+      },
+      {
+        match: "lift 4 149-copy",
+        label: "diagnostic de votre peau détaillé offert",
+      },
+    ],
+  };
+  const minceur = findOfferMap(seya, "Soin minceur");
+  assert.equal(
+    minceur.label,
+    "offre découverte minceur (bilan + séance découverte offerte)",
+  );
+  const lift = findOfferMap(seya, "lift-4-149-copy", "Soin minceur");
+  assert.equal(lift.match, "lift 4 149-copy");
+  assert.equal(lift.label, "diagnostic de votre peau détaillé offert");
+  assert.equal(
+    phraseConfiguredOffer(lift.label),
+    "diagnostic de votre peau détaillé offert",
+  );
+  assert.equal(findOfferMap({ offerMaps: [] }, "Soin minceur"), null);
+});
+
 test("un titre de soin se dit naturellement, sans copier l’enseigne", () => {
   const { phraseFromCareTitle } = require("./care-family");
   assert.match(

@@ -56,7 +56,13 @@ const {
   wantsSlots,
   asksOtherDay,
 } = require("./conversation");
-const { inferCareFamily, naturalOfferPhrase, phraseFromCareTitle } = require("./care-family");
+const {
+  findOfferMap,
+  inferCareFamily,
+  naturalOfferPhrase,
+  phraseConfiguredOffer,
+  phraseFromCareTitle,
+} = require("./care-family");
 const { sanitizePersonName } = require("../../lib/seya-person-name");
 
 const BILAN_DURATION_MINUTES = 75;
@@ -595,15 +601,7 @@ function agentSettings(seya) {
 }
 
 function resolveOfferLabel(seya, campaign, treatment) {
-  const settings = agentSettings(seya);
-  const needle = normalize(`${campaign || ""} ${treatment || ""}`);
-  if (!needle) {
-    return "";
-  }
-  const found = settings.offerMaps.find((item) => {
-    const match = normalize(item?.match);
-    return match.length > 1 && needle.includes(match);
-  });
+  const found = findOfferMap(agentSettings(seya), campaign, treatment);
   return String(found?.label || "").trim();
 }
 
@@ -650,7 +648,7 @@ function resolveOpeningOffer(seya, campaign, treatment) {
   const family = inferFamily(seya, campaign, treatment);
   const mapped = resolveOfferLabel(seya, campaign, treatment);
   if (mapped) {
-    return naturalOfferPhrase(family, mapped);
+    return phraseConfiguredOffer(mapped);
   }
   const brief =
     findTreatmentBrief(seya, `${campaign || ""} ${treatment || ""}`) ||
@@ -926,12 +924,14 @@ function startConversation(context, centerName, seya) {
   const treatment =
     isJunkTreatment(context.treatment) ? "" : context.treatment || "";
   const family = inferFamily(seya, context.campaign, treatment || context.treatment);
-  const offer = naturalOfferPhrase(
-    family,
-    resolveOfferLabel(seya, context.campaign, treatment || context.treatment) ||
-      context.campaign ||
-      treatment,
+  const mappedOffer = resolveOfferLabel(
+    seya,
+    context.campaign,
+    treatment || context.treatment,
   );
+  const offer = mappedOffer
+    ? phraseConfiguredOffer(mappedOffer)
+    : naturalOfferPhrase(family, context.campaign || treatment);
   const opening = buildOpeningMessage(context, centerName, seya);
   const person = sanitizePersonName(context.firstName, context.lastName);
 

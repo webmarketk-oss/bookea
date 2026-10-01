@@ -1090,6 +1090,36 @@ test("j’ai réfléchi, je veux le prix : elle répond, même après un message
   assert.notEqual(conversation.status, "Pas intéressé");
 });
 
+test("le 1er WhatsApp reprend le texte d’offre du centre, pas l’intitulé campagne", () => {
+  const conversation = startConversation(
+    {
+      leadId: "lead-offer-map",
+      firstName: "Léa",
+      lastName: "Test",
+      phone: "0611223344",
+      treatment: "Soin minceur",
+      campaign: "lift 4 149-copy",
+    },
+    "Institut Gap",
+    {
+      offerMaps: [
+        {
+          match: "Soin minceur",
+          label: "offre découverte minceur (bilan + séance découverte offerte)",
+        },
+        {
+          match: "lift 4 149-copy",
+          label: "diagnostic de votre peau détaillé offert",
+        },
+      ],
+    },
+  );
+  const opening = conversation.messages[0].text;
+  assert.match(opening, /diagnostic de votre peau détaillé offert/i);
+  assert.doesNotMatch(opening, /lift 4 149-copy|un soin minceur/i);
+  assert.equal(conversation.campaign, "lift 4 149-copy");
+});
+
 test("un lead visage reprend le titre du soin, pas l’enseigne", () => {
   const conversation = startConversation(
     {

@@ -1,4 +1,4 @@
-import { naturalOfferPhrase, phraseFromCareTitle } from "@/api/seya/care-family";
+import { findOfferMap, naturalOfferPhrase, phraseConfiguredOffer, phraseFromCareTitle } from "@/api/seya/care-family";
 import {
   mergeSeyaConversationLists,
   persistableConversations,
@@ -548,17 +548,9 @@ export function resolveOfferLabel(
   campaign?: string | null,
   treatment?: string | null,
 ) {
-  const hay = `${campaign || ""} ${treatment || ""}`;
-  const needle = normalizeTreatmentName(hay);
-  if (!needle) {
-    return "";
-  }
-
-  const found = settings.offerMaps.find((item) => {
-    const match = normalizeTreatmentName(item.match);
-    return match.length > 1 && needle.includes(match);
-  });
-  return found?.label.trim() || "";
+  return String(
+    findOfferMap(settings, campaign, treatment)?.label || "",
+  ).trim();
 }
 
 export function openingOfferFromSettings(
@@ -569,7 +561,7 @@ export function openingOfferFromSettings(
   const family = inferFamilyFromSettings(settings, campaign, treatment);
   const mapped = resolveOfferLabel(settings, campaign, treatment);
   if (mapped) {
-    return naturalOfferPhrase(family, mapped);
+    return phraseConfiguredOffer(mapped);
   }
   const brief =
     findTreatmentBrief(settings, `${campaign || ""} ${treatment || ""}`) ||
