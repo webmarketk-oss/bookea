@@ -539,7 +539,6 @@ export default function StatisticsPage() {
 
           <Panel
             title="À surveiller"
-            subtitle="Ce que Seya doit remonter en priorité."
             icon={<AlertTriangle className="h-6 w-6 text-amber-500" />}
           >
             <div className="grid gap-3">
@@ -751,7 +750,7 @@ function Panel({
   children,
 }: {
   title: string;
-  subtitle: string;
+  subtitle?: string;
   icon: ReactNode;
   children: ReactNode;
 }) {
@@ -763,7 +762,9 @@ function Panel({
         </div>
         <div>
           <h2 className="text-lg font-semibold">{title}</h2>
-          <p className="mt-1 font-semibold text-slate-500">{subtitle}</p>
+          {subtitle ? (
+            <p className="mt-1 font-semibold text-slate-500">{subtitle}</p>
+          ) : null}
         </div>
       </div>
       {children}
