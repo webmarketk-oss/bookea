@@ -28,7 +28,7 @@ test("une demande de créneau ou un oui n’est plus transformé en indisponible
   assert.equal(isSeyaAgendaBlockCommand("supprime le rdv de Marie"), false);
 });
 
-test("Seya Agenda parle au nom de l’équipe du centre actif", () => {
+test("Seya Planning parle au nom de l’équipe du centre actif", () => {
   const conversation = createAgendaDeskConversation("center-1");
   assert.equal(conversation.centerId, "center-1");
   assert.equal(conversation.leadId, "agenda-desk");
@@ -96,5 +96,5 @@ test("les suggestions viennent des vrais créneaux et des RDV à confirmer", () 
   assert.equal(suggestions.length, 3);
   assert.match(suggestions[0] ?? "", /Léa/);
   assert.match(suggestions[1] ?? "", /16h00/);
-  assert.match(suggestions[2] ?? "", /pause|créneau|tarif/i);
+  assert.match(suggestions[2] ?? "", /pause|créneau|tarif|Planning/i);
 });

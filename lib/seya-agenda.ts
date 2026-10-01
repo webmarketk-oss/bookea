@@ -151,7 +151,7 @@ export function agendaSeyaSuggestionTexts({
     );
   }
   if (items.length < 3) {
-    items.push("Seya suit les briefs, horaires et rendez-vous du centre.");
+    items.push("Seya Planning suit les briefs, horaires et le planning du centre.");
   }
 
   return items.slice(0, 3);

@@ -103,10 +103,10 @@ import {
   seyaAgendaOccupancyAppointments,
 } from "@/lib/seya-agenda";
 import {
-  applyLeadReply,
   lastSeyaMessage,
   suggestAvailableSlots,
 } from "@/lib/seya-agent";
+import { applyPlanningReply } from "@/lib/seya-planning";
 import {
   defaultSeyaAgentSettings,
   loadSeyaAgentSettings,
@@ -1820,7 +1820,7 @@ export default function AgendaBoard() {
 
   async function askSeyaAgenda(command: string) {
     setSeyaAsking(true);
-    setSeyaFeedback("Seya réfléchit…");
+    setSeyaFeedback("Seya Planning réfléchit…");
 
     let centerId = centerIdRef.current;
     if (!centerId) {
@@ -1856,15 +1856,19 @@ export default function AgendaBoard() {
       .filter(Boolean)
       .join(", ");
 
-    let result = applyLeadReply(
+    let result = applyPlanningReply(
       conversation,
       command,
       seyaSettings,
       fallbackSlots,
+      {
+        hours: centerDayHours,
+        centerName: centerNameRef.current,
+      },
     );
 
     try {
-      const response = await fetch("/api/seya/reply", {
+      const response = await fetch("/api/seya/planning", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -1895,7 +1899,7 @@ export default function AgendaBoard() {
     setSeyaConversation(result.conversation);
     setSeyaCommand("");
     const reply = lastSeyaMessage(result.conversation)?.text?.trim() || "";
-    setSeyaFeedback(reply || "Seya n’a pas pu répondre.");
+        setSeyaFeedback(reply || "Seya Planning n’a pas pu répondre.");
 
     if (!result.shouldBook) {
       setSeyaAsking(false);
@@ -1932,7 +1936,7 @@ export default function AgendaBoard() {
       status: "À confirmer",
       source: "Seya",
       kind: "Rendez-vous",
-      notes: `RDV posé par Seya Agenda : ${command}`,
+      notes: `RDV posé par Seya Planning : ${command}`,
     });
 
     beginAgendaWrite();
@@ -2413,11 +2417,12 @@ export default function AgendaBoard() {
             <div>
               <div className="mb-3 flex items-center gap-2 text-violet-900">
                 <Sparkles className="h-5 w-5" />
-                <h2 className="font-semibold">Seya Agenda</h2>
+                <h2 className="font-semibold">Seya Planning</h2>
               </div>
               <p className="text-sm leading-6 text-violet-800">
-                Seya suit les briefs, horaires et rendez-vous du centre. Une
-                pause, une formation ou une fermeture se pose aussi ici.
+                Assistante interne du planning. Elle suit toutes les consignes,
+                briefs, horaires et le planning du centre — elle ne parle pas
+                comme Seya WhatsApp.
               </p>
             </div>
             <div className="grid gap-3 md:grid-cols-3">
@@ -2435,7 +2440,7 @@ export default function AgendaBoard() {
                     void submitSeyaAgenda();
                   }
                 }}
-                placeholder="Ex : un créneau cryo jeudi après-midi, ou pause 14h-15h toutes les cabines"
+                placeholder="Ex : créneaux cryo jeudi, tarif bilan, ou pause 14h-15h toutes les cabines"
                 className="bg-white"
                 disabled={seyaAsking}
               />
@@ -2448,10 +2453,10 @@ export default function AgendaBoard() {
                 {seyaAsking ? (
                   <>
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Seya…
+                    Seya Planning…
                   </>
                 ) : (
-                  "Parler à Seya"
+                  "Parler à Seya Planning"
                 )}
               </Button>
             </div>
