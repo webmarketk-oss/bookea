@@ -10,7 +10,7 @@ const {
   sanitizeId,
   stripeRequest,
   stripeStatusFromAccount,
-} = require("./_lib");
+} = require("./_stripe-lib");
 
 module.exports = async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
@@ -123,7 +123,7 @@ module.exports = async function handler(req, res) {
         return res.status(409).json({
           ok: false,
           error: "not_ready",
-          message: "Le compte Stripe n’est pas encore prêt à encaisser.",
+          message: "Le compte Stripe du centre n’est pas encore prêt à encaisser.",
         });
       }
       const link = await stripeRequest(

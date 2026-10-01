@@ -82,8 +82,8 @@ async function requestStripeConnect(
 ) {
   const response = await fetch(
     action === "status"
-      ? `/api/stripe/connect?centerId=${encodeURIComponent(centerId)}`
-      : "/api/stripe/connect",
+      ? `/api/center/stripe?centerId=${encodeURIComponent(centerId)}`
+      : "/api/center/stripe",
     action === "status"
       ? undefined
       : {

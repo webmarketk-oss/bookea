@@ -4,7 +4,7 @@ const {
   stripeRequest,
   stripeStatusFromAccount,
   verifyStripeSignature,
-} = require("./_lib");
+} = require("./_stripe-lib");
 
 async function readRawBody(req) {
   if (typeof req.body === "string") {
