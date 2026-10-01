@@ -56,6 +56,7 @@ import {
   deleteCenterImage,
   normalizeCoverPosition,
   parseExternalReviewsCsv,
+  servicePhotoByName,
   uploadCenterImage,
   type CoverPosition,
 } from "@/lib/center-media";
@@ -76,6 +77,7 @@ type Service = {
   topListed: boolean;
   cabins: string;
   practitioners: string;
+  photo?: string;
 };
 
 type CenterProfile = {
@@ -292,6 +294,7 @@ export default function CenterSettingsPage() {
   const [saveError, setSaveError] = useState(false);
   const [saving, setSaving] = useState(false);
   const [mediaBusy, setMediaBusy] = useState(false);
+  const [photoBusyId, setPhotoBusyId] = useState<number | null>(null);
   const noticeTimer = useRef(0);
   const [coverPreview, setCoverPreview] = useState("");
   const [coverPosition, setCoverPosition] = useState<CoverPosition>(
@@ -361,6 +364,7 @@ export default function CenterSettingsPage() {
           color: service.color ?? serviceColorFallback(index),
           vatRate: service.vatRate ?? 20,
           onQuote: service.onQuote === true,
+          photo: service.photo ?? "",
         })),
       );
     }
@@ -520,6 +524,7 @@ export default function CenterSettingsPage() {
         topListed: true,
         cabins: "Toutes",
         practitioners: "Toutes",
+        photo: "",
       },
       ...current,
     ]);
@@ -937,6 +942,56 @@ export default function CenterSettingsPage() {
       await persistProfile({ photoPreviews: nextPhotos }, "Photo du bandeau supprimée.");
     } catch (error) {
       setPhotoPreviews(previous);
+      showNotice(publicSaveErrorMessage(error), true);
+    }
+  };
+
+  const uploadServicePhoto = async (serviceId: number, file: File) => {
+    if (photoBusyId) return;
+    setPhotoBusyId(serviceId);
+    try {
+      const url = await uploadCenterImage({
+        centerId: loadedCenterId || "local",
+        kind: "service",
+        file,
+      });
+      const nextServices = services.map((service) =>
+        service.id === serviceId ? { ...service, photo: url } : service,
+      );
+      setServices(nextServices);
+      await persistProfile(
+        { services: sortServicesByCategory(nextServices, categoryOptions) },
+        "Photo de la prestation enregistrée.",
+      );
+    } catch (error) {
+      showNotice(publicSaveErrorMessage(error), true);
+    } finally {
+      setPhotoBusyId(null);
+    }
+  };
+
+  const removeServicePhoto = async (serviceId: number) => {
+    const service = services.find((item) => item.id === serviceId);
+    if (!service?.photo || photoBusyId) return;
+    if (!window.confirm(`Supprimer la photo de ${service.name} ?`)) return;
+
+    const previous = service.photo;
+    const nextServices = services.map((item) =>
+      item.id === serviceId ? { ...item, photo: "" } : item,
+    );
+    setServices(nextServices);
+    void deleteCenterImage(previous, loadedCenterId || "local");
+    try {
+      await persistProfile(
+        { services: sortServicesByCategory(nextServices, categoryOptions) },
+        "Photo de la prestation supprimée.",
+      );
+    } catch (error) {
+      setServices((current) =>
+        current.map((item) =>
+          item.id === serviceId ? { ...item, photo: previous } : item,
+        ),
+      );
       showNotice(publicSaveErrorMessage(error), true);
     }
   };
@@ -1724,115 +1779,129 @@ export default function CenterSettingsPage() {
                 </div>
 
                 <div className="space-y-3">
-                  {offers.map((offer, index) => (
+                  {offers.map((offer, index) => {
+                    const offerPhoto = servicePhotoByName(services, offer.serviceName);
+                    return (
                     <article
                       key={offer.id}
                       className="rounded-[24px] border border-violet-100 bg-white p-4 shadow-sm"
                     >
-                      <div className="grid gap-3 xl:grid-cols-[1.2fr_1fr_0.65fr_0.65fr_0.9fr_0.65fr_auto]">
-                        <Field
-                          label="Titre"
-                          value={offer.title}
-                          onChange={(value) => updateOffer(offer.id, "title", value)}
+                      <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
+                        <ServiceThumb
+                          src={offerPhoto}
+                          name={offer.serviceName}
+                          className="h-20 w-20 shrink-0"
                         />
-                        <label className="space-y-2">
-                          <span className="text-xs font-medium text-slate-500">
-                            Prestation
-                          </span>
-                          <select
-                            className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-medium text-slate-800 outline-none focus:border-blue-500"
-                            value={offer.serviceName}
-                            onChange={(event) =>
-                              updateOffer(offer.id, "serviceName", event.target.value)
-                            }
-                          >
-                            {services.map((service) => (
-                              <option key={service.id}>{service.name}</option>
-                            ))}
-                          </select>
-                        </label>
-                        <NumberField
-                          label="Prix avant"
-                          value={offer.oldPrice}
-                          suffix="€"
-                          onChange={(value) => updateOffer(offer.id, "oldPrice", value)}
-                        />
-                        <NumberField
-                          label="Prix offre"
-                          value={offer.price}
-                          suffix="€"
-                          onChange={(value) => updateOffer(offer.id, "price", value)}
-                        />
-                        <label className="space-y-2">
-                          <span className="text-xs font-medium text-slate-500">
-                            Badge
-                          </span>
-                          <select
-                            className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-medium text-slate-800 outline-none focus:border-blue-500"
-                            value={offer.tag}
-                            onChange={(event) =>
-                              updateOffer(offer.id, "tag", event.target.value)
-                            }
-                          >
-                            <option>Offre du moment</option>
-                            <option>Bientôt épuisée</option>
-                            <option>Derniers créneaux</option>
-                            <option>À ne pas rater</option>
-                          </select>
-                        </label>
-                        <NumberField
-                          label="Places"
-                          value={offer.limitedSpots}
-                          suffix="rest."
-                          onChange={(value) =>
-                            updateOffer(offer.id, "limitedSpots", value)
-                          }
-                        />
-                        <div className="flex items-end gap-2">
-                          <IconButton
-                            label="Monter l'offre"
-                            disabled={index === 0}
-                            onClick={() => moveOffer(offer.id, -1)}
-                          >
-                            <ArrowUp className="h-5 w-5" />
-                          </IconButton>
-                          <IconButton
-                            label="Descendre l'offre"
-                            disabled={index === offers.length - 1}
-                            onClick={() => moveOffer(offer.id, 1)}
-                          >
-                            <ArrowDown className="h-5 w-5" />
-                          </IconButton>
-                          <IconButton
-                            label="Supprimer l'offre"
-                            onClick={() => removeOffer(offer.id)}
-                          >
-                            <Trash2 className="h-5 w-5" />
-                          </IconButton>
+                        <div className="min-w-0 flex-1 space-y-3">
+                          <div className="grid gap-3 sm:grid-cols-2">
+                            <Field
+                              label="Titre"
+                              value={offer.title}
+                              onChange={(value) => updateOffer(offer.id, "title", value)}
+                            />
+                            <label className="space-y-2">
+                              <span className="text-xs font-medium text-slate-500">
+                                Prestation
+                              </span>
+                              <select
+                                className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-medium text-slate-800 outline-none focus:border-blue-500"
+                                value={offer.serviceName}
+                                onChange={(event) =>
+                                  updateOffer(offer.id, "serviceName", event.target.value)
+                                }
+                              >
+                                {services.map((service) => (
+                                  <option key={service.id}>{service.name}</option>
+                                ))}
+                              </select>
+                            </label>
+                          </div>
+                          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                            <NumberField
+                              label="Prix avant"
+                              value={offer.oldPrice}
+                              suffix="€"
+                              onChange={(value) => updateOffer(offer.id, "oldPrice", value)}
+                            />
+                            <NumberField
+                              label="Prix offre"
+                              value={offer.price}
+                              suffix="€"
+                              onChange={(value) => updateOffer(offer.id, "price", value)}
+                            />
+                            <label className="space-y-2">
+                              <span className="text-xs font-medium text-slate-500">
+                                Badge
+                              </span>
+                              <select
+                                className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-medium text-slate-800 outline-none focus:border-blue-500"
+                                value={offer.tag}
+                                onChange={(event) =>
+                                  updateOffer(offer.id, "tag", event.target.value)
+                                }
+                              >
+                                <option>Offre du moment</option>
+                                <option>Bientôt épuisée</option>
+                                <option>Derniers créneaux</option>
+                                <option>À ne pas rater</option>
+                              </select>
+                            </label>
+                            <NumberField
+                              label="Places"
+                              value={offer.limitedSpots}
+                              suffix="rest."
+                              onChange={(value) =>
+                                updateOffer(offer.id, "limitedSpots", value)
+                              }
+                            />
+                          </div>
+                          <div className="flex flex-wrap items-center gap-3">
+                            <label className="space-y-2">
+                              <span className="text-xs font-medium text-slate-500">
+                                Fin de l'offre
+                              </span>
+                              <input
+                                type="date"
+                                value={offer.endsAt}
+                                onChange={(event) =>
+                                  updateOffer(offer.id, "endsAt", event.target.value)
+                                }
+                                className="h-11 rounded-xl border border-slate-200 px-3 font-semibold outline-none focus:border-blue-500"
+                              />
+                            </label>
+                            <div className="flex flex-wrap items-center gap-2 pt-5">
+                              <Toggle
+                                checked={offer.visible}
+                                label={offer.visible ? "Visible public" : "Masquée public"}
+                                onClick={() => updateOffer(offer.id, "visible", !offer.visible)}
+                              />
+                              <IconButton
+                                label="Monter l'offre"
+                                disabled={index === 0}
+                                onClick={() => moveOffer(offer.id, -1)}
+                              >
+                                <ArrowUp className="h-5 w-5" />
+                              </IconButton>
+                              <IconButton
+                                label="Descendre l'offre"
+                                disabled={index === offers.length - 1}
+                                onClick={() => moveOffer(offer.id, 1)}
+                              >
+                                <ArrowDown className="h-5 w-5" />
+                              </IconButton>
+                              <IconButton
+                                label="Supprimer l'offre"
+                                onClick={() => removeOffer(offer.id)}
+                              >
+                                <Trash2 className="h-5 w-5" />
+                              </IconButton>
+                            </div>
+                          </div>
                         </div>
                       </div>
-                      <div className="mt-4 flex flex-wrap items-center gap-3">
-                        <label className="space-y-2">
-                          <span className="text-xs font-medium text-slate-500">
-                            Fin de l'offre
-                          </span>
-                          <input
-                            type="date"
-                            value={offer.endsAt}
-                            onChange={(event) =>
-                              updateOffer(offer.id, "endsAt", event.target.value)
-                            }
-                            className="h-12 rounded-2xl border border-slate-200 px-4 font-semibold outline-none focus:border-blue-500"
-                          />
-                        </label>
-                        <Toggle
-                          checked={offer.visible}
-                          label={offer.visible ? "Visible public" : "Masquée public"}
-                          onClick={() => updateOffer(offer.id, "visible", !offer.visible)}
-                        />
-                      </div>
                     </article>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
 
@@ -2012,7 +2081,19 @@ export default function CenterSettingsPage() {
                   borderColor: `${service.color ?? serviceColorFallback(index)}45`,
                 }}
               >
-                <div className="grid gap-2 xl:grid-cols-[1.4fr_0.9fr_0.7fr_0.6fr_0.7fr_0.9fr_1fr_1fr_auto]">
+                <div className="grid gap-2 xl:grid-cols-[40px_1.4fr_0.9fr_0.7fr_0.6fr_0.7fr_0.9fr_1fr_1fr_auto]">
+                  <label className="space-y-0.5">
+                    <span className="text-[11px] font-medium text-slate-500">
+                      Photo
+                    </span>
+                    <ServicePhotoPicker
+                      src={service.photo}
+                      name={service.name}
+                      disabled={photoBusyId === service.id}
+                      onPick={(file) => void uploadServicePhoto(service.id, file)}
+                      onRemove={() => void removeServicePhoto(service.id)}
+                    />
+                  </label>
                   <Field
                     compact
                     label="Nom"
@@ -3390,24 +3471,33 @@ function PublicPreview({
                   key={offer.id}
                   className="rounded-2xl border border-violet-100 bg-white p-3"
                 >
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <p className="font-semibold text-slate-950">{offer.title}</p>
-                      <p className="mt-1 text-sm font-normal text-slate-500">
-                        {offer.serviceName} · fin {offer.endsAt}
-                      </p>
+                  <div className="flex items-start gap-3">
+                    <ServiceThumb
+                      src={servicePhotoByName(sortedServices, offer.serviceName)}
+                      name={offer.serviceName}
+                      className="h-14 w-14 shrink-0"
+                    />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className="font-semibold text-slate-950">{offer.title}</p>
+                          <p className="mt-1 text-sm font-normal text-slate-500">
+                            {offer.serviceName} · fin {offer.endsAt}
+                          </p>
+                        </div>
+                        <span className="rounded-full bg-violet-100 px-3 py-1 text-xs font-semibold text-violet-700">
+                          {offer.tag}
+                        </span>
+                      </div>
+                      <div className="mt-3 flex items-center justify-between gap-3">
+                        <p className="text-sm font-normal text-slate-400 line-through">
+                          {offer.oldPrice} €
+                        </p>
+                        <p className="text-base font-semibold text-violet-700">
+                          {offer.price} €
+                        </p>
+                      </div>
                     </div>
-                    <span className="rounded-full bg-violet-100 px-3 py-1 text-xs font-semibold text-violet-700">
-                      {offer.tag}
-                    </span>
-                  </div>
-                  <div className="mt-3 flex items-center justify-between gap-3">
-                    <p className="text-sm font-normal text-slate-400 line-through">
-                      {offer.oldPrice} €
-                    </p>
-                    <p className="text-base font-semibold text-violet-700">
-                      {offer.price} €
-                    </p>
                   </div>
                 </div>
               ))}
@@ -3453,11 +3543,18 @@ function PublicPreview({
                 className="rounded-3xl border border-slate-200 bg-white p-4"
               >
                 <div className="flex items-start justify-between gap-4">
-                  <div>
-                    <p className="text-base font-semibold">{service.name}</p>
-                    <p className="mt-1 text-sm text-slate-500">
-                      {service.category} · {service.duration} min
-                    </p>
+                  <div className="flex min-w-0 items-start gap-3">
+                    <ServiceThumb
+                      src={service.photo}
+                      name={service.name}
+                      className="h-12 w-12 shrink-0"
+                    />
+                    <div className="min-w-0">
+                      <p className="text-base font-semibold">{service.name}</p>
+                      <p className="mt-1 text-sm text-slate-500">
+                        {service.category} · {service.duration} min
+                      </p>
+                    </div>
                   </div>
                   <p className="text-base font-semibold text-slate-950">
                     {formatCenterServicePrice(service)}
@@ -3484,6 +3581,83 @@ function PublicPreview({
         </div>
       </div>
     </aside>
+  );
+}
+
+function ServiceThumb({
+  src,
+  name,
+  className = "h-10 w-10",
+}: {
+  src?: string;
+  name: string;
+  className?: string;
+}) {
+  return (
+    <div
+      className={`overflow-hidden rounded-xl border border-slate-200 bg-slate-100 ${className}`}
+    >
+      {src ? (
+        <img src={src} alt={name} className="h-full w-full object-cover" />
+      ) : (
+        <div className="grid h-full w-full place-items-center text-slate-300">
+          <ImagePlus className="h-4 w-4" />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ServicePhotoPicker({
+  src,
+  name,
+  disabled,
+  onPick,
+  onRemove,
+}: {
+  src?: string;
+  name: string;
+  disabled?: boolean;
+  onPick: (file: File) => void;
+  onRemove: () => void;
+}) {
+  return (
+    <div className="relative">
+      <label
+        className={`relative grid h-10 w-10 cursor-pointer overflow-hidden rounded-xl border border-slate-200 bg-white ${
+          disabled ? "pointer-events-none opacity-60" : ""
+        }`}
+        title={src ? `Changer la photo de ${name}` : `Ajouter une photo à ${name}`}
+      >
+        {src ? (
+          <img src={src} alt="" className="h-full w-full object-cover" />
+        ) : (
+          <ImagePlus className="m-auto h-4 w-4 text-slate-400" />
+        )}
+        <input
+          type="file"
+          accept="image/*"
+          className="sr-only"
+          disabled={disabled}
+          onChange={(event) => {
+            const file = event.target.files?.[0];
+            event.target.value = "";
+            if (file) onPick(file);
+          }}
+        />
+      </label>
+      {src ? (
+        <button
+          type="button"
+          onClick={onRemove}
+          disabled={disabled}
+          aria-label={`Supprimer la photo de ${name}`}
+          className="absolute -right-1 -top-1 grid h-4 w-4 place-items-center rounded-full bg-white text-[10px] font-bold leading-none text-red-500 shadow-sm"
+        >
+          ×
+        </button>
+      ) : null}
+    </div>
   );
 }
 

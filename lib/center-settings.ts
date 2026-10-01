@@ -156,6 +156,7 @@ export type CenterServiceSetting = {
   topListed: boolean;
   cabins: string;
   practitioners: string;
+  photo?: string;
 };
 
 export type CenterSourceSetting = {
@@ -867,6 +868,10 @@ function withoutDataUrls(settings: StoredCenterSettings): StoredCenterSettings {
     photoPreviews: (settings.photoPreviews ?? [])
       .map((src) => persistableMediaUrl(src))
       .filter(Boolean),
+    services: settings.services?.map((service) => ({
+      ...service,
+      photo: persistableMediaUrl(service.photo) || undefined,
+    })),
   };
 }
 

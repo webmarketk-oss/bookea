@@ -45,7 +45,7 @@ import {
   type CenterPublicOffer,
   type StoredCenterSettings,
 } from "@/lib/center-settings";
-import { coverPositionCss } from "@/lib/center-media";
+import { coverPositionCss, servicePhotoByName } from "@/lib/center-media";
 
 type Center = {
   name: string;
@@ -83,6 +83,7 @@ type Center = {
     duration: string;
     color: string;
     deposit: number;
+    photo?: string;
   }>;
   profileColor?: string;
   phone?: string;
@@ -631,6 +632,7 @@ export function PublicBooking() {
         duration: `${service.duration} min`,
         color: service.color,
         deposit: service.depositEnabled ? service.depositAmount : 0,
+        photo: service.photo,
       })),
       color: "from-violet-600 via-blue-500 to-cyan-400",
       profileColor: profile.profileColor,
@@ -704,10 +706,11 @@ export function PublicBooking() {
           price: `${offer.price} €`,
           oldPrice: `${offer.oldPrice} €`,
           category: configuredCenter.categories[0] ?? "Institut beauté",
+          photo: servicePhotoByName(storedSettings?.services, offer.serviceName),
         })) ?? [];
 
     return [...centerOffers, ...currentOffers];
-  }, [configuredCenter]);
+  }, [configuredCenter, storedSettings]);
   const publicEndingSoonOffers = useMemo(() => {
     const centerOffers =
       configuredCenter?.offers
@@ -720,10 +723,11 @@ export function PublicBooking() {
               : "Dernières places",
           discount: `${offer.price} €`,
           category: configuredCenter.categories[0] ?? "Institut beauté",
+          photo: servicePhotoByName(storedSettings?.services, offer.serviceName),
         })) ?? [];
 
     return [...centerOffers, ...endingSoonOffers];
-  }, [configuredCenter]);
+  }, [configuredCenter, storedSettings]);
 
   const focusSeyaSearch = () => {
     document.getElementById("recherche")?.scrollIntoView({ behavior: "smooth" });
@@ -1115,11 +1119,20 @@ export function PublicBooking() {
                     onClick={() => launchOfferSearch(offer.title, offer.category)}
                     className="flex w-full min-w-0 items-center justify-between gap-3 rounded-2xl bg-white p-4 text-left shadow-sm transition hover:-translate-y-0.5 sm:rounded-3xl"
                   >
-                    <div>
-                      <p className="font-black text-slate-950">{offer.title}</p>
-                      <p className="mt-1 text-sm font-semibold text-slate-500">
-                        {offer.center}
-                      </p>
+                    <div className="flex min-w-0 items-center gap-3">
+                      {offer.photo ? (
+                        <img
+                          src={offer.photo}
+                          alt=""
+                          className="h-12 w-12 shrink-0 rounded-2xl object-cover"
+                        />
+                      ) : null}
+                      <div className="min-w-0">
+                        <p className="font-black text-slate-950">{offer.title}</p>
+                        <p className="mt-1 text-sm font-semibold text-slate-500">
+                          {offer.center}
+                        </p>
+                      </div>
                     </div>
                     <div className="shrink-0 text-right">
                       <p className="text-xl font-black text-violet-700">
@@ -1154,7 +1167,16 @@ export function PublicBooking() {
                     onClick={() => launchOfferSearch(offer.title, offer.category)}
                     className="flex w-full min-w-0 flex-col items-start justify-between gap-2 rounded-2xl bg-white px-4 py-3 text-left font-black shadow-sm transition hover:bg-orange-100 sm:flex-row sm:items-center"
                   >
-                    <span className="text-slate-950">{offer.title}</span>
+                    <span className="flex min-w-0 items-center gap-3">
+                      {offer.photo ? (
+                        <img
+                          src={offer.photo}
+                          alt=""
+                          className="h-10 w-10 shrink-0 rounded-xl object-cover"
+                        />
+                      ) : null}
+                      <span className="text-slate-950">{offer.title}</span>
+                    </span>
                     <span className="rounded-full bg-orange-100 px-3 py-1 text-xs text-orange-700">
                       {offer.discount} · {offer.until}
                     </span>
@@ -1186,12 +1208,20 @@ export function PublicBooking() {
                 key={`${offer.title}-${offer.center}`}
                 type="button"
                 onClick={() => launchOfferSearch(offer.title, offer.category)}
-                className={`min-w-[245px] max-w-[calc(100vw-3rem)] snap-start rounded-[22px] p-4 text-left text-white shadow-sm transition hover:-translate-y-0.5 sm:min-w-[320px] sm:rounded-[26px] sm:p-5 ${
+                className={`relative min-w-[245px] max-w-[calc(100vw-3rem)] snap-start overflow-hidden rounded-[22px] p-4 text-left text-white shadow-sm transition hover:-translate-y-0.5 sm:min-w-[320px] sm:rounded-[26px] sm:p-5 ${
                   index % 2 === 0
                     ? "bg-gradient-to-br from-orange-500 to-pink-500"
                     : "bg-gradient-to-br from-blue-600 to-violet-600"
                 }`}
               >
+                {offer.photo ? (
+                  <img
+                    src={offer.photo}
+                    alt=""
+                    className="absolute inset-0 h-full w-full object-cover opacity-35"
+                  />
+                ) : null}
+                <div className="relative">
                 <span className="rounded-full bg-white/20 px-3 py-1 text-xs font-black">
                   Offre limitée
                 </span>
@@ -1209,6 +1239,7 @@ export function PublicBooking() {
                   <span className="rounded-full bg-white px-4 py-2 text-sm font-black text-slate-950">
                     Voir l&apos;offre
                   </span>
+                </div>
                 </div>
               </button>
             ))}
@@ -1236,11 +1267,20 @@ export function PublicBooking() {
                   onClick={() => launchOfferSearch(offer.title, offer.category)}
                   className="flex w-full min-w-0 items-center justify-between gap-3 rounded-2xl border border-orange-100 bg-orange-50 px-4 py-3 text-left transition hover:border-orange-200 sm:rounded-3xl"
                 >
-                  <div className="min-w-0">
-                    <p className="font-black text-slate-950">{offer.title}</p>
-                    <p className="mt-1 text-sm font-bold text-orange-700">
-                      {offer.until}
-                    </p>
+                  <div className="flex min-w-0 items-center gap-3">
+                    {offer.photo ? (
+                      <img
+                        src={offer.photo}
+                        alt=""
+                        className="h-11 w-11 shrink-0 rounded-xl object-cover"
+                      />
+                    ) : null}
+                    <div className="min-w-0">
+                      <p className="font-black text-slate-950">{offer.title}</p>
+                      <p className="mt-1 text-sm font-bold text-orange-700">
+                        {offer.until}
+                      </p>
+                    </div>
                   </div>
                   <span className="shrink-0 rounded-full bg-white px-3 py-1 text-sm font-black text-orange-700">
                     {offer.discount}
@@ -1765,8 +1805,18 @@ export function PublicBooking() {
                               })`,
                             }}
                           >
-                            <span className="absolute inset-0 bg-white/10" />
-                            <ImageIcon className="relative h-6 w-6 text-white" />
+                            {service.photo ? (
+                              <img
+                                src={service.photo}
+                                alt=""
+                                className="h-full w-full object-cover"
+                              />
+                            ) : (
+                              <>
+                                <span className="absolute inset-0 bg-white/10" />
+                                <ImageIcon className="relative h-6 w-6 text-white" />
+                              </>
+                            )}
                           </span>
                           <span className="min-w-0 flex-1">
                             <span className="block truncate text-base font-black text-slate-950">

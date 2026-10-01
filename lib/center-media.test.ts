@@ -6,6 +6,7 @@ import {
   normalizeCoverPosition,
   parseExternalReviewsCsv,
   persistableMediaUrl,
+  servicePhotoByName,
 } from "./center-media.ts";
 
 test("CSV avis ignore l'en-tête et lit Nom;note;commentaire", () => {
@@ -63,4 +64,18 @@ test("le cadrage de couverture reste entre 0 et 100", () => {
   assert.deepEqual(normalizeCoverPosition({ x: -20, y: 140 }), { x: 0, y: 100 });
   assert.equal(coverPositionCss({ x: 20, y: 80 }), "20% 80%");
   assert.equal(coverPositionCss(undefined), "50% 50%");
+});
+
+test("la photo d'une prestation se retrouve par son nom", () => {
+  assert.equal(
+    servicePhotoByName(
+      [
+        { name: "Hydrafacial", photo: "https://cdn.example/hydra.jpg" },
+        { name: "Laser", photo: "https://cdn.example/laser.jpg" },
+      ],
+      "hydrafacial",
+    ),
+    "https://cdn.example/hydra.jpg",
+  );
+  assert.equal(servicePhotoByName([{ name: "Laser" }], "Hydrafacial"), "");
 });

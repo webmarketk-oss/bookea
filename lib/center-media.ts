@@ -1,4 +1,17 @@
-export const MAX_BANNER_PHOTOS = 4;
+export function servicePhotoByName(
+  services: Array<{ name?: string; photo?: string }> | undefined,
+  serviceName: string,
+) {
+  const key = serviceName.trim().toLowerCase();
+  if (!key) {
+    return "";
+  }
+  return (
+    services?.find(
+      (service) => (service.name ?? "").trim().toLowerCase() === key,
+    )?.photo || ""
+  );
+}
 export const defaultCoverPosition = { x: 50, y: 50 };
 const MAX_STORED_DATA_URL = 220_000;
 
