@@ -17,6 +17,7 @@ import {
   PaymentStatusMark,
 } from "@/components/crm/payment-status-mark";
 import { Button } from "@/components/ui/button";
+import { askAlert, askConfirm } from "@/components/ui/app-dialog";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { cabins, practitioners } from "@/lib/agenda-data";
@@ -1180,7 +1181,7 @@ export default function AgendaBoard() {
   }
 
   async function addCabin() {
-    const confirmed = window.confirm(
+    const confirmed = await askConfirm(
       "Êtes-vous sûr de vouloir ajouter une cabine ?"
     );
 
@@ -1207,7 +1208,7 @@ export default function AgendaBoard() {
   }
 
   async function removeCabin() {
-    const confirmed = window.confirm(
+    const confirmed = await askConfirm(
       "Êtes-vous sûr de vouloir retirer une cabine ?"
     );
 
@@ -1216,7 +1217,7 @@ export default function AgendaBoard() {
     }
 
     if (cabinList.length <= 1) {
-      window.alert("Vous devez garder au moins une cabine.");
+      await askAlert("Vous devez garder au moins une cabine.");
       return;
     }
 
@@ -1606,7 +1607,7 @@ export default function AgendaBoard() {
     beginAgendaWrite();
     deletingAppointmentIdsRef.current.add(appointmentId);
 
-    const confirmed = window.confirm(
+    const confirmed = await askConfirm(
       "Êtes-vous sûr de vouloir supprimer le RDV ?"
     );
 

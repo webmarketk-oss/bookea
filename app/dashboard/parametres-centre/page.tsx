@@ -61,6 +61,7 @@ import {
   type CoverPosition,
 } from "@/lib/center-media";
 import { PlaceSuggestField } from "@/components/forms/place-suggest-field";
+import { askConfirm } from "@/components/ui/app-dialog";
 
 type Service = {
   id: number;
@@ -651,9 +652,9 @@ export default function CenterSettingsPage() {
     window.setTimeout(() => setSavedMessage(""), 2400);
   };
 
-  const removeSource = (id: number) => {
+  const removeSource = async (id: number) => {
     const source = sources.find((item) => item.id === id);
-    const confirmed = window.confirm(
+    const confirmed = await askConfirm(
       `Êtes-vous sûr de vouloir supprimer la source ${source?.name ?? ""} ?`,
     );
 
@@ -691,9 +692,9 @@ export default function CenterSettingsPage() {
     window.setTimeout(() => setSavedMessage(""), 2400);
   };
 
-  const removeProduct = (id: number) => {
+  const removeProduct = async (id: number) => {
     const product = products.find((item) => item.id === id);
-    const confirmed = window.confirm(
+    const confirmed = await askConfirm(
       `Êtes-vous sûr de vouloir supprimer le produit ${product?.name ?? ""} ?`,
     );
 
@@ -727,9 +728,9 @@ export default function CenterSettingsPage() {
     window.setTimeout(() => setSavedMessage(""), 2400);
   };
 
-  const removeDepositLink = (id: number) => {
+  const removeDepositLink = async (id: number) => {
     const link = depositLinks.find((item) => item.id === id);
-    const confirmed = window.confirm(
+    const confirmed = await askConfirm(
       `Êtes-vous sûr de vouloir supprimer le lien ${link?.name ?? ""} ?`,
     );
 
@@ -891,7 +892,7 @@ export default function CenterSettingsPage() {
 
   const removeCover = async () => {
     if (!coverPreview || mediaBusy) return;
-    if (!window.confirm("Supprimer la photo de couverture ?")) return;
+    if (!(await askConfirm("Supprimer la photo de couverture ?"))) return;
 
     const previous = coverPreview;
     const previousPosition = coverPosition;
@@ -919,7 +920,7 @@ export default function CenterSettingsPage() {
 
   const removeLogo = async () => {
     if (!logoPreview || mediaBusy) return;
-    if (!window.confirm("Supprimer le logo ?")) return;
+    if (!(await askConfirm("Supprimer le logo ?"))) return;
 
     const previous = logoPreview;
     setLogoPreview("");
@@ -935,7 +936,7 @@ export default function CenterSettingsPage() {
 
   const removeBannerPhoto = async (photo: string) => {
     if (mediaBusy) return;
-    if (!window.confirm("Supprimer cette photo du bandeau ?")) return;
+    if (!(await askConfirm("Supprimer cette photo du bandeau ?"))) return;
 
     const previous = photoPreviews;
     const nextPhotos = photoPreviews.filter((item) => item !== photo);
@@ -977,7 +978,7 @@ export default function CenterSettingsPage() {
   const removeServicePhoto = async (serviceId: number) => {
     const service = services.find((item) => item.id === serviceId);
     if (!service?.photo || photoBusyId) return;
-    if (!window.confirm(`Supprimer la photo de ${service.name} ?`)) return;
+    if (!(await askConfirm(`Supprimer la photo de ${service.name} ?`))) return;
 
     const previous = service.photo;
     const nextServices = services.map((item) =>
@@ -1111,9 +1112,9 @@ export default function CenterSettingsPage() {
     window.setTimeout(() => setSavedMessage(""), 2400);
   };
 
-  const removeOffer = (id: number) => {
+  const removeOffer = async (id: number) => {
     const offer = offers.find((item) => item.id === id);
-    const confirmed = window.confirm(
+    const confirmed = await askConfirm(
       `Êtes-vous sûr de vouloir supprimer l'offre ${offer?.title ?? ""} ?`,
     );
     if (!confirmed) return;
@@ -1899,7 +1900,7 @@ export default function CenterSettingsPage() {
                               </IconButton>
                               <IconButton
                                 label="Supprimer l'offre"
-                                onClick={() => removeOffer(offer.id)}
+                                onClick={() => void removeOffer(offer.id)}
                               >
                                 <Trash2 className="h-5 w-5" />
                               </IconButton>
@@ -2348,7 +2349,7 @@ export default function CenterSettingsPage() {
                   <div className="flex items-end">
                     <IconButton
                       label="Supprimer la source"
-                      onClick={() => removeSource(source.id)}
+                      onClick={() => void removeSource(source.id)}
                     >
                       <Trash2 className="h-5 w-5" />
                     </IconButton>
@@ -2532,7 +2533,7 @@ export default function CenterSettingsPage() {
                   <div className="flex items-end">
                     <IconButton
                       label="Supprimer le produit"
-                      onClick={() => removeProduct(product.id)}
+                      onClick={() => void removeProduct(product.id)}
                     >
                       <Trash2 className="h-5 w-5" />
                     </IconButton>
@@ -2686,7 +2687,7 @@ export default function CenterSettingsPage() {
                     />
                     <IconButton
                       label="Supprimer le lien"
-                      onClick={() => removeDepositLink(link.id)}
+                      onClick={() => void removeDepositLink(link.id)}
                     >
                       <Trash2 className="h-5 w-5" />
                     </IconButton>

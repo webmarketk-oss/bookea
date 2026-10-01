@@ -35,6 +35,7 @@ import {
   type CenterProductSetting,
   type CenterServiceSetting,
 } from "@/lib/center-settings";
+import { askConfirm } from "@/components/ui/app-dialog";
 import {
   createBillingInvoice,
   deleteBillingInvoice,
@@ -675,7 +676,7 @@ export default function BillingPage() {
   }
 
   async function deleteQuote(invoiceId: string) {
-    if (!window.confirm("Êtes-vous sûr de vouloir supprimer ce devis ?")) {
+    if (!(await askConfirm("Êtes-vous sûr de vouloir supprimer ce devis ?"))) {
       return;
     }
 
@@ -894,8 +895,8 @@ export default function BillingPage() {
     );
   }
 
-  function removeBillingService(serviceId: string) {
-    if (!window.confirm("Êtes-vous sûr de vouloir supprimer cette prestation ?")) {
+  async function removeBillingService(serviceId: string) {
+    if (!(await askConfirm("Êtes-vous sûr de vouloir supprimer cette prestation ?"))) {
       return;
     }
     setBillingServices((current) =>
@@ -928,8 +929,8 @@ export default function BillingPage() {
     );
   }
 
-  function removeBillingProduct(productId: string) {
-    if (!window.confirm("Êtes-vous sûr de vouloir supprimer ce produit ?")) {
+  async function removeBillingProduct(productId: string) {
+    if (!(await askConfirm("Êtes-vous sûr de vouloir supprimer ce produit ?"))) {
       return;
     }
     setBillingProducts((current) =>
@@ -948,14 +949,14 @@ export default function BillingPage() {
     );
   }
 
-  function removeBillingCategory(category: string) {
+  async function removeBillingCategory(category: string) {
     const isUsed =
       billingServices.some((service) => service.category === category) ||
       billingProducts.some((product) => product.category === category);
     const message = isUsed
       ? `Cette catégorie est utilisée. La supprimer remettra les éléments concernés dans "À classer". Continuer ?`
       : `Êtes-vous sûr de vouloir supprimer la catégorie "${category}" ?`;
-    if (!window.confirm(message)) {
+    if (!(await askConfirm(message))) {
       return;
     }
     setBillingCategories((current) =>

@@ -9,6 +9,7 @@ import {
   useSidebarSlide,
 } from "@/components/layout/use-sidebar-slide";
 import { loadPublicCenterProfile } from "@/lib/center-settings";
+import { AppDialogHost } from "@/components/ui/app-dialog";
 
 export function DashboardShell({ children }: { children: React.ReactNode }) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -89,6 +90,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
       >
         {children}
       </main>
+      <AppDialogHost />
     </SidebarControlProvider>
   );
 }
