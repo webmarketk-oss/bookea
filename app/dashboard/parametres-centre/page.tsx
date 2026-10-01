@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import type { ChangeEvent } from "react";
+import type { ChangeEvent, PointerEvent } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowDown,
@@ -17,6 +17,7 @@ import {
   EyeOff,
   ImagePlus,
   MapPin,
+  Move,
   Package,
   Plus,
   Save,
@@ -49,9 +50,14 @@ import { cabins as agendaCabins, practitioners as agendaPractitioners } from "@/
 import { loadCenterAssignmentOptions } from "@/lib/agenda-supabase";
 import {
   MAX_BANNER_PHOTOS,
+  clampPercent,
+  coverPositionCss,
+  defaultCoverPosition,
   deleteCenterImage,
+  normalizeCoverPosition,
   parseExternalReviewsCsv,
   uploadCenterImage,
+  type CoverPosition,
 } from "@/lib/center-media";
 import { PlaceSuggestField } from "@/components/forms/place-suggest-field";
 
@@ -122,6 +128,7 @@ type StoredCenterSettings = {
   depositLinks: CenterDepositLinkSetting[];
   stripeConnected: boolean;
   coverPreview: string;
+  coverPosition: CoverPosition;
   logoPreview: string;
   photoPreviews: string[];
   externalReviews: CenterExternalReview[];
@@ -287,6 +294,12 @@ export default function CenterSettingsPage() {
   const [mediaBusy, setMediaBusy] = useState(false);
   const noticeTimer = useRef(0);
   const [coverPreview, setCoverPreview] = useState("");
+  const [coverPosition, setCoverPosition] = useState<CoverPosition>(
+    defaultCoverPosition,
+  );
+  const coverPositionRef = useRef(coverPosition);
+  coverPositionRef.current = coverPosition;
+  const committedCoverPosition = useRef(coverPosition);
   const [logoPreview, setLogoPreview] = useState("");
   const [photoPreviews, setPhotoPreviews] = useState<string[]>([]);
   const [externalReviews, setExternalReviews] =
@@ -375,6 +388,11 @@ export default function CenterSettingsPage() {
     }
     if (typeof parsed.coverPreview === "string") {
       setCoverPreview(parsed.coverPreview);
+    }
+    if (parsed.coverPosition) {
+      const nextPosition = normalizeCoverPosition(parsed.coverPosition);
+      setCoverPosition(nextPosition);
+      committedCoverPosition.current = nextPosition;
     }
     if (typeof parsed.logoPreview === "string") {
       setLogoPreview(parsed.logoPreview);
@@ -720,6 +738,7 @@ export default function CenterSettingsPage() {
     depositLinks,
     stripeConnected,
     coverPreview,
+    coverPosition,
     logoPreview,
     photoPreviews,
     externalReviews,
@@ -736,6 +755,21 @@ export default function CenterSettingsPage() {
     mergeCenterSettings(next);
     await savePublicCenterProfile(next, loadedCenterId || undefined);
     showNotice(message);
+  };
+
+  const commitCoverPosition = () => {
+    const next = normalizeCoverPosition(coverPositionRef.current);
+    if (
+      next.x === committedCoverPosition.current.x &&
+      next.y === committedCoverPosition.current.y
+    ) {
+      return;
+    }
+    committedCoverPosition.current = next;
+    void persistProfile(
+      { coverPosition: next },
+      "Cadrage de la couverture enregistré.",
+    ).catch((error) => showNotice(publicSaveErrorMessage(error), true));
   };
 
   const saveSettings = async () => {
@@ -802,7 +836,12 @@ export default function CenterSettingsPage() {
     try {
       const url = await uploadCenterAsset("cover", file);
       setCoverPreview(url);
-      await persistProfile({ coverPreview: url }, "Couverture enregistrée.");
+      setCoverPosition(defaultCoverPosition);
+      committedCoverPosition.current = defaultCoverPosition;
+      await persistProfile(
+        { coverPreview: url, coverPosition: defaultCoverPosition },
+        "Couverture enregistrée.",
+      );
     } catch (error) {
       showNotice(publicSaveErrorMessage(error), true);
     } finally {
@@ -846,13 +885,25 @@ export default function CenterSettingsPage() {
     if (!window.confirm("Supprimer la photo de couverture ?")) return;
 
     const previous = coverPreview;
+    const previousPosition = coverPosition;
     setCoverPreview("");
-    mergeCenterSettings(currentPublicSettings({ coverPreview: "" }));
+    setCoverPosition(defaultCoverPosition);
+    committedCoverPosition.current = defaultCoverPosition;
+    mergeCenterSettings(
+      currentPublicSettings({
+        coverPreview: "",
+        coverPosition: defaultCoverPosition,
+      }),
+    );
     void deleteCenterImage(previous, loadedCenterId || "local");
     try {
-      await persistProfile({ coverPreview: "" }, "Couverture supprimée.");
+      await persistProfile(
+        { coverPreview: "", coverPosition: defaultCoverPosition },
+        "Couverture supprimée.",
+      );
     } catch (error) {
       setCoverPreview(previous);
+      setCoverPosition(previousPosition);
       showNotice(publicSaveErrorMessage(error), true);
     }
   };
@@ -1451,26 +1502,14 @@ export default function CenterSettingsPage() {
                   <p className="mb-2 text-xs font-medium text-slate-500">
                     Couverture
                   </p>
-                  <div className="relative grid h-32 overflow-hidden rounded-2xl bg-gradient-to-r from-violet-600 via-blue-500 to-cyan-400">
-                    {coverPreview ? (
-                      <img
-                        src={coverPreview}
-                        alt="Image de couverture du centre"
-                        className="h-full w-full object-cover"
-                      />
-                    ) : (
-                      <div className="grid h-full place-items-center bg-white/15 font-semibold text-white">
-                        Image de couverture
-                      </div>
-                    )}
-                    {coverPreview ? (
-                      <RemoveMediaButton
-                        label="Supprimer la couverture"
-                        onClick={() => void removeCover()}
-                        disabled={mediaBusy}
-                      />
-                    ) : null}
-                  </div>
+                  <CoverFrame
+                    src={coverPreview}
+                    position={coverPosition}
+                    disabled={mediaBusy}
+                    onPositionChange={setCoverPosition}
+                    onPositionCommit={commitCoverPosition}
+                    onRemove={() => void removeCover()}
+                  />
                 </div>
                 <div className="rounded-3xl bg-white p-3 shadow-sm">
                   <p className="mb-2 text-xs font-medium text-slate-500">
@@ -1873,6 +1912,7 @@ export default function CenterSettingsPage() {
             services={services}
             serviceCategories={categoryOptions}
             coverPreview={coverPreview}
+            coverPosition={coverPosition}
             logoPreview={logoPreview}
             photoPreviews={photoPreviews}
             externalReviews={externalReviews}
@@ -3177,6 +3217,7 @@ function PublicPreview({
   services,
   serviceCategories,
   coverPreview,
+  coverPosition,
   logoPreview,
   photoPreviews,
   externalReviews,
@@ -3200,6 +3241,7 @@ function PublicPreview({
   services: Service[];
   serviceCategories?: string[];
   coverPreview: string;
+  coverPosition: CoverPosition;
   logoPreview: string;
   photoPreviews: string[];
   externalReviews: CenterExternalReview[];
@@ -3228,11 +3270,12 @@ function PublicPreview({
       />
       <div className="mt-6 overflow-hidden rounded-[28px] border border-slate-200 bg-[#f4f7fb]">
         <div
-          className="h-28 bg-cover bg-center"
+          className="h-28 bg-cover"
           style={
             coverPreview
               ? {
                   backgroundImage: `linear-gradient(rgba(15, 23, 42, 0.04), rgba(15, 23, 42, 0.12)), url(${coverPreview})`,
+                  backgroundPosition: coverPositionCss(coverPosition),
                 }
               : {
                   background: `linear-gradient(135deg, ${center.profileColor}, #06b6d4)`,
@@ -3463,6 +3506,121 @@ function RemoveMediaButton({
     >
       <Trash2 className="h-4 w-4" />
     </button>
+  );
+}
+
+function CoverFrame({
+  src,
+  position,
+  disabled,
+  onPositionChange,
+  onPositionCommit,
+  onRemove,
+}: {
+  src: string;
+  position: CoverPosition;
+  disabled?: boolean;
+  onPositionChange: (next: CoverPosition) => void;
+  onPositionCommit: () => void;
+  onRemove: () => void;
+}) {
+  const drag = useRef<{
+    x: number;
+    y: number;
+    pos: CoverPosition;
+  } | null>(null);
+
+  const onPointerDown = (event: PointerEvent<HTMLDivElement>) => {
+    if (!src || disabled) return;
+    if ((event.target as HTMLElement).closest("button")) return;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    drag.current = { x: event.clientX, y: event.clientY, pos: position };
+  };
+
+  const onPointerMove = (event: PointerEvent<HTMLDivElement>) => {
+    if (!drag.current) return;
+    const rect = event.currentTarget.getBoundingClientRect();
+    const dx = ((event.clientX - drag.current.x) / Math.max(rect.width, 1)) * 100;
+    const dy = ((event.clientY - drag.current.y) / Math.max(rect.height, 1)) * 100;
+    onPositionChange({
+      x: clampPercent(drag.current.pos.x - dx),
+      y: clampPercent(drag.current.pos.y - dy),
+    });
+  };
+
+  const endDrag = () => {
+    if (!drag.current) return;
+    drag.current = null;
+    onPositionCommit();
+  };
+
+  return (
+    <div className="space-y-2">
+      <div
+        className={`relative grid h-32 overflow-hidden rounded-2xl bg-gradient-to-r from-violet-600 via-blue-500 to-cyan-400 ${
+          src && !disabled ? "cursor-grab active:cursor-grabbing" : ""
+        }`}
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={endDrag}
+        onPointerCancel={endDrag}
+        style={{ touchAction: src ? "none" : undefined }}
+      >
+        {src ? (
+          <img
+            src={src}
+            alt="Image de couverture du centre"
+            draggable={false}
+            className="pointer-events-none h-full w-full object-cover"
+            style={{ objectPosition: coverPositionCss(position) }}
+          />
+        ) : (
+          <div className="grid h-full place-items-center bg-white/15 font-semibold text-white">
+            Image de couverture
+          </div>
+        )}
+        {src ? (
+          <RemoveMediaButton
+            label="Supprimer la couverture"
+            onClick={onRemove}
+            disabled={disabled}
+          />
+        ) : null}
+      </div>
+      {src ? (
+        <div className="space-y-1 px-1">
+          <p className="flex items-center gap-1 text-[11px] font-medium text-slate-500">
+            <Move className="h-3.5 w-3.5" />
+            Glissez la photo pour cadrer, ou utilisez le curseur
+          </p>
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+              Haut
+            </span>
+            <input
+              type="range"
+              min={0}
+              max={100}
+              value={position.y}
+              disabled={disabled}
+              aria-label="Cadrage vertical de la couverture"
+              className="h-1.5 w-full cursor-pointer accent-blue-600"
+              onChange={(event) =>
+                onPositionChange({
+                  ...position,
+                  y: Number(event.target.value),
+                })
+              }
+              onPointerUp={onPositionCommit}
+              onKeyUp={onPositionCommit}
+            />
+            <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+              Bas
+            </span>
+          </div>
+        </div>
+      ) : null}
+    </div>
   );
 }
 

@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  coverPositionCss,
   mergePublicMedia,
+  normalizeCoverPosition,
   parseExternalReviewsCsv,
   persistableMediaUrl,
 } from "./center-media.ts";
@@ -55,4 +57,10 @@ test("supprimer une photo locale vide bien le champ si le remote est vide aussi"
   );
   assert.equal(cleared.coverPreview, "");
   assert.deepEqual(cleared.photoPreviews, []);
+});
+
+test("le cadrage de couverture reste entre 0 et 100", () => {
+  assert.deepEqual(normalizeCoverPosition({ x: -20, y: 140 }), { x: 0, y: 100 });
+  assert.equal(coverPositionCss({ x: 20, y: 80 }), "20% 80%");
+  assert.equal(coverPositionCss(undefined), "50% 50%");
 });

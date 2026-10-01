@@ -45,6 +45,7 @@ import {
   type CenterPublicOffer,
   type StoredCenterSettings,
 } from "@/lib/center-settings";
+import { coverPositionCss } from "@/lib/center-media";
 
 type Center = {
   name: string;
@@ -68,6 +69,7 @@ type Center = {
     gradient: string;
   }>;
   cover?: string;
+  coverPosition?: { x: number; y: number };
   reviewHighlights?: Array<{
     author: string;
     rating: number;
@@ -610,6 +612,7 @@ export function PublicBooking() {
           : ["Institut beauté"],
       address: profile.address,
       cover: storedSettings?.coverPreview,
+      coverPosition: storedSettings?.coverPosition,
       photos: (storedSettings?.photoPreviews ?? []).slice(0, 3).map((src, index) => ({
         label: `Photo ${index + 1}`,
         src,
@@ -1629,9 +1632,10 @@ export function PublicBooking() {
             >
               {center.cover ? (
                 <div
-                  className="h-28 bg-cover bg-center"
+                  className="h-28 bg-cover"
                   style={{
                     backgroundImage: `linear-gradient(180deg, rgba(15, 23, 42, 0.02), rgba(15, 23, 42, 0.18)), url(${center.cover})`,
+                    backgroundPosition: coverPositionCss(center.coverPosition),
                   }}
                 />
               ) : (

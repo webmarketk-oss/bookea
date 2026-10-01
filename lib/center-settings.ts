@@ -2,7 +2,12 @@ import {
   getActiveCenterContext,
   readActiveCenterId,
 } from "@/lib/center-access";
-import { persistableMediaUrl, mergePublicMedia } from "@/lib/center-media";
+import {
+  persistableMediaUrl,
+  mergePublicMedia,
+  normalizeCoverPosition,
+  type CoverPosition,
+} from "@/lib/center-media";
 import { createClient } from "@/lib/supabase";
 
 export const CENTER_SETTINGS_STORAGE_KEY = "bookea-center-settings";
@@ -238,6 +243,7 @@ export type StoredCenterSettings = {
   depositLinks?: CenterDepositLinkSetting[];
   stripeConnected?: boolean;
   coverPreview?: string;
+  coverPosition?: CoverPosition;
   logoPreview?: string;
   photoPreviews?: string[];
   externalReviews?: CenterExternalReview[];
@@ -782,6 +788,7 @@ function storedSettingsFromCenterRow(row: CenterProfileRow): StoredCenterSetting
         ? publicSettings.stripeConnected
         : undefined,
     coverPreview: asOptionalString(publicSettings.coverPreview),
+    coverPosition: parseCoverPosition(publicSettings.coverPosition),
     logoPreview: asOptionalString(publicSettings.logoPreview),
     photoPreviews: asStringArray(publicSettings.photoPreviews),
     externalReviews: asArray(publicSettings.externalReviews),
@@ -929,6 +936,20 @@ function asString(value: unknown, fallback = "") {
 
 function asOptionalString(value: unknown) {
   return typeof value === "string" ? value : undefined;
+}
+
+function parseCoverPosition(value: unknown): CoverPosition | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+  const record = value as { x?: unknown; y?: unknown };
+  if (typeof record.x !== "number" && typeof record.y !== "number") {
+    return undefined;
+  }
+  return normalizeCoverPosition({
+    x: typeof record.x === "number" ? record.x : 50,
+    y: typeof record.y === "number" ? record.y : 50,
+  });
 }
 
 function emptyToNull(value?: string) {

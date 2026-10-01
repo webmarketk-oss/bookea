@@ -1,5 +1,32 @@
 export const MAX_BANNER_PHOTOS = 4;
+export const defaultCoverPosition = { x: 50, y: 50 };
 const MAX_STORED_DATA_URL = 220_000;
+
+export type CoverPosition = {
+  x: number;
+  y: number;
+};
+
+export function clampPercent(value: number) {
+  if (!Number.isFinite(value)) {
+    return 50;
+  }
+  return Math.min(100, Math.max(0, value));
+}
+
+export function normalizeCoverPosition(
+  value?: Partial<CoverPosition> | null,
+): CoverPosition {
+  return {
+    x: clampPercent(value?.x ?? defaultCoverPosition.x),
+    y: clampPercent(value?.y ?? defaultCoverPosition.y),
+  };
+}
+
+export function coverPositionCss(value?: Partial<CoverPosition> | null) {
+  const next = normalizeCoverPosition(value);
+  return `${next.x}% ${next.y}%`;
+}
 
 export function persistableMediaUrl(value?: string) {
   if (!value) {
@@ -14,17 +41,20 @@ export function persistableMediaUrl(value?: string) {
 export function mergePublicMedia(
   local?: {
     coverPreview?: string;
+    coverPosition?: CoverPosition;
     logoPreview?: string;
     photoPreviews?: string[];
   } | null,
   remote?: {
     coverPreview?: string;
+    coverPosition?: CoverPosition;
     logoPreview?: string;
     photoPreviews?: string[];
   } | null,
 ) {
   return {
     coverPreview: remote?.coverPreview || local?.coverPreview || "",
+    coverPosition: remote?.coverPosition || local?.coverPosition,
     logoPreview: remote?.logoPreview || local?.logoPreview || "",
     photoPreviews:
       remote?.photoPreviews && remote.photoPreviews.length > 0
