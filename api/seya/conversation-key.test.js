@@ -68,3 +68,42 @@ test("les ouvertures auto n’évincient pas un WhatsApp en attente de réponse"
   const kept = persistableConversations([...synthetics, waiting]);
   assert.ok(kept.some((item) => item.phone === "0611223344"));
 });
+
+test("un message plus récent n’efface pas un RDV déjà confirmé", () => {
+  const booked = {
+    leadId: "lead-1",
+    phone: "0611223344",
+    status: "RDV confirmé",
+    bookedSlot: { date: "2026-10-05", time: "17:30" },
+    bookingState: { appointmentStatus: "confirmed", lastOfferedSlots: [] },
+    messages: [
+      {
+        author: "seya",
+        text: "Parfait, votre rendez-vous est confirmé",
+        at: "2026-09-30T14:00:00.000Z",
+      },
+    ],
+    updatedAt: "2026-09-30T14:00:00.000Z",
+  };
+  const laterThanks = {
+    leadId: "lead-1",
+    phone: "0611223344",
+    status: "Qualifié",
+    bookingState: { pendingQuestion: "offer_slots" },
+    messages: [
+      {
+        author: "seya",
+        text: "Parfait, votre rendez-vous est confirmé",
+        at: "2026-09-30T14:00:00.000Z",
+      },
+      { author: "lead", text: "Merci à bientôt", at: "2026-09-30T14:02:00.000Z" },
+    ],
+    updatedAt: "2026-09-30T14:02:00.000Z",
+  };
+  const merged = mergeSeyaConversationLists([booked], [laterThanks]);
+  assert.equal(merged.length, 1);
+  assert.equal(merged[0].status, "RDV confirmé");
+  assert.equal(merged[0].bookedSlot.time, "17:30");
+  assert.equal(merged[0].bookingState.appointmentStatus, "confirmed");
+  assert.equal(merged[0].messages.length, 2);
+});

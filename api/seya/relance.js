@@ -15,7 +15,9 @@ const {
   conversationHasStaffBooking,
   conversationMatchesBookedVisit,
   bookedVisitKeysFromAppointments,
+  sealConfirmedConversation,
 } = require("./booking-close");
+const { threadHasConfirmedVisit } = require("./conversation");
 const { isSeyaOff, readCenterSeya, writeSeyaConversations } = require("./store");
 
 const FIRST_RELANCE_HOURS = 15;
@@ -92,14 +94,24 @@ async function relanceCenter(supabase, center) {
   const sent = [];
   const now = new Date();
   const bookedKeys = await loadBookedVisitKeys(supabase, center.id);
+  let closed = false;
 
   for (const conversation of conversations) {
     const updated = { ...conversation };
-    if (
-      conversationHasStaffBooking(conversation) ||
-      conversationMatchesBookedVisit(conversation, bookedKeys)
-    ) {
-      nextConversations.push(updated);
+    const bookedVisit = conversationMatchesBookedVisit(conversation, bookedKeys);
+    if (conversationHasStaffBooking(conversation) || bookedVisit) {
+      const shouldSeal =
+        bookedVisit ||
+        threadHasConfirmedVisit(conversation) ||
+        conversation?.bookingState?.appointmentStatus === "confirmed" ||
+        Boolean(conversation?.bookedSlot);
+      const sealed = shouldSeal
+        ? sealConfirmedConversation(conversation)
+        : updated;
+      if (sealed !== conversation) {
+        closed = true;
+      }
+      nextConversations.push(sealed);
       continue;
     }
     const round = pickRelanceRound(conversation, now);
@@ -157,7 +169,7 @@ async function relanceCenter(supabase, center) {
     nextConversations.push(updated);
   }
 
-  if (sent.length > 0) {
+  if (sent.length > 0 || closed) {
     await writeSeyaConversations(
       supabase,
       center.id,

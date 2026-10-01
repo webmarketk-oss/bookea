@@ -123,11 +123,23 @@ function checkingSlotReply() {
   return "Parfait, je vérifie le créneau dont nous avions parlé et je reviens vers vous tout de suite 😊";
 }
 
+function threadHasConfirmedVisit(conversation) {
+  return (conversation?.messages || []).some((item) => {
+    if (item?.author !== "seya") {
+      return false;
+    }
+    const value = compactText(item.text);
+    return /rendez-vous est confirme|rdv (est )?confirme|est bien bloque/.test(value);
+  });
+}
+
 function isAppointmentConfirmed(conversation) {
   return (
     conversation?.status === "RDV confirmé" ||
+    conversation?.status === "RDV pris" ||
     conversation?.bookingState?.appointmentStatus === "confirmed" ||
-    Boolean(conversation?.bookedSlot)
+    Boolean(conversation?.bookedSlot) ||
+    threadHasConfirmedVisit(conversation)
   );
 }
 
@@ -204,7 +216,7 @@ function isThanks(text, conversation) {
   ) {
     return true;
   }
-  return /merci( beaucoup)? (et )?a bientot|a bientot merci|^a bientot$|^merci a bientot$/.test(
+  return /merci( beaucoup)? (et )?a bientot|a bientot merci|^a bientot$|^merci a bientot$|merci.*a bientot/.test(
     value,
   );
 }
@@ -499,6 +511,7 @@ module.exports = {
   alreadyTold,
   checkingSlotReply,
   isAppointmentConfirmed,
+  threadHasConfirmedVisit,
   isConfirmingOfferedTime,
   composeReplies,
   conversationalReply,

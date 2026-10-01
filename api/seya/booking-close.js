@@ -1,4 +1,5 @@
 const { last9Phone } = require("./conversation-key");
+const { threadHasConfirmedVisit } = require("./conversation");
 
 function matchesBookedLead(conversation, match) {
   const leadId = String(match?.leadId || "").trim();
@@ -47,10 +48,36 @@ function closeConversationsForBooking(conversations, match, appointment) {
 }
 
 function conversationHasStaffBooking(conversation) {
+  const status = String(conversation?.status || "");
   return (
     conversation?.bookingState?.appointmentStatus === "confirmed" ||
-    Boolean(conversation?.bookedSlot)
+    Boolean(conversation?.bookedSlot) ||
+    /rdv pris|rdv confirm|terminé|termine/i.test(status) ||
+    threadHasConfirmedVisit(conversation)
   );
+}
+
+function sealConfirmedConversation(conversation) {
+  const status = String(conversation?.status || "");
+  const alreadyClosed = /rdv pris|rdv confirm|terminé|termine/i.test(status);
+  const alreadyFlagged =
+    conversation?.bookingState?.appointmentStatus === "confirmed" ||
+    Boolean(conversation?.bookedSlot);
+  if (alreadyClosed && alreadyFlagged) {
+    return conversation;
+  }
+  return {
+    ...conversation,
+    status: /terminé|termine/i.test(status) ? conversation.status : "RDV confirmé",
+    proposedSlots: [],
+    bookingState: {
+      ...(conversation.bookingState || {}),
+      appointmentStatus: "confirmed",
+      pendingQuestion: null,
+      lastOfferedSlots: [],
+    },
+    updatedAt: new Date().toISOString(),
+  };
 }
 
 function bookedVisitKeysFromAppointments(rows) {
@@ -92,4 +119,5 @@ module.exports = {
   conversationHasStaffBooking,
   conversationMatchesBookedVisit,
   matchesBookedLead,
+  sealConfirmedConversation,
 };

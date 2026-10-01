@@ -73,9 +73,31 @@ function isFresherConversation(next, current) {
   return String(next?.updatedAt || "") >= String(current?.updatedAt || "");
 }
 
+function preferredBookingStatus(newerStatus, olderStatus) {
+  const ranks = [
+    /terminé|termine/i,
+    /rdv confirm/i,
+    /rdv pris/i,
+  ];
+  for (const rank of ranks) {
+    if (rank.test(String(newerStatus || ""))) {
+      return newerStatus;
+    }
+    if (rank.test(String(olderStatus || ""))) {
+      return olderStatus;
+    }
+  }
+  return newerStatus || olderStatus;
+}
+
 function mergeConversationPair(current, next) {
   const newer = isFresherConversation(next, current) ? next : current;
   const older = newer === next ? current : next;
+  const bookedSlot = newer.bookedSlot || older.bookedSlot;
+  const confirmed =
+    newer.bookingState?.appointmentStatus === "confirmed" ||
+    older.bookingState?.appointmentStatus === "confirmed" ||
+    Boolean(bookedSlot);
   return {
     ...older,
     ...newer,
@@ -84,10 +106,28 @@ function mergeConversationPair(current, next) {
     phone: newer.phone || older.phone,
     firstName: newer.firstName || older.firstName,
     lastName: newer.lastName || older.lastName,
+    bookedSlot,
+    status: preferredBookingStatus(newer.status, older.status),
     messages:
       (newer.messages || []).length >= (older.messages || []).length
         ? newer.messages
         : older.messages,
+    bookingState: {
+      ...(older.bookingState || {}),
+      ...(newer.bookingState || {}),
+      appointmentStatus: confirmed
+        ? "confirmed"
+        : newer.bookingState?.appointmentStatus ||
+          older.bookingState?.appointmentStatus,
+      lastOfferedSlots: confirmed
+        ? []
+        : newer.bookingState?.lastOfferedSlots ||
+          older.bookingState?.lastOfferedSlots,
+      pendingQuestion: confirmed
+        ? null
+        : newer.bookingState?.pendingQuestion ??
+          older.bookingState?.pendingQuestion,
+    },
   };
 }
 

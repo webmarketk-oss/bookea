@@ -165,6 +165,24 @@ test("pas de relance si stop, refus ou RDV confirmé", () => {
     ),
     0,
   );
+  assert.equal(
+    pickRelanceRound(
+      conversation({
+        status: "Qualifié",
+        messages: [
+          {
+            id: "m1",
+            author: "seya",
+            text: "Parfait, votre rendez-vous est confirmé ✅ Lundi 5 octobre à 17h30",
+            at: hoursAgo(16),
+          },
+          { id: "m2", author: "lead", text: "Merci à bientôt", at: hoursAgo(16) },
+        ],
+      }),
+      NOW,
+    ),
+    0,
+  );
 });
 
 test("pas de deuxième relance identique, ni avant 20 h", () => {

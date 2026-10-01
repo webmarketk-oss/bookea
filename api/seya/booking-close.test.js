@@ -38,6 +38,23 @@ test("un RDV CRM ferme la conversation Seya en cours", () => {
   assert.equal(conversationHasStaffBooking(next[0]), true);
 });
 
+test("un message de confirmation Seya ferme aussi le fil pour la relance", () => {
+  const { sealConfirmedConversation } = require("./booking-close");
+  const open = {
+    status: "Qualifié",
+    messages: [
+      {
+        author: "seya",
+        text: "Parfait, votre rendez-vous est confirmé ✅ Lundi 5 octobre à 17h30",
+      },
+    ],
+  };
+  assert.equal(conversationHasStaffBooking(open), true);
+  const sealed = sealConfirmedConversation(open);
+  assert.equal(sealed.status, "RDV confirmé");
+  assert.equal(sealed.bookingState.appointmentStatus, "confirmed");
+});
+
 test("le matching téléphone ferme aussi un fil sans leadId", () => {
   const next = closeConversationsForBooking(
     [{ id: "c-phone", phone: "+33 6 12 34 56 78", status: "RDV proposé" }],

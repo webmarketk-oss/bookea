@@ -656,6 +656,61 @@ test("merci à bientôt après un RDV confirmé : elle clôture, elle ne redeman
   );
 });
 
+test("merci à bientôt après le texte de confirmation : elle clôture même sans flag bookedSlot", async () => {
+  let conversation = startConversation(
+    {
+      leadId: "lead-samantha-fil",
+      centerId: "jfg-clinique-clermont",
+      firstName: "Samantha",
+      lastName: "Test",
+      phone: "0611223344",
+      treatment: "Soin minceur",
+    },
+    "JFG Clinique Clermont",
+    seya,
+  );
+  conversation.status = "Qualifié";
+  conversation.qualification = {
+    need: "Soin minceur",
+    zone: "",
+    delay: "",
+    availability: "",
+  };
+  conversation.bookingState = {
+    ...(conversation.bookingState || {}),
+    pendingQuestion: "offer_slots",
+    lastOfferedSlots: [],
+  };
+  conversation.messages.push(
+    {
+      author: "seya",
+      text: "Vous êtes plutôt disponible en début de semaine, ou plutôt en fin de semaine ?",
+    },
+    {
+      author: "seya",
+      text: "Parfait, votre rendez-vous est confirmé ✅ Lundi 5 octobre à 17h30 📍 JFG Clinic Clermont-Ferrand, 3 rue Eugène Gilbert Vous recevrez un SMS 48 h avant",
+    },
+  );
+  const result = await generateSeyaReply({
+    conversation,
+    text: "Merci à bientôt",
+    seya,
+    appointments: [],
+    hours: hours(),
+    centerName: "JFG Clinique Clermont",
+    centerAddress: "3 rue Eugène Gilbert",
+    centerId: "jfg-clinique-clermont",
+    now: NOW,
+  });
+  assert.equal(result.shouldBook, null);
+  assert.equal(result.conversation.status, "Terminé");
+  assert.match(lastSeya(result.conversation), /à bientôt|plaisir/i);
+  assert.doesNotMatch(
+    lastSeya(result.conversation),
+    /dites-moi un jour|je regarde tout de suite|créneau|horaire/i,
+  );
+});
+
 const CONFIRMATION_BRIEF = `Dès qu’un rendez-vous est enregistré et confirmé dans l’agenda, envoie ce message en renseignant le jour, la date et l’heure exacts :
 « Parfait, votre rendez-vous est confirmé ✅
 📅 [Jour] [date] à [heure]
