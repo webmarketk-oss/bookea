@@ -45,6 +45,7 @@ export default function StatisticsPage() {
     defaultPractitioners,
   );
   const [activeTab, setActiveTab] = useState<StatsTab>("overview");
+  const [showAllServices, setShowAllServices] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -500,7 +501,10 @@ export default function StatisticsPage() {
                   Aucune prestation enregistrée sur ce centre.
                 </p>
               ) : null}
-              {servicePerformance.map((service) => {
+              {(showAllServices
+                ? servicePerformance
+                : servicePerformance.slice(0, 4)
+              ).map((service) => {
                 const honoredRate = ratio(service.honored, service.reservations);
                 const missedRate = ratio(service.missed, service.reservations);
 
@@ -534,6 +538,17 @@ export default function StatisticsPage() {
                   </div>
                 );
               })}
+              {servicePerformance.length > 4 ? (
+                <button
+                  type="button"
+                  onClick={() => setShowAllServices((current) => !current)}
+                  className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-bold text-slate-700 transition hover:bg-slate-50"
+                >
+                  {showAllServices
+                    ? "Voir moins"
+                    : `Voir plus (${servicePerformance.length - 4})`}
+                </button>
+              ) : null}
             </div>
           </Panel>
 
