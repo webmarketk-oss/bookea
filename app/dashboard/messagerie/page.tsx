@@ -163,29 +163,15 @@ export default function MessagingPage() {
 
   return (
     <main className="min-h-screen bg-[#eef3f9] px-6 py-6 text-slate-950">
-      <section className="mb-6 flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
-        <div>
-          <p className="text-sm font-medium text-violet-600">Bookea CRM</p>
-          <h1 className="mt-1 text-xl font-semibold tracking-tight">
-            Messagerie in-app
-          </h1>
-          <p className="mt-2 max-w-3xl text-sm text-slate-500">
-            Communiquez avec vos client(e)s directement dans Bookea, sans perdre
-            l'historique des échanges.
-          </p>
-        </div>
-        <button
-          type="button"
-          onClick={() =>
-            useQuickReply(
-              "Bonjour {{prenom}}, je vous réponds depuis la messagerie Bookea.",
-            )
-          }
-          className="inline-flex items-center justify-center gap-2 rounded-2xl bg-slate-950 px-4 py-3 text-sm font-medium text-white shadow-sm"
-        >
-          <Sparkles className="h-5 w-5" />
-          Réponse Seya
-        </button>
+      <section className="mb-6">
+        <p className="text-sm font-medium text-violet-600">Bookea CRM</p>
+        <h1 className="mt-1 text-xl font-semibold tracking-tight">
+          Messagerie in-app
+        </h1>
+        <p className="mt-2 max-w-3xl text-sm text-slate-500">
+          Communiquez avec vos client(e)s directement dans Bookea, sans perdre
+          l'historique des échanges.
+        </p>
       </section>
 
       <section className="mb-6 grid gap-4 md:grid-cols-4">
