@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 
 import { YearlyTtcChart } from "@/components/stats/yearly-ttc-chart";
+import { SeyaKpiPanel } from "@/components/stats/seya-kpi-panel";
 import { loadCrmAppointments } from "@/lib/agenda-supabase";
 import {
   loadBillingInvoices,
@@ -35,6 +36,11 @@ import {
 import { todayIso } from "@/lib/crm-stats";
 import { loadCrmLeads } from "@/lib/crm-supabase";
 import { buildRequestedSlots } from "@/lib/requested-slots";
+import { buildSeyaKpi } from "@/lib/seya-kpi";
+import {
+  loadSeyaAgentSettings,
+  type SeyaConversation,
+} from "@/lib/seya-settings";
 import {
   buildPractitionerStats,
   isLeadWithBookedRdv,
@@ -49,7 +55,7 @@ import type { Appointment, Practitioner } from "@/types/agenda";
 
 const redStatuses = ["Perdu", "Prospect perdu", "Numéro invalide", "Doublon", "Hors zone", "No show"];
 
-type StatsTab = "overview" | "practitioners";
+type StatsTab = "overview" | "practitioners" | "seya";
 
 export default function StatisticsPage() {
   const [leads, setLeads] = useState<Lead[]>([]);
@@ -64,19 +70,23 @@ export default function StatisticsPage() {
     defaultCenterDayHours,
   );
   const [invoices, setInvoices] = useState<BillingInvoice[]>([]);
+  const [seyaConversations, setSeyaConversations] = useState<SeyaConversation[]>(
+    [],
+  );
 
   useEffect(() => {
     let cancelled = false;
 
     async function load() {
       try {
-        const [leadData, appointmentData, team, hours, billing] =
+        const [leadData, appointmentData, team, hours, billing, seya] =
           await Promise.all([
             loadCrmLeads(),
             loadCrmAppointments(),
             loadTeamPlanning().catch(() => null),
             loadCenterHours().catch(() => defaultCenterDayHours),
             loadBillingInvoices().catch(() => []),
+            loadSeyaAgentSettings().catch(() => null),
           ]);
 
         if (cancelled) {
@@ -87,6 +97,7 @@ export default function StatisticsPage() {
         setAppointments(appointmentData);
         setCenterHours(hours);
         setInvoices(billing);
+        setSeyaConversations(seya?.conversations || []);
         if (team?.practitioners.length) {
           setPractitionerList(team.practitioners);
         }
@@ -172,6 +183,10 @@ export default function StatisticsPage() {
   const practitionerTotals = useMemo(
     () => summarizePractitionerStats(practitionerStats),
     [practitionerStats],
+  );
+  const seyaKpi = useMemo(
+    () => buildSeyaKpi(seyaConversations, leads, invoices),
+    [invoices, leads, seyaConversations],
   );
   const reminderCount = leads.filter((lead) => lead.reminderDate === today).length;
   const unconfirmedCount = todayAppointments.filter(
@@ -311,6 +326,12 @@ export default function StatisticsPage() {
             onClick={() => setActiveTab("practitioners")}
           >
             Statistiques équipes
+          </StatsTabButton>
+          <StatsTabButton
+            active={activeTab === "seya"}
+            onClick={() => setActiveTab("seya")}
+          >
+            Seya KPI
           </StatsTabButton>
         </div>
 
@@ -515,6 +536,8 @@ export default function StatisticsPage() {
               )}
             </Panel>
           </>
+        ) : activeTab === "seya" ? (
+          <SeyaKpiPanel kpi={seyaKpi} />
         ) : (
           <>
 
