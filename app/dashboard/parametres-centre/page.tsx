@@ -34,6 +34,7 @@ import {
   defaultServiceCategories,
   formatCenterServicePrice,
   loadPublicCenterProfile,
+  mergeCenterSettings,
   mergeProductCategories,
   mergeServiceCategories,
   publicCenterCategories,
@@ -46,6 +47,12 @@ import {
 } from "@/lib/center-settings";
 import { cabins as agendaCabins, practitioners as agendaPractitioners } from "@/lib/agenda-data";
 import { loadCenterAssignmentOptions } from "@/lib/agenda-supabase";
+import {
+  MAX_BANNER_PHOTOS,
+  deleteCenterImage,
+  parseExternalReviewsCsv,
+  uploadCenterImage,
+} from "@/lib/center-media";
 import { PlaceSuggestField } from "@/components/forms/place-suggest-field";
 
 type Service = {
@@ -277,6 +284,7 @@ export default function CenterSettingsPage() {
   const [savedMessage, setSavedMessage] = useState("");
   const [saveError, setSaveError] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [mediaBusy, setMediaBusy] = useState(false);
   const noticeTimer = useRef(0);
   const [coverPreview, setCoverPreview] = useState("");
   const [logoPreview, setLogoPreview] = useState("");
@@ -365,9 +373,15 @@ export default function CenterSettingsPage() {
     if (typeof parsed.stripeConnected === "boolean") {
       setStripeConnected(parsed.stripeConnected);
     }
-    if (parsed.coverPreview) setCoverPreview(parsed.coverPreview);
-    if (parsed.logoPreview) setLogoPreview(parsed.logoPreview);
-    if (parsed.photoPreviews) setPhotoPreviews(parsed.photoPreviews);
+    if (typeof parsed.coverPreview === "string") {
+      setCoverPreview(parsed.coverPreview);
+    }
+    if (typeof parsed.logoPreview === "string") {
+      setLogoPreview(parsed.logoPreview);
+    }
+    if (Array.isArray(parsed.photoPreviews)) {
+      setPhotoPreviews(parsed.photoPreviews);
+    }
     if (parsed.externalReviews) setExternalReviews(parsed.externalReviews);
     if (parsed.offers) setOffers(parsed.offers);
     if (parsed.reviewAutomation) {
@@ -696,34 +710,42 @@ export default function CenterSettingsPage() {
     setDepositLinks((current) => current.filter((item) => item.id !== id));
   };
 
+  const currentPublicSettings = (patch: Partial<StoredCenterSettings> = {}) => ({
+    center,
+    services: sortServicesByCategory(services, categoryOptions),
+    serviceCategories,
+    sources,
+    products: sortServicesByCategory(products, productCategoryOptions),
+    productCategories,
+    depositLinks,
+    stripeConnected,
+    coverPreview,
+    logoPreview,
+    photoPreviews,
+    externalReviews,
+    offers,
+    reviewAutomation,
+    ...patch,
+  });
+
+  const persistProfile = async (
+    patch: Partial<StoredCenterSettings> = {},
+    message = "Fiche publique enregistrée.",
+  ) => {
+    const next = currentPublicSettings(patch);
+    mergeCenterSettings(next);
+    await savePublicCenterProfile(next, loadedCenterId || undefined);
+    showNotice(message);
+  };
+
   const saveSettings = async () => {
     if (saving) {
       return;
     }
 
     setSaving(true);
-
     try {
-      await savePublicCenterProfile(
-        {
-          center,
-          services: sortServicesByCategory(services, categoryOptions),
-          serviceCategories,
-          sources,
-          products: sortServicesByCategory(products, productCategoryOptions),
-          productCategories,
-          depositLinks,
-          stripeConnected,
-          coverPreview,
-          logoPreview,
-          photoPreviews,
-          externalReviews,
-          offers,
-          reviewAutomation,
-        },
-        loadedCenterId || undefined,
-      );
-      showNotice("Fiche publique enregistrée.");
+      await persistProfile();
     } catch (error) {
       showNotice(publicSaveErrorMessage(error), true);
     } finally {
@@ -743,34 +765,129 @@ export default function CenterSettingsPage() {
     });
   };
 
+  const uploadCenterAsset = async (
+    kind: "cover" | "logo" | "photo",
+    file: File,
+  ) => {
+    return uploadCenterImage({
+      centerId: loadedCenterId || "local",
+      kind,
+      file,
+    });
+  };
+
   const uploadLogo = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
-    if (!file) return;
-
-    setLogoPreview(await readFileAsDataUrl(file));
-    setSavedMessage("Logo ajouté à l'aperçu. Cliquez sur Enregistrer.");
-    window.setTimeout(() => setSavedMessage(""), 2400);
     event.target.value = "";
+    if (!file || mediaBusy) return;
+
+    setMediaBusy(true);
+    try {
+      const url = await uploadCenterAsset("logo", file);
+      setLogoPreview(url);
+      await persistProfile({ logoPreview: url }, "Logo enregistré.");
+    } catch (error) {
+      showNotice(publicSaveErrorMessage(error), true);
+    } finally {
+      setMediaBusy(false);
+    }
   };
 
   const uploadCover = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
-    if (!file) return;
-
-    setCoverPreview(await readFileAsDataUrl(file));
-    setSavedMessage("Image de couverture ajoutée. Cliquez sur Enregistrer.");
-    window.setTimeout(() => setSavedMessage(""), 2400);
     event.target.value = "";
+    if (!file || mediaBusy) return;
+
+    setMediaBusy(true);
+    try {
+      const url = await uploadCenterAsset("cover", file);
+      setCoverPreview(url);
+      await persistProfile({ coverPreview: url }, "Couverture enregistrée.");
+    } catch (error) {
+      showNotice(publicSaveErrorMessage(error), true);
+    } finally {
+      setMediaBusy(false);
+    }
   };
 
   const uploadPhotos = async (event: ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(event.target.files ?? []).slice(0, 4);
-    if (!files.length) return;
-
-    setPhotoPreviews(await Promise.all(files.map(readFileAsDataUrl)));
-    setSavedMessage("Photos ajoutées au bandeau. Cliquez sur Enregistrer.");
-    window.setTimeout(() => setSavedMessage(""), 2400);
+    const files = Array.from(event.target.files ?? []);
     event.target.value = "";
+    if (!files.length || mediaBusy) return;
+
+    const remaining = MAX_BANNER_PHOTOS - photoPreviews.length;
+    if (remaining <= 0) {
+      showNotice("Supprimez une photo du bandeau avant d'en ajouter une autre.", true);
+      return;
+    }
+
+    setMediaBusy(true);
+    try {
+      const uploaded = await Promise.all(
+        files.slice(0, remaining).map((file) => uploadCenterAsset("photo", file)),
+      );
+      const nextPhotos = [...photoPreviews, ...uploaded].slice(0, MAX_BANNER_PHOTOS);
+      setPhotoPreviews(nextPhotos);
+      await persistProfile(
+        { photoPreviews: nextPhotos },
+        uploaded.length > 1
+          ? "Photos du bandeau enregistrées."
+          : "Photo du bandeau enregistrée.",
+      );
+    } catch (error) {
+      showNotice(publicSaveErrorMessage(error), true);
+    } finally {
+      setMediaBusy(false);
+    }
+  };
+
+  const removeCover = async () => {
+    if (!coverPreview || mediaBusy) return;
+    if (!window.confirm("Supprimer la photo de couverture ?")) return;
+
+    const previous = coverPreview;
+    setCoverPreview("");
+    mergeCenterSettings(currentPublicSettings({ coverPreview: "" }));
+    void deleteCenterImage(previous, loadedCenterId || "local");
+    try {
+      await persistProfile({ coverPreview: "" }, "Couverture supprimée.");
+    } catch (error) {
+      setCoverPreview(previous);
+      showNotice(publicSaveErrorMessage(error), true);
+    }
+  };
+
+  const removeLogo = async () => {
+    if (!logoPreview || mediaBusy) return;
+    if (!window.confirm("Supprimer le logo ?")) return;
+
+    const previous = logoPreview;
+    setLogoPreview("");
+    mergeCenterSettings(currentPublicSettings({ logoPreview: "" }));
+    void deleteCenterImage(previous, loadedCenterId || "local");
+    try {
+      await persistProfile({ logoPreview: "" }, "Logo supprimé.");
+    } catch (error) {
+      setLogoPreview(previous);
+      showNotice(publicSaveErrorMessage(error), true);
+    }
+  };
+
+  const removeBannerPhoto = async (photo: string) => {
+    if (mediaBusy) return;
+    if (!window.confirm("Supprimer cette photo du bandeau ?")) return;
+
+    const previous = photoPreviews;
+    const nextPhotos = photoPreviews.filter((item) => item !== photo);
+    setPhotoPreviews(nextPhotos);
+    mergeCenterSettings(currentPublicSettings({ photoPreviews: nextPhotos }));
+    void deleteCenterImage(photo, loadedCenterId || "local");
+    try {
+      await persistProfile({ photoPreviews: nextPhotos }, "Photo du bandeau supprimée.");
+    } catch (error) {
+      setPhotoPreviews(previous);
+      showNotice(publicSaveErrorMessage(error), true);
+    }
   };
 
   const importExternalReviews = async () => {
@@ -797,9 +914,11 @@ export default function CenterSettingsPage() {
       };
 
       if (payload.ok && payload.reviews?.length) {
-        setExternalReviews((current) => [...payload.reviews!, ...current]);
-        setSavedMessage(
-          `${payload.reviews.length} avis Google importés. Cliquez sur Enregistrer pour publier.`,
+        const nextReviews = [...payload.reviews, ...externalReviews];
+        setExternalReviews(nextReviews);
+        await persistProfile(
+          { externalReviews: nextReviews },
+          `${payload.reviews.length} avis Google importés.`,
         );
       } else {
         setSavedMessage(
@@ -819,12 +938,11 @@ export default function CenterSettingsPage() {
 
   const addManualReview = () => {
     if (!manualReview.author.trim() || !manualReview.comment.trim()) {
-      setSavedMessage("Ajoutez au minimum un nom et un commentaire.");
-      window.setTimeout(() => setSavedMessage(""), 2600);
+      showNotice("Ajoutez au minimum un nom et un commentaire.", true);
       return;
     }
 
-    setExternalReviews((current) => [
+    const nextReviews = [
       {
         id: Date.now(),
         author: manualReview.author.trim(),
@@ -834,15 +952,21 @@ export default function CenterSettingsPage() {
         comment: manualReview.comment.trim(),
         imported: false,
       },
-      ...current,
-    ]);
+      ...externalReviews,
+    ];
+    setExternalReviews(nextReviews);
     setManualReview({ author: "", rating: 5, comment: "" });
-    setSavedMessage("Avis ajouté. Cliquez sur Enregistrer pour publier.");
-    window.setTimeout(() => setSavedMessage(""), 2600);
+    void persistProfile({ externalReviews: nextReviews }, "Avis ajouté et publié.").catch(
+      (error) => showNotice(publicSaveErrorMessage(error), true),
+    );
   };
 
   const removeExternalReview = (id: number) => {
-    setExternalReviews((current) => current.filter((review) => review.id !== id));
+    const nextReviews = externalReviews.filter((review) => review.id !== id);
+    setExternalReviews(nextReviews);
+    void persistProfile({ externalReviews: nextReviews }, "Avis supprimé.").catch(
+      (error) => showNotice(publicSaveErrorMessage(error), true),
+    );
   };
 
   const updateOffer = <K extends keyof CenterPublicOffer>(
@@ -909,35 +1033,30 @@ export default function CenterSettingsPage() {
 
   const uploadReviewsCsv = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
+    event.target.value = "";
     if (!file) return;
 
     const content = await file.text();
-    const importedReviews = content
-      .split(/\r?\n/)
-      .map((line) => line.trim())
-      .filter(Boolean)
-      .map((line, index) => {
-        const [author, rating, comment, source, date] = line
-          .split(";")
-          .map((item) => item.trim());
+    const importedReviews = parseExternalReviewsCsv(content, reviewSource);
 
-        return {
-          id: Date.now() + index,
-          author: author || "Cliente",
-          rating: Math.min(5, Math.max(1, Number(rating) || 5)),
-          source: source || reviewSource,
-          date: date || new Date().toISOString().slice(0, 10),
-          comment: comment || "Avis importé.",
-          imported: true,
-        };
-      });
-
-    if (importedReviews.length > 0) {
-      setExternalReviews((current) => [...importedReviews, ...current]);
-      setSavedMessage(`${importedReviews.length} avis importés depuis le fichier.`);
-      window.setTimeout(() => setSavedMessage(""), 2600);
+    if (importedReviews.length === 0) {
+      showNotice(
+        "Aucun avis lu. Format attendu : Nom;5;Commentaire",
+        true,
+      );
+      return;
     }
-    event.target.value = "";
+
+    const nextReviews = [...importedReviews, ...externalReviews];
+    setExternalReviews(nextReviews);
+    try {
+      await persistProfile(
+        { externalReviews: nextReviews },
+        `${importedReviews.length} avis importés depuis le fichier.`,
+      );
+    } catch (error) {
+      showNotice(publicSaveErrorMessage(error), true);
+    }
   };
 
   return (
@@ -964,7 +1083,7 @@ export default function CenterSettingsPage() {
           <button
             type="button"
             onClick={() => void saveSettings()}
-            disabled={saving}
+            disabled={saving || mediaBusy}
             className="inline-flex items-center gap-2 rounded-xl bg-slate-950 px-4 py-2 text-sm font-medium text-white shadow-sm disabled:opacity-60"
           >
             <Save className="h-4 w-4" />
@@ -1292,97 +1411,118 @@ export default function CenterSettingsPage() {
               </div>
             </div>
             <div className="mt-5 grid gap-4 rounded-3xl border border-blue-100 bg-blue-50/60 p-4 md:grid-cols-3">
-              <label className="flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-dashed border-cyan-300 bg-white px-4 py-3 text-sm font-medium text-cyan-700 transition hover:bg-cyan-50">
+              <label className={`flex items-center justify-center gap-2 rounded-xl border border-dashed border-cyan-300 bg-white px-4 py-3 text-sm font-medium text-cyan-700 transition hover:bg-cyan-50 ${mediaBusy ? "pointer-events-none opacity-60" : "cursor-pointer"}`}>
                 <ImagePlus className="h-5 w-5" />
-                Importer la couverture
+                {mediaBusy ? "Import…" : "Importer la couverture"}
                 <input
                   type="file"
                   accept="image/*"
                   className="sr-only"
+                  disabled={mediaBusy}
                   onChange={uploadCover}
                 />
               </label>
-              <label className="flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-dashed border-blue-300 bg-white px-4 py-3 text-sm font-medium text-blue-700 transition hover:bg-blue-50">
+              <label className={`flex items-center justify-center gap-2 rounded-xl border border-dashed border-blue-300 bg-white px-4 py-3 text-sm font-medium text-blue-700 transition hover:bg-blue-50 ${mediaBusy ? "pointer-events-none opacity-60" : "cursor-pointer"}`}>
                 <ImagePlus className="h-5 w-5" />
-                Importer le logo
+                {mediaBusy ? "Import…" : "Importer le logo"}
                 <input
                   type="file"
                   accept="image/*"
                   className="sr-only"
+                  disabled={mediaBusy}
                   onChange={uploadLogo}
                 />
               </label>
-              <label className="flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-dashed border-violet-300 bg-white px-4 py-3 text-sm font-medium text-violet-700 transition hover:bg-violet-50">
+              <label className={`flex items-center justify-center gap-2 rounded-xl border border-dashed border-violet-300 bg-white px-4 py-3 text-sm font-medium text-violet-700 transition hover:bg-violet-50 ${mediaBusy ? "pointer-events-none opacity-60" : "cursor-pointer"}`}>
                 <ImagePlus className="h-5 w-5" />
-                Importer les photos
+                {mediaBusy ? "Import…" : "Importer les photos"}
                 <input
                   type="file"
                   accept="image/*"
                   multiple
                   className="sr-only"
+                  disabled={mediaBusy}
                   onChange={uploadPhotos}
                 />
               </label>
 
-              {(coverPreview || logoPreview || photoPreviews.length > 0) && (
-                <div className="grid gap-3 md:col-span-3 md:grid-cols-[1.2fr_120px_1fr]">
-                  <div className="rounded-3xl bg-white p-3 shadow-sm">
-                    <p className="mb-2 text-xs font-medium text-slate-500">
-                      Couverture
-                    </p>
-                    <div className="grid h-32 overflow-hidden rounded-2xl bg-gradient-to-r from-violet-600 via-blue-500 to-cyan-400">
-                      {coverPreview ? (
-                        <img
-                          src={coverPreview}
-                          alt="Image de couverture du centre"
-                          className="h-full w-full object-cover"
-                        />
-                      ) : (
-                        <div className="grid h-full place-items-center bg-white/15 font-semibold text-white">
-                          Image de couverture
-                        </div>
-                      )}
-                    </div>
+              <div className="grid gap-3 md:col-span-3 md:grid-cols-[1.2fr_120px_1fr]">
+                <div className="rounded-3xl bg-white p-3 shadow-sm">
+                  <p className="mb-2 text-xs font-medium text-slate-500">
+                    Couverture
+                  </p>
+                  <div className="relative grid h-32 overflow-hidden rounded-2xl bg-gradient-to-r from-violet-600 via-blue-500 to-cyan-400">
+                    {coverPreview ? (
+                      <img
+                        src={coverPreview}
+                        alt="Image de couverture du centre"
+                        className="h-full w-full object-cover"
+                      />
+                    ) : (
+                      <div className="grid h-full place-items-center bg-white/15 font-semibold text-white">
+                        Image de couverture
+                      </div>
+                    )}
+                    {coverPreview ? (
+                      <RemoveMediaButton
+                        label="Supprimer la couverture"
+                        onClick={() => void removeCover()}
+                        disabled={mediaBusy}
+                      />
+                    ) : null}
                   </div>
-                  <div className="rounded-3xl bg-white p-3 shadow-sm">
-                    <p className="mb-2 text-xs font-medium text-slate-500">
-                      Logo
-                    </p>
-                    <div className="grid aspect-square place-items-center overflow-hidden rounded-2xl bg-slate-50 text-xl font-semibold text-blue-600">
-                      {logoPreview ? (
-                        <img
-                          src={logoPreview}
-                          alt="Logo du centre"
-                          className="h-full w-full object-cover"
-                        />
-                      ) : (
-                        "JFG"
-                      )}
-                    </div>
+                </div>
+                <div className="rounded-3xl bg-white p-3 shadow-sm">
+                  <p className="mb-2 text-xs font-medium text-slate-500">
+                    Logo
+                  </p>
+                  <div className="relative grid aspect-square place-items-center overflow-hidden rounded-2xl bg-slate-50 text-xl font-semibold text-blue-600">
+                    {logoPreview ? (
+                      <img
+                        src={logoPreview}
+                        alt="Logo du centre"
+                        className="h-full w-full object-cover"
+                      />
+                    ) : (
+                      "JFG"
+                    )}
+                    {logoPreview ? (
+                      <RemoveMediaButton
+                        label="Supprimer le logo"
+                        onClick={() => void removeLogo()}
+                        disabled={mediaBusy}
+                      />
+                    ) : null}
                   </div>
-                  <div className="rounded-3xl bg-white p-3 shadow-sm">
-                    <p className="mb-2 text-xs font-medium text-slate-500">
-                      Photos du bandeau
-                    </p>
-                    <div className="grid min-h-24 gap-2 overflow-hidden rounded-2xl bg-gradient-to-r from-violet-600 via-blue-500 to-cyan-400 p-2 sm:grid-cols-4">
-                      {photoPreviews.length > 0 ? (
-                        photoPreviews.map((photo) => (
+                </div>
+                <div className="rounded-3xl bg-white p-3 shadow-sm">
+                  <p className="mb-2 text-xs font-medium text-slate-500">
+                    Photos du bandeau
+                  </p>
+                  <div className="grid min-h-24 gap-2 overflow-hidden rounded-2xl bg-gradient-to-r from-violet-600 via-blue-500 to-cyan-400 p-2 sm:grid-cols-4">
+                    {photoPreviews.length > 0 ? (
+                      photoPreviews.map((photo) => (
+                        <div key={photo} className="relative">
                           <img
-                            key={photo}
                             src={photo}
                             alt="Photo du centre"
                             className="h-24 w-full rounded-xl object-cover"
                           />
-                        ))
-                      ) : (
-                        <div className="col-span-full grid h-24 place-items-center rounded-xl bg-white/15 font-semibold text-white">
-                          Bandeau public
+                          <RemoveMediaButton
+                            label="Supprimer cette photo du bandeau"
+                            onClick={() => void removeBannerPhoto(photo)}
+                            disabled={mediaBusy}
+                          />
                         </div>
-                      )}
-                    </div>
+                      ))
+                    ) : (
+                      <div className="col-span-full grid h-24 place-items-center rounded-xl bg-white/15 font-semibold text-white">
+                        Bandeau public
+                      </div>
+                    )}
                   </div>
                 </div>
-              )}
+              </div>
 
               <div className="space-y-4 rounded-3xl border border-slate-200 bg-white p-4 md:col-span-3">
                 <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
@@ -3304,13 +3444,26 @@ function PublicPreview({
   );
 }
 
-function readFileAsDataUrl(file: File) {
-  return new Promise<string>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result));
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
-  });
+function RemoveMediaButton({
+  label,
+  onClick,
+  disabled,
+}: {
+  label: string;
+  onClick: () => void;
+  disabled?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      aria-label={label}
+      className="absolute right-2 top-2 inline-flex h-8 w-8 items-center justify-center rounded-full border border-red-100 bg-white/95 text-red-500 shadow-sm transition hover:bg-red-50 disabled:opacity-50"
+    >
+      <Trash2 className="h-4 w-4" />
+    </button>
+  );
 }
 
 function publicSaveErrorMessage(error: unknown) {

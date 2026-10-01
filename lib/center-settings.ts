@@ -2,6 +2,7 @@ import {
   getActiveCenterContext,
   readActiveCenterId,
 } from "@/lib/center-access";
+import { persistableMediaUrl, mergePublicMedia } from "@/lib/center-media";
 import { createClient } from "@/lib/supabase";
 
 export const CENTER_SETTINGS_STORAGE_KEY = "bookea-center-settings";
@@ -833,12 +834,7 @@ function mergeLocalAndRemote(
           },
         }
       : local?.center,
-    coverPreview: remote.coverPreview || local?.coverPreview,
-    logoPreview: remote.logoPreview || local?.logoPreview,
-    photoPreviews:
-      remote.photoPreviews && remote.photoPreviews.length > 0
-        ? remote.photoPreviews
-        : local?.photoPreviews,
+    ...mergePublicMedia(local, remote),
     services: mergeCatalogByName(remote.services, local?.services),
     serviceCategories: remote.serviceCategories ?? local?.serviceCategories,
     sources: remote.sources ?? local?.sources,
@@ -859,9 +855,11 @@ function hasStoredPublicSettings(settings: unknown) {
 function withoutDataUrls(settings: StoredCenterSettings): StoredCenterSettings {
   return {
     ...settings,
-    coverPreview: isDataUrl(settings.coverPreview) ? "" : settings.coverPreview,
-    logoPreview: isDataUrl(settings.logoPreview) ? "" : settings.logoPreview,
-    photoPreviews: (settings.photoPreviews ?? []).filter((src) => !isDataUrl(src)),
+    coverPreview: persistableMediaUrl(settings.coverPreview),
+    logoPreview: persistableMediaUrl(settings.logoPreview),
+    photoPreviews: (settings.photoPreviews ?? [])
+      .map((src) => persistableMediaUrl(src))
+      .filter(Boolean),
   };
 }
 
@@ -875,10 +873,6 @@ function sanitizeCenterSlug(value: string, fallback: string) {
     .slice(0, 80);
 
   return slug || fallback;
-}
-
-function isDataUrl(value?: string) {
-  return Boolean(value?.startsWith("data:"));
 }
 
 function isUnknownColumnError(message: string) {
