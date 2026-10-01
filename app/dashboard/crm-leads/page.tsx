@@ -1025,20 +1025,24 @@ export default function CRMLeadsPage() {
               activeStatus={filters.status}
               activeQuickFilter={quickDateFilter}
               onQuickFilter={(quickFilter) => {
+                const sameCategory =
+                  quickDateFilter === quickFilter && filters.status === "Tous";
                 setQuickDateFilter(quickFilter);
                 setFilters((currentFilters) => ({
                   ...currentFilters,
                   status: "Tous",
-                  search: currentFilters.search,
+                  search: sameCategory ? currentFilters.search : "",
                 }));
                 scrollToLeadList();
               }}
               onStatusFilter={(status) => {
+                const sameCategory =
+                  filters.status === status && quickDateFilter === "Tous";
                 setQuickDateFilter("Tous");
                 setFilters((currentFilters) => ({
                   ...currentFilters,
                   status,
-                  search: currentFilters.search,
+                  search: sameCategory ? currentFilters.search : "",
                 }));
                 scrollToLeadList();
               }}
@@ -1046,7 +1050,18 @@ export default function CRMLeadsPage() {
 
             <Filters
               filters={filters}
-              onFiltersChange={setFilters}
+              onFiltersChange={(nextFilters) => {
+                setFilters((currentFilters) => {
+                  const resolved =
+                    typeof nextFilters === "function"
+                      ? nextFilters(currentFilters)
+                      : nextFilters;
+                  if (resolved.status === currentFilters.status) {
+                    return resolved;
+                  }
+                  return { ...resolved, search: "" };
+                });
+              }}
               onNewLead={openNewLeadModal}
             />
 
