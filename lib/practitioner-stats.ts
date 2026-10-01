@@ -1,5 +1,8 @@
+import type { BillingInvoice } from "./billing-supabase";
 import type { Appointment, Practitioner } from "../types/agenda";
 import type { Lead } from "../types/lead";
+
+export const PRACTITIONER_SALE_MIN_EUR = 100;
 
 export const practitionerSoldStatuses = ["Vendu", "Client", "Client converti"];
 export const practitionerBookedStatuses = [
@@ -27,6 +30,8 @@ export type PractitionerStatRow = {
   leads: number;
   rdvLeads: number;
   sold: number;
+  devis: number;
+  invoices: number;
   appointments: number;
   honored: number;
   revenue: number;
@@ -71,10 +76,50 @@ export function namesMatch(left: string, right: string) {
   return first === second || first.startsWith(second) || second.startsWith(first);
 }
 
+function isSaleOverMinimum(amount: number) {
+  return Number(amount) > PRACTITIONER_SALE_MIN_EUR;
+}
+
+function compactIdentity(value?: string | null) {
+  return normalizePersonName(String(value || ""));
+}
+
+function last9Phone(value?: string | null) {
+  return String(value || "").replace(/\D/g, "").slice(-9);
+}
+
+function matchLeadForInvoice(invoice: BillingInvoice, leads: Lead[]) {
+  const email = compactIdentity(invoice.email);
+  if (email) {
+    const byEmail = leads.find((lead) => compactIdentity(lead.email) === email);
+    if (byEmail) {
+      return byEmail;
+    }
+  }
+
+  const phone = last9Phone(invoice.phone);
+  if (phone.length >= 9) {
+    const byPhone = leads.find((lead) => last9Phone(lead.phone) === phone);
+    if (byPhone) {
+      return byPhone;
+    }
+  }
+
+  const name = compactIdentity(invoice.client);
+  if (!name) {
+    return undefined;
+  }
+
+  return leads.find(
+    (lead) => compactIdentity(`${lead.firstName} ${lead.lastName}`) === name,
+  );
+}
+
 export function buildPractitionerStats(
   appointments: Appointment[],
   leads: Lead[],
   team: Practitioner[],
+  invoices: BillingInvoice[] = [],
 ): PractitionerStatRow[] {
   const rows = new Map<string, PractitionerStatRow>();
 
@@ -90,6 +135,8 @@ export function buildPractitionerStats(
       leads: 0,
       rdvLeads: 0,
       sold: 0,
+      devis: 0,
+      invoices: 0,
       appointments: 0,
       honored: 0,
       revenue: 0,
@@ -125,6 +172,9 @@ export function buildPractitionerStats(
       row.sold += 1;
       row.revenue += Number(lead.dealAmount) || 0;
     }
+    if (lead.status === "Devis" && isSaleOverMinimum(lead.dealAmount)) {
+      row.devis += 1;
+    }
   }
 
   for (const appointment of appointments) {
@@ -158,6 +208,44 @@ export function buildPractitionerStats(
     }
   }
 
+  const countedDevisLeads = new Set<string>();
+  for (const lead of leads) {
+    if (lead.status === "Devis" && isSaleOverMinimum(lead.dealAmount)) {
+      countedDevisLeads.add(lead.id);
+    }
+  }
+
+  for (const invoice of invoices) {
+    if (invoice.status === "Annulée" || !isSaleOverMinimum(invoice.total)) {
+      continue;
+    }
+    const lead = matchLeadForInvoice(invoice, leads);
+    if (!lead) {
+      continue;
+    }
+    const commercial = lead.commercial.trim() || "Non attribué";
+    const matched = team.find((practitioner) =>
+      namesMatch(practitioner.name, commercial),
+    );
+    const row = matched
+      ? ensure(matched.id, matched.name, matched.color)
+      : ensure(
+          `invoice:${normalizePersonName(commercial)}`,
+          commercial,
+          "bg-slate-400",
+        );
+
+    if (
+      invoice.type === "Devis" &&
+      !(lead && countedDevisLeads.has(lead.id))
+    ) {
+      row.devis += 1;
+    }
+    if (invoice.type === "Facture finale") {
+      row.invoices += 1;
+    }
+  }
+
   return [...rows.values()]
     .map((row) => ({
       ...row,
@@ -169,7 +257,9 @@ export function buildPractitionerStats(
       (row) =>
         team.some((practitioner) => practitioner.id === row.id) ||
         row.leads > 0 ||
-        row.appointments > 0,
+        row.appointments > 0 ||
+        row.devis > 0 ||
+        row.invoices > 0,
     )
     .sort(
       (left, right) =>
@@ -181,6 +271,8 @@ export function summarizePractitionerStats(rows: PractitionerStatRow[]) {
   const leads = rows.reduce((sum, row) => sum + row.leads, 0);
   const rdvLeads = rows.reduce((sum, row) => sum + row.rdvLeads, 0);
   const sold = rows.reduce((sum, row) => sum + row.sold, 0);
+  const devis = rows.reduce((sum, row) => sum + row.devis, 0);
+  const invoices = rows.reduce((sum, row) => sum + row.invoices, 0);
   const appointments = rows.reduce((sum, row) => sum + row.appointments, 0);
   const honored = rows.reduce((sum, row) => sum + row.honored, 0);
   const revenue = rows.reduce((sum, row) => sum + row.revenue, 0);
@@ -189,6 +281,8 @@ export function summarizePractitionerStats(rows: PractitionerStatRow[]) {
     leads,
     rdvLeads,
     sold,
+    devis,
+    invoices,
     appointments,
     honored,
     revenue,

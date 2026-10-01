@@ -108,6 +108,121 @@ test("les stats praticienne mesurent transfo, RDV posé et présentiel", () => {
   assert.equal(marie?.rdvRate, 100);
 });
 
+test("les devis et factures praticienne ne comptent que les ventes de plus de 100 €", () => {
+  const rows = buildPractitionerStats(
+    [],
+    [
+      lead({
+        id: "d1",
+        commercial: "Camille",
+        status: "Devis",
+        dealAmount: 180,
+        email: "camille-client@test.fr",
+      }),
+      lead({
+        id: "d2",
+        commercial: "Camille",
+        status: "Devis",
+        dealAmount: 80,
+      }),
+    ],
+    team,
+    [
+      {
+        id: "f1",
+        number: "F-1",
+        date: "01/10/2026",
+        client: "A B",
+        email: "camille-client@test.fr",
+        care: "Laser",
+        type: "Facture finale",
+        status: "Payée",
+        total: 250,
+        paid: 250,
+        paymentMethod: "CB centre",
+      },
+      {
+        id: "f2",
+        number: "F-2",
+        date: "01/10/2026",
+        client: "A B",
+        email: "camille-client@test.fr",
+        care: "Laser",
+        type: "Facture finale",
+        status: "Payée",
+        total: 90,
+        paid: 90,
+        paymentMethod: "CB centre",
+      },
+    ],
+  );
+
+  const camille = rows.find((row) => row.id === "camille");
+  assert.equal(camille?.devis, 1);
+  assert.equal(camille?.invoices, 1);
+});
+
+test("un devis CRM et un devis facturation du même lead ne se comptent qu'une fois", () => {
+  const rows = buildPractitionerStats(
+    [],
+    [
+      lead({
+        id: "same",
+        commercial: "Camille",
+        status: "Devis",
+        dealAmount: 220,
+        email: "same@test.fr",
+      }),
+    ],
+    team,
+    [
+      {
+        id: "bd1",
+        number: "D-1",
+        date: "01/10/2026",
+        client: "A B",
+        email: "same@test.fr",
+        care: "Laser",
+        type: "Devis",
+        status: "Envoyée",
+        total: 220,
+        paid: 0,
+        paymentMethod: "CB centre",
+      },
+    ],
+  );
+
+  assert.equal(rows.find((row) => row.id === "camille")?.devis, 1);
+});
+
+test("une facture sans lead attribué n'invente pas de praticien", () => {
+  const rows = buildPractitionerStats(
+    [],
+    [],
+    team,
+    [
+      {
+        id: "orphan",
+        number: "F-9",
+        date: "01/10/2026",
+        client: "Inconnue",
+        email: "inconnu@test.fr",
+        care: "Laser",
+        type: "Facture finale",
+        status: "Payée",
+        total: 300,
+        paid: 300,
+        paymentMethod: "CB centre",
+      },
+    ],
+  );
+
+  assert.equal(
+    rows.some((row) => row.invoices > 0 || row.name === "Inconnue"),
+    false,
+  );
+});
+
 test("le résumé équipe agrège les taux de l'onglet stats équipes", () => {
   const summary = summarizePractitionerStats(
     buildPractitionerStats(

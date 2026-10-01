@@ -9,8 +9,10 @@ import {
   CheckCircle2,
   Clock3,
   Euro,
+  FileText,
   Flame,
   MousePointerClick,
+  Receipt,
   Sparkles,
   Star,
   TrendingDown,
@@ -158,8 +160,14 @@ export default function StatisticsPage() {
   );
   const duplicateCount = findDuplicateLeadGroups(leads).length;
   const practitionerStats = useMemo(
-    () => buildPractitionerStats(appointments, leads, practitionerList),
-    [appointments, leads, practitionerList],
+    () =>
+      buildPractitionerStats(
+        appointments,
+        leads,
+        practitionerList,
+        invoices,
+      ),
+    [appointments, invoices, leads, practitionerList],
   );
   const practitionerTotals = useMemo(
     () => summarizePractitionerStats(practitionerStats),
@@ -308,7 +316,7 @@ export default function StatisticsPage() {
 
         {activeTab === "practitioners" ? (
           <>
-            <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
               <MetricCard
                 title="RDV posés"
                 value={practitionerTotals.appointments}
@@ -337,11 +345,25 @@ export default function StatisticsPage() {
                 icon={<CheckCircle2 />}
                 tone={rateTone(practitionerTotals.attendanceRate)}
               />
+              <MetricCard
+                title="NB devis"
+                value={practitionerTotals.devis}
+                detail="Ventes de plus de 100 €"
+                icon={<FileText />}
+                color="text-amber-600"
+              />
+              <MetricCard
+                title="NB factures"
+                value={practitionerTotals.invoices}
+                detail="Ventes de plus de 100 €"
+                icon={<Receipt />}
+                color="text-cyan-600"
+              />
             </section>
 
             <Panel
               title="Statistiques par praticien(ne)"
-              subtitle="Chaque praticien(ne) a son taux de transformation, son taux de présentiel et ses RDV posés."
+              subtitle="Chaque praticien(ne) a son taux de transformation, son taux de présentiel, ses RDV posés, ses devis et ses factures de plus de 100 €."
               icon={<Users className="h-6 w-6 text-violet-600" />}
             >
               {practitionerStats.length === 0 ? (
@@ -386,7 +408,7 @@ export default function StatisticsPage() {
                         </div>
                       </div>
 
-                      <div className="mt-5 grid gap-3 sm:grid-cols-3">
+                      <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
                         <div className="rounded-2xl border border-white bg-white p-3">
                           <p className="text-xs font-bold uppercase text-slate-400">
                             RDV posés
@@ -423,6 +445,28 @@ export default function StatisticsPage() {
                           </p>
                           <p className="mt-1 text-xs font-semibold text-slate-500">
                             sur les RDV posés
+                          </p>
+                        </div>
+                        <div className="rounded-2xl border border-white bg-white p-3">
+                          <p className="text-xs font-bold uppercase text-slate-400">
+                            NB devis
+                          </p>
+                          <p className="mt-2 text-2xl font-semibold text-amber-600">
+                            {row.devis}
+                          </p>
+                          <p className="mt-1 text-xs font-semibold text-slate-500">
+                            +100 €
+                          </p>
+                        </div>
+                        <div className="rounded-2xl border border-white bg-white p-3">
+                          <p className="text-xs font-bold uppercase text-slate-400">
+                            NB factures
+                          </p>
+                          <p className="mt-2 text-2xl font-semibold text-cyan-600">
+                            {row.invoices}
+                          </p>
+                          <p className="mt-1 text-xs font-semibold text-slate-500">
+                            +100 €
                           </p>
                         </div>
                       </div>
