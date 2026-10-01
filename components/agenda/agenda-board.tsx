@@ -2533,51 +2533,13 @@ export default function AgendaBoard() {
               )}
             </div>
 
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              {agendaView === "day" ? (
-                <div className="flex items-center gap-1 rounded-xl border border-slate-200 bg-white p-1 shadow-sm">
-                  <button
-                    type="button"
-                    onClick={() => slideCabinBoard(-1)}
-                    className="flex h-9 w-9 items-center justify-center rounded-lg text-slate-500 transition-colors hover:bg-slate-50 hover:text-slate-950"
-                    aria-label="Voir les cabines à gauche"
-                  >
-                    <ChevronLeft className="h-4 w-4" />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => slideCabinBoard(1)}
-                    className="flex h-9 w-9 items-center justify-center rounded-lg text-slate-500 transition-colors hover:bg-slate-50 hover:text-slate-950"
-                    aria-label="Voir les cabines à droite"
-                  >
-                    <ChevronRight className="h-4 w-4" />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={removeCabin}
-                    className="flex h-9 w-9 items-center justify-center rounded-lg text-slate-500 transition-colors hover:bg-red-50 hover:text-red-600"
-                    aria-label="Retirer une cabine"
-                  >
-                    <Minus className="h-4 w-4" />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={addCabin}
-                    className="flex h-9 w-9 items-center justify-center rounded-lg bg-blue-600 text-white transition-colors hover:bg-blue-700"
-                    aria-label="Ajouter une cabine"
-                  >
-                    <Plus className="h-4 w-4" />
-                  </button>
-                </div>
-              ) : null}
-              <AgendaDateNav
-                selectedDate={selectedDate}
-                onSelectDate={(date) => {
-                  setSelectedDate(date);
-                  setDailyInfoSavedDate(null);
-                }}
-              />
-            </div>
+            <AgendaDateNav
+              selectedDate={selectedDate}
+              onSelectDate={(date) => {
+                setSelectedDate(date);
+                setDailyInfoSavedDate(null);
+              }}
+            />
           </CardContent>
         </Card>
 
