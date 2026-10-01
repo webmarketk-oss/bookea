@@ -19,7 +19,12 @@ import {
   XCircle,
 } from "lucide-react";
 
+import { YearlyTtcChart } from "@/components/stats/yearly-ttc-chart";
 import { loadCrmAppointments } from "@/lib/agenda-supabase";
+import {
+  loadBillingInvoices,
+  type BillingInvoice,
+} from "@/lib/billing-supabase";
 import {
   defaultCenterDayHours,
   loadCenterHours,
@@ -56,18 +61,21 @@ export default function StatisticsPage() {
   const [centerHours, setCenterHours] = useState<CenterDayHours[]>(
     defaultCenterDayHours,
   );
+  const [invoices, setInvoices] = useState<BillingInvoice[]>([]);
 
   useEffect(() => {
     let cancelled = false;
 
     async function load() {
       try {
-        const [leadData, appointmentData, team, hours] = await Promise.all([
-          loadCrmLeads(),
-          loadCrmAppointments(),
-          loadTeamPlanning().catch(() => null),
-          loadCenterHours().catch(() => defaultCenterDayHours),
-        ]);
+        const [leadData, appointmentData, team, hours, billing] =
+          await Promise.all([
+            loadCrmLeads(),
+            loadCrmAppointments(),
+            loadTeamPlanning().catch(() => null),
+            loadCenterHours().catch(() => defaultCenterDayHours),
+            loadBillingInvoices().catch(() => []),
+          ]);
 
         if (cancelled) {
           return;
@@ -76,6 +84,7 @@ export default function StatisticsPage() {
         setLeads(leadData.leads);
         setAppointments(appointmentData);
         setCenterHours(hours);
+        setInvoices(billing);
         if (team?.practitioners.length) {
           setPractitionerList(team.practitioners);
         }
@@ -500,6 +509,14 @@ export default function StatisticsPage() {
           />
           <MetricCard title="Activité Seya" value={reminderCount + unconfirmedCount + duplicateCount} detail="Relances, confirmations, doublons" icon={<Sparkles />} color="text-violet-600" />
         </section>
+
+        <Panel
+          title="Chiffre TTC"
+          subtitle="Courbe annuelle TTC. Chaque nouvelle année ajoute une courbe d’une autre couleur."
+          icon={<Euro className="h-6 w-6 text-emerald-600" />}
+        >
+          <YearlyTtcChart invoices={invoices} />
+        </Panel>
 
         <section className="grid gap-6 xl:grid-cols-[1.2fr_0.8fr]">
           <Panel
