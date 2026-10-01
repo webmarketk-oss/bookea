@@ -36,6 +36,16 @@ export default {
       }
     }
 
+    if (/^\/centres\/[^/]+$/.test(pathname)) {
+      const centrePage = await env.ASSETS.fetch(
+        withPath(request, "/centres/index.html"),
+      );
+
+      if (centrePage.status !== 404) {
+        return centrePage;
+      }
+    }
+
     return env.ASSETS.fetch(withPath(request, "/404.html"));
   },
 };

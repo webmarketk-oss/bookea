@@ -539,8 +539,7 @@ export function PublicBooking() {
     window.addEventListener("bookea-center-settings-updated", refreshSettings);
     window.addEventListener("storage", refreshSettings);
 
-    const slug =
-      readCenterSettings()?.center?.slug || "jfg-clinic-clermont";
+    const slug = readPublicCenterSlug();
 
     void loadPublishedCenterProfile(slug).then((remote) => {
       if (remote) {
@@ -2632,4 +2631,17 @@ function formatPublicDate(date: string) {
     day: "2-digit",
     month: "long",
   }).format(new Date(`${date}T00:00:00`));
+}
+
+function readPublicCenterSlug() {
+  if (typeof window === "undefined") {
+    return "";
+  }
+
+  const parts = window.location.pathname.split("/").filter(Boolean);
+  if (parts[0] === "centres" && parts[1]) {
+    return decodeURIComponent(parts[1]).trim().toLowerCase();
+  }
+
+  return readCenterSettings()?.center?.slug?.trim().toLowerCase() || "";
 }

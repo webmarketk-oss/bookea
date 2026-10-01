@@ -25,6 +25,10 @@
     {
       "source": "/r/:token",
       "destination": "/r"
+    },
+    {
+      "source": "/centres/:slug",
+      "destination": "/centres"
     }
   ]
 }
