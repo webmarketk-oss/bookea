@@ -52,6 +52,7 @@ export default function StatisticsPage() {
   );
   const [activeTab, setActiveTab] = useState<StatsTab>("overview");
   const [showAllServices, setShowAllServices] = useState(false);
+  const [showAllCampaigns, setShowAllCampaigns] = useState(false);
   const [centerHours, setCenterHours] = useState<CenterDayHours[]>(
     defaultCenterDayHours,
   );
@@ -655,7 +656,10 @@ export default function StatisticsPage() {
             icon={<Star className="h-6 w-6 text-amber-500" />}
           >
             <RankList
-              rows={campaignRows.map((row) => ({
+              rows={(showAllCampaigns
+                ? campaignRows
+                : campaignRows.slice(0, 4)
+              ).map((row) => ({
                 label: row.label,
                 value: `${row.count} lead${row.count > 1 ? "s" : ""}`,
                 sub: `${formatCurrency(row.revenue)} CA · ${row.sold} converti${row.sold > 1 ? "s" : ""} · ${row.devis} devis · ${row.conversion}% conversion`,
@@ -664,6 +668,17 @@ export default function StatisticsPage() {
                 tone: rateTone(row.conversion),
               }))}
             />
+              {campaignRows.length > 4 ? (
+                <button
+                  type="button"
+                  onClick={() => setShowAllCampaigns((current) => !current)}
+                  className="mt-4 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-bold text-slate-700 transition hover:bg-slate-50"
+                >
+                  {showAllCampaigns
+                    ? "Voir moins"
+                    : `Voir plus (${campaignRows.length - 4})`}
+                </button>
+              ) : null}
           </Panel>
         </section>
 
