@@ -4,6 +4,7 @@ const {
   activeCareFamily,
   inferCareFamily,
   pickApprovedTemplate,
+  understandThread,
 } = require("./care-family");
 const {
   resolvePersonName,
@@ -62,14 +63,39 @@ test("un lead visage prend le template visage", () => {
   assert.equal(picked.name, "seya_accueil_visage");
 });
 
+test("elle relit tout le fil : minceur puis visage, le soin actuel est visage", () => {
+  const thread = understandThread(
+    {
+      treatment: "Soin minceur",
+      campaign: "lift 4 149-copy",
+      qualification: { need: "Soin minceur" },
+      messages: [
+        { author: "lead", text: "Bonjour je veut bien prendre un soin" },
+        { author: "seya", text: "Souhaitez-vous le créneau pour le soin minceur ?" },
+        { author: "lead", text: "C’est gratuit" },
+        { author: "seya", text: "Oui, le bilan est offert." },
+        { author: "lead", text: "Non pour le visage" },
+        { author: "seya", text: "Pour le soin du visage, à partir de 149 €." },
+      ],
+    },
+    "Ok c’est quoi le prix déjà",
+  );
+  assert.equal(thread.family, "visage");
+  assert.match(thread.need, /visage/i);
+  assert.ok(thread.asked.includes("prix"));
+});
+
 test("après « non pour le visage », le soin actif n’est plus minceur", () => {
   assert.equal(
     activeCareFamily({
       treatment: "Soin minceur",
       campaign: "lift 4 149-copy",
       offerLabel: "bilan minceur offert",
-      qualification: { need: "Soin visage" },
-      messages: [{ author: "lead", text: "Non pour le visage" }],
+      qualification: { need: "Soin minceur" },
+      messages: [
+        { author: "lead", text: "C’est gratuit" },
+        { author: "lead", text: "Non pour le visage" },
+      ],
     }),
     "visage",
   );

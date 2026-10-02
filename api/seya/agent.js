@@ -59,6 +59,7 @@ const {
 const {
   findOfferMap,
   inferCareFamily,
+  understandThread,
   naturalOfferPhrase,
   phraseConfiguredOffer,
   phraseFromCareTitle,
@@ -1293,8 +1294,12 @@ function applyLeadReply(conversation, text, seya, slots, extras = {}) {
   const safeSlots = shouldSearchSlots(bookingState, intentText, conversation)
     ? guarded.slots
     : [];
+  const thread = understandThread(conversation, intentText);
   const qualification = mergeQualification(
-    conversation.qualification,
+    {
+      ...(conversation.qualification || {}),
+      ...(thread.need ? { need: thread.need } : {}),
+    },
     intentText,
     conversation.treatment,
   );

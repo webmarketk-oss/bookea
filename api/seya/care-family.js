@@ -26,26 +26,77 @@ function inferCareFamily(text) {
   return "";
 }
 
-function activeCareFamily(conversation, extraText) {
-  const need = inferCareFamily(conversation?.qualification?.need);
-  if (need) {
-    return need;
-  }
-  const spoken = inferCareFamily(extraText);
-  if (spoken) {
-    return spoken;
-  }
-  const leads = [...(conversation?.messages || [])]
-    .reverse()
-    .filter((item) => item.author === "lead");
-  for (const item of leads.slice(0, 8)) {
-    const family = inferCareFamily(item.text);
-    if (family) {
-      return family;
+function understandThread(conversation, extraText) {
+  const lines = (Array.isArray(conversation?.messages) ? conversation.messages : [])
+    .map((item) => ({
+      author: item.author,
+      text: String(item.text || "").replace(/\s+/g, " ").trim(),
+    }))
+    .filter((item) => item.text);
+  const latest = String(extraText || "").replace(/\s+/g, " ").trim();
+  if (latest) {
+    const last = lines[lines.length - 1];
+    if (!(last?.author === "lead" && last.text === latest)) {
+      lines.push({ author: "lead", text: latest });
     }
   }
-  return inferCareFamily(
-    `${conversation?.treatment || ""} ${conversation?.campaign || ""} ${conversation?.offerLabel || ""}`,
+
+  const leadTexts = lines
+    .filter((item) => item.author === "lead")
+    .map((item) => item.text);
+  let family = "";
+  let need = "";
+  for (const text of [...leadTexts].reverse()) {
+    const spoken = inferCareFamily(text);
+    if (!spoken) {
+      continue;
+    }
+    family = spoken;
+    need = careLabelForFamily(spoken);
+    break;
+  }
+  if (!family) {
+    family = inferCareFamily(
+      `${conversation?.qualification?.need || ""} ${conversation?.treatment || ""} ${conversation?.campaign || ""} ${conversation?.offerLabel || ""}`,
+    );
+    need = family ? careLabelForFamily(family) : "";
+  }
+
+  const lastLead = leadTexts[leadTexts.length - 1] || latest;
+  const asked = [];
+  const needle = normalizeCare(lastLead);
+  if (/prix|tarif|coute|cout|combien|gratuit|offert/.test(needle) && !/combien de (temps|seance)/.test(needle)) {
+    asked.push("prix");
+  }
+  if (/dure|combien de temps|minutes/.test(needle)) {
+    asked.push("duree");
+  }
+  if (/technique|cest quoi comme|c est quoi le soin/.test(needle)) {
+    asked.push("technique");
+  }
+
+  const summary = [
+    family ? `Soin actuel, d’après tout le fil : ${need || family}.` : "Soin actuel encore flou.",
+    asked.length ? `Elle demande maintenant : ${asked.join(", ")}.` : "",
+    leadTexts.length
+      ? `Fil prospect : ${leadTexts
+          .slice(-12)
+          .map((text, index) => `${index + 1}) ${text.slice(0, 140)}`)
+          .join(" · ")}`
+      : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+
+  return { family, need, asked, summary };
+}
+
+function activeCareFamily(conversation, extraText) {
+  return (
+    understandThread(conversation, extraText).family ||
+    inferCareFamily(
+      `${conversation?.treatment || ""} ${conversation?.campaign || ""} ${conversation?.offerLabel || ""}`,
+    )
   );
 }
 
@@ -260,6 +311,7 @@ function phraseConfiguredOffer(value) {
 
 module.exports = {
   activeCareFamily,
+  understandThread,
   careLabelForFamily,
   findOfferMap,
   humanizeOfferTitle,

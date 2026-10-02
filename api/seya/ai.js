@@ -45,6 +45,7 @@ const {
   offeredSlots,
   wantsSlots,
 } = require("./conversation");
+const { understandThread } = require("./care-family");
 
 function seyaModel() {
   const requested = String(process.env.OPENAI_MODEL || "").trim();
@@ -172,16 +173,17 @@ async function polishSeyaText({
   draft,
 }) {
   const settings = agentSettings(seya);
-  const careHint = `${conversation.qualification?.need || ""} ${conversation.qualification?.zone || ""} ${conversation.treatment || ""}`;
+  const thread = understandThread(conversation, text);
+  const careHint = `${thread.need || conversation.qualification?.need || ""} ${conversation.qualification?.zone || ""} ${conversation.treatment || ""}`;
   const offer = resolveOpeningOffer(
     seya,
     conversation.campaign,
-    conversation.qualification?.need || conversation.treatment,
+    thread.need || conversation.qualification?.need || conversation.treatment,
   );
   const careUrl = resolveTreatmentUrl(
     seya,
     conversation.campaign,
-    conversation.qualification?.need || conversation.treatment,
+    thread.need || conversation.qualification?.need || conversation.treatment,
   );
   const brief = resolveTreatmentBrief(seya, careHint);
   const price = resolveTreatmentPrice(seya, careHint, conversation);
@@ -191,10 +193,10 @@ async function polishSeyaText({
   });
   const history = (conversation.messages || [])
     .filter((item, index, list) => !(index === list.length - 1 && item.author === "seya"))
-    .slice(-8)
+    .slice(-24)
     .map((item) => ({
       role: item.author === "lead" ? "user" : "assistant",
-      content: String(item.text || "").slice(0, 400),
+      content: String(item.text || "").slice(0, 500),
     }));
 
   const response = await client.chat.completions.create({
@@ -222,7 +224,7 @@ async function polishSeyaText({
         role: "user",
         content: [
           `Dernier message de la cliente : ${String(text || "").slice(0, 800)}`,
-          threadContext(conversation, text),
+          threadContext(conversation, text, thread),
           `Faits Bookea autorisés (à utiliser, pas à recopier mot pour mot) : ${String(draft || "").slice(0, 700)}`,
         ].join("\n"),
       },
@@ -254,7 +256,7 @@ function polishPrompt({
   return [
     "Tu es Seya, au standard WhatsApp. Chaleureuse, naturelle, claire, vouvoiement. Tu parles comme une réceptionniste au téléphone, 1 à 3 phrases.",
     "Ton objectif est d’accompagner jusqu’à la prise de rendez-vous, sans insister et sans coller deux fois la même réponse.",
-    "Avant de répondre, tu tiens compte de tout le fil : ce que le prospect a demandé, les infos déjà données, les disponibilités déjà évoquées.",
+    "Avant de répondre, tu relis tout le fil et tu t’y tiens. Si le prospect a corrigé le soin (visage, minceur, laser), tu restes sur CE soin. Interdit de revenir à la campagne d’origine.",
     "Tu réponds au dernier message, dans ce contexte. Interdit de reposer une question déjà traitée. Interdit de recoller le dernier message Seya.",
     "Le texte Bookea est une fiche de faits autorisés, pas un script. Si Bookea propose un créneau ou pose une question alors que la cliente n’a pas demandé ça, tu ne le recopies pas.",
     "Tu ne mets jamais fin à la conversation. Interdit : « écrivez-moi quand vous voulez reprendre », « je vous prie », « je reviendrai vers vous », « une conseillère vous recontacte », sauf si elle demande clairement à parler à quelqu’un.",
@@ -302,12 +304,15 @@ function polishPrompt({
     .join("\n");
 }
 
-function threadContext(conversation, text) {
+function threadContext(conversation, text, thread) {
+  const understood = thread || understandThread(conversation, text);
   const qualification = conversation?.qualification || {};
   const state = conversation?.bookingState || {};
   const previousSeya = previousSeyaText(conversation);
   const known = [
-    qualification.need ? `soin ${qualification.need}` : "",
+    understood.need || qualification.need
+      ? `soin ${understood.need || qualification.need}`
+      : "",
     qualification.zone ? `zone ${qualification.zone}` : "",
     state.weekHalf === "end"
       ? "fin de semaine"
@@ -328,6 +333,7 @@ function threadContext(conversation, text) {
     .slice(0, 6)
     .join(", ");
   return [
+    understood.summary ? `Fil relu : ${understood.summary}` : "",
     previousSeya
       ? `Dernier message Seya (ne pas le recoller, ne pas reposer la même question) : ${String(previousSeya).slice(0, 400)}`
       : "",
@@ -463,8 +469,16 @@ function applyAiDecision(conversation, text, seya, slots, decision, extras = {})
   });
   const safeSlots = shouldSearchSlots(bookingState, text, conversation) ? guarded.slots : [];
   const spokenNeed = extractNeed(text);
+  const thread = understandThread(conversation, text);
   const qualification = {
-    ...mergeQualification(conversation.qualification, text, conversation.treatment),
+    ...mergeQualification(
+      {
+        ...(conversation.qualification || {}),
+        ...(thread.need ? { need: thread.need } : {}),
+      },
+      text,
+      conversation.treatment,
+    ),
     ...(decision.need && !isJunkTreatment(decision.need) && !spokenNeed
       ? { need: decision.need }
       : {}),
