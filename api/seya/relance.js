@@ -126,7 +126,7 @@ async function relanceCenter(supabase, center) {
       continue;
     }
 
-    const text = relanceCopy(conversation, round, center.name);
+    const text = relanceCopy(conversation, round, center.name, current.seya);
     const lastSeya = [...(conversation.messages || [])]
       .reverse()
       .find((item) => item.author === "seya")?.text;

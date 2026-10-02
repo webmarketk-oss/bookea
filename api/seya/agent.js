@@ -1889,20 +1889,20 @@ function remainingOfferedSlots(offered, appointments, taken) {
   });
 }
 
-function relanceCopy(conversation, round = 1, centerName = "") {
+function relanceCopy(conversation, round = 1, centerName = "", seya) {
   const firstName = displayRelanceName(conversation.firstName);
   const named = firstName ? `Bonjour ${firstName}` : "Bonjour";
   const hello = named;
   const centre = String(centerName || "").trim() || "le centre";
   const care = relanceCareLabel(conversation);
   const about = /^une?\s/i.test(care) ? `d’${care}` : `de ${care}`;
-  const offer = relanceOfferPhrase(conversation);
+  const crmOffer = crmOfferForRelance(conversation, seya);
   const lastLead = lastLeadText(conversation);
   const candidates =
     Number(round) >= 3
-      ? relanceThirdCandidates(firstName, offer)
+      ? relanceThirdCandidates(firstName, crmOffer)
       : Number(round) === 2
-        ? relanceSecondCandidates(firstName, offer)
+        ? relanceSecondCandidates(firstName, crmOffer)
         : relanceFirstCandidates(hello, about, centre, lastLead, conversation);
   const previous = (conversation.messages || [])
     .filter((item) => item.author === "seya")
@@ -1922,34 +1922,76 @@ function displayRelanceName(value) {
   return name.charAt(0).toUpperCase() + name.slice(1);
 }
 
-function relanceOfferPhrase(conversation) {
-  const label = String(conversation?.offerLabel || "").replace(/\s+/g, " ").trim();
-  const care = relanceCareLabel(conversation);
-  const hay = `${label} ${care}`;
-  const priced = /\d+\s*€/.test(hay);
-  if (
-    /d[eé]couverte|offert|gratuit/i.test(hay) ||
-    (/bilan/i.test(hay) && !priced)
-  ) {
-    return "notre offre découverte";
+function crmOfferForRelance(conversation, seya) {
+  const mapped = seya
+    ? resolveOfferLabel(
+        seya,
+        conversation?.campaign,
+        conversation?.treatment || conversation?.qualification?.need,
+      )
+    : "";
+  if (mapped) {
+    return phraseConfiguredOffer(mapped);
   }
-  const offer = label || care;
-  if (!offer || offer === "votre soin") {
-    return "notre offre";
+  const stored = String(conversation?.offerLabel || "").replace(/\s+/g, " ").trim();
+  if (stored && !isJunkTreatment(stored)) {
+    return phraseConfiguredOffer(stored);
   }
-  return `notre offre ${offer.replace(/^(un|une|le|la|les|votre|notre)\s+/i, "")}`;
+  const fromOpening = offerFromOpeningMessage(conversation);
+  if (fromOpening) {
+    return fromOpening;
+  }
+  if (seya) {
+    const opening = resolveOpeningOffer(
+      seya,
+      conversation?.campaign,
+      conversation?.treatment || conversation?.qualification?.need,
+    );
+    if (opening && opening !== "un soin") {
+      return opening;
+    }
+  }
+  return "";
 }
 
-function relanceSecondCandidates(firstName, offer) {
+function offerFromOpeningMessage(conversation) {
+  const first = (conversation?.messages || []).find((item) => item.author === "seya");
+  const match = String(first?.text || "").match(
+    /demande pour\s+(.+?)(?:\s*[.?!]|$)/i,
+  );
+  return String(match?.[1] || "").replace(/\s+/g, " ").trim();
+}
+
+function relanceOfferMention(raw) {
+  const offer = String(raw || "").replace(/\s+/g, " ").trim();
+  if (!offer) {
+    return "notre offre";
+  }
+  const lower = offer.charAt(0).toLowerCase() + offer.slice(1);
+  if (/^notre offre\b/i.test(lower)) {
+    return lower;
+  }
+  if (/^offre\b/i.test(lower)) {
+    return `notre ${lower}`;
+  }
+  if (/^(une?|la|le|les|l['’]|votre)\s/i.test(lower)) {
+    return lower;
+  }
+  return `notre offre ${lower}`;
+}
+
+function relanceSecondCandidates(firstName, crmOffer) {
   const who = firstName ? `${firstName}, ` : "";
+  const offer = relanceOfferMention(crmOffer);
   return [
     `${who}je ne souhaite pas vous relancer inutilement. Dites-moi si vous êtes toujours intéressé par ${offer}.`,
     `${who}je ne souhaite pas vous relancer inutilement. ${offer.charAt(0).toUpperCase()}${offer.slice(1)} vous intéresse-t-elle toujours ?`,
   ];
 }
 
-function relanceThirdCandidates(firstName, offer) {
+function relanceThirdCandidates(firstName, crmOffer) {
   const hello = firstName ? `Bonjour ${firstName} 😊` : "Bonjour 😊";
+  const offer = String(crmOffer || "").replace(/\s+/g, " ").trim() || "notre offre";
   return [
     `${hello} Je reviens vers vous concernant votre demande pour ${offer}. Quel jour seriez-vous disponible pour venir en bénéficier ?`,
     `${hello} Je reviens vers vous au sujet de ${offer}. Quel jour vous arrangerait pour en bénéficier ?`,

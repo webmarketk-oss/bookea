@@ -256,29 +256,44 @@ test("le texte de relance s’adapte et ne recopie pas un message déjà envoyé
   const mid = relanceCopy(conversation(), 2, "JFG Clinique Clermont");
   assert.match(mid, /^Léa,/);
   assert.match(mid, /je ne souhaite pas vous relancer inutilement/i);
-  assert.match(mid, /offre découverte/i);
+  assert.match(mid, /votre bilan minceur/i);
+  assert.doesNotMatch(mid, /notre offre votre bilan/i);
   assert.doesNotMatch(mid, /clos le sujet/);
 
   const last = relanceCopy(conversation(), 3, "JFG Clinique Clermont");
   assert.match(last, /Bonjour Léa 😊/);
-  assert.match(last, /offre découverte/i);
+  assert.match(last, /votre bilan minceur/i);
   assert.match(last, /Quel jour seriez-vous disponible/i);
 });
 
-test("relance 2 et 3 : prénom + offre en cours, pas la campagne brute", () => {
+test("relance 2 et 3 : offre CRM {offre}, jamais l’intitulé campagne", () => {
+  const seya = {
+    offerMaps: [
+      {
+        match: "Soin minceur",
+        label: "offre découverte minceur (bilan + séance découverte offerte)",
+      },
+      {
+        match: "lift 4 149-copy",
+        label: "diagnostic de votre peau détaillé offert",
+      },
+    ],
+  };
   const paid = conversation({
     firstName: "Samantha",
-    offerLabel: "lift 4 à 149 €",
+    campaign: "lift 4 149-copy",
+    offerLabel: "",
     treatment: "Soin visage",
     qualification: { need: "Soin visage" },
   });
-  const second = relanceCopy(paid, 2, "JFG Clinique Clermont");
+  const second = relanceCopy(paid, 2, "JFG Clinique Clermont", seya);
   assert.match(second, /^Samantha,/);
-  assert.match(second, /lift 4 à 149 €/);
-  assert.doesNotMatch(second, /offre découverte/);
+  assert.match(second, /diagnostic de votre peau détaillé offert/i);
+  assert.doesNotMatch(second, /lift 4 149-copy/i);
 
-  const third = relanceCopy(paid, 3, "JFG Clinique Clermont");
+  const third = relanceCopy(paid, 3, "JFG Clinique Clermont", seya);
   assert.match(third, /Bonjour Samantha 😊/);
-  assert.match(third, /lift 4 à 149 €/);
+  assert.match(third, /diagnostic de votre peau détaillé offert/i);
   assert.match(third, /bénéficier/i);
+  assert.doesNotMatch(third, /lift 4 149-copy/i);
 });
