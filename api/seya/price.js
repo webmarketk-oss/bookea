@@ -1,3 +1,5 @@
+const { activeCareFamily, inferCareFamily } = require("./care-family");
+
 const SESSION_POLICIES = ["fixed", "from", "range", "after_bilan", "callback"];
 
 function emptyPricePolicy() {
@@ -113,17 +115,29 @@ function asksPrice(text) {
 
 function resolvePricePolicy(seya, conversation) {
   const briefs = Array.isArray(seya?.treatmentBriefs) ? seya.treatmentBriefs : [];
+  const family = activeCareFamily(conversation);
+  const need = normalize(conversation?.qualification?.need || "");
+  const treatment = normalize(conversation?.treatment || "");
+  const byNeed = need
+    ? briefs.find((item) => {
+        const name = normalize(item?.name);
+        return name && (name === need || name.includes(need) || need.includes(name));
+      })
+    : null;
+  const byFamily = family
+    ? briefs.find((item) => inferCareFamily(item?.name) === family)
+    : null;
   const needle = normalize(
-    `${conversation?.qualification?.need || ""} ${conversation?.treatment || ""} ${conversation?.bookingState?.serviceIntent || ""}`,
+    `${conversation?.qualification?.need || ""} ${conversation?.bookingState?.serviceIntent || ""}`,
   );
   const brief =
+    byNeed ||
+    byFamily ||
     briefs.find((item) => needle && normalize(item?.name).includes(needle)) ||
     briefs.find((item) => needle && needle.includes(normalize(item?.name))) ||
-    briefs.find((item) =>
-      /minceur|cryo|ventre|poids/.test(needle)
-        ? /minceur|cryo/i.test(item?.name || "")
-        : false,
-    );
+    (family === "minceur" || /minceur|cryo|ventre|poids/.test(treatment)
+      ? briefs.find((item) => /minceur|cryo/i.test(item?.name || ""))
+      : null);
   const policy = overlayOfferPricing(
     normalizePricePolicy(brief?.pricing, brief?.price),
     seya,
@@ -137,18 +151,51 @@ function resolvePricePolicy(seya, conversation) {
 
 function matchOfferMap(seya, conversation) {
   const maps = Array.isArray(seya?.offerMaps) ? seya.offerMaps : [];
-  const hay = normalize(
+  const family = activeCareFamily(conversation);
+  const needHay = normalize(`${conversation?.qualification?.need || ""} ${family}`);
+  const campaignHay = normalize(
     `${conversation?.campaign || ""} ${conversation?.treatment || ""} ${conversation?.offerLabel || ""}`,
   );
-  if (!hay) {
+  const campaignFamily = inferCareFamily(campaignHay);
+
+  let best = null;
+  let bestScore = 0;
+  for (const item of maps) {
+    const match = normalize(item?.match);
+    if (match.length < 2) {
+      continue;
+    }
+    const itemFamily = inferCareFamily(`${item?.match || ""} ${item?.label || ""}`);
+    if (family && itemFamily && itemFamily !== family) {
+      continue;
+    }
+    const campaignHit = Boolean(campaignHay && campaignHay.includes(match));
+    const needHit = Boolean(
+      needHay && (needHay.includes(match) || match.includes(needHay)),
+    );
+    let score = 0;
+    if (needHit && family && itemFamily === family) {
+      score = 40 + match.length;
+    } else if (campaignHit) {
+      score = 30 + match.length;
+    } else if (family && itemFamily === family) {
+      score = 10 + match.length;
+    }
+    if (score > bestScore) {
+      bestScore = score;
+      best = item;
+    }
+  }
+
+  if (
+    family &&
+    campaignFamily &&
+    family !== campaignFamily &&
+    inferCareFamily(`${best?.match || ""} ${best?.label || ""}`) !== family
+  ) {
     return null;
   }
-  return (
-    maps.find((item) => {
-      const match = normalize(item?.match);
-      return match.length > 1 && hay.includes(match);
-    }) || null
-  );
+  return best;
 }
 
 function priceFromOfferText(text) {
@@ -217,7 +264,7 @@ function unknownPriceReply() {
 function priceReplyForIntent(intent, policy, options = {}) {
   const target = intent === "repeat_complaint" ? options.previousIntent || "next_session" : intent;
   if (target === "next_session") {
-    return nextSessionReply(policy);
+    return nextSessionReply(policy, options);
   }
   if (target === "package") {
     return packageReply(policy);
@@ -226,17 +273,23 @@ function priceReplyForIntent(intent, policy, options = {}) {
     return discoveryReply(policy);
   }
   if (target === "bilan") {
-    return bilanReply(policy);
+    return bilanReply(policy, options);
   }
-  return genericPriceReply(policy);
+  return genericPriceReply(policy, options);
 }
 
-function bilanReply(policy) {
+function analysisPhrase(family) {
+  return family === "visage"
+    ? "un diagnostic de la peau"
+    : "une analyse corporelle";
+}
+
+function bilanReply(policy, options = {}) {
   if (!policy.bilan) {
     return unknownPriceReply();
   }
   if (isFree(policy.bilan)) {
-    return "Le bilan est offert. On y fait une analyse corporelle pour établir le protocole.";
+    return `Le bilan est offert. On y fait ${analysisPhrase(options.family)} pour établir le protocole.`;
   }
   return `Le bilan est à ${policy.bilan}.`;
 }
@@ -251,17 +304,18 @@ function discoveryReply(policy) {
   return `La séance découverte est à ${policy.discovery}.`;
 }
 
-function nextSessionReply(policy) {
+function nextSessionReply(policy, options = {}) {
+  const analysis = analysisPhrase(options.family);
   if (policy.session && ["fixed", "from", "range"].includes(policy.sessionPolicy)) {
-    return `${announceSession(policy)} Le protocole exact se précise après l’analyse corporelle.`;
+    return `${announceSession(policy)} Le protocole exact se précise après ${analysis}.`;
   }
   if (policy.sessionPolicy === "callback") {
     return "Je comprends, vous souhaitez connaître le prix des séances si vous poursuivez après la découverte. Je n’ai pas de tarif à annoncer ici : une conseillère du centre peut vous donner une fourchette. Je peux lui demander de vous rappeler.";
   }
   if (policy.package) {
-    return `Je n’ai pas de tarif fixe à la séance. ${packageSentence(policy.package)} Le détail dépend du protocole proposé après l’analyse corporelle.`;
+    return `Je n’ai pas de tarif fixe à la séance. ${packageSentence(policy.package)} Le détail dépend du protocole proposé après ${analysis}.`;
   }
-  return "Vous parlez du tarif des séances après la découverte, c’est bien ça. Il dépend du protocole conseillé après l’analyse corporelle. Je n’ai pas de prix fiable à vous donner avant ce bilan, mais je peux demander au centre s’il peut vous communiquer une fourchette.";
+  return `Vous parlez du tarif des séances après la découverte, c’est bien ça. Il dépend du protocole conseillé après ${analysis}. Je n’ai pas de prix fiable à vous donner avant ce bilan, mais je peux demander au centre s’il peut vous communiquer une fourchette.`;
 }
 
 function packageReply(policy) {
@@ -271,18 +325,31 @@ function packageReply(policy) {
   return "Je n’ai pas de tarif de cure renseigné. Je peux demander au centre de vous donner une fourchette.";
 }
 
-function genericPriceReply(policy) {
+function genericPriceReply(policy, options = {}) {
+  const family = options.family || "";
   const parts = [];
   if (isFree(policy.bilan) || isFree(policy.discovery)) {
-    parts.push("Le bilan et la séance découverte sont offerts, c’est gratuit.");
+    parts.push(
+      family === "visage"
+        ? "Le diagnostic visage n’est pas le bilan minceur offert."
+        : "Le bilan et la séance découverte sont offerts, c’est gratuit.",
+    );
   } else if (policy.bilan || policy.discovery) {
-    if (policy.bilan) parts.push(`Le bilan : ${policy.bilan}.`);
-    if (policy.discovery) parts.push(`La séance découverte : ${policy.discovery}.`);
+    if (family === "visage" && policy.bilan) {
+      parts.push(`Le diagnostic et le soin du visage commencent à ${policy.bilan}.`);
+    } else {
+      if (policy.bilan) parts.push(`Le bilan : ${policy.bilan}.`);
+      if (policy.discovery) parts.push(`La séance découverte : ${policy.discovery}.`);
+    }
   } else if (!policy.session && !policy.package) {
     return unknownPriceReply();
   }
   if (policy.session && ["fixed", "from", "range"].includes(policy.sessionPolicy)) {
     parts.push(announceSession(policy));
+  } else if (family === "visage") {
+    parts.push(
+      "Ce diagnostic permet de faire le point sur la peau et de vous proposer un protocole adapté.",
+    );
   } else {
     parts.push(
       "Le bilan permet de réaliser une analyse corporelle et de vous établir un devis personnalisé en fonction de vos objectifs.",
@@ -401,16 +468,20 @@ function buildPriceReply(text, seya, conversation) {
     conversation?.bookingState?.lastPriceIntent ||
     "next_session";
   const policy = resolvePricePolicy(seya, conversation);
+  const options = {
+    previousIntent,
+    family: activeCareFamily(conversation),
+  };
   if (intent === "repeat_complaint") {
     if (previousIntent === "next_session" || !previousIntent) {
       return apologyForRepeat(previousIntent);
     }
-    return `${apologyForRepeat(previousIntent)} ${priceReplyForIntent(previousIntent, policy)}`;
+    return `${apologyForRepeat(previousIntent)} ${priceReplyForIntent(previousIntent, policy, options)}`;
   }
   if (!intent) {
     return "";
   }
-  return priceReplyForIntent(intent, policy, { previousIntent });
+  return priceReplyForIntent(intent, policy, options);
 }
 
 function enforcePriceReply(draft, text, seya, conversation) {

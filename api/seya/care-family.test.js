@@ -1,6 +1,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const {
+  activeCareFamily,
   inferCareFamily,
   pickApprovedTemplate,
 } = require("./care-family");
@@ -59,6 +60,19 @@ test("un lead minceur prend le template minceur", () => {
 test("un lead visage prend le template visage", () => {
   const picked = pickApprovedTemplate(templates, inferCareFamily("Hydrafacial"));
   assert.equal(picked.name, "seya_accueil_visage");
+});
+
+test("après « non pour le visage », le soin actif n’est plus minceur", () => {
+  assert.equal(
+    activeCareFamily({
+      treatment: "Soin minceur",
+      campaign: "lift 4 149-copy",
+      offerLabel: "bilan minceur offert",
+      qualification: { need: "Soin visage" },
+      messages: [{ author: "lead", text: "Non pour le visage" }],
+    }),
+    "visage",
+  );
 });
 
 test("sans soin connu : template générique, jamais minceur par défaut", () => {

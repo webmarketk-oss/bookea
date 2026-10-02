@@ -26,6 +26,29 @@ function inferCareFamily(text) {
   return "";
 }
 
+function activeCareFamily(conversation, extraText) {
+  const need = inferCareFamily(conversation?.qualification?.need);
+  if (need) {
+    return need;
+  }
+  const spoken = inferCareFamily(extraText);
+  if (spoken) {
+    return spoken;
+  }
+  const leads = [...(conversation?.messages || [])]
+    .reverse()
+    .filter((item) => item.author === "lead");
+  for (const item of leads.slice(0, 8)) {
+    const family = inferCareFamily(item.text);
+    if (family) {
+      return family;
+    }
+  }
+  return inferCareFamily(
+    `${conversation?.treatment || ""} ${conversation?.campaign || ""} ${conversation?.offerLabel || ""}`,
+  );
+}
+
 function humanizeOfferTitle(value) {
   let text = String(value || "")
     .replace(/\+/g, " et ")
@@ -236,6 +259,7 @@ function phraseConfiguredOffer(value) {
 }
 
 module.exports = {
+  activeCareFamily,
   careLabelForFamily,
   findOfferMap,
   humanizeOfferTitle,

@@ -402,7 +402,7 @@ function priceReply(seya, qualification, conversation, text) {
   const built = buildPriceReply(
     text || conversation?.bookingState?.lastLeadPriceText || "c’est combien",
     seya,
-    { ...conversation, qualification },
+    { ...applyCareSwitch(conversation, qualification), qualification },
   );
   if (built) {
     return built;
@@ -789,6 +789,7 @@ function extractNeed(text) {
 
 function extractZone(text) {
   const value = normalize(text);
+  const careNeed = extractNeed(text);
   const zones = [
     "jambes",
     "maillot",
@@ -802,7 +803,33 @@ function extractZone(text) {
     "menton",
     "levre",
   ];
-  return zones.filter((zone) => value.includes(zone)).join(", ");
+  return zones
+    .filter((zone) => {
+      if (
+        zone === "visage" &&
+        (careNeed === "Soin visage" ||
+          /pour le visage|soin (du )?visage|\bdu visage\b/.test(value))
+      ) {
+        return false;
+      }
+      return value.includes(zone);
+    })
+    .join(", ");
+}
+
+function applyCareSwitch(conversation, qualification) {
+  const nextFamily = inferCareFamily(qualification?.need || "");
+  const prevFamily = inferCareFamily(
+    `${conversation?.treatment || ""} ${conversation?.offerLabel || ""} ${conversation?.campaign || ""}`,
+  );
+  if (!nextFamily || nextFamily === prevFamily) {
+    return conversation;
+  }
+  return {
+    ...conversation,
+    treatment: qualification.need,
+    offerLabel: "",
+  };
 }
 
 function extractDelay(text) {
@@ -1765,8 +1792,9 @@ function finishLeadReply(
 ) {
   const slotSafe = enforceOutgoingText(seyaText, bookingState);
   const { _seya, ...cleanConversation } = conversation;
+  const switched = applyCareSwitch(cleanConversation, qualification);
   const checked = enforcePriceReply(slotSafe, leadText, extra.seya || _seya, {
-    ...cleanConversation,
+    ...switched,
     qualification,
     bookingState,
   });
@@ -1777,7 +1805,7 @@ function finishLeadReply(
     : markOfferPending(bookingState, reply);
   return {
     conversation: {
-      ...cleanConversation,
+      ...switched,
       qualification,
       status: blockedProposal && status === "RDV proposé" ? "Qualifié" : status,
       bookingState: nextBookingState,
@@ -1981,6 +2009,8 @@ module.exports = {
   daysSince,
   matchProposedSlot,
   mergeQualification,
+  extractNeed,
+  applyCareSwitch,
   readHours,
   relanceCopy,
   asksLocation,

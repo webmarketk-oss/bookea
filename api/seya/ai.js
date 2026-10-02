@@ -18,6 +18,8 @@ const {
   pickSlotsForState,
   matchProposedSlot,
   mergeQualification,
+  extractNeed,
+  applyCareSwitch,
   message,
   priceReply,
   resolveOfferLabel,
@@ -460,10 +462,16 @@ function applyAiDecision(conversation, text, seya, slots, decision, extras = {})
     allowRepeat,
   });
   const safeSlots = shouldSearchSlots(bookingState, text, conversation) ? guarded.slots : [];
+  const spokenNeed = extractNeed(text);
   const qualification = {
     ...mergeQualification(conversation.qualification, text, conversation.treatment),
-    ...(decision.need && !isJunkTreatment(decision.need) ? { need: decision.need } : {}),
-    ...(decision.zone ? { zone: decision.zone } : {}),
+    ...(decision.need && !isJunkTreatment(decision.need) && !spokenNeed
+      ? { need: decision.need }
+      : {}),
+    ...(decision.zone &&
+    !(spokenNeed === "Soin visage" && /visage/i.test(decision.zone))
+      ? { zone: decision.zone }
+      : {}),
     ...(decision.delay ? { delay: decision.delay } : {}),
     ...(decision.availability ? { availability: decision.availability } : {}),
   };
@@ -577,7 +585,12 @@ function applyAiDecision(conversation, text, seya, slots, decision, extras = {})
     (asksLocation(text) || asksAccess(text)
       ? centerPlaceReply(text, extras, seya)
       : asksPrice(text) || classifyPriceQuestion(text) || isPriceRepeatComplaint(text)
-        ? priceReply(seya, qualification, { ...conversation, bookingState }, text)
+        ? priceReply(
+            seya,
+            qualification,
+            { ...applyCareSwitch(conversation, qualification), bookingState },
+            text,
+          )
         : "Merci. Dites-moi le soin ou la zone, je m’occupe de la suite.");
   const reply =
     faqReply(text) || asksLocation(text) || asksAccess(text) || asksPrice(text) || classifyPriceQuestion(text) || isPriceRepeatComplaint(text)
@@ -597,8 +610,9 @@ function applyAiDecision(conversation, text, seya, slots, decision, extras = {})
 }
 
 function withMessages(conversation, qualification, status, leadText, seyaText) {
+  const switched = applyCareSwitch(conversation, qualification);
   return {
-    ...conversation,
+    ...switched,
     qualification,
     status,
     messages: [

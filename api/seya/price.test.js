@@ -226,3 +226,63 @@ test("le contrôle rejette une copie de la dernière réponse", () => {
   assert.doesNotMatch(checked.text, /Le bilan et la séance découverte sont offerts/i);
   assert.match(checked.text, /prix fiable|fourchette|après la découverte/i);
 });
+
+test("après « non pour le visage », le prix ne revient pas au bilan minceur", async () => {
+  const seya = {
+    qualifyOnSignup: true,
+    askForAppointment: true,
+    bookAppointment: true,
+    handoffToHuman: true,
+    treatmentBriefs: [
+      {
+        name: "Soin minceur",
+        brief: "Prix seulement si on demande.",
+        pricing: {
+          bilan: "offert",
+          discovery: "offerte",
+          session: "",
+          package: "",
+          sessionPolicy: "after_bilan",
+        },
+      },
+      {
+        name: "Soin visage",
+        brief: "Diagnostic peau.",
+        pricing: {
+          bilan: "149€",
+          discovery: "149€",
+          session: "",
+          package: "",
+          sessionPolicy: "after_bilan",
+        },
+      },
+    ],
+    offerMaps: [
+      { match: "minceur", label: "bilan + séance découverte offerte" },
+      { match: "visage", label: "diagnostic et soin à partir de 149 €" },
+    ],
+  };
+  let conversation = startConversation(
+    {
+      leadId: "lead-switch-visage",
+      centerId: "jfg-clinique-clermont",
+      firstName: "Samantha",
+      lastName: "Test",
+      phone: "0612345678",
+      campaign: "lift 4 149-copy",
+      treatment: "Soin minceur",
+    },
+    "JFG Clinique Clermont",
+    seya,
+  );
+
+  conversation = await reply(conversation, "C’est gratuit", seya);
+  conversation = await reply(conversation, "Non pour le visage", seya);
+  assert.match(String(conversation.qualification?.need || ""), /visage/i);
+
+  conversation = await reply(conversation, "Ok c’est quoi le prix déjà", seya);
+  const answer = lastSeya(conversation);
+  assert.match(answer, /149|visage|peau/i);
+  assert.doesNotMatch(answer, /corporelle/i);
+  assert.doesNotMatch(answer, /offerts, c’est gratuit/i);
+});
