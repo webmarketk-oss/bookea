@@ -1890,26 +1890,19 @@ function remainingOfferedSlots(offered, appointments, taken) {
 }
 
 function relanceCopy(conversation, round = 1, centerName = "") {
-  const firstName = greetingName(conversation.firstName);
-  const named = firstName
-    ? `Bonjour ${firstName.charAt(0).toUpperCase()}${firstName.slice(1)}`
-    : "Bonjour";
+  const firstName = displayRelanceName(conversation.firstName);
+  const named = firstName ? `Bonjour ${firstName}` : "Bonjour";
   const hello = named;
   const centre = String(centerName || "").trim() || "le centre";
   const care = relanceCareLabel(conversation);
   const about = /^une?\s/i.test(care) ? `d’${care}` : `de ${care}`;
+  const offer = relanceOfferPhrase(conversation);
   const lastLead = lastLeadText(conversation);
   const candidates =
     Number(round) >= 3
-      ? [
-          `${hello}, je me permets de revenir une dernière fois au sujet ${about} à ${centre}. Souhaitez-vous que je vous propose un rendez-vous, ou préférez-vous que je clôture le sujet ?`,
-          `${hello}, je clos le sujet de mon côté. N’hésitez pas à me réécrire si vous souhaitez avancer au sujet ${about}.`,
-        ]
+      ? relanceThirdCandidates(firstName, offer)
       : Number(round) === 2
-        ? [
-            `${hello}, je me permets de revenir vers vous au sujet ${about} à ${centre}. Souhaitez-vous que je vous propose un rendez-vous, ou préférez-vous en rester là ?`,
-            `${hello}, je reste à votre disposition au sujet ${about} à ${centre}. Puis-je vous proposer un créneau ?`,
-          ]
+        ? relanceSecondCandidates(firstName, offer)
         : relanceFirstCandidates(hello, about, centre, lastLead, conversation);
   const previous = (conversation.messages || [])
     .filter((item) => item.author === "seya")
@@ -1919,6 +1912,48 @@ function relanceCopy(conversation, round = 1, centerName = "") {
       (text) => !previous.some((item) => isNearDuplicate(text, item)),
     ) || ""
   );
+}
+
+function displayRelanceName(value) {
+  const name = greetingName(value);
+  if (!name) {
+    return "";
+  }
+  return name.charAt(0).toUpperCase() + name.slice(1);
+}
+
+function relanceOfferPhrase(conversation) {
+  const label = String(conversation?.offerLabel || "").replace(/\s+/g, " ").trim();
+  const care = relanceCareLabel(conversation);
+  const hay = `${label} ${care}`;
+  const priced = /\d+\s*€/.test(hay);
+  if (
+    /d[eé]couverte|offert|gratuit/i.test(hay) ||
+    (/bilan/i.test(hay) && !priced)
+  ) {
+    return "notre offre découverte";
+  }
+  const offer = label || care;
+  if (!offer || offer === "votre soin") {
+    return "notre offre";
+  }
+  return `notre offre ${offer.replace(/^(un|une|le|la|les|votre|notre)\s+/i, "")}`;
+}
+
+function relanceSecondCandidates(firstName, offer) {
+  const who = firstName ? `${firstName}, ` : "";
+  return [
+    `${who}je ne souhaite pas vous relancer inutilement. Dites-moi si vous êtes toujours intéressé par ${offer}.`,
+    `${who}je ne souhaite pas vous relancer inutilement. ${offer.charAt(0).toUpperCase()}${offer.slice(1)} vous intéresse-t-elle toujours ?`,
+  ];
+}
+
+function relanceThirdCandidates(firstName, offer) {
+  const hello = firstName ? `Bonjour ${firstName} 😊` : "Bonjour 😊";
+  return [
+    `${hello} Je reviens vers vous concernant votre demande pour ${offer}. Quel jour seriez-vous disponible pour venir en bénéficier ?`,
+    `${hello} Je reviens vers vous au sujet de ${offer}. Quel jour vous arrangerait pour en bénéficier ?`,
+  ];
 }
 
 function relanceFirstCandidates(hello, about, centre, lastLead, conversation) {
