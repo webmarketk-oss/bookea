@@ -48,13 +48,6 @@ type CenterRow = {
   } | null;
 };
 
-type ProfileRow = {
-  id: string;
-  email: string | null;
-  full_name: string | null;
-  role: string | null;
-};
-
 type CenterMemberRow = {
   center_id: string;
   profile_id: string;
@@ -124,7 +117,6 @@ export default function AdminCentresPage() {
 
   async function loadCenters() {
     setLoading(true);
-    setNotice(null);
 
     try {
       const { data: centerRows, error: centersError } = await supabase
@@ -203,7 +195,6 @@ export default function AdminCentresPage() {
       const name = form.name.trim();
       const slug = slugify(form.slug || form.name);
       const ownerEmail = form.ownerEmail.trim().toLowerCase();
-      const owner = ownerEmail ? await findProfileByEmail(ownerEmail) : null;
 
       if (!name) {
         throw new Error("Le nom du centre est obligatoire.");
@@ -220,7 +211,7 @@ export default function AdminCentresPage() {
           slug,
           city: form.city.trim() || null,
           email: form.email.trim() || null,
-          owner_profile_id: owner?.id ?? null,
+          owner_profile_id: null,
           country: "France",
           description: "Centre Bookea",
           public_profile_enabled: false,
@@ -239,16 +230,24 @@ export default function AdminCentresPage() {
         createDefaultSources(centerId),
       ]);
 
-      if (owner) {
-        await attachOwner(centerId, owner);
+      let attached = false;
+      if (ownerEmail) {
+        try {
+          await attachOwnerViaApi(centerId, ownerEmail);
+          attached = true;
+        } catch {
+          attached = false;
+        }
       }
 
       setForm({ name: "", slug: "", city: "", email: "", ownerEmail: "" });
       setNotice({
-        type: owner ? "success" : "info",
-        message: owner
+        type: attached ? "success" : "info",
+        message: attached
           ? "Centre créé et responsable rattaché."
-          : "Centre créé vierge. Le responsable devra créer son compte avant rattachement.",
+          : ownerEmail
+            ? "Centre créé. Le responsable n’a pas encore de compte : rattachez son email après inscription."
+            : "Centre créé vierge. Le responsable devra créer son compte avant rattachement.",
       });
       await loadCenters();
     } catch (error) {
@@ -269,40 +268,26 @@ export default function AdminCentresPage() {
     setNotice(null);
 
     try {
-      const ownerEmail = email.trim().toLowerCase();
-
-      if (!ownerEmail) {
-        throw new Error("Ajoutez l'email du responsable.");
-      }
-
-      const owner = await findProfileByEmail(ownerEmail);
-
-      if (!owner) {
-        throw new Error(
-          "Aucun compte Bookea trouvé avec cet email. Le responsable doit d'abord créer son compte.",
-        );
-      }
-
-      await attachOwner(centerId, owner);
+      const member = await attachOwnerViaApi(centerId, email);
       setNotice({
         type: "success",
-        message: `Responsable rattaché : ${owner.email ?? ownerEmail}`,
+        message: `Accès rattaché : ${member.email || email}`,
       });
       await loadCenters();
-      return true;
+      return { ok: true as const };
     } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Impossible de rattacher ce responsable.";
       setNotice({
         type: "error",
-        message:
-          error instanceof Error
-            ? error.message
-            : "Impossible de rattacher ce responsable.",
+        message,
       });
+      return { ok: false as const, error: message };
     } finally {
       setAttachingCenterId(null);
     }
-
-    return false;
   }
 
   async function handleRemoveMember(centerId: string, profileId: string) {
@@ -455,31 +440,34 @@ export default function AdminCentresPage() {
     }
   }
 
-  async function findProfileByEmail(email: string) {
-    const { data, error } = await supabase
-      .from("profiles")
-      .select("id,email,full_name,role")
-      .ilike("email", email)
-      .maybeSingle();
+  async function attachOwnerViaApi(centerId: string, email: string) {
+    const ownerEmail = email.trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(ownerEmail)) {
+      throw new Error("Email incomplet. Exemple : sandra.lucard@gmail.com");
+    }
 
-    if (error) throw new Error(error.message);
-    return data as ProfileRow | null;
-  }
-
-  async function attachOwner(centerId: string, profile: ProfileRow) {
-    const { error: memberError } = await supabase
-      .from("center_members")
-      .upsert(
-        {
-          center_id: centerId,
-          profile_id: profile.id,
-          role: "owner",
-          is_active: true,
-        },
-        { onConflict: "center_id,profile_id" },
-      );
-
-    if (memberError) throw new Error(memberError.message);
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+    const response = await fetch("/api/admin/center-members", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(session?.access_token
+          ? { Authorization: `Bearer ${session.access_token}` }
+          : {}),
+      },
+      body: JSON.stringify({ centerId, email: ownerEmail }),
+    });
+    const payload = (await response.json().catch(() => ({}))) as {
+      ok?: boolean;
+      error?: string;
+      member?: { email?: string };
+    };
+    if (!response.ok || !payload.ok) {
+      throw new Error(payload.error || "Impossible de rattacher cet accès.");
+    }
+    return payload.member || { email: ownerEmail };
   }
 
   async function createDefaultSettings(centerId: string) {
@@ -776,12 +764,15 @@ function CenterCard({
   removingMemberKey: string | null;
   toggling: boolean;
   crediting: boolean;
-  onAttachOwner: (email: string) => Promise<boolean>;
+  onAttachOwner: (
+    email: string,
+  ) => Promise<{ ok: boolean; error?: string }>;
   onRemoveMember: (profileId: string) => void;
   onToggleActive: (nextActive: boolean) => void;
   onCreditSms: (amount: number) => void;
 }) {
   const [ownerEmail, setOwnerEmail] = useState("");
+  const [attachError, setAttachError] = useState("");
   const [facebookPageId, setFacebookPageId] = useState("");
   const [smsAmount, setSmsAmount] = useState("");
   const facebookConnectUrl =
@@ -791,10 +782,13 @@ function CenterCard({
 
   async function submitOwner(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const attached = await onAttachOwner(ownerEmail);
-    if (attached) {
+    setAttachError("");
+    const result = await onAttachOwner(ownerEmail);
+    if (result.ok) {
       setOwnerEmail("");
+      return;
     }
+    setAttachError(result.error || "Impossible de rattacher cet accès.");
   }
 
   function submitSmsCredit(event: FormEvent<HTMLFormElement>) {
@@ -933,9 +927,14 @@ function CenterCard({
             </label>
             <div className="flex flex-col gap-2 sm:flex-row">
               <input
-                type="email"
+                type="text"
+                inputMode="email"
+                autoComplete="email"
                 value={ownerEmail}
-                onChange={(event) => setOwnerEmail(event.target.value)}
+                onChange={(event) => {
+                  setOwnerEmail(event.target.value);
+                  setAttachError("");
+                }}
                 placeholder="responsable@centre.fr"
                 className="h-12 min-w-0 flex-1 rounded-xl border border-slate-200 bg-white px-3 font-bold text-slate-950 outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-100"
               />
@@ -952,10 +951,14 @@ function CenterCard({
                 Rattacher
               </button>
             </div>
-            <p className="text-xs font-semibold text-slate-400">
-              Autant d’emails que nécessaire. Retirez un accès pour le remplacer.
-              Le compte doit déjà avoir été créé sur la page connexion.
-            </p>
+            {attachError ? (
+              <p className="text-xs font-semibold text-rose-600">{attachError}</p>
+            ) : (
+              <p className="text-xs font-semibold text-slate-400">
+                Autant d’emails que nécessaire. Retirez un accès pour le remplacer.
+                Le compte doit déjà avoir été créé sur la page connexion.
+              </p>
+            )}
           </form>
 
           <form onSubmit={submitSmsCredit} className="mt-5 border-t border-slate-200 pt-4">
