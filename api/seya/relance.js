@@ -137,7 +137,13 @@ async function relanceCenter(supabase, center) {
     const result = await sendSharedWhatsApp(conversation.phone, text, {
       firstName: conversation.firstName,
       centerName: center.name,
-      treatment: conversation.qualification?.need || conversation.treatment || "",
+      treatment:
+        conversation.offerLabel ||
+        conversation.qualification?.need ||
+        conversation.treatment ||
+        "",
+      campaign: conversation.campaign || "",
+      offerLabel: conversation.offerLabel || "",
     });
 
     if (result.sent) {

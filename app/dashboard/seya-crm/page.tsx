@@ -26,7 +26,6 @@ import { inactiveLeadStatuses } from "@/lib/lead-statuses";
 import {
   applyLeadReply,
   createSeyaMessage,
-  lastSeyaMessage,
   suggestAvailableSlots,
   whatsappHref,
 } from "@/lib/seya-agent";
@@ -287,15 +286,8 @@ function lastOutgoingMessage(conversation: SeyaConversation) {
     .find((item) => item.author === "seya" || item.author === "centre");
 }
 
-function prefersWelcomeTemplate(conversation: SeyaConversation, text: string) {
-  const leadReplied = (conversation.messages || []).some(
-    (item) => item.author === "lead",
-  );
-  if (leadReplied) {
-    return false;
-  }
-  const opening = lastSeyaMessage(conversation)?.text?.trim() || "";
-  return Boolean(opening) && opening === text.trim();
+function prefersWelcomeTemplate(conversation: SeyaConversation, _text: string) {
+  return !(conversation.messages || []).some((item) => item.author === "lead");
 }
 
 export default function SeyaCrmPage() {
@@ -632,7 +624,12 @@ export default function SeyaCrmPage() {
         firstName: conversation.firstName,
         centerName,
         treatment:
-          conversation.qualification?.need || conversation.treatment || "",
+          conversation.offerLabel ||
+          conversation.qualification?.need ||
+          conversation.treatment ||
+          "",
+        campaign: conversation.campaign || "",
+        offerLabel: conversation.offerLabel || "",
         preferTemplate,
       }),
     });
@@ -648,7 +645,10 @@ export default function SeyaCrmPage() {
     error?: string;
   }) {
     if (payload.reason === "template_required") {
-      return "WhatsApp n’accepte un texte libre que si le prospect a écrit dans les 24 h. Le message n’est pas parti.";
+      return (
+        payload.error ||
+        "Le premier WhatsApp part via le modèle générique (prénom, centre, offre). Il doit être Approuvé une fois dans Meta."
+      );
     }
     return payload.error || "L’envoi Bookea a échoué. Réessaie dans une minute.";
   }

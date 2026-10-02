@@ -141,7 +141,7 @@ async function sendDueWelcomes(
     const result = await sendWhatsApp(updated.phone, opening, {
       firstName: updated.firstName,
       centerName: center.name,
-      treatment: updated.treatment || updated.offerLabel || "",
+      treatment: updated.offerLabel || updated.treatment || "",
       campaign: updated.campaign || "",
       offerLabel: updated.offerLabel || "",
       family,

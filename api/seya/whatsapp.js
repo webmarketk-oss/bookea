@@ -81,6 +81,9 @@ async function handler(req, res) {
         firstName: payload.firstName,
         centerName: payload.centerName,
         treatment: payload.treatment,
+        campaign: payload.campaign,
+        offerLabel: payload.offerLabel,
+        family: payload.family,
         preferTemplate: Boolean(payload.preferTemplate),
       });
       return res.status(result.sent ? 200 : 409).json(result);
@@ -899,6 +902,15 @@ async function diagnoseGraph() {
   };
 }
 
+function welcomeTemplateVars(extras) {
+  const offer = String(extras?.offerLabel || extras?.treatment || "").trim();
+  return {
+    firstName: String(extras?.firstName || "").trim() || "bonjour",
+    centerName: String(extras?.centerName || "").trim() || "notre centre",
+    treatment: offer || "votre soin",
+  };
+}
+
 function templateVarCount(template) {
   const body = (template.components || []).find(
     (item) => String(item.type || "").toUpperCase() === "BODY",
@@ -1112,11 +1124,7 @@ async function sendSharedWhatsApp(phone, text, extras = {}) {
   }
 
   const intl = toWhatsAppIntl(phone);
-  const vars = {
-    firstName: extras.firstName || "bonjour",
-    centerName: extras.centerName || "notre centre",
-    treatment: extras.treatment || "votre soin",
-  };
+  const vars = welcomeTemplateVars(extras);
 
   let textError = {};
   if (!extras.preferTemplate) {
@@ -1131,22 +1139,15 @@ async function sendSharedWhatsApp(phone, text, extras = {}) {
     }
 
     textError = textResult.data?.error || {};
-    if (isTemplateRequired(textError)) {
+    if (!isTemplateRequired(textError)) {
       return {
         sent: false,
-        reason: "template_required",
+        reason: "send_failed",
         code: textError.code || null,
         error: frenchSendError(textError),
         to: intl,
       };
     }
-    return {
-      sent: false,
-      reason: "send_failed",
-      code: textError.code || null,
-      error: frenchSendError(textError),
-      to: intl,
-    };
   }
 
   const listed = await listTemplates();
@@ -1162,7 +1163,7 @@ async function sendSharedWhatsApp(phone, text, extras = {}) {
         code: textError.code || null,
         error:
           ensured.template
-            ? "Le modèle seya_accueil est envoyé à Meta. Dès qu’il est Approuvé, le premier message partira."
+            ? "Le premier message part via le modèle générique seya_accueil (prénom, centre, offre). Il doit être Approuvé une fois dans Meta — pas besoin d’y coller le texte de chaque campagne."
             : frenchSendError(ensured.error || textError),
         templateStatus: ensured.template?.status || null,
         to: intl,
@@ -1200,4 +1201,6 @@ async function sendSharedWhatsApp(phone, text, extras = {}) {
 handler.sendSharedWhatsApp = sendSharedWhatsApp;
 handler.outgoingWhatsAppTexts = outgoingWhatsAppTexts;
 handler.replaceDraftWithSent = replaceDraftWithSent;
+handler.isTemplateRequired = isTemplateRequired;
+handler.welcomeTemplateVars = welcomeTemplateVars;
 module.exports = handler;
