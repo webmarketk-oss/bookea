@@ -979,12 +979,20 @@ export function PublicBooking() {
               Mon compte Bookea
             </a>
           </nav>
-          <Link
-            href="/login"
-            className="shrink-0 rounded-full bg-slate-950 px-4 py-2.5 text-sm font-bold text-white shadow-sm transition hover:bg-slate-800"
-          >
-            Connexion
-          </Link>
+          <div className="flex shrink-0 items-center gap-2">
+            <Link
+              href="/client/login"
+              className="rounded-full border border-slate-200 bg-white px-3 py-2.5 text-sm font-bold text-slate-950 shadow-sm transition hover:bg-slate-50 sm:px-4"
+            >
+              Connexion client
+            </Link>
+            <Link
+              href="/login"
+              className="rounded-full bg-slate-950 px-3 py-2.5 text-sm font-bold text-white shadow-sm transition hover:bg-slate-800 sm:px-4"
+            >
+              Connexion Pro
+            </Link>
+          </div>
         </div>
       </header>
 

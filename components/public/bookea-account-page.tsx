@@ -169,8 +169,8 @@ export function BookeaAccountPage() {
             <a href="/client" className="rounded-full px-4 py-2 hover:bg-blue-50 hover:text-blue-700">
               Rechercher
             </a>
-            <a href="/login" className="rounded-full bg-slate-950 px-4 py-2 text-white hover:bg-slate-800">
-              Connexion
+            <a href="/client/login" className="rounded-full bg-slate-950 px-4 py-2 text-white hover:bg-slate-800">
+              Connexion client
             </a>
           </nav>
         </div>
