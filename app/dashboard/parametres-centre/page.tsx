@@ -344,6 +344,7 @@ export default function CenterSettingsPage() {
   const [mediaBusy, setMediaBusy] = useState(false);
   const [photoBusyId, setPhotoBusyId] = useState<number | null>(null);
   const noticeTimer = useRef(0);
+  const persistGeneration = useRef(0);
   const [coverPreview, setCoverPreview] = useState("");
   const [coverPosition, setCoverPosition] = useState<CoverPosition>(
     defaultCoverPosition,
@@ -492,11 +493,17 @@ export default function CenterSettingsPage() {
       if (cancelled) {
         return;
       }
-      if (loaded.settings) {
+      const generation = persistGeneration.current;
+      if (loaded.centerId) {
+        setLoadedCenterId(loaded.centerId);
+      }
+      if (
+        generation === persistGeneration.current &&
+        loaded.settings
+      ) {
         applyStoredSettings(loaded.settings as Partial<StoredCenterSettings>);
       }
       if (loaded.centerId) {
-        setLoadedCenterId(loaded.centerId);
         const { json } = await requestStripeConnect(loaded.centerId, "status");
         if (cancelled) {
           return;
@@ -898,6 +905,7 @@ export default function CenterSettingsPage() {
     patch: Partial<StoredCenterSettings> = {},
     message = "Fiche publique enregistrée.",
   ) => {
+    persistGeneration.current += 1;
     const next = currentPublicSettings(patch);
     mergeCenterSettings(next);
     await savePublicCenterProfile(next, loadedCenterId || undefined);
@@ -950,8 +958,11 @@ export default function CenterSettingsPage() {
     kind: "cover" | "logo" | "photo",
     file: File,
   ) => {
+    if (!loadedCenterId) {
+      throw new Error("Le centre n’est pas encore chargé. Réessaie dans un instant.");
+    }
     return uploadCenterImage({
-      centerId: loadedCenterId || "local",
+      centerId: loadedCenterId,
       kind,
       file,
     });
@@ -1042,7 +1053,7 @@ export default function CenterSettingsPage() {
         coverPosition: defaultCoverPosition,
       }),
     );
-    void deleteCenterImage(previous, loadedCenterId || "local");
+    void deleteCenterImage(previous, loadedCenterId);
     try {
       await persistProfile(
         { coverPreview: "", coverPosition: defaultCoverPosition },
@@ -1062,7 +1073,7 @@ export default function CenterSettingsPage() {
     const previous = logoPreview;
     setLogoPreview("");
     mergeCenterSettings(currentPublicSettings({ logoPreview: "" }));
-    void deleteCenterImage(previous, loadedCenterId || "local");
+    void deleteCenterImage(previous, loadedCenterId);
     try {
       await persistProfile({ logoPreview: "" }, "Logo supprimé.");
     } catch (error) {
@@ -1079,7 +1090,7 @@ export default function CenterSettingsPage() {
     const nextPhotos = photoPreviews.filter((item) => item !== photo);
     setPhotoPreviews(nextPhotos);
     mergeCenterSettings(currentPublicSettings({ photoPreviews: nextPhotos }));
-    void deleteCenterImage(photo, loadedCenterId || "local");
+    void deleteCenterImage(photo, loadedCenterId);
     try {
       await persistProfile({ photoPreviews: nextPhotos }, "Photo du bandeau supprimée.");
     } catch (error) {
@@ -1092,8 +1103,11 @@ export default function CenterSettingsPage() {
     if (photoBusyId) return;
     setPhotoBusyId(serviceId);
     try {
+      if (!loadedCenterId) {
+        throw new Error("Le centre n’est pas encore chargé. Réessaie dans un instant.");
+      }
       const url = await uploadCenterImage({
-        centerId: loadedCenterId || "local",
+        centerId: loadedCenterId,
         kind: "service",
         file,
       });
@@ -1122,7 +1136,7 @@ export default function CenterSettingsPage() {
       item.id === serviceId ? { ...item, photo: "" } : item,
     );
     setServices(nextServices);
-    void deleteCenterImage(previous, loadedCenterId || "local");
+    void deleteCenterImage(previous, loadedCenterId);
     try {
       await persistProfile(
         { services: sortServicesByCategory(nextServices, categoryOptions) },
@@ -1663,29 +1677,29 @@ export default function CenterSettingsPage() {
               </div>
             </div>
             <div className="mt-5 grid gap-4 rounded-3xl border border-blue-100 bg-blue-50/60 p-4 md:grid-cols-3">
-              <label className={`flex items-center justify-center gap-2 rounded-xl border border-dashed border-cyan-300 bg-white px-4 py-3 text-sm font-medium text-cyan-700 transition hover:bg-cyan-50 ${mediaBusy ? "pointer-events-none opacity-60" : "cursor-pointer"}`}>
+              <label className={`flex items-center justify-center gap-2 rounded-xl border border-dashed border-cyan-300 bg-white px-4 py-3 text-sm font-medium text-cyan-700 transition hover:bg-cyan-50 ${mediaBusy || !loadedCenterId ? "pointer-events-none opacity-60" : "cursor-pointer"}`}>
                 <ImagePlus className="h-5 w-5" />
                 {mediaBusy ? "Import…" : "Importer la couverture"}
                 <input
                   type="file"
                   accept="image/*"
                   className="sr-only"
-                  disabled={mediaBusy}
+                  disabled={mediaBusy || !loadedCenterId}
                   onChange={uploadCover}
                 />
               </label>
-              <label className={`flex items-center justify-center gap-2 rounded-xl border border-dashed border-blue-300 bg-white px-4 py-3 text-sm font-medium text-blue-700 transition hover:bg-blue-50 ${mediaBusy ? "pointer-events-none opacity-60" : "cursor-pointer"}`}>
+              <label className={`flex items-center justify-center gap-2 rounded-xl border border-dashed border-blue-300 bg-white px-4 py-3 text-sm font-medium text-blue-700 transition hover:bg-blue-50 ${mediaBusy || !loadedCenterId ? "pointer-events-none opacity-60" : "cursor-pointer"}`}>
                 <ImagePlus className="h-5 w-5" />
                 {mediaBusy ? "Import…" : "Importer le logo"}
                 <input
                   type="file"
                   accept="image/*"
                   className="sr-only"
-                  disabled={mediaBusy}
+                  disabled={mediaBusy || !loadedCenterId}
                   onChange={uploadLogo}
                 />
               </label>
-              <label className={`flex items-center justify-center gap-2 rounded-xl border border-dashed border-violet-300 bg-white px-4 py-3 text-sm font-medium text-violet-700 transition hover:bg-violet-50 ${mediaBusy ? "pointer-events-none opacity-60" : "cursor-pointer"}`}>
+              <label className={`flex items-center justify-center gap-2 rounded-xl border border-dashed border-violet-300 bg-white px-4 py-3 text-sm font-medium text-violet-700 transition hover:bg-violet-50 ${mediaBusy || !loadedCenterId ? "pointer-events-none opacity-60" : "cursor-pointer"}`}>
                 <ImagePlus className="h-5 w-5" />
                 {mediaBusy ? "Import…" : "Importer les photos"}
                 <input
@@ -1693,7 +1707,7 @@ export default function CenterSettingsPage() {
                   accept="image/*"
                   multiple
                   className="sr-only"
-                  disabled={mediaBusy}
+                  disabled={mediaBusy || !loadedCenterId}
                   onChange={uploadPhotos}
                 />
               </label>
@@ -2235,7 +2249,7 @@ export default function CenterSettingsPage() {
                     <ServicePhotoPicker
                       src={service.photo}
                       name={service.name}
-                      disabled={photoBusyId === service.id}
+                      disabled={photoBusyId === service.id || !loadedCenterId}
                       onPick={(file) => void uploadServicePhoto(service.id, file)}
                       onRemove={() => void removeServicePhoto(service.id)}
                     />

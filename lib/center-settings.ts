@@ -6,6 +6,7 @@ import {
   persistableMediaUrl,
   mergePublicMedia,
   normalizeCoverPosition,
+  retainPublicMedia,
   type CoverPosition,
 } from "@/lib/center-media";
 import { createClient } from "@/lib/supabase";
@@ -593,7 +594,13 @@ export async function savePublicCenterProfile(
   const currentSettings = asRecord(data?.settings);
   const currentSlug = asString(data?.slug, context.centerSlug);
   const nextSlug = sanitizeCenterSlug(nextSettings.center?.slug ?? "", currentSlug);
-  const publicSettings = withoutDataUrls(nextSettings);
+  const publicSettings = retainPublicMedia(
+    withoutDataUrls(nextSettings),
+    nextSettings,
+    storedSettingsFromCenterRow({
+      settings: currentSettings,
+    } as CenterProfileRow),
+  );
 
   const payload: Record<string, unknown> = {
     name: nextSettings.center?.name?.trim() || context.centerName,
@@ -939,8 +946,26 @@ export function mergeCatalogByName<T extends { name?: string }>(
     const key = String(item.name || "").trim().toLowerCase();
     return Boolean(key) && !seen.has(key);
   });
+  const localByName = new Map(
+    local
+      .map((item) => [String(item.name || "").trim().toLowerCase(), item] as const)
+      .filter(([key]) => key),
+  );
+  const mergedRemote = remote.map((item) => {
+    const localItem = localByName.get(String(item.name || "").trim().toLowerCase());
+    if (!localItem) {
+      return item;
+    }
+    const remotePhoto = (item as { photo?: string }).photo;
+    const localPhoto = (localItem as { photo?: string }).photo;
+    return {
+      ...localItem,
+      ...item,
+      photo: remotePhoto || localPhoto,
+    };
+  });
 
-  return extras.length > 0 ? [...remote, ...extras] : remote;
+  return extras.length > 0 ? [...mergedRemote, ...extras] : mergedRemote;
 }
 
 function asStringArray(value: unknown): string[] | undefined {

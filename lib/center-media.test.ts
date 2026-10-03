@@ -6,6 +6,7 @@ import {
   normalizeCoverPosition,
   parseExternalReviewsCsv,
   persistableMediaUrl,
+  retainPublicMedia,
   servicePhotoByName,
 } from "./center-media.ts";
 
@@ -64,6 +65,55 @@ test("le cadrage de couverture reste entre 0 et 100", () => {
   assert.deepEqual(normalizeCoverPosition({ x: -20, y: 140 }), { x: 0, y: 100 });
   assert.equal(coverPositionCss({ x: 20, y: 80 }), "20% 80%");
   assert.equal(coverPositionCss(undefined), "50% 50%");
+});
+
+test("un enregistrement sans URL persistable ne gomme pas les photos déjà en ligne", () => {
+  const kept = retainPublicMedia(
+    {
+      coverPreview: "",
+      logoPreview: "",
+      photoPreviews: [],
+      services: [{ name: "Hydrafacial", photo: "" }],
+    },
+    {
+      coverPreview: `data:image/jpeg;base64,${"a".repeat(300000)}`,
+      logoPreview: `data:image/png;base64,${"b".repeat(300000)}`,
+      photoPreviews: [`data:image/jpeg;base64,${"c".repeat(300000)}`],
+      services: [
+        {
+          name: "Hydrafacial",
+          photo: `data:image/jpeg;base64,${"d".repeat(300000)}`,
+        },
+      ],
+    },
+    {
+      coverPreview: "https://cdn.example/cover.jpg",
+      logoPreview: "https://cdn.example/logo.png",
+      photoPreviews: ["https://cdn.example/p1.jpg"],
+      services: [{ name: "Hydrafacial", photo: "https://cdn.example/hydra.jpg" }],
+    },
+  );
+
+  assert.equal(kept.coverPreview, "https://cdn.example/cover.jpg");
+  assert.equal(kept.logoPreview, "https://cdn.example/logo.png");
+  assert.deepEqual(kept.photoPreviews, ["https://cdn.example/p1.jpg"]);
+  assert.equal(kept.services?.[0]?.photo, "https://cdn.example/hydra.jpg");
+});
+
+test("une suppression volontaire de photo reste vide", () => {
+  const cleared = retainPublicMedia(
+    { coverPreview: "", logoPreview: "", photoPreviews: [] },
+    { coverPreview: "", logoPreview: "", photoPreviews: [] },
+    {
+      coverPreview: "https://cdn.example/cover.jpg",
+      logoPreview: "https://cdn.example/logo.png",
+      photoPreviews: ["https://cdn.example/p1.jpg"],
+    },
+  );
+
+  assert.equal(cleared.coverPreview, "");
+  assert.equal(cleared.logoPreview, "");
+  assert.deepEqual(cleared.photoPreviews, []);
 });
 
 test("la photo d'une prestation se retrouve par son nom", () => {
