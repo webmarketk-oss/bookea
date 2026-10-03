@@ -29,6 +29,7 @@ export type CenterNotificationKind =
   | "appointment_cancelled"
   | "appointment_moved"
   | "message_reply"
+  | "client_message"
   | "new_review"
   | "confirm_tomorrow"
   | "recall_today";
@@ -603,6 +604,60 @@ function isRecentActivity(activity: LeadActivity) {
   return /aujourd/i.test(activity.date);
 }
 
+async function loadClientMessageNotifications(): Promise<CenterNotification[]> {
+  const supabase = createClient();
+  const context = await getActiveCenterContext(supabase);
+  const since = `${lookbackStart()}T00:00:00.000Z`;
+  const { data, error } = await supabase
+    .from("messages")
+    .select("id,body,created_at,sender_client_id")
+    .eq("center_id", context.centerId)
+    .eq("channel", "in_app")
+    .not("sender_client_id", "is", null)
+    .gte("created_at", since)
+    .order("created_at", { ascending: false })
+    .limit(20);
+
+  if (error || !data?.length) {
+    return [];
+  }
+
+  const clientIds = [
+    ...new Set(
+      data
+        .map((row) => String(row.sender_client_id || ""))
+        .filter(Boolean),
+    ),
+  ];
+  const names = new Map<string, string>();
+  if (clientIds.length > 0) {
+    const { data: clients } = await supabase
+      .from("clients")
+      .select("id,first_name,last_name")
+      .in("id", clientIds);
+    for (const client of clients || []) {
+      names.set(
+        String(client.id),
+        personLabel(client.first_name, client.last_name),
+      );
+    }
+  }
+
+  return data.map((row) => {
+    const name = names.get(String(row.sender_client_id || "")) || "Une cliente";
+    const body = String(row.body || "").replace(/\s+/g, " ").trim();
+    return {
+      id: `client-message-${row.id}`,
+      kind: "client_message" as const,
+      title: "Message cliente Bookea",
+      body: body ? `${name} : ${body}` : `${name} vous a écrit.`,
+      href: "/dashboard/seya-crm",
+      createdAt: String(row.created_at || new Date().toISOString()),
+      unread: true,
+    };
+  });
+}
+
 function reviewNotifications(reviews: CenterExternalReview[]) {
   return reviews
     .filter((review) => isRecentIso(review.date))
@@ -626,6 +681,7 @@ function sortNotifications(items: CenterNotification[]) {
     new_online_booking: 4,
     new_lead: 5,
     message_reply: 6,
+    client_message: 6,
     new_review: 7,
   };
 
@@ -696,12 +752,13 @@ export async function loadCenterNotifications(): Promise<CenterNotification[]> {
     return applyReadState(notificationsCache.items, state);
   }
 
-  const [leadsResult, appointmentsResult, inboxResult, profileResult] =
+  const [leadsResult, appointmentsResult, inboxResult, profileResult, messagesResult] =
     await Promise.allSettled([
       loadCrmLeads().then((result) => result.leads),
       loadNotificationAppointments(),
       loadSmsInbox(),
       loadPublicCenterProfile(),
+      loadClientMessageNotifications(),
     ]);
 
   if (
@@ -736,6 +793,7 @@ export async function loadCenterNotifications(): Promise<CenterNotification[]> {
     ...appointmentNotifications(appointments),
     ...leadNotifications(leads),
     ...replyNotifications(leads, inbox),
+    ...(messagesResult.status === "fulfilled" ? messagesResult.value : []),
     ...reviewNotifications(reviews),
   ]);
 

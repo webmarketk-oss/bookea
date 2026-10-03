@@ -134,7 +134,7 @@ export function ClientLoginForm() {
               required
               value={fullName}
               onChange={(event) => setFullName(event.target.value)}
-              placeholder="Julie Martin"
+              placeholder="Votre nom"
               disabled={loading}
               className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-slate-900 shadow-sm outline-none transition-colors placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 disabled:opacity-60"
             />
@@ -155,7 +155,7 @@ export function ClientLoginForm() {
             required
             value={email}
             onChange={(event) => setEmail(event.target.value)}
-            placeholder="julie@email.com"
+            placeholder="vous@email.com"
             disabled={loading}
             className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-slate-900 shadow-sm outline-none transition-colors placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 disabled:opacity-60"
           />

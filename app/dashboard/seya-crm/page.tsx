@@ -1,6 +1,7 @@
 "use client";
 
 import { Bot } from "lucide-react";
+import { NotificationsBell } from "@/components/layout/notifications-bell";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { cabins, practitioners } from "@/lib/agenda-data";
 import {
@@ -959,6 +960,8 @@ export default function SeyaCrmPage() {
           </p>
           <h1 className="mt-1 text-xl font-semibold tracking-tight">Seya</h1>
         </div>
+        <div className="flex items-center gap-3">
+        <NotificationsBell />
         <div className="flex rounded-2xl bg-white p-1 shadow-sm ring-1 ring-slate-200">
           <button
             type="button"
@@ -978,6 +981,7 @@ export default function SeyaCrmPage() {
           >
             Réglages
           </button>
+        </div>
         </div>
       </section>
 

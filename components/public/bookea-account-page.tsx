@@ -1,27 +1,27 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   CalendarCheck,
   CalendarDays,
-  ChevronRight,
   Gift,
   History,
   MessageCircle,
   Send,
-  Sparkles,
-  Star,
 } from "lucide-react";
 import type { ComponentType } from "react";
+import { useRouter } from "next/navigation";
+
+import {
+  emptyClientAccount,
+  loadClientAccount,
+  sendClientMessage,
+  type ClientAccount,
+  type ClientAppointmentCard,
+} from "@/lib/client-account";
+import { createClient } from "@/lib/supabase";
 
 type AccountTab = "upcoming" | "loyalty" | "past" | "messages";
-type ClientMessage = {
-  id: string;
-  side: "center" | "client";
-  author: string;
-  text: string;
-  time: string;
-};
 
 const tabs: Array<{
   id: AccountTab;
@@ -38,7 +38,7 @@ const tabs: Array<{
   {
     id: "loyalty",
     label: "Carte fidélité",
-    description: "Points, avantages et notes partagées.",
+    description: "Points et notes partagées par vos instituts.",
     icon: Gift,
   },
   {
@@ -50,161 +50,199 @@ const tabs: Array<{
   {
     id: "messages",
     label: "Messagerie Bookea",
-    description: "Chat privé avec les instituts.",
+    description: "Écrivez à l’institut de votre rendez-vous.",
     icon: MessageCircle,
   },
 ];
 
-const upcomingAppointments = [
-  {
-    id: "rdv-1",
-    center: "JFG Clinique Clermont-Ferrand",
-    service: "Hydrafacial",
-    date: "Samedi 14:30",
-    detail: "Cabine 3 · Camille",
-    status: "Confirmé",
-    color: "emerald",
-  },
-  {
-    id: "rdv-2",
-    center: "Institut Nova",
-    service: "Cryolipolyse",
-    date: "Mardi 10:00",
-    detail: "Cabine 2 · Aurélie",
-    status: "À confirmer",
-    color: "amber",
-  },
-];
+function statusTone(status: string) {
+  if (status === "Confirmé") {
+    return "bg-emerald-50 text-emerald-700";
+  }
+  if (status === "À confirmer") {
+    return "bg-amber-50 text-amber-800";
+  }
+  return "bg-slate-100 text-slate-600";
+}
 
-const pastAppointments = [
-  {
-    id: "past-1",
-    center: "JFG Clinique Clermont-Ferrand",
-    service: "Épilation laser",
-    date: "25 juillet 2026",
-    reward: "+10 points",
-  },
-  {
-    id: "past-2",
-    center: "Studio Belle Peau",
-    service: "Soin du visage",
-    date: "12 juillet 2026",
-    reward: "+8 points",
-  },
-  {
-    id: "past-3",
-    center: "Institut Nova",
-    service: "Bilan minceur",
-    date: "28 juin 2026",
-    reward: "+5 points",
-  },
-];
-
-const initialMessages: ClientMessage[] = [
-  {
-    id: "msg-1",
-    side: "center",
-    author: "JFG Clinique",
-    text: "Bonjour Julie, votre rendez-vous Hydrafacial est bien confirmé samedi à 14:30.",
-    time: "10:12",
-  },
-  {
-    id: "msg-2",
-    side: "client",
-    author: "Vous",
-    text: "Merci, je confirme ma présence.",
-    time: "10:18",
-  },
-];
-
-const sharedNotes = [
-  "Prévoir une protection solaire après le soin visage.",
-  "Carte fidélité active : prochaine récompense à 10 passages.",
-];
+function messageTime(iso?: string) {
+  if (!iso) {
+    return "";
+  }
+  const stamp = Date.parse(iso);
+  if (!Number.isFinite(stamp)) {
+    return "";
+  }
+  return new Intl.DateTimeFormat("fr-FR", {
+    day: "numeric",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(stamp));
+}
 
 export function BookeaAccountPage() {
+  const router = useRouter();
   const [activeTab, setActiveTab] = useState<AccountTab>("upcoming");
-  const [messages, setMessages] = useState(initialMessages);
+  const [account, setAccount] = useState<ClientAccount>(emptyClientAccount);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [activeCenterId, setActiveCenterId] = useState("");
   const [messageDraft, setMessageDraft] = useState("");
+  const [sending, setSending] = useState(false);
 
   const active = useMemo(
     () => tabs.find((tab) => tab.id === activeTab) ?? tabs[0],
-    [activeTab]
+    [activeTab],
   );
 
-  function sendMessage() {
-    const text = messageDraft.trim();
-    if (!text) return;
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      try {
+        const next = await loadClientAccount();
+        if (cancelled) {
+          return;
+        }
+        if (!next) {
+          router.replace("/client/login");
+          return;
+        }
+        setAccount(next);
+        setActiveCenterId((current) => current || next.centers[0]?.id || "");
+      } catch {
+        if (!cancelled) {
+          setError("Impossible de charger votre espace pour le moment.");
+        }
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      }
+    }
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, [router]);
 
-    setMessages((current) => [
-      ...current,
-      {
-        id: `msg-${Date.now()}`,
-        side: "client",
-        author: "Vous",
-        text,
-        time: "Maintenant",
-      },
-    ]);
-    setMessageDraft("");
+  const thread =
+    account.threads.find((item) => item.centerId === activeCenterId) || null;
+  const activeCenter =
+    account.centers.find((item) => item.id === activeCenterId) ||
+    account.centers[0] ||
+    null;
+
+  async function sendMessage() {
+    const text = messageDraft.trim();
+    if (!text || !activeCenter || sending) {
+      return;
+    }
+    setSending(true);
+    setError("");
+    try {
+      const result = await sendClientMessage(activeCenter.id, text);
+      setAccount((current) => {
+        const existing = current.threads.find((item) => item.centerId === activeCenter.id);
+        const nextThread = existing
+          ? {
+              ...existing,
+              messages: [...existing.messages, result.message],
+            }
+          : {
+              id: `local-${activeCenter.id}`,
+              centerId: activeCenter.id,
+              centerName: activeCenter.name,
+              messages: [result.message],
+            };
+        return {
+          ...current,
+          threads: existing
+            ? current.threads.map((item) =>
+                item.centerId === activeCenter.id ? nextThread : item,
+              )
+            : [...current.threads, nextThread],
+        };
+      });
+      setMessageDraft("");
+    } catch {
+      setError("Le message n’a pas pu partir. Réessayez.");
+    } finally {
+      setSending(false);
+    }
+  }
+
+  function openContact(appointment: ClientAppointmentCard) {
+    setActiveCenterId(appointment.centerId);
+    setActiveTab("messages");
+  }
+
+  async function signOut() {
+    const supabase = createClient();
+    await supabase.auth.signOut();
+    router.replace("/client/login");
   }
 
   return (
-    <main className="min-h-screen bg-[#eef4fb] text-slate-950">
-      <header className="border-b border-slate-200 bg-white/90 backdrop-blur">
-        <div className="mx-auto flex max-w-[1500px] items-center justify-between gap-4 px-4 py-4 sm:px-6 lg:px-10">
+    <main className="min-h-screen bg-[#eef3f9] text-slate-950">
+      <header className="border-b border-slate-200 bg-white">
+        <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-4 py-4 sm:px-6">
           <a href="/client" className="flex items-center gap-3">
-            <div className="grid h-12 w-12 place-items-center rounded-2xl bg-gradient-to-br from-violet-600 via-blue-600 to-cyan-400 text-2xl font-black text-white shadow-lg shadow-blue-900/10">
+            <div className="grid h-10 w-10 place-items-center rounded-2xl bg-violet-600 text-sm font-semibold text-white">
               B
             </div>
             <div>
-              <p className="text-lg font-black text-blue-600">Bookea</p>
-              <p className="text-xs font-bold text-slate-500">
-                Mon espace cliente
-              </p>
+              <p className="text-sm font-semibold text-slate-950">Bookea</p>
+              <p className="text-xs font-medium text-slate-500">Espace client</p>
             </div>
           </a>
-
-          <nav className="flex items-center gap-3 text-sm font-black text-slate-600">
-            <a href="/client" className="rounded-full px-4 py-2 hover:bg-blue-50 hover:text-blue-700">
+          <nav className="flex items-center gap-2 text-sm font-semibold">
+            <a
+              href="/client"
+              className="rounded-xl px-3 py-2 text-slate-600 hover:bg-slate-50"
+            >
               Rechercher
             </a>
-            <a href="/client/login" className="rounded-full bg-slate-950 px-4 py-2 text-white hover:bg-slate-800">
-              Connexion client
-            </a>
+            <button
+              type="button"
+              onClick={() => void signOut()}
+              className="rounded-xl bg-slate-950 px-3 py-2 text-white"
+            >
+              Déconnexion
+            </button>
           </nav>
         </div>
       </header>
 
-      <div className="mx-auto grid max-w-[1500px] gap-5 px-4 py-6 sm:px-6 lg:grid-cols-[300px_1fr] lg:px-10 lg:py-8">
-        <aside className="rounded-[28px] border border-slate-200 bg-white p-4 shadow-sm lg:sticky lg:top-6 lg:self-start">
-          <div className="rounded-[24px] bg-slate-950 p-5 text-white">
-            <p className="text-xs font-black uppercase text-cyan-200">
+      <div className="mx-auto grid max-w-6xl gap-5 px-4 py-6 sm:px-6 lg:grid-cols-[260px_1fr]">
+        <aside className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm lg:sticky lg:top-6 lg:self-start">
+          <div className="rounded-2xl bg-slate-950 p-4 text-white">
+            <p className="text-xs font-medium uppercase tracking-wide text-slate-300">
               Mon compte Bookea
             </p>
-            <h1 className="mt-2 text-2xl font-black">Julie Martin</h1>
-            <p className="mt-1 text-sm font-bold text-slate-300">
-              julie@email.com
+            <h1 className="mt-2 text-lg font-semibold">
+              {loading ? "…" : account.displayName}
+            </h1>
+            <p className="mt-1 text-sm font-medium text-slate-300">
+              {account.email || " "}
             </p>
           </div>
-
           <div className="mt-4 flex gap-2 overflow-x-auto pb-1 lg:block lg:space-y-2 lg:overflow-visible">
             {tabs.map((tab) => {
               const Icon = tab.icon;
               const selected = activeTab === tab.id;
-
               return (
                 <button
                   key={tab.id}
                   type="button"
                   onClick={() => setActiveTab(tab.id)}
-                  className={`flex min-w-max items-center gap-3 rounded-2xl px-4 py-3 text-left font-black transition lg:w-full ${
+                  className={`flex min-w-max items-center gap-3 rounded-2xl px-4 py-3 text-left text-sm font-semibold lg:w-full ${
                     selected
-                      ? "bg-blue-600 text-white shadow-md shadow-blue-900/10"
-                      : "bg-slate-50 text-slate-600 hover:bg-blue-50 hover:text-blue-700"
+                      ? "bg-slate-950 text-white"
+                      : "bg-slate-50 text-slate-600 hover:bg-slate-100"
                   }`}
                 >
-                  <Icon className="h-5 w-5" />
+                  <Icon className="h-4 w-4" />
                   <span>{tab.label}</span>
                 </button>
               );
@@ -213,258 +251,247 @@ export function BookeaAccountPage() {
         </aside>
 
         <section className="space-y-5">
-          <div className="rounded-[32px] border border-slate-200 bg-white p-5 shadow-sm sm:p-7">
-            <div className="flex flex-wrap items-start justify-between gap-4">
-              <div>
-                <p className="text-sm font-black uppercase text-violet-700">
-                  {active.label}
-                </p>
-                <h2 className="mt-2 text-3xl font-black tracking-tight text-slate-950 sm:text-4xl">
-                  Mon compte Bookea
-                </h2>
-                <p className="mt-2 max-w-2xl text-base font-semibold leading-7 text-slate-500">
-                  {active.description}
-                </p>
-              </div>
-              <div className="rounded-full bg-emerald-50 px-4 py-2 text-sm font-black text-emerald-700">
-                Compte actif
-              </div>
-            </div>
+          <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+            <p className="text-xs font-medium uppercase tracking-wide text-violet-600">
+              {active.label}
+            </p>
+            <h2 className="mt-1 text-xl font-semibold tracking-tight">
+              {active.label}
+            </h2>
+            <p className="mt-1 text-sm font-medium text-slate-500">
+              {active.description}
+            </p>
           </div>
 
-          {activeTab === "upcoming" && (
-            <div className="grid gap-5 xl:grid-cols-[1.15fr_0.85fr]">
-              <section className="rounded-[32px] border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <p className="text-xs font-black uppercase text-slate-400">
-                      Prochains soins
-                    </p>
-                    <h3 className="text-2xl font-black">Rendez-vous à venir</h3>
-                  </div>
-                  <CalendarCheck className="h-7 w-7 text-blue-600" />
-                </div>
+          {error ? (
+            <p className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-medium text-rose-800">
+              {error}
+            </p>
+          ) : null}
 
-                <div className="mt-5 space-y-3">
-                  {upcomingAppointments.map((appointment) => (
+          {loading ? (
+            <p className="rounded-3xl border border-slate-200 bg-white px-5 py-8 text-sm font-medium text-slate-500">
+              Chargement de votre espace…
+            </p>
+          ) : null}
+
+          {!loading && activeTab === "upcoming" ? (
+            <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+              <div className="flex items-center justify-between gap-3">
+                <h3 className="text-base font-semibold">Rendez-vous à venir</h3>
+                <CalendarCheck className="h-5 w-5 text-slate-400" />
+              </div>
+              {account.upcoming.length === 0 ? (
+                <p className="mt-6 text-sm font-medium text-slate-500">
+                  Aucun rendez-vous à venir. Quand vous réservez un soin, il
+                  apparaîtra ici.
+                </p>
+              ) : (
+                <div className="mt-4 space-y-3">
+                  {account.upcoming.map((appointment) => (
                     <article
                       key={appointment.id}
-                      className="rounded-[26px] border border-slate-200 bg-slate-50 p-4"
+                      className="rounded-2xl border border-slate-200 bg-slate-50 p-4"
                     >
                       <div className="flex flex-wrap items-start justify-between gap-3">
                         <div>
-                          <h4 className="text-xl font-black text-slate-950">
+                          <h4 className="text-base font-semibold text-slate-950">
                             {appointment.service}
                           </h4>
-                          <p className="mt-1 font-bold text-slate-500">
+                          <p className="mt-1 text-sm font-medium text-slate-500">
                             {appointment.center}
                           </p>
                         </div>
                         <span
-                          className={`rounded-full px-3 py-1 text-sm font-black ${
-                            appointment.color === "emerald"
-                              ? "bg-emerald-50 text-emerald-700"
-                              : "bg-amber-50 text-amber-700"
-                          }`}
+                          className={`rounded-full px-2.5 py-1 text-xs font-semibold ${statusTone(appointment.status)}`}
                         >
                           {appointment.status}
                         </span>
                       </div>
-
-                      <div className="mt-4 grid gap-3 rounded-3xl bg-white p-4 sm:grid-cols-2">
+                      <div className="mt-3 grid gap-3 rounded-2xl bg-white p-3 sm:grid-cols-2">
                         <div>
-                          <p className="text-xs font-black uppercase text-slate-400">
+                          <p className="text-xs font-medium text-slate-400">
                             Créneau
                           </p>
-                          <p className="mt-1 font-black text-slate-900">
+                          <p className="mt-1 text-sm font-semibold">
                             {appointment.date}
                           </p>
                         </div>
                         <div>
-                          <p className="text-xs font-black uppercase text-slate-400">
+                          <p className="text-xs font-medium text-slate-400">
                             Détail
                           </p>
-                          <p className="mt-1 font-black text-slate-900">
-                            {appointment.detail}
+                          <p className="mt-1 text-sm font-semibold">
+                            {appointment.detail || "—"}
                           </p>
                         </div>
                       </div>
-
-                      <div className="mt-4 flex flex-wrap gap-2">
-                        <button className="rounded-2xl border border-slate-200 bg-white px-4 py-3 font-black text-slate-700 hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700">
-                          Modifier
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setActiveTab("messages");
-                            setMessageDraft(
-                              `Bonjour, j'ai une question sur mon rendez-vous ${appointment.service} chez ${appointment.center}.`
-                            );
-                          }}
-                          className="rounded-2xl bg-blue-600 px-4 py-3 font-black text-white hover:bg-blue-700"
-                        >
-                          Contacter
-                        </button>
-                      </div>
+                      <button
+                        type="button"
+                        onClick={() => openContact(appointment)}
+                        className="mt-3 rounded-xl bg-slate-950 px-4 py-2 text-sm font-semibold text-white"
+                      >
+                        Contacter {appointment.center}
+                      </button>
                     </article>
                   ))}
                 </div>
-              </section>
+              )}
+            </section>
+          ) : null}
 
-              <section className="rounded-[32px] border border-violet-100 bg-violet-50 p-5 shadow-sm sm:p-6">
-                <Sparkles className="h-8 w-8 text-violet-700" />
-                <h3 className="mt-4 text-2xl font-black text-violet-950">
-                  Seya suit vos rendez-vous
-                </h3>
-                <p className="mt-3 text-base font-semibold leading-7 text-violet-800">
-                  Vos rappels, messages des instituts, points fidélité et
-                  rendez-vous passés restent regroupés dans cet espace.
+          {!loading && activeTab === "loyalty" ? (
+            <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+              <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
+                Carte fidélité
+              </p>
+              <h3 className="mt-1 text-2xl font-semibold">
+                {account.loyalty.points} point
+                {account.loyalty.points === 1 ? "" : "s"}
+              </h3>
+              {account.loyalty.points === 0 ? (
+                <p className="mt-3 text-sm font-medium text-slate-500">
+                  Aucun point pour le moment. Ils s’ajouteront après vos
+                  passages en institut.
                 </p>
-              </section>
-            </div>
-          )}
-
-          {activeTab === "loyalty" && (
-            <section className="rounded-[32px] border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
-              <div className="overflow-hidden rounded-[28px] bg-gradient-to-br from-violet-600 via-blue-600 to-cyan-400 p-5 text-white">
-                <div className="flex flex-wrap items-start justify-between gap-4">
-                  <div>
-                    <p className="text-sm font-black uppercase text-cyan-100">
-                      Carte fidélité
-                    </p>
-                    <h3 className="mt-2 text-3xl font-black">72 points</h3>
-                    <p className="mt-1 font-bold text-blue-50">
-                      Plus que 28 points avant votre prochaine récompense.
-                    </p>
+              ) : (
+                <p className="mt-2 text-sm font-medium text-slate-500">
+                  Cumul réel de vos instituts Bookea.
+                </p>
+              )}
+              <div className="mt-5">
+                <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
+                  Notes partagées
+                </p>
+                {account.loyalty.notes.length === 0 ? (
+                  <p className="mt-2 text-sm font-medium text-slate-500">
+                    Aucune note partagée par un institut.
+                  </p>
+                ) : (
+                  <div className="mt-2 space-y-2">
+                    {account.loyalty.notes.map((note) => (
+                      <p
+                        key={note}
+                        className="rounded-2xl bg-slate-50 px-4 py-3 text-sm font-medium text-slate-700"
+                      >
+                        {note}
+                      </p>
+                    ))}
                   </div>
-                  <Gift className="h-10 w-10" />
-                </div>
-
-                <div className="mt-6 grid grid-cols-5 gap-2 sm:grid-cols-10">
-                  {Array.from({ length: 10 }).map((_, index) => (
-                    <div
-                      key={index}
-                      className={`grid aspect-square place-items-center rounded-2xl border text-sm font-black ${
-                        index < 7
-                          ? "border-white bg-white text-blue-700"
-                          : "border-white/50 bg-white/10 text-white"
-                      }`}
-                    >
-                      <Star className="h-4 w-4" />
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              <div className="mt-5 rounded-[26px] border border-slate-200 bg-slate-50 p-4">
-                <p className="text-xs font-black uppercase text-slate-400">
-                  Notes partagées par les instituts
-                </p>
-                <div className="mt-3 space-y-2">
-                  {sharedNotes.map((note) => (
-                    <p key={note} className="rounded-2xl bg-white px-4 py-3 font-bold text-slate-700">
-                      {note}
-                    </p>
-                  ))}
-                </div>
+                )}
               </div>
             </section>
-          )}
+          ) : null}
 
-          {activeTab === "past" && (
-            <section className="rounded-[32px] border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
-              <h3 className="text-2xl font-black">RDV passés</h3>
-              <div className="mt-5 divide-y divide-slate-100 overflow-hidden rounded-[26px] border border-slate-200">
-                {pastAppointments.map((appointment) => (
-                  <div
-                    key={appointment.id}
-                    className="grid gap-3 bg-white p-4 sm:grid-cols-[1fr_auto] sm:items-center"
-                  >
-                    <div>
-                      <h4 className="text-lg font-black text-slate-950">
-                        {appointment.service}
-                      </h4>
-                      <p className="mt-1 font-bold text-slate-500">
+          {!loading && activeTab === "past" ? (
+            <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+              <h3 className="text-base font-semibold">RDV passés</h3>
+              {account.past.length === 0 ? (
+                <p className="mt-6 text-sm font-medium text-slate-500">
+                  Aucun rendez-vous passé pour l’instant.
+                </p>
+              ) : (
+                <div className="mt-4 divide-y divide-slate-100 overflow-hidden rounded-2xl border border-slate-200">
+                  {account.past.map((appointment) => (
+                    <div key={appointment.id} className="bg-white p-4">
+                      <h4 className="text-sm font-semibold">{appointment.service}</h4>
+                      <p className="mt-1 text-sm font-medium text-slate-500">
                         {appointment.center} · {appointment.date}
                       </p>
                     </div>
-                    <span className="rounded-full bg-emerald-50 px-3 py-2 text-sm font-black text-emerald-700">
-                      {appointment.reward}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </section>
-          )}
-
-          {activeTab === "messages" && (
-            <section className="rounded-[32px] border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <p className="text-xs font-black uppercase text-blue-600">
-                    Messagerie in-app
-                  </p>
-                  <h3 className="text-2xl font-black">Messages Bookea</h3>
+                  ))}
                 </div>
-                <MessageCircle className="h-7 w-7 text-blue-600" />
-              </div>
-
-              <div className="mt-5 max-h-[430px] space-y-3 overflow-y-auto rounded-[28px] bg-slate-50 p-4">
-                {messages.map((message) => (
-                  <div
-                    key={message.id}
-                    className={`max-w-[88%] rounded-3xl px-4 py-3 shadow-sm ${
-                      message.side === "client"
-                        ? "ml-auto bg-blue-600 text-white"
-                        : "bg-white text-slate-800"
-                    }`}
-                  >
-                    <p
-                      className={`text-xs font-black uppercase ${
-                        message.side === "client" ? "text-blue-100" : "text-slate-400"
-                      }`}
-                    >
-                      {message.author} · {message.time}
-                    </p>
-                    <p className="mt-1 text-sm font-bold leading-6">{message.text}</p>
-                  </div>
-                ))}
-              </div>
-
-              <div className="mt-4 flex gap-2">
-                <input
-                  value={messageDraft}
-                  onChange={(event) => setMessageDraft(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter") sendMessage();
-                  }}
-                  placeholder="Écrire à l'institut..."
-                  className="min-h-12 flex-1 rounded-2xl border border-slate-200 px-4 font-bold outline-none focus:border-blue-500"
-                />
-                <button
-                  type="button"
-                  onClick={sendMessage}
-                  className="inline-flex items-center gap-2 rounded-2xl bg-slate-950 px-5 font-black text-white hover:bg-slate-800"
-                >
-                  Envoyer
-                  <Send className="h-4 w-4" />
-                </button>
-              </div>
-              <p className="mt-3 rounded-2xl bg-blue-50 px-4 py-3 text-xs font-bold leading-5 text-blue-700">
-                En version connectée, l'institut reçoit une notification email
-                quand un nouveau message arrive.
-              </p>
+              )}
             </section>
-          )}
+          ) : null}
 
-          <a
-            href="/client"
-            className="inline-flex items-center gap-2 rounded-full bg-white px-5 py-3 font-black text-slate-700 shadow-sm ring-1 ring-slate-200 hover:text-blue-700"
-          >
-            Retour à la recherche
-            <ChevronRight className="h-4 w-4" />
-          </a>
+          {!loading && activeTab === "messages" ? (
+            <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+              <h3 className="text-base font-semibold">Messages</h3>
+              {account.centers.length === 0 ? (
+                <p className="mt-6 text-sm font-medium text-slate-500">
+                  Vous pourrez écrire à un institut dès que vous aurez un
+                  rendez-vous Bookea avec lui.
+                </p>
+              ) : (
+                <>
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    {account.centers.map((center) => (
+                      <button
+                        key={center.id}
+                        type="button"
+                        onClick={() => setActiveCenterId(center.id)}
+                        className={`rounded-full px-3 py-1.5 text-sm font-semibold ${
+                          activeCenter?.id === center.id
+                            ? "bg-slate-950 text-white"
+                            : "bg-slate-100 text-slate-600"
+                        }`}
+                      >
+                        {center.name}
+                      </button>
+                    ))}
+                  </div>
+                  <p className="mt-3 text-sm font-medium text-slate-500">
+                    Conversation avec {activeCenter?.name}
+                  </p>
+                  <div className="mt-4 max-h-[420px] space-y-3 overflow-y-auto rounded-2xl bg-slate-50 p-4">
+                    {(thread?.messages || []).length === 0 ? (
+                      <p className="text-sm font-medium text-slate-500">
+                        Aucun message. Écrivez au centre pour une question sur
+                        votre rendez-vous.
+                      </p>
+                    ) : (
+                      (thread?.messages || []).map((message) => (
+                        <div
+                          key={message.id}
+                          className={`max-w-[88%] rounded-2xl px-4 py-3 text-sm ${
+                            message.side === "client"
+                              ? "ml-auto bg-slate-950 text-white"
+                              : "bg-white text-slate-800"
+                          }`}
+                        >
+                          <p
+                            className={`text-[11px] font-medium ${
+                              message.side === "client"
+                                ? "text-slate-300"
+                                : "text-slate-400"
+                            }`}
+                          >
+                            {message.author}
+                            {message.at ? ` · ${messageTime(message.at)}` : ""}
+                          </p>
+                          <p className="mt-1 font-medium leading-6">{message.text}</p>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                  <div className="mt-4 flex gap-2">
+                    <input
+                      value={messageDraft}
+                      onChange={(event) => setMessageDraft(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") {
+                          event.preventDefault();
+                          void sendMessage();
+                        }
+                      }}
+                      placeholder={`Écrire à ${activeCenter?.name || "l’institut"}…`}
+                      className="h-11 min-w-0 flex-1 rounded-xl border border-slate-200 px-3 text-sm font-medium outline-none focus:border-violet-500"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => void sendMessage()}
+                      disabled={sending || !messageDraft.trim()}
+                      className="inline-flex items-center gap-2 rounded-xl bg-slate-950 px-4 text-sm font-semibold text-white disabled:opacity-50"
+                    >
+                      Envoyer
+                      <Send className="h-4 w-4" />
+                    </button>
+                  </div>
+                </>
+              )}
+            </section>
+          ) : null}
         </section>
       </div>
     </main>
