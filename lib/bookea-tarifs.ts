@@ -11,27 +11,17 @@ export function brevoSmsCost(quantity: number) {
   return Number((quantity * brevoUnitForQuantity(quantity)).toFixed(2));
 }
 
+export const WHATSAPP_PACK_POINTS = [
+  "Relance",
+  "Qualification",
+  "Reprise de RDV",
+] as const;
+
 export const whatsappLeadPacks = [
-  {
-    leads: 100,
-    price: 79,
-    detail: "Relance, qualification et reprise de RDV",
-  },
-  {
-    leads: 200,
-    price: 159,
-    detail: "Relance, qualification et reprise de RDV",
-  },
-  {
-    leads: 300,
-    price: 229,
-    detail: "Volume centre, suivi Seya inclus",
-  },
-  {
-    leads: 500,
-    price: 389,
-    detail: "Le plus complet pour un flux de leads",
-  },
+  { leads: 100, price: 79 },
+  { leads: 200, price: 159 },
+  { leads: 300, price: 229 },
+  { leads: 500, price: 389 },
 ] as const;
 
 export function formatEuro(value: number, digits = 2) {

@@ -1,12 +1,13 @@
 "use client";
 
-import { Loader2 } from "lucide-react";
+import { Check, Loader2 } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { PriceCard } from "@/components/tarifs/price-card";
 import {
   formatEuro,
   smsPacks,
+  WHATSAPP_PACK_POINTS,
   whatsappLeadPacks,
 } from "@/lib/bookea-tarifs";
 import {
@@ -17,6 +18,22 @@ import {
 import { seyaRemainingConversations } from "@/lib/seya-quota";
 
 type Notice = { type: "success" | "error"; message: string };
+
+function FeatureTicks({ items }: { items: readonly string[] }) {
+  return (
+    <ul className="mt-4 grid gap-2.5 text-sm font-medium text-slate-600">
+      {items.map((point) => (
+        <li key={point} className="flex items-start gap-2.5">
+          <Check
+            className="mt-0.5 h-4 w-4 shrink-0 text-violet-600"
+            strokeWidth={2.5}
+          />
+          <span>{point}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
 
 function SubscribeButton({
   label,
@@ -117,9 +134,9 @@ export function WhatsappPacks() {
             key={pack.leads}
             title={`${pack.leads} leads`}
             price={`${pack.price} €`}
-            detail={pack.detail}
             highlight={pack.leads === 200}
           >
+            <FeatureTicks items={WHATSAPP_PACK_POINTS} />
             <SubscribeButton
               label="Souscrire"
               busy={busyLeads === pack.leads}
