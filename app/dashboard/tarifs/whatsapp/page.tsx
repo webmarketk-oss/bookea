@@ -12,14 +12,14 @@ export default function TarifWhatsappPage() {
         </p>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-3">
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         {whatsappLeadPacks.map((pack) => (
           <PriceCard
             key={pack.leads}
             title={`${pack.leads} leads`}
             price={`${pack.price} €`}
             detail={pack.detail}
-            highlight={pack.leads === 300}
+            highlight={pack.leads === 200}
           />
         ))}
       </div>

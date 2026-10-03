@@ -13,8 +13,13 @@ export function brevoSmsCost(quantity: number) {
 
 export const whatsappLeadPacks = [
   {
-    leads: 200,
+    leads: 100,
     price: 79,
+    detail: "Relance, qualification et reprise de RDV",
+  },
+  {
+    leads: 200,
+    price: 159,
     detail: "Relance, qualification et reprise de RDV",
   },
   {
