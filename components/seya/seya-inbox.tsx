@@ -16,24 +16,11 @@ import type { Lead } from "@/types/lead";
 const tagStyles: Record<SeyaInboxTag, string> = {
   court: "bg-sky-100 text-sky-800",
   chaud: "bg-orange-100 text-orange-800",
+  qualifie: "bg-emerald-100 text-emerald-800",
   humain: "bg-amber-200 text-amber-950",
   rdv: "bg-violet-100 text-violet-800",
   sans_reponse: "bg-slate-200 text-slate-600",
   ferme: "bg-red-600 text-white",
-};
-
-const statusStyles: Record<SeyaConversation["status"], string> = {
-  "À envoyer": "bg-amber-100 text-amber-800",
-  "En cours": "bg-blue-100 text-blue-700",
-  Qualifié: "bg-violet-100 text-violet-700",
-  "RDV proposé": "bg-cyan-100 text-cyan-800",
-  "RDV pris": "bg-violet-100 text-violet-700",
-  "RDV confirmé": "bg-violet-500 text-white",
-  Chaud: "bg-orange-100 text-orange-800",
-  "À recontacter": "bg-amber-200 text-amber-900",
-  "Revue santé": "bg-amber-300 text-amber-950",
-  "Pas intéressé": "bg-red-600 text-white",
-  Terminé: "bg-slate-100 text-slate-600",
 };
 
 type FilterId = "toutes" | "en_cours" | "agir" | "attente" | "fermees";
@@ -177,10 +164,21 @@ export function SeyaInbox({
     const needle = query.trim().toLowerCase();
     return inbox.filter((conversation) => {
       const tag = inboxTag(conversation);
-      if (filter === "en_cours" && tag !== "court" && tag !== "chaud") {
+      if (
+        filter === "en_cours" &&
+        tag !== "court" &&
+        tag !== "chaud" &&
+        tag !== "qualifie"
+      ) {
         return false;
       }
-      if (filter === "agir" && tag !== "court" && tag !== "humain" && tag !== "chaud") {
+      if (
+        filter === "agir" &&
+        tag !== "court" &&
+        tag !== "humain" &&
+        tag !== "chaud" &&
+        tag !== "qualifie"
+      ) {
         return false;
       }
       if (filter === "attente" && tag !== "sans_reponse") {
@@ -285,9 +283,9 @@ export function SeyaInbox({
                         selected.phone}
                     </h2>
                     <span
-                      className={`inline-flex rounded-full px-2 py-1 text-[11px] font-semibold ${statusStyles[selected.status]}`}
+                      className={`inline-flex rounded-full px-2 py-1 text-[11px] font-semibold ${tagStyles[inboxTag(selected)]}`}
                     >
-                      {selected.status}
+                      {inboxTagLabel(inboxTag(selected))}
                     </span>
                   </div>
                   <p className="mt-1 text-sm font-medium text-slate-500">

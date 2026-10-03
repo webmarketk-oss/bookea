@@ -28,6 +28,69 @@ test("un fil avec réponse reste En cours, pas Sans réponse", () => {
   assert.equal(isOngoingSeyaThread(live), true);
 });
 
+test("un refus ferme la conversation même si le statut dit Qualifié ou RDV", () => {
+  const declined = conversation({
+    id: "declined",
+    status: "Qualifié",
+    messages: [
+      { author: "seya", text: "Bonjour, je suis Seya.", at: "2026-10-03T09:00:00.000Z" },
+      {
+        author: "lead",
+        text: "Désolé je ne donne pas suite cordialement",
+        at: "2026-10-03T10:00:00.000Z",
+      },
+      {
+        author: "seya",
+        text: "D’accord, je comprends. Si vous changez d’avis, n’hésitez pas.",
+        at: "2026-10-03T10:02:00.000Z",
+      },
+    ],
+  });
+  const staleRdv = conversation({
+    id: "stale-rdv",
+    status: "RDV pris",
+    bookedSlot: { label: "Jeudi 15h" },
+    messages: [
+      { author: "lead", text: "Je ne suis pas intéressée", at: "2026-10-03T11:00:00.000Z" },
+    ],
+  });
+
+  assert.equal(inboxTag(declined), "ferme");
+  assert.equal(inboxTag(staleRdv), "ferme");
+  assert.equal(isOngoingSeyaThread(declined), false);
+});
+
+test("Qualifié, chaud et vrai RDV gardent leur pastille", () => {
+  assert.equal(
+    inboxTag(
+      conversation({
+        status: "Qualifié",
+        messages: [{ author: "lead", text: "Le visage", at: "2026-10-03T09:00:00.000Z" }],
+      }),
+    ),
+    "qualifie",
+  );
+  assert.equal(
+    inboxTag(
+      conversation({
+        status: "Chaud",
+        messages: [{ author: "lead", text: "Oui je veux un RDV", at: "2026-10-03T09:00:00.000Z" }],
+      }),
+    ),
+    "chaud",
+  );
+  assert.equal(
+    inboxTag(
+      conversation({
+        status: "RDV confirmé",
+        bookedSlot: { label: "Vendredi 10h" },
+        messages: [{ author: "lead", text: "Oui jeudi 15h", at: "2026-10-03T09:00:00.000Z" }],
+      }),
+    ),
+    "rdv",
+  );
+});
+
 test("les discussions en cours passent devant relances sans réponse et fermées", () => {
   const closed = conversation({
     id: "closed",

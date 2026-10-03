@@ -1,6 +1,7 @@
 export type SeyaInboxTag =
   | "court"
   | "chaud"
+  | "qualifie"
   | "humain"
   | "rdv"
   | "sans_reponse"
@@ -8,18 +9,87 @@ export type SeyaInboxTag =
 
 export type SeyaInboxItem = {
   status?: string;
-  messages?: Array<{ author?: string; at?: string }>;
+  bookedSlot?: unknown;
+  messages?: Array<{ author?: string; at?: string; text?: string }>;
   updatedAt?: string;
 };
 
 export const SEYA_INBOX_RECENT_MS = 48 * 60 * 60 * 1000;
 
-export function inboxTag(conversation: SeyaInboxItem): SeyaInboxTag {
+function normalizeInboxText(value: string) {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
+}
+
+export function isLeadOptOutText(text?: string) {
+  const raw = String(text || "").trim();
+  const needle = normalizeInboxText(raw).replace(/[!?.]+$/g, "");
+  if (!needle) {
+    return false;
+  }
+  if (/^(stop|stoppez|arrete|arretez|stop svp)$/.test(needle)) {
+    return true;
+  }
+  if (/pas interess/.test(needle)) {
+    return true;
+  }
+  if (/ne donne pas suite/.test(needle)) {
+    return true;
+  }
+  if (/pas la peine/.test(needle)) {
+    return true;
+  }
+  if (/ne (me )?(plus )?(ecrire|contacter|deranger|appeler|relancer)/.test(needle)) {
+    return true;
+  }
+  return /^(non merci|plus jamais)$/.test(needle);
+}
+
+function isSeyaClosedReply(text?: string) {
+  const needle = normalizeInboxText(text || "");
+  return (
+    /j['’ ]?arrete ici/.test(needle) || /si vous changez d['’ ]avis/.test(needle)
+  );
+}
+
+export function conversationLooksClosed(conversation: SeyaInboxItem) {
   const status = conversation.status;
   if (status === "Pas intéressé" || status === "Terminé") {
+    return true;
+  }
+
+  const messages = conversation.messages || [];
+  if (messages.some((item) => item.author === "lead" && isLeadOptOutText(item.text))) {
+    return true;
+  }
+
+  const last = messages[messages.length - 1];
+  return Boolean(
+    last &&
+      (last.author === "seya" || last.author === "centre") &&
+      isSeyaClosedReply(last.text),
+  );
+}
+
+function hasBookedAppointment(conversation: SeyaInboxItem) {
+  const status = conversation.status;
+  return Boolean(
+    conversation.bookedSlot ||
+      status === "RDV pris" ||
+      status === "RDV confirmé",
+  );
+}
+
+export function inboxTag(conversation: SeyaInboxItem): SeyaInboxTag {
+  if (conversationLooksClosed(conversation)) {
     return "ferme";
   }
-  if (status === "RDV pris" || status === "RDV confirmé") {
+
+  const status = conversation.status;
+  if (hasBookedAppointment(conversation)) {
     return "rdv";
   }
   if (status === "À recontacter" || status === "Revue santé") {
@@ -27,6 +97,9 @@ export function inboxTag(conversation: SeyaInboxItem): SeyaInboxTag {
   }
   if (status === "Chaud" || status === "RDV proposé") {
     return "chaud";
+  }
+  if (status === "Qualifié") {
+    return "qualifie";
   }
 
   const leadReplied = (conversation.messages || []).some((item) => item.author === "lead");
@@ -58,7 +131,7 @@ export function hasRecentInboxActivity(
 
 export function isOngoingSeyaThread(item: SeyaInboxItem) {
   const tag = inboxTag(item);
-  return tag === "court" || tag === "chaud";
+  return tag === "court" || tag === "chaud" || tag === "qualifie";
 }
 
 function inboxSortRank(item: SeyaInboxItem, now: number) {
@@ -68,13 +141,13 @@ function inboxSortRank(item: SeyaInboxItem, now: number) {
   }
 
   const recent = hasRecentInboxActivity(item, now);
-  if (recent && (tag === "court" || tag === "chaud")) {
+  if (recent && (tag === "court" || tag === "chaud" || tag === "qualifie")) {
     return 0;
   }
   if (recent) {
     return 1;
   }
-  if (tag === "court" || tag === "chaud") {
+  if (tag === "court" || tag === "chaud" || tag === "qualifie") {
     return 2;
   }
   if (tag === "humain") {
@@ -103,10 +176,11 @@ export function sortSeyaInbox<T extends SeyaInboxItem>(
 }
 
 export function inboxTagLabel(tag: SeyaInboxTag) {
-  if (tag === "court") return "En cours";
-  if (tag === "chaud") return "Chaud";
-  if (tag === "humain") return "À recontacter";
-  if (tag === "rdv") return "RDV";
-  if (tag === "sans_reponse") return "Sans réponse";
-  return "Fermé";
+  if (tag === "court") return "💬 En cours";
+  if (tag === "chaud") return "🔥 Chaud";
+  if (tag === "qualifie") return "✅ Qualifié";
+  if (tag === "humain") return "🚨 À recontacter";
+  if (tag === "rdv") return "📅 RDV";
+  if (tag === "sans_reponse") return "⏳ Sans réponse";
+  return "❌ Fermé";
 }
