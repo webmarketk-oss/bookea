@@ -1984,8 +1984,8 @@ function relanceSecondCandidates(firstName, crmOffer) {
   const who = firstName ? `${firstName}, ` : "";
   const offer = relanceOfferMention(crmOffer);
   return [
-    `${who}je ne souhaite pas vous relancer inutilement. Dites-moi si vous êtes toujours intéressé par ${offer}.`,
-    `${who}je ne souhaite pas vous relancer inutilement. ${offer.charAt(0).toUpperCase()}${offer.slice(1)} vous intéresse-t-elle toujours ?`,
+    `${who}je ne veux pas vous relancer inutilement. Dites-moi si vous souhaiteriez prendre un rendez-vous pour bénéficier de ${offer}.`,
+    `${who}je ne veux pas vous relancer inutilement. Dites-moi si un rendez-vous pour ${offer} vous arrangerait.`,
   ];
 }
 
@@ -2016,8 +2016,8 @@ function relanceFirstCandidates(hello, about, centre, lastLead, conversation) {
     ];
   }
   return [
-    `${hello}, je me permets de revenir vers vous au sujet ${about} à ${centre}. Souhaitez-vous que je vous propose un rendez-vous ?`,
-    `${hello}, je reviens vers vous au sujet ${about} à ${centre}. Puis-je vous proposer un créneau ?`,
+    `${hello}, je me permets de revenir vers vous au sujet ${about} à ${centre}. Je ne veux pas vous relancer inutilement. Dites-moi si vous souhaiteriez prendre un rendez-vous pour bénéficier de l’offre.`,
+    `${hello}, je reviens vers vous au sujet ${about} à ${centre}. Dites-moi si vous souhaiteriez prendre un rendez-vous pour bénéficier de l’offre.`,
   ];
 }
 

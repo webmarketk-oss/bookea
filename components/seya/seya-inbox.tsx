@@ -20,6 +20,7 @@ const tagStyles: Record<SeyaInboxTag, string> = {
   humain: "bg-amber-200 text-amber-950",
   rdv: "bg-violet-100 text-violet-800",
   sans_reponse: "bg-slate-200 text-slate-600",
+  hors_zone: "bg-rose-100 text-rose-800",
   ferme: "bg-red-600 text-white",
 };
 
@@ -184,7 +185,7 @@ export function SeyaInbox({
       if (filter === "attente" && tag !== "sans_reponse") {
         return false;
       }
-      if (filter === "fermees" && tag !== "ferme") {
+      if (filter === "fermees" && tag !== "ferme" && tag !== "hors_zone") {
         return false;
       }
       if (!needle) {

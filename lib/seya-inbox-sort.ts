@@ -5,6 +5,7 @@ export type SeyaInboxTag =
   | "humain"
   | "rdv"
   | "sans_reponse"
+  | "hors_zone"
   | "ferme";
 
 export type SeyaInboxItem = {
@@ -48,6 +49,58 @@ export function isLeadOptOutText(text?: string) {
   return /^(non merci|plus jamais)$/.test(needle);
 }
 
+function isLeadWrongCenterText(text?: string) {
+  const needle = normalizeInboxText(text || "").replace(/['’]/g, "'");
+  if (!needle) {
+    return false;
+  }
+  return (
+    /je pensais (que )?(c[' ]?etait|c etait)/.test(needle) ||
+    /je me suis tromp[ee]e?( de )?(centre|institut|ville|adresse|numero)/.test(
+      needle,
+    ) ||
+    /pas le bon (centre|institut|etablissement|numero)/.test(needle) ||
+    /mauvais (centre|institut|numero)/.test(needle) ||
+    /c[' ]est (pas|pas du tout) (le |votre )?(centre|institut)/.test(needle) ||
+    /je (cherchais|voulais) (l[' ]?institut|le centre) de/.test(needle)
+  );
+}
+
+function isLeadOutOfZoneText(text?: string) {
+  const needle = normalizeInboxText(text || "").replace(/['’]/g, "'");
+  return /hors[- ]?zone|trop loin|pas (dans )?(le |votre )?secteur|pas de votre cote|j[' ]habite (trop )?loin|je (n[' ]?habite|suis) pas (du tout )?(a cote|a proximite|dans le coin|sur (place|votre ville))/.test(
+    needle,
+  );
+}
+
+function conversationLooksOutOfZone(conversation: SeyaInboxItem) {
+  if (conversation.status === "Hors zone") {
+    return true;
+  }
+
+  const messages = conversation.messages || [];
+  let flagged = false;
+  for (const item of messages) {
+    if (item.author !== "lead") {
+      continue;
+    }
+    const text = item.text || "";
+    if (isLeadWrongCenterText(text) || isLeadOutOfZoneText(text)) {
+      flagged = true;
+      continue;
+    }
+    if (
+      flagged &&
+      /rendez-vous|creneau|chez vous|votre centre|je (viens|passe)|toujours interesse/.test(
+        normalizeInboxText(text).replace(/['’]/g, "'"),
+      )
+    ) {
+      flagged = false;
+    }
+  }
+  return flagged;
+}
+
 function isSeyaClosedReply(text?: string) {
   const needle = normalizeInboxText(text || "");
   return (
@@ -84,6 +137,9 @@ function hasBookedAppointment(conversation: SeyaInboxItem) {
 }
 
 export function inboxTag(conversation: SeyaInboxItem): SeyaInboxTag {
+  if (conversationLooksOutOfZone(conversation)) {
+    return "hors_zone";
+  }
   if (conversationLooksClosed(conversation)) {
     return "ferme";
   }
@@ -136,7 +192,7 @@ export function isOngoingSeyaThread(item: SeyaInboxItem) {
 
 function inboxSortRank(item: SeyaInboxItem, now: number) {
   const tag = inboxTag(item);
-  if (tag === "ferme") {
+  if (tag === "ferme" || tag === "hors_zone") {
     return 50;
   }
 
@@ -182,5 +238,6 @@ export function inboxTagLabel(tag: SeyaInboxTag) {
   if (tag === "humain") return "🚨 À recontacter";
   if (tag === "rdv") return "📅 RDV";
   if (tag === "sans_reponse") return "⏳ Sans réponse";
+  if (tag === "hors_zone") return "📍 Hors zone";
   return "❌ Fermé";
 }

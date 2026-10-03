@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   inboxTag,
+  inboxTagLabel,
   isOngoingSeyaThread,
   sortSeyaInbox,
   type SeyaInboxItem,
@@ -26,6 +27,33 @@ test("un fil avec réponse reste En cours, pas Sans réponse", () => {
   });
   assert.equal(inboxTag(live), "court");
   assert.equal(isOngoingSeyaThread(live), true);
+});
+
+test("un mauvais centre ou hors zone n’est pas Qualifié", () => {
+  const wrongCenter = conversation({
+    id: "cournon",
+    status: "Qualifié",
+    messages: [
+      { author: "seya", text: "Bonjour Marine", at: "2026-10-03T09:00:00.000Z" },
+      {
+        author: "lead",
+        text: "Bonjour, Excusez-moi, je pensais que c’était l’institut de Cournon d’Auvergne",
+        at: "2026-10-03T10:00:00.000Z",
+      },
+    ],
+  });
+  const farAway = conversation({
+    id: "loin",
+    status: "Qualifié",
+    messages: [
+      { author: "lead", text: "C’est trop loin pour moi", at: "2026-10-03T10:00:00.000Z" },
+    ],
+  });
+
+  assert.equal(inboxTag(wrongCenter), "hors_zone");
+  assert.equal(inboxTag(farAway), "hors_zone");
+  assert.equal(inboxTagLabel("hors_zone"), "📍 Hors zone");
+  assert.equal(isOngoingSeyaThread(wrongCenter), false);
 });
 
 test("un refus ferme la conversation même si le statut dit Qualifié ou RDV", () => {

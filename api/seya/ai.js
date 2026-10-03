@@ -259,7 +259,8 @@ function polishPrompt({
     "Avant de répondre, tu relis tout le fil et tu t’y tiens. Si le prospect a corrigé le soin (visage, minceur, laser), tu restes sur CE soin. Interdit de revenir à la campagne d’origine.",
     "Tu réponds au dernier message, dans ce contexte. Interdit de reposer une question déjà traitée. Interdit de recoller le dernier message Seya.",
     "Le texte Bookea est une fiche de faits autorisés, pas un script. Si Bookea propose un créneau ou pose une question alors que la cliente n’a pas demandé ça, tu ne le recopies pas.",
-    "Tu ne mets jamais fin à la conversation. Interdit : « écrivez-moi quand vous voulez reprendre », « je vous prie », « je reviendrai vers vous », « une conseillère vous recontacte », sauf si elle demande clairement à parler à quelqu’un.",
+    "Tu ne mets jamais fin à la conversation. Interdit : « écrivez-moi quand vous voulez reprendre », « je vous prie », « je reviendrai vers vous », « une conseillère vous recontacte », « préférez-vous en rester là », « vous préférez rester là », sauf si elle demande clairement à parler à quelqu’un.",
+    "Tu ne pousses jamais à sortir du circuit. Pas de question fermée du type rester là / arrêter / clore. Tu restes gentiment sur la prise de rendez-vous.",
     "Si elle dit aujourd’hui, un jour, 9h, oui merci, oui toujours, fin de journée, après-midi, ou « relis ce que je t’ai demandé », tu réponds à ÇA : un horaire déjà proposé, ou de nouveaux créneaux autorisés. Tu ne redemandes pas la zone.",
     "Tu ne dis jamais qu’il n’y a plus de créneau si des horaires autorisés sont listés plus bas.",
     "Si elle choisit 9h / 9h00 alors que 09h00 a été proposé, tu confirmes ce créneau.",
@@ -380,6 +381,9 @@ function pickSafeReply(draft, polished, bookingState, conversation) {
   if (replyClosesThread(candidate) && !replyClosesThread(draft)) {
     return draft;
   }
+  if (replyPushesExit(candidate) && !replyPushesExit(draft)) {
+    return draft;
+  }
   if (replyDropsBooking(draft, candidate)) {
     return draft;
   }
@@ -409,6 +413,16 @@ function pickSafeReply(draft, polished, bookingState, conversation) {
 function replyClosesThread(text) {
   return /reviendrai vers vous|vous recontacte|je vous laisse|je clos le sujet|une conseill[eè]re du centre, elle|ecrivez[- ]moi quand|reprendre (la conversation|contact)|quand vous (voulez|souhaitez) reprendre|je vous prie[,.]|pas de creneaux disponibles|ravie que cela vous convienne|reste disponible si vous avez|d['’]autres questions/i.test(
     String(text || ""),
+  );
+}
+
+function replyPushesExit(text) {
+  const needle = String(text || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+  return /en rester la|preferez-vous (en )?rester|vous preferez (en )?rester|on en reste la/.test(
+    needle,
   );
 }
 

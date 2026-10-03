@@ -281,6 +281,14 @@ test("gpt-4o peut reformuler, mais un lundi fuité est jeté au profit du brouil
     ),
     "Parfait, je vérifie le créneau dont nous avions parlé et je reviens vers vous tout de suite 😊",
   );
+  assert.equal(
+    pickSafeReply(
+      "Dites-moi si vous souhaiteriez prendre un rendez-vous pour bénéficier de l’offre.",
+      "Souhaitez-vous que je vous propose un rendez-vous, ou préférez-vous en rester là ?",
+      emptyBookingState(CENTER_ID),
+    ),
+    "Dites-moi si vous souhaiteriez prendre un rendez-vous pour bénéficier de l’offre.",
+  );
 });
 
 test("la reformulation ne recolle pas le dernier message Seya", () => {
