@@ -6,6 +6,7 @@ import { displayPersonName } from "@/lib/seya-person-name";
 import {
   inboxTag,
   inboxTagLabel,
+  isOngoingSeyaThread,
   type SeyaAgentSettings,
   type SeyaConversation,
   type SeyaInboxTag,
@@ -35,7 +36,7 @@ const statusStyles: Record<SeyaConversation["status"], string> = {
   Terminé: "bg-slate-100 text-slate-600",
 };
 
-type FilterId = "toutes" | "agir" | "attente" | "fermees";
+type FilterId = "toutes" | "en_cours" | "agir" | "attente" | "fermees";
 
 function timeAgo(iso?: string | null) {
   if (!iso) return "";
@@ -94,20 +95,27 @@ const ConversationRow = memo(function ConversationRow({
   onSelect: (id: string) => void;
 }) {
   const tag = inboxTag(conversation);
+  const ongoing = isOngoingSeyaThread(conversation);
   return (
     <button
       type="button"
       onClick={() => onSelect(conversation.id)}
       className={`w-full border-b border-slate-100 px-4 py-3 text-left transition-colors ${
         selected
-          ? "bg-violet-50"
-          : tag === "ferme"
-            ? "bg-red-50/80"
-            : "bg-white hover:bg-slate-50"
+          ? "border-l-[3px] border-l-violet-600 bg-violet-50"
+          : ongoing
+            ? "border-l-[3px] border-l-violet-500 bg-violet-50/80 hover:bg-violet-50"
+            : tag === "ferme"
+              ? "bg-white opacity-70 hover:bg-slate-50 hover:opacity-100"
+              : "bg-white hover:bg-slate-50"
       }`}
     >
       <div className="flex items-start justify-between gap-2">
-        <p className="truncate text-sm font-semibold text-slate-950">
+        <p
+          className={`truncate text-sm ${
+            ongoing ? "font-bold text-slate-950" : "font-semibold text-slate-950"
+          }`}
+        >
           {displayPersonName(conversation.firstName, conversation.lastName) ||
             conversation.phone}
         </p>
@@ -169,6 +177,9 @@ export function SeyaInbox({
     const needle = query.trim().toLowerCase();
     return inbox.filter((conversation) => {
       const tag = inboxTag(conversation);
+      if (filter === "en_cours" && tag !== "court" && tag !== "chaud") {
+        return false;
+      }
       if (filter === "agir" && tag !== "court" && tag !== "humain" && tag !== "chaud") {
         return false;
       }
@@ -224,6 +235,7 @@ export function SeyaInbox({
               {(
                 [
                   ["toutes", "Toutes"],
+                  ["en_cours", "En cours"],
                   ["agir", "À traiter"],
                   ["attente", "Sans réponse"],
                   ["fermees", "Fermées"],

@@ -95,13 +95,13 @@ export type SeyaConversationStatus =
   | "Pas intéressé"
   | "Terminé";
 
-export type SeyaInboxTag =
-  | "court"
-  | "chaud"
-  | "humain"
-  | "rdv"
-  | "sans_reponse"
-  | "ferme";
+export type { SeyaInboxTag } from "./seya-inbox-sort";
+export {
+  inboxTag,
+  inboxTagLabel,
+  isOngoingSeyaThread,
+  sortSeyaInbox,
+} from "./seya-inbox-sort";
 
 export type SeyaAgentMessage = {
   id: string;
@@ -593,49 +593,6 @@ export function resolveTreatmentUrl(
   return String(brief?.url || "").trim();
 }
 
-export function inboxTag(conversation: SeyaConversation): SeyaInboxTag {
-  const status = conversation.status;
-  if (status === "Pas intéressé" || status === "Terminé") {
-    return "ferme";
-  }
-  if (status === "RDV pris" || status === "RDV confirmé") {
-    return "rdv";
-  }
-  if (status === "À recontacter" || status === "Revue santé") {
-    return "humain";
-  }
-  if (status === "Chaud" || status === "RDV proposé") {
-    return "chaud";
-  }
-
-  const leadReplied = (conversation.messages || []).some((item) => item.author === "lead");
-  if (!leadReplied) {
-    return "sans_reponse";
-  }
-
-  return (conversation.messages || []).length <= 4 ? "court" : "chaud";
-}
-
-function lastActivityAt(conversation: SeyaConversation) {
-  const messages = conversation.messages || [];
-  const last = messages[messages.length - 1];
-  return String(last?.at || conversation.updatedAt || "");
-}
-
-function isLiveSeyaThread(item: SeyaConversation) {
-  const messages = item.messages || [];
-  return messages.some((entry) => entry.author === "lead") || messages.length > 2;
-}
-
-export function sortSeyaInbox(conversations: SeyaConversation[]) {
-  return [...conversations].sort((a, b) => {
-    const liveGap = Number(isLiveSeyaThread(b)) - Number(isLiveSeyaThread(a));
-    if (liveGap !== 0) {
-      return liveGap;
-    }
-    return lastActivityAt(b).localeCompare(lastActivityAt(a));
-  });
-}
 
 export function markSeyaHealthReviewed(
   conversation: SeyaConversation,
@@ -671,14 +628,6 @@ export function markSeyaHealthReviewed(
   };
 }
 
-export function inboxTagLabel(tag: SeyaInboxTag) {
-  if (tag === "court") return "En cours";
-  if (tag === "chaud") return "Chaud";
-  if (tag === "humain") return "À recontacter";
-  if (tag === "rdv") return "RDV";
-  if (tag === "sans_reponse") return "Sans réponse";
-  return "Fermé";
-}
 
 const LEGACY_GENERAL_BRIEF =
   "Tu parles comme une réceptionniste, pas comme un robot. Une question à la fois. Tu ne parles jamais de prix, de cure, de 500€ ou de paiement tant que la cliente n’a pas demandé le tarif. Si elle demande le prix, tu donnes le tarif paramétré naturellement. Pacemaker ou grossesse : tu transmets à l’équipe, tu ne bookes pas. Jamais Lead Meta.";
