@@ -32,6 +32,10 @@ export type ClientAccount = {
   lastName: string;
   email: string;
   displayName: string;
+  birthDate: string;
+  address: string;
+  postalCode: string;
+  city: string;
   upcoming: ClientAppointmentCard[];
   past: ClientAppointmentCard[];
   centers: Array<{ id: string; name: string; clientId: string }>;
@@ -39,11 +43,28 @@ export type ClientAccount = {
   loyalty: { points: number; notes: string[] };
 };
 
+export type ClientProfileInput = {
+  firstName: string;
+  lastName: string;
+  email: string;
+  birthDate: string;
+  address: string;
+  postalCode: string;
+  city: string;
+  currentPassword?: string;
+  newPassword?: string;
+  confirmPassword?: string;
+};
+
 export const emptyClientAccount = (): ClientAccount => ({
   firstName: "",
   lastName: "",
   email: "",
   displayName: "Mon compte",
+  birthDate: "",
+  address: "",
+  postalCode: "",
+  city: "",
   upcoming: [],
   past: [],
   centers: [],
@@ -90,4 +111,25 @@ export async function sendClientMessage(centerId: string, text: string) {
     throw new Error("message_failed");
   }
   return (await response.json()) as { message: ClientThreadMessage };
+}
+
+export async function saveClientSettings(input: ClientProfileInput) {
+  const headers = await authHeaders();
+  if (!headers) {
+    throw new Error("unauthorized");
+  }
+  const response = await fetch("/api/client/settings", {
+    method: "POST",
+    headers: { ...headers, "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  const payload = (await response.json().catch(() => ({}))) as {
+    account?: ClientAccount;
+    message?: string;
+    error?: string;
+  };
+  if (!response.ok) {
+    throw new Error(payload.message || payload.error || "settings_failed");
+  }
+  return payload.account as ClientAccount;
 }

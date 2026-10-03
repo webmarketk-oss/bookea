@@ -8,11 +8,65 @@ function emptyAccount(user = {}) {
     lastName,
     email,
     displayName: displayName || email || "Mon compte",
+    birthDate: String(user.birthDate || "").slice(0, 10),
+    address: String(user.address || "").trim(),
+    postalCode: String(user.postalCode || "").trim(),
+    city: String(user.city || "").trim(),
     upcoming: [],
     past: [],
     centers: [],
     threads: [],
     loyalty: { points: 0, notes: [] },
+  };
+}
+
+function sanitizeProfileInput(payload = {}) {
+  const firstName = String(payload.firstName || "").replace(/\s+/g, " ").trim();
+  const lastName = String(payload.lastName || "").replace(/\s+/g, " ").trim();
+  const email = String(payload.email || "").trim().toLowerCase();
+  const birthDate = String(payload.birthDate || "").slice(0, 10);
+  const address = String(payload.address || "").replace(/\s+/g, " ").trim();
+  const postalCode = String(payload.postalCode || "").replace(/\s+/g, " ").trim();
+  const city = String(payload.city || "").replace(/\s+/g, " ").trim();
+  const currentPassword = String(payload.currentPassword || "");
+  const newPassword = String(payload.newPassword || "");
+  const confirmPassword = String(payload.confirmPassword || "");
+
+  if (!firstName) {
+    return { error: "first_name_required" };
+  }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return { error: "invalid_email" };
+  }
+  if (birthDate && !/^\d{4}-\d{2}-\d{2}$/.test(birthDate)) {
+    return { error: "invalid_birthdate" };
+  }
+  if (birthDate && Date.parse(`${birthDate}T12:00:00`) > Date.now()) {
+    return { error: "invalid_birthdate" };
+  }
+  if (newPassword) {
+    if (newPassword.length < 6) {
+      return { error: "password_too_short" };
+    }
+    if (confirmPassword !== newPassword) {
+      return { error: "password_mismatch" };
+    }
+    if (!currentPassword) {
+      return { error: "current_password_required" };
+    }
+  }
+
+  return {
+    firstName,
+    lastName,
+    email,
+    birthDate,
+    address,
+    postalCode,
+    city,
+    currentPassword,
+    newPassword,
+    fullName: [firstName, lastName].filter(Boolean).join(" ").trim(),
   };
 }
 
@@ -94,4 +148,5 @@ module.exports = {
   formatSlot,
   isCancelledStatus,
   isPastAppointment,
+  sanitizeProfileInput,
 };

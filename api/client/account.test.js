@@ -6,6 +6,7 @@ const {
   emptyAccount,
   formatSlot,
   isPastAppointment,
+  sanitizeProfileInput,
 } = require("./account-lib");
 
 test("un compte sans fiche reste vide, sans Julie ni RDV fictif", () => {
@@ -20,6 +21,37 @@ test("un compte sans fiche reste vide, sans Julie ni RDV fictif", () => {
   assert.deepEqual(account.threads, []);
   assert.equal(account.loyalty.points, 0);
   assert.doesNotMatch(JSON.stringify(account), /Julie Martin|Institut Nova|72 points/);
+  assert.equal(account.birthDate, "");
+  assert.equal(account.address, "");
+});
+
+test("le profil client refuse un email ou un mot de passe invalide", () => {
+  assert.equal(sanitizeProfileInput({ firstName: "", email: "a@b.fr" }).error, "first_name_required");
+  assert.equal(
+    sanitizeProfileInput({ firstName: "Léa", email: "pas-un-mail" }).error,
+    "invalid_email",
+  );
+  assert.equal(
+    sanitizeProfileInput({
+      firstName: "Léa",
+      email: "lea@test.fr",
+      newPassword: "123",
+      currentPassword: "ancien",
+    }).error,
+    "password_too_short",
+  );
+  const ok = sanitizeProfileInput({
+    firstName: "Léa",
+    lastName: "Martin",
+    email: "lea@test.fr",
+    birthDate: "1998-04-12",
+    address: "12 rue des Lilas",
+    postalCode: "63000",
+    city: "Clermont-Ferrand",
+  });
+  assert.equal(ok.error, undefined);
+  assert.equal(ok.fullName, "Léa Martin");
+  assert.equal(ok.birthDate, "1998-04-12");
 });
 
 test("on n’écrit qu’au centre où la cliente a un dossier", () => {

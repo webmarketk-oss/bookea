@@ -30,9 +30,13 @@ function personFromUser(user) {
   const full = String(meta.full_name || "").trim();
   const parts = full.split(/\s+/).filter(Boolean);
   return {
-    firstName: parts[0] || "",
-    lastName: parts.slice(1).join(" "),
+    firstName: String(meta.first_name || parts[0] || "").trim(),
+    lastName: String(meta.last_name || parts.slice(1).join(" ")).trim(),
     email: String(user?.email || "").trim().toLowerCase(),
+    birthDate: String(meta.birthdate || "").slice(0, 10),
+    address: String(meta.address || "").trim(),
+    postalCode: String(meta.postal_code || "").trim(),
+    city: String(meta.city || "").trim(),
   };
 }
 
@@ -48,7 +52,7 @@ async function loadAccount(supabase, user) {
   let query = supabase
     .from("clients")
     .select(
-      "id,center_id,first_name,last_name,email,phone,shared_note,profile_user_id",
+      "id,center_id,first_name,last_name,email,phone,birthdate,address_line1,postal_code,city,shared_note,profile_user_id",
     )
     .is("merged_into_client_id", null);
   if (email) {
@@ -77,6 +81,19 @@ async function loadAccount(supabase, user) {
   }
   if (!account.email && clients[0]?.email) {
     account.email = String(clients[0].email).toLowerCase();
+  }
+  const detailed = clients.find(
+    (row) => row.birthdate || row.address_line1 || row.postal_code || row.city,
+  );
+  const profileSource = detailed || named || clients[0];
+  if (profileSource) {
+    account.birthDate =
+      String(profileSource.birthdate || account.birthDate || "").slice(0, 10);
+    account.address =
+      String(profileSource.address_line1 || account.address || "").trim();
+    account.postalCode =
+      String(profileSource.postal_code || account.postalCode || "").trim();
+    account.city = String(profileSource.city || account.city || "").trim();
   }
 
   for (const row of clients) {

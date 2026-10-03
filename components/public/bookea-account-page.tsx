@@ -8,20 +8,23 @@ import {
   History,
   MessageCircle,
   Send,
+  Settings,
 } from "lucide-react";
 import type { ComponentType } from "react";
 import { useRouter } from "next/navigation";
 
+import { PlaceSuggestField } from "@/components/forms/place-suggest-field";
 import {
   emptyClientAccount,
   loadClientAccount,
+  saveClientSettings,
   sendClientMessage,
   type ClientAccount,
   type ClientAppointmentCard,
 } from "@/lib/client-account";
 import { createClient } from "@/lib/supabase";
 
-type AccountTab = "upcoming" | "loyalty" | "past" | "messages";
+type AccountTab = "upcoming" | "loyalty" | "past" | "messages" | "settings";
 
 const tabs: Array<{
   id: AccountTab;
@@ -52,6 +55,12 @@ const tabs: Array<{
     label: "Messagerie Bookea",
     description: "Écrivez à l’institut de votre rendez-vous.",
     icon: MessageCircle,
+  },
+  {
+    id: "settings",
+    label: "Réglages",
+    description: "Nom, email, mot de passe, naissance et adresse.",
+    icon: Settings,
   },
 ];
 
@@ -90,6 +99,20 @@ export function BookeaAccountPage() {
   const [activeCenterId, setActiveCenterId] = useState("");
   const [messageDraft, setMessageDraft] = useState("");
   const [sending, setSending] = useState(false);
+  const [savingProfile, setSavingProfile] = useState(false);
+  const [profileFeedback, setProfileFeedback] = useState("");
+  const [profileForm, setProfileForm] = useState({
+    firstName: "",
+    lastName: "",
+    email: "",
+    birthDate: "",
+    address: "",
+    postalCode: "",
+    city: "",
+    currentPassword: "",
+    newPassword: "",
+    confirmPassword: "",
+  });
 
   const active = useMemo(
     () => tabs.find((tab) => tab.id === activeTab) ?? tabs[0],
@@ -110,6 +133,16 @@ export function BookeaAccountPage() {
         }
         setAccount(next);
         setActiveCenterId((current) => current || next.centers[0]?.id || "");
+        setProfileForm((current) => ({
+          ...current,
+          firstName: next.firstName,
+          lastName: next.lastName,
+          email: next.email,
+          birthDate: next.birthDate,
+          address: next.address,
+          postalCode: next.postalCode,
+          city: next.city,
+        }));
       } catch {
         if (!cancelled) {
           setError("Impossible de charger votre espace pour le moment.");
@@ -175,6 +208,38 @@ export function BookeaAccountPage() {
   function openContact(appointment: ClientAppointmentCard) {
     setActiveCenterId(appointment.centerId);
     setActiveTab("messages");
+  }
+
+  async function saveProfile() {
+    setSavingProfile(true);
+    setProfileFeedback("");
+    setError("");
+    try {
+      const next = await saveClientSettings(profileForm);
+      setAccount(next);
+      setProfileForm((current) => ({
+        ...current,
+        firstName: next.firstName,
+        lastName: next.lastName,
+        email: next.email,
+        birthDate: next.birthDate,
+        address: next.address,
+        postalCode: next.postalCode,
+        city: next.city,
+        currentPassword: "",
+        newPassword: "",
+        confirmPassword: "",
+      }));
+      setProfileFeedback("Réglages enregistrés.");
+    } catch (caught) {
+      setError(
+        caught instanceof Error && caught.message && !/settings_failed|unauthorized/.test(caught.message)
+          ? caught.message
+          : "Impossible d’enregistrer les réglages.",
+      );
+    } finally {
+      setSavingProfile(false);
+    }
   }
 
   async function signOut() {
@@ -490,6 +555,194 @@ export function BookeaAccountPage() {
                   </div>
                 </>
               )}
+            </section>
+          ) : null}
+
+          {!loading && activeTab === "settings" ? (
+            <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+              <h3 className="text-base font-semibold">Réglages du compte</h3>
+              <p className="mt-1 text-sm font-medium text-slate-500">
+                Ces informations sont celles de votre espace Bookea et de vos
+                fiches dans les instituts.
+              </p>
+              <div className="mt-5 grid gap-4 sm:grid-cols-2">
+                <label className="block space-y-1.5">
+                  <span className="text-xs font-medium text-slate-500">Prénom</span>
+                  <input
+                    value={profileForm.firstName}
+                    onChange={(event) =>
+                      setProfileForm((current) => ({
+                        ...current,
+                        firstName: event.target.value,
+                      }))
+                    }
+                    className="h-11 w-full rounded-xl border border-slate-200 px-3 text-sm font-medium outline-none focus:border-violet-500"
+                  />
+                </label>
+                <label className="block space-y-1.5">
+                  <span className="text-xs font-medium text-slate-500">Nom</span>
+                  <input
+                    value={profileForm.lastName}
+                    onChange={(event) =>
+                      setProfileForm((current) => ({
+                        ...current,
+                        lastName: event.target.value,
+                      }))
+                    }
+                    className="h-11 w-full rounded-xl border border-slate-200 px-3 text-sm font-medium outline-none focus:border-violet-500"
+                  />
+                </label>
+                <label className="block space-y-1.5 sm:col-span-2">
+                  <span className="text-xs font-medium text-slate-500">Email</span>
+                  <input
+                    type="email"
+                    value={profileForm.email}
+                    onChange={(event) =>
+                      setProfileForm((current) => ({
+                        ...current,
+                        email: event.target.value,
+                      }))
+                    }
+                    className="h-11 w-full rounded-xl border border-slate-200 px-3 text-sm font-medium outline-none focus:border-violet-500"
+                  />
+                </label>
+                <label className="block space-y-1.5">
+                  <span className="text-xs font-medium text-slate-500">
+                    Date de naissance
+                  </span>
+                  <input
+                    type="date"
+                    value={profileForm.birthDate}
+                    onChange={(event) =>
+                      setProfileForm((current) => ({
+                        ...current,
+                        birthDate: event.target.value,
+                      }))
+                    }
+                    className="h-11 w-full rounded-xl border border-slate-200 px-3 text-sm font-medium outline-none focus:border-violet-500"
+                  />
+                </label>
+                <div className="sm:col-span-2">
+                  <PlaceSuggestField
+                    kind="address"
+                    label="Adresse"
+                    value={profileForm.address}
+                    placeholder="Numéro et rue"
+                    onChange={(value) =>
+                      setProfileForm((current) => ({ ...current, address: value }))
+                    }
+                    onSelect={(place) =>
+                      setProfileForm((current) => ({
+                        ...current,
+                        address: place.street || place.label,
+                        postalCode: place.postcode,
+                        city: place.city,
+                      }))
+                    }
+                  />
+                </div>
+                <label className="block space-y-1.5">
+                  <span className="text-xs font-medium text-slate-500">
+                    Code postal
+                  </span>
+                  <input
+                    value={profileForm.postalCode}
+                    onChange={(event) =>
+                      setProfileForm((current) => ({
+                        ...current,
+                        postalCode: event.target.value,
+                      }))
+                    }
+                    className="h-11 w-full rounded-xl border border-slate-200 px-3 text-sm font-medium outline-none focus:border-violet-500"
+                  />
+                </label>
+                <label className="block space-y-1.5">
+                  <span className="text-xs font-medium text-slate-500">Ville</span>
+                  <input
+                    value={profileForm.city}
+                    onChange={(event) =>
+                      setProfileForm((current) => ({
+                        ...current,
+                        city: event.target.value,
+                      }))
+                    }
+                    className="h-11 w-full rounded-xl border border-slate-200 px-3 text-sm font-medium outline-none focus:border-violet-500"
+                  />
+                </label>
+              </div>
+
+              <div className="mt-6 border-t border-slate-100 pt-5">
+                <p className="text-sm font-semibold">Mot de passe</p>
+                <p className="mt-1 text-sm font-medium text-slate-500">
+                  Laissez vide pour ne pas le changer. Le mot de passe actuel
+                  est demandé pour modifier l’email ou le mot de passe.
+                </p>
+                <div className="mt-4 grid gap-4 sm:grid-cols-2">
+                  <label className="block space-y-1.5 sm:col-span-2">
+                    <span className="text-xs font-medium text-slate-500">
+                      Mot de passe actuel
+                    </span>
+                    <input
+                      type="password"
+                      value={profileForm.currentPassword}
+                      onChange={(event) =>
+                        setProfileForm((current) => ({
+                          ...current,
+                          currentPassword: event.target.value,
+                        }))
+                      }
+                      className="h-11 w-full rounded-xl border border-slate-200 px-3 text-sm font-medium outline-none focus:border-violet-500"
+                    />
+                  </label>
+                  <label className="block space-y-1.5">
+                    <span className="text-xs font-medium text-slate-500">
+                      Nouveau mot de passe
+                    </span>
+                    <input
+                      type="password"
+                      value={profileForm.newPassword}
+                      onChange={(event) =>
+                        setProfileForm((current) => ({
+                          ...current,
+                          newPassword: event.target.value,
+                        }))
+                      }
+                      className="h-11 w-full rounded-xl border border-slate-200 px-3 text-sm font-medium outline-none focus:border-violet-500"
+                    />
+                  </label>
+                  <label className="block space-y-1.5">
+                    <span className="text-xs font-medium text-slate-500">
+                      Confirmer
+                    </span>
+                    <input
+                      type="password"
+                      value={profileForm.confirmPassword}
+                      onChange={(event) =>
+                        setProfileForm((current) => ({
+                          ...current,
+                          confirmPassword: event.target.value,
+                        }))
+                      }
+                      className="h-11 w-full rounded-xl border border-slate-200 px-3 text-sm font-medium outline-none focus:border-violet-500"
+                    />
+                  </label>
+                </div>
+              </div>
+
+              {profileFeedback ? (
+                <p className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-800">
+                  {profileFeedback}
+                </p>
+              ) : null}
+
+              <button
+                type="button"
+                onClick={() => void saveProfile()}
+                disabled={savingProfile}
+                className="mt-5 rounded-xl bg-slate-950 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50"
+              >
+                {savingProfile ? "Enregistrement…" : "Enregistrer"}
+              </button>
             </section>
           ) : null}
         </section>
