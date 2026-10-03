@@ -1,4 +1,4 @@
-export type AdminAlertKind = "seya_pack" | "sms_pack";
+export type AdminAlertKind = "seya_pack" | "sms_pack" | "crm_pack";
 
 export type AdminAlert = {
   id: string;
@@ -44,9 +44,12 @@ export function createAdminAlert(input: {
 
 export function normalizeAdminAlert(value: unknown): AdminAlert | null {
   const record = asRecord(value);
-  const kind = record.kind === "seya_pack" || record.kind === "sms_pack"
-    ? record.kind
-    : null;
+  const kind =
+    record.kind === "seya_pack" ||
+    record.kind === "sms_pack" ||
+    record.kind === "crm_pack"
+      ? record.kind
+      : null;
   const id = String(record.id || "").trim();
   const title = String(record.title || "").trim();
   const message = String(record.message || "").trim();

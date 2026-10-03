@@ -12,6 +12,12 @@ import {
 } from "@/lib/bookea-tarifs";
 import { getActiveCenterContext } from "@/lib/center-access";
 import {
+  createBookeaPlan,
+  monthlyRenewal,
+  normalizeBookeaPlan,
+  seyaOfferFromQuota,
+} from "@/lib/center-offers";
+import {
   normalizeSeyaQuota,
   seyaConversationCount,
   type SeyaQuota,
@@ -127,10 +133,13 @@ export async function subscribeSeyaPack(leads: number) {
 
   const context = await getActiveCenterContext();
   const center = await loadCenterSettings(context.centerId);
+  const dates = monthlyRenewal();
   const nextQuota: SeyaQuota = {
     conversationLimit: pack.leads,
     packLeads: pack.leads,
-    updatedAt: new Date().toISOString(),
+    subscribedAt: dates.subscribedAt,
+    renewsAt: dates.renewsAt,
+    updatedAt: dates.subscribedAt,
   };
   const alert = createAdminAlert({
     kind: "seya_pack",
@@ -163,6 +172,8 @@ export async function setCenterSeyaQuota(
   const nextQuota: SeyaQuota = {
     conversationLimit,
     packLeads: current.packLeads,
+    subscribedAt: current.subscribedAt,
+    renewsAt: current.renewsAt,
     updatedAt: new Date().toISOString(),
   };
 
@@ -175,6 +186,32 @@ export async function setCenterSeyaQuota(
     centerId: center.id,
     quota: nextQuota,
     used: seyaConversationCount(center.settings.seya),
+  };
+}
+
+export async function subscribeBookeaPlan() {
+  const context = await getActiveCenterContext();
+  const center = await loadCenterSettings(context.centerId);
+  const plan = createBookeaPlan();
+  const alert = createAdminAlert({
+    kind: "crm_pack",
+    title: `${center.name} a souscrit Bookea CRM + SMS`,
+    message: `${center.name} a souscrit Bookea CRM + SMS — ${plan.price} € / mois`,
+    amountEuros: plan.price,
+    quantity: 1,
+  });
+
+  await persistCenterSettings(center.supabase, center.id, {
+    ...center.settings,
+    bookeaPlan: plan,
+    adminAlerts: appendAdminAlert(center.settings.adminAlerts, alert),
+  });
+
+  return {
+    centerId: center.id,
+    centerName: center.name,
+    plan,
+    alert,
   };
 }
 
@@ -243,5 +280,7 @@ export async function loadActiveCenterBilling() {
     smsRemaining: sms.remaining,
     seyaQuota,
     seyaUsed: seyaConversationCount(center.settings.seya),
+    whatsappOffer: seyaOfferFromQuota(seyaQuota),
+    bookeaPlan: normalizeBookeaPlan(center.settings.bookeaPlan),
   };
 }

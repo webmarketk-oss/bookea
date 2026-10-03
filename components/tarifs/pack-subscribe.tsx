@@ -3,9 +3,11 @@
 import { Loader2 } from "lucide-react";
 import { useEffect, useState } from "react";
 
+import { notifyOffersUpdated } from "@/components/tarifs/current-offers";
 import { FeatureTicks } from "@/components/tarifs/feature-ticks";
 import { PriceCard } from "@/components/tarifs/price-card";
 import {
+  crmOffers,
   formatEuro,
   smsPacks,
   WHATSAPP_PACK_POINTS,
@@ -13,6 +15,7 @@ import {
 } from "@/lib/bookea-tarifs";
 import {
   loadActiveCenterBilling,
+  subscribeBookeaPlan,
   subscribeSeyaPack,
   subscribeSmsPack,
 } from "@/lib/center-billing";
@@ -90,6 +93,7 @@ export function WhatsappPacks() {
     setNotice(null);
     try {
       const result = await subscribeSeyaPack(leads);
+      notifyOffersUpdated();
       setNotice({
         type: "success",
         message: `${result.quota.conversationLimit} conversations Seya sont maintenant débloquées pour ${result.centerName}.`,
@@ -150,6 +154,7 @@ export function SmsPacks() {
     setNotice(null);
     try {
       const result = await subscribeSmsPack(quantity);
+      notifyOffersUpdated();
       setRemaining(result.remaining);
       setNotice({
         type: "success",
@@ -192,6 +197,61 @@ export function SmsPacks() {
             />
           </PriceCard>
         ))}
+      </div>
+    </div>
+  );
+}
+
+const crmPlus = crmOffers.find((offer) => offer.id === "crm-plus");
+
+export function CrmPacks() {
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState<Notice | null>(null);
+
+  if (!crmPlus) {
+    return null;
+  }
+
+  async function handleSubscribe() {
+    setBusy(true);
+    setNotice(null);
+    try {
+      const result = await subscribeBookeaPlan();
+      notifyOffersUpdated();
+      setNotice({
+        type: "success",
+        message: `Bookea CRM + SMS est actif pour ${result.centerName}.`,
+      });
+    } catch (error) {
+      setNotice({
+        type: "error",
+        message:
+          error instanceof Error
+            ? error.message
+            : "Impossible de souscrire Bookea.",
+      });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="space-y-4">
+      <NoticeBanner notice={notice} />
+      <div className="max-w-md">
+        <PriceCard
+          title={crmPlus.title}
+          price={`${crmPlus.price} €`}
+          period={crmPlus.period}
+          highlight
+        >
+          <FeatureTicks items={crmPlus.points} />
+          <SubscribeButton
+            label="Souscrire"
+            busy={busy}
+            onClick={() => void handleSubscribe()}
+          />
+        </PriceCard>
       </div>
     </div>
   );

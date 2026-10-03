@@ -1,14 +1,6 @@
-import { FeatureTicks } from "@/components/tarifs/feature-ticks";
-import { PriceCard } from "@/components/tarifs/price-card";
-import { crmOffers } from "@/lib/bookea-tarifs";
-
-const crmPlus = crmOffers.find((offer) => offer.id === "crm-plus");
+import { CrmPacks } from "@/components/tarifs/pack-subscribe";
 
 export default function TarifCrmPage() {
-  if (!crmPlus) {
-    return null;
-  }
-
   return (
     <section className="space-y-5">
       <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
@@ -20,16 +12,7 @@ export default function TarifCrmPage() {
         </p>
       </div>
 
-      <div className="max-w-md">
-        <PriceCard
-          title={crmPlus.title}
-          price={`${crmPlus.price} €`}
-          period={crmPlus.period}
-          highlight
-        >
-          <FeatureTicks items={crmPlus.points} />
-        </PriceCard>
-      </div>
+      <CrmPacks />
     </section>
   );
 }

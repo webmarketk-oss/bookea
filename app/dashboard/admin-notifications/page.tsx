@@ -6,6 +6,7 @@ import {
   Loader2,
   MessageCircle,
   Smartphone,
+  Users,
 } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
@@ -156,7 +157,11 @@ export default function AdminNotificationsPage() {
               <div className="space-y-3">
                 {items.map((item) => {
                   const Icon =
-                    item.kind === "seya_pack" ? MessageCircle : Smartphone;
+                    item.kind === "seya_pack"
+                      ? MessageCircle
+                      : item.kind === "crm_pack"
+                        ? Users
+                        : Smartphone;
 
                   return (
                     <article

@@ -1,3 +1,4 @@
+import { CurrentOffers } from "@/components/tarifs/current-offers";
 import { TarifsNav } from "@/components/tarifs/tarifs-nav";
 
 export default function TarifsLayout({
@@ -19,6 +20,9 @@ export default function TarifsLayout({
         </div>
         <TarifsNav />
       </section>
+      <div className="mb-5">
+        <CurrentOffers />
+      </div>
       {children}
     </main>
   );

@@ -3,6 +3,8 @@ export const SEYA_PACK_LIMITS = [100, 200, 300, 500] as const;
 export type SeyaQuota = {
   conversationLimit: number | null;
   packLeads: number | null;
+  subscribedAt: string | null;
+  renewsAt: string | null;
   updatedAt: string | null;
 };
 
@@ -30,6 +32,8 @@ export function normalizeSeyaQuota(value?: unknown): SeyaQuota {
   return {
     conversationLimit: conversationLimitFromValue(record.conversationLimit),
     packLeads: conversationLimitFromValue(record.packLeads),
+    subscribedAt: record.subscribedAt ? String(record.subscribedAt) : null,
+    renewsAt: record.renewsAt ? String(record.renewsAt) : null,
     updatedAt: record.updatedAt ? String(record.updatedAt) : null,
   };
 }
