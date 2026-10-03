@@ -399,10 +399,9 @@ export default function CenterSettingsPage() {
         ...parsed.center,
         postalCode: parsed.center?.postalCode ?? current.postalCode,
         profileColor: parsed.center?.profileColor ?? current.profileColor,
-        categories:
-          parsed.center?.categories && parsed.center.categories.length > 0
-            ? parsed.center.categories
-            : current.categories,
+        categories: Array.isArray(parsed.center?.categories)
+          ? parsed.center.categories
+          : current.categories,
         socialLinks: {
           ...current.socialLinks,
           ...parsed.center?.socialLinks,
@@ -428,23 +427,21 @@ export default function CenterSettingsPage() {
         })),
       );
     }
-    if (parsed.serviceCategories || parsed.services) {
-      setServiceCategories((current) =>
-        mergeServiceCategories(
-          parsed.serviceCategories ?? current,
-          parsed.services,
-        ),
+    if (Array.isArray(parsed.serviceCategories)) {
+      setServiceCategories(
+        mergeServiceCategories(parsed.serviceCategories, undefined),
       );
+    } else if (parsed.services) {
+      setServiceCategories(mergeServiceCategories(undefined, parsed.services));
     }
     if (parsed.sources) setSources(parsed.sources);
     if (parsed.products) setProducts(parsed.products);
-    if (parsed.productCategories || parsed.products) {
-      setProductCategories((current) =>
-        mergeProductCategories(
-          parsed.productCategories ?? current,
-          parsed.products,
-        ),
+    if (Array.isArray(parsed.productCategories)) {
+      setProductCategories(
+        mergeProductCategories(parsed.productCategories, undefined),
       );
+    } else if (parsed.products) {
+      setProductCategories(mergeProductCategories(undefined, parsed.products));
     }
     if (parsed.depositLinks) setDepositLinks(parsed.depositLinks);
     if (typeof parsed.stripeConnected === "boolean") {
@@ -734,22 +731,50 @@ export default function CenterSettingsPage() {
       return false;
     }
 
-    setServiceCategories((current) =>
-      mergeServiceCategories([...current, name], services),
+    const nextCategories = mergeServiceCategories(
+      [...serviceCategories, name],
+      undefined,
     );
+    const nextServices = serviceId
+      ? services.map((service) =>
+          service.id === serviceId ? { ...service, category: name } : service,
+        )
+      : services;
 
+    setServiceCategories(nextCategories);
     if (serviceId) {
-      updateService(serviceId, "category", name);
+      setServices(nextServices);
     }
-
     setCategoryDraft("");
+    void persistProfile(
+      {
+        serviceCategories: nextCategories,
+        services: sortServicesByCategory(nextServices, nextCategories),
+      },
+      "Catégorie de prestation enregistrée.",
+    ).catch((error) => showNotice(publicSaveErrorMessage(error), true));
     return true;
   };
 
   const removeServiceCategory = (name: string) => {
-    setServiceCategories((current) =>
-      current.filter((item) => item.toLowerCase() !== name.toLowerCase()),
+    const nextCategories = serviceCategories.filter(
+      (item) => item.toLowerCase() !== name.toLowerCase(),
     );
+    const fallback = nextCategories[0] ?? "";
+    const nextServices = services.map((service) =>
+      service.category.trim().toLowerCase() === name.toLowerCase()
+        ? { ...service, category: fallback }
+        : service,
+    );
+    setServiceCategories(nextCategories);
+    setServices(nextServices);
+    void persistProfile(
+      {
+        serviceCategories: nextCategories,
+        services: sortServicesByCategory(nextServices, nextCategories),
+      },
+      "Catégorie de prestation retirée.",
+    ).catch((error) => showNotice(publicSaveErrorMessage(error), true));
   };
 
   const createProductCategory = (rawName: string, productId?: number) => {
@@ -759,22 +784,50 @@ export default function CenterSettingsPage() {
       return false;
     }
 
-    setProductCategories((current) =>
-      mergeProductCategories([...current, name], products),
+    const nextCategories = mergeProductCategories(
+      [...productCategories, name],
+      undefined,
     );
+    const nextProducts = productId
+      ? products.map((product) =>
+          product.id === productId ? { ...product, category: name } : product,
+        )
+      : products;
 
+    setProductCategories(nextCategories);
     if (productId) {
-      updateProduct(productId, "category", name);
+      setProducts(nextProducts);
     }
-
     setProductCategoryDraft("");
+    void persistProfile(
+      {
+        productCategories: nextCategories,
+        products: sortServicesByCategory(nextProducts, nextCategories),
+      },
+      "Catégorie de produit enregistrée.",
+    ).catch((error) => showNotice(publicSaveErrorMessage(error), true));
     return true;
   };
 
   const removeProductCategory = (name: string) => {
-    setProductCategories((current) =>
-      current.filter((item) => item.toLowerCase() !== name.toLowerCase()),
+    const nextCategories = productCategories.filter(
+      (item) => item.toLowerCase() !== name.toLowerCase(),
     );
+    const fallback = nextCategories[0] ?? "";
+    const nextProducts = products.map((product) =>
+      product.category.trim().toLowerCase() === name.toLowerCase()
+        ? { ...product, category: fallback }
+        : product,
+    );
+    setProductCategories(nextCategories);
+    setProducts(nextProducts);
+    void persistProfile(
+      {
+        productCategories: nextCategories,
+        products: sortServicesByCategory(nextProducts, nextCategories),
+      },
+      "Catégorie de produit retirée.",
+    ).catch((error) => showNotice(publicSaveErrorMessage(error), true));
   };
 
   const removeService = (id: number) => {
@@ -958,12 +1011,19 @@ export default function CenterSettingsPage() {
   const toggleCenterCategory = (category: string) => {
     setCenter((current) => {
       const hasCategory = current.categories.includes(category);
-      return {
+      const next = {
         ...current,
         categories: hasCategory
           ? current.categories.filter((item) => item !== category)
           : [...current.categories, category],
       };
+      void persistProfile(
+        { center: next },
+        hasCategory
+          ? "Catégorie de recherche retirée."
+          : "Catégorie de recherche enregistrée.",
+      ).catch((error) => showNotice(publicSaveErrorMessage(error), true));
+      return next;
     });
   };
 

@@ -9,7 +9,20 @@ import {
   retainPublicMedia,
   type CoverPosition,
 } from "@/lib/center-media";
+import {
+  defaultProductCategories,
+  defaultServiceCategories,
+  mergeProductCategories,
+  mergeServiceCategories,
+} from "@/lib/center-categories";
 import { createClient } from "@/lib/supabase";
+
+export {
+  defaultProductCategories,
+  defaultServiceCategories,
+  mergeProductCategories,
+  mergeServiceCategories,
+};
 
 export const CENTER_SETTINGS_STORAGE_KEY = "bookea-center-settings";
 const CENTER_SETTINGS_OWNER_KEY = "bookea-center-settings-owner";
@@ -43,70 +56,6 @@ export const publicCenterCategories = [
   "Spa",
   "Barbier",
 ];
-
-export const defaultServiceCategories = [
-  "Bilan",
-  "Soin visage",
-  "Soins minceur",
-  "Soin du visage",
-  "Minceur",
-  "Laser",
-  "Silhouette",
-  "Beauté des ongles",
-  "Beauté du regard",
-  "Bien-être",
-  "Spa",
-];
-
-export const defaultProductCategories = [
-  "Produits visage",
-  "Produits corps",
-  "Soin après séance",
-  "Visage",
-  "Compléments",
-  "Hygiène",
-];
-
-function mergeNamedCategories(
-  stored?: string[] | null,
-  items?: Array<{ category?: string }> | null,
-  fallback: string[] = [],
-) {
-  const values = [
-    ...(stored && stored.length > 0 ? stored : fallback),
-    ...(items ?? []).map((item) => item.category ?? ""),
-  ]
-    .map((value) => value.trim())
-    .filter(
-      (value) =>
-        value.length > 0 && value.toLowerCase() !== "catégorie",
-    );
-
-  const seen = new Set<string>();
-
-  return values.filter((value) => {
-    const key = value.toLowerCase();
-    if (seen.has(key)) {
-      return false;
-    }
-    seen.add(key);
-    return true;
-  });
-}
-
-export function mergeServiceCategories(
-  stored?: string[] | null,
-  services?: Array<{ category?: string }> | null,
-) {
-  return mergeNamedCategories(stored, services, defaultServiceCategories);
-}
-
-export function mergeProductCategories(
-  stored?: string[] | null,
-  products?: Array<{ category?: string }> | null,
-) {
-  return mergeNamedCategories(stored, products, defaultProductCategories);
-}
 
 export function sortServicesByCategory<
   T extends { category?: string; topListed?: boolean },
@@ -817,10 +766,9 @@ function mergeLocalAndRemote(
       center: {
         ...remote.center,
         ...local.center,
-        categories:
-          local.center?.categories && local.center.categories.length > 0
-            ? local.center.categories
-            : remote.center?.categories,
+        categories: Array.isArray(local.center?.categories)
+          ? local.center.categories
+          : remote.center?.categories,
         socialLinks: {
           ...remote.center?.socialLinks,
           ...local.center?.socialLinks,
@@ -836,10 +784,9 @@ function mergeLocalAndRemote(
       ? {
           ...local?.center,
           ...remote.center,
-          categories:
-            remote.center.categories && remote.center.categories.length > 0
-              ? remote.center.categories
-              : local?.center?.categories,
+          categories: Array.isArray(remote.center.categories)
+            ? remote.center.categories
+            : local?.center?.categories,
           socialLinks: {
             ...local?.center?.socialLinks,
             ...remote.center.socialLinks,
