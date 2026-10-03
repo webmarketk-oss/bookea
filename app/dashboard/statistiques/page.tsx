@@ -357,7 +357,7 @@ export default function StatisticsPage() {
               <MetricCard
                 title="Taux de présentiel"
                 value={`${practitionerTotals.attendanceRate}%`}
-                detail={`${practitionerTotals.honored} RDV honorés`}
+                detail={`${practitionerTotals.honored} honorés sur ${practitionerTotals.pastAppointments} RDV passés`}
                 icon={<CheckCircle2 />}
                 tone={rateTone(practitionerTotals.attendanceRate)}
               />
@@ -410,11 +410,11 @@ export default function StatisticsPage() {
                         </div>
                         <div className="flex flex-wrap justify-end gap-2">
                           <Badge
-                            tone={row.appointments ? rateTone(row.attendanceRate) : "orange"}
+                            tone={row.pastAppointments ? rateTone(row.attendanceRate) : "orange"}
                           >
-                            {row.appointments
+                            {row.pastAppointments
                               ? `${row.attendanceRate}% présentiel`
-                              : "Pas encore de RDV"}
+                              : "Pas encore de RDV passé"}
                           </Badge>
                           <Badge tone={row.leads ? rateTone(row.conversionRate) : "orange"}>
                             {row.leads
@@ -434,6 +434,9 @@ export default function StatisticsPage() {
                           </p>
                           <p className="mt-1 text-xs font-semibold text-slate-500">
                             {row.honored} honoré{row.honored > 1 ? "s" : ""}
+                            {row.pastAppointments
+                              ? ` / ${row.pastAppointments} passé${row.pastAppointments > 1 ? "s" : ""}`
+                              : ""}
                           </p>
                         </div>
                         <div className="rounded-2xl border border-white bg-white p-3">
@@ -460,7 +463,7 @@ export default function StatisticsPage() {
                             {row.attendanceRate}%
                           </p>
                           <p className="mt-1 text-xs font-semibold text-slate-500">
-                            sur les RDV posés
+                            sur les RDV passés
                           </p>
                         </div>
                         <div className="rounded-2xl border border-white bg-white p-3">
@@ -516,7 +519,7 @@ export default function StatisticsPage() {
                           <div className="mb-1 flex items-center justify-between text-sm font-bold text-slate-500">
                             <span>Taux de présentiel</span>
                             <span>
-                              {row.honored}/{row.appointments || 0}
+                              {row.honored}/{row.pastAppointments || 0}
                             </span>
                           </div>
                           <Progress

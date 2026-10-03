@@ -224,6 +224,42 @@ test("une facture sans lead attribué n'invente pas de praticien", () => {
   );
 });
 
+test("le présentiel se calcule sur les RDV passés, pas les RDV à venir", () => {
+  const rows = buildPractitionerStats(
+    [
+      appointment({
+        id: "past-present",
+        practitionerId: "camille",
+        practitionerName: "Camille",
+        status: "Présent",
+        date: "2026-09-20",
+      }),
+      appointment({
+        id: "past-noshow",
+        practitionerId: "camille",
+        practitionerName: "Camille",
+        status: "No show",
+        date: "2026-09-21",
+      }),
+      appointment({
+        id: "future",
+        practitionerId: "camille",
+        practitionerName: "Camille",
+        status: "Confirmé",
+        date: "2099-01-15",
+      }),
+    ],
+    [],
+    team,
+  );
+
+  const camille = rows.find((row) => row.id === "camille");
+  assert.equal(camille?.appointments, 3);
+  assert.equal(camille?.pastAppointments, 2);
+  assert.equal(camille?.honored, 1);
+  assert.equal(camille?.attendanceRate, 50);
+});
+
 test("le présentiel ignore les pauses et reste sur 100", () => {
   const rate = attendanceRateFromAppointments([
     appointment({
@@ -251,6 +287,12 @@ test("le présentiel ignore les pauses et reste sur 100", () => {
       kind: "Indisponible",
       treatment: "Indisponible",
       personName: "Indisponible",
+    }),
+    appointment({
+      id: "future",
+      practitionerId: "camille",
+      status: "Confirmé",
+      date: "2099-01-15",
     }),
   ]);
 

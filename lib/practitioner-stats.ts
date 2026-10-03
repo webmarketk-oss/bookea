@@ -34,6 +34,7 @@ export type PractitionerStatRow = {
   devis: number;
   invoices: number;
   appointments: number;
+  pastAppointments: number;
   honored: number;
   revenue: number;
   rdvRate: number;
@@ -74,6 +75,18 @@ export function isBookableAppointment(
 
 export function isHonoredAppointment(appointment: Pick<Appointment, "status">) {
   return honoredStatuses.has(appointment.status);
+}
+
+export function isPastAppointment(appointment: {
+  date: string;
+  start: string;
+  duration: number;
+}) {
+  const start = new Date(`${appointment.date}T${appointment.start}:00`);
+  if (Number.isNaN(start.getTime())) {
+    return false;
+  }
+  return start.getTime() + Math.max(appointment.duration, 0) * 60 * 1000 <= Date.now();
 }
 
 export function normalizePersonName(value: string) {
@@ -156,6 +169,7 @@ export function buildPractitionerStats(
       devis: 0,
       invoices: 0,
       appointments: 0,
+      pastAppointments: 0,
       honored: 0,
       revenue: 0,
       rdvRate: 0,
@@ -221,8 +235,11 @@ export function buildPractitionerStats(
           "bg-slate-400",
         );
     row.appointments += 1;
-    if (isHonoredAppointment(appointment)) {
-      row.honored += 1;
+    if (isPastAppointment(appointment)) {
+      row.pastAppointments += 1;
+      if (isHonoredAppointment(appointment)) {
+        row.honored += 1;
+      }
     }
   }
 
@@ -269,7 +286,7 @@ export function buildPractitionerStats(
       ...row,
       rdvRate: ratio(row.rdvLeads, row.leads),
       conversionRate: ratio(row.sold, row.leads),
-      attendanceRate: ratio(row.honored, row.appointments),
+      attendanceRate: ratio(row.honored, row.pastAppointments),
     }))
     .filter(
       (row) =>
@@ -292,6 +309,7 @@ export function summarizePractitionerStats(rows: PractitionerStatRow[]) {
   const devis = rows.reduce((sum, row) => sum + row.devis, 0);
   const invoices = rows.reduce((sum, row) => sum + row.invoices, 0);
   const appointments = rows.reduce((sum, row) => sum + row.appointments, 0);
+  const pastAppointments = rows.reduce((sum, row) => sum + row.pastAppointments, 0);
   const honored = rows.reduce((sum, row) => sum + row.honored, 0);
   const revenue = rows.reduce((sum, row) => sum + row.revenue, 0);
 
@@ -302,16 +320,20 @@ export function summarizePractitionerStats(rows: PractitionerStatRow[]) {
     devis,
     invoices,
     appointments,
+    pastAppointments,
     honored,
     revenue,
     rdvRate: ratio(rdvLeads, leads),
     conversionRate: ratio(sold, leads),
-    attendanceRate: ratio(honored, appointments),
+    attendanceRate: ratio(honored, pastAppointments),
   };
 }
 
 export function attendanceRateFromAppointments(appointments: Appointment[]) {
-  const visits = appointments.filter(isBookableAppointment);
+  const visits = appointments.filter(
+    (appointment) =>
+      isBookableAppointment(appointment) && isPastAppointment(appointment),
+  );
   return ratio(
     visits.filter(isHonoredAppointment).length,
     visits.length,
