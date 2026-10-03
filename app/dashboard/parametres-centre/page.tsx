@@ -49,7 +49,8 @@ import {
   type CenterReviewAutomation,
 } from "@/lib/center-settings";
 import { cabins as agendaCabins, practitioners as agendaPractitioners } from "@/lib/agenda-data";
-import { loadCenterAssignmentOptions } from "@/lib/agenda-supabase";
+import { loadCenterAssignmentOptions, loadCenterCabins } from "@/lib/agenda-supabase";
+import { resolveAssignedCabinNames } from "@/lib/assigned-cabins";
 import {
   MAX_BANNER_PHOTOS,
   clampPercent,
@@ -345,6 +346,8 @@ export default function CenterSettingsPage() {
   const [photoBusyId, setPhotoBusyId] = useState<number | null>(null);
   const noticeTimer = useRef(0);
   const persistGeneration = useRef(0);
+  const cabinNamesRef = useRef(centerCabins);
+  cabinNamesRef.current = centerCabins;
   const [coverPreview, setCoverPreview] = useState("");
   const [coverPosition, setCoverPosition] = useState<CoverPosition>(
     defaultCoverPosition,
@@ -414,6 +417,10 @@ export default function CenterSettingsPage() {
           vatRate: service.vatRate ?? 20,
           onQuote: service.onQuote === true,
           photo: service.photo ?? "",
+          cabins: resolveAssignedCabinNames(
+            service.cabins ?? "Toutes",
+            cabinNamesRef.current,
+          ),
           depositAmount: Number(service.depositAmount) || 0,
           depositEnabled:
             service.depositEnabled === true ||
@@ -538,12 +545,25 @@ export default function CenterSettingsPage() {
       }
     });
 
-    void loadCenterAssignmentOptions().then((loaded) => {
+    void Promise.all([
+      loadCenterAssignmentOptions(),
+      loadCenterCabins().catch(() => []),
+    ]).then(([loaded, cabins]) => {
       if (cancelled) {
         return;
       }
-      if (loaded.cabins.length > 0) {
-        setCenterCabins(loaded.cabins);
+      const cabinNames = cabins
+        .map((cabin) => cabin.name.trim())
+        .filter(Boolean);
+      if (cabinNames.length > 0) {
+        cabinNamesRef.current = cabinNames;
+        setCenterCabins(cabinNames);
+        setServices((current) =>
+          current.map((service) => ({
+            ...service,
+            cabins: resolveAssignedCabinNames(service.cabins, cabinNames),
+          })),
+        );
       }
       if (loaded.practitioners.length > 0) {
         setCenterPractitioners(loaded.practitioners);
@@ -685,14 +705,7 @@ export default function CenterSettingsPage() {
     () => mergeServiceCategories(serviceCategories, services),
     [serviceCategories, services],
   );
-  const cabinOptions = useMemo(
-    () =>
-      mergeAssignmentOptions(
-        centerCabins,
-        services.map((service) => service.cabins),
-      ),
-    [centerCabins, services],
-  );
+  const cabinOptions = useMemo(() => centerCabins, [centerCabins]);
   const practitionerOptions = useMemo(
     () =>
       mergeAssignmentOptions(
@@ -2334,9 +2347,13 @@ export default function CenterSettingsPage() {
                     label="Cabines"
                     allLabel="Toutes"
                     options={cabinOptions}
-                    value={service.cabins}
+                    value={resolveAssignedCabinNames(service.cabins, cabinOptions)}
                     onChange={(value) =>
-                      updateService(service.id, "cabins", value)
+                      updateService(
+                        service.id,
+                        "cabins",
+                        resolveAssignedCabinNames(value, cabinOptions),
+                      )
                     }
                   />
                   <AssignmentSelect
