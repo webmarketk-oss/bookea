@@ -67,6 +67,15 @@ function parseClockMinutes(text) {
   while (match) {
     const hour = Number(match[1]);
     const minutes = match[2] != null ? Number(match[2]) : 0;
+    const token = match[0];
+    const looksLikeClock = /h|:/.test(token);
+    const dayAfterWeekday = new RegExp(
+      `(lundi|mardi|mercredi|jeudi|vendredi|samedi|le)\\s+${hour}\\b`,
+    ).test(value);
+    if (!looksLikeClock && dayAfterWeekday) {
+      match = pattern.exec(value);
+      continue;
+    }
     if (hour >= 7 && hour <= 20 && minutes >= 0 && minutes <= 59) {
       times.push(hour * 60 + minutes);
     }
@@ -420,7 +429,7 @@ function dayPartFromText(text) {
   ) {
     return "evening";
   }
-  if (/apres[- ]?midi/.test(value)) {
+  if (/\b(apm|aprem)['']?\b|apres[- ]?midi/.test(value)) {
     return "afternoon";
   }
   if (/\bmatin\b/.test(value) && !/apres/.test(value)) {

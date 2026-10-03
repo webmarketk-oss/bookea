@@ -69,7 +69,7 @@ async function reply(conversation, text, extras = {}) {
     centerName: "JFG Clinique Clermont",
     centerAddress: extras.centerAddress ?? ADDRESS,
     centerId: CENTER_ID,
-    now: NOW,
+    now: extras.now || NOW,
     slots: extras.slots,
   });
   return result.conversation;
@@ -406,5 +406,75 @@ test("un créneau Seya à plus de 48h est confirmé, laser comme cryo", () => {
   ].join(":");
 
   assert.equal(dbStatusWhenSlotPositioned(soonDate, soonTime), "to_confirm");
+});
+
+test("pas ce lundi, jeudi 8 apm : elle lit le jeudi après-midi, pas le lundi", async () => {
+  const friday = new Date("2026-10-03T14:00:00");
+  const mondaySlots = [
+    { date: "2026-10-05", time: "10:30", label: "lun. 05/10 à 10h30" },
+    { date: "2026-10-05", time: "11:00", label: "lun. 05/10 à 11h00" },
+    { date: "2026-10-05", time: "11:30", label: "lun. 05/10 à 11h30" },
+  ];
+  const state = applyBookingMessage(
+    {
+      ...emptyBookingState(CENTER_ID),
+      requestedDate: "2026-10-05",
+      requestedWeekday: 1,
+      lastOfferedSlots: mondaySlots,
+      appointmentStatus: "proposed",
+    },
+    "euh ! navrée pas ce Lundi jeudi 8 apm' c'est possible pr  vous ?",
+    { centerId: CENTER_ID, now: friday },
+  );
+
+  assert.equal(state.requestedDate, "2026-10-08");
+  assert.equal(state.requestedWeekday, 4);
+  assert.equal(state.dayPart, "afternoon");
+  assert.ok(state.rejectedWeekdays.includes(1));
+  assert.ok(state.rejectedDates.includes("2026-10-05"));
+
+  let conversation = startConversation(
+    {
+      leadId: "lead-apm",
+      centerId: CENTER_ID,
+      firstName: "Marine",
+      lastName: "Test",
+      phone: "0612345678",
+      treatment: "Soin minceur",
+    },
+    "JFG Clinique Clermont",
+    seya,
+  );
+  conversation = {
+    ...conversation,
+    proposedSlots: mondaySlots,
+    bookingState: {
+      ...conversation.bookingState,
+      requestedDate: "2026-10-05",
+      requestedWeekday: 1,
+      lastOfferedSlots: mondaySlots,
+      appointmentStatus: "proposed",
+    },
+    messages: [
+      ...conversation.messages,
+      {
+        author: "seya",
+        text: "Pour le lundi 5 octobre, je peux vous proposer un rendez-vous à 10h30, 11h00 ou 11h30. Lequel vous conviendrait le mieux ?",
+      },
+    ],
+  };
+  conversation = await reply(
+    conversation,
+    "euh ! navrée pas ce Lundi jeudi 8 apm' c'est possible pr  vous ?",
+    { now: friday },
+  );
+  assert.doesNotMatch(lastSeya(conversation), /lun\.|lundi|05\/10|10h30|11h00|11h30/i);
+  assert.match(lastSeya(conversation), /jeu\.|jeudi|08\/10|14h|15h|16h|17h|18h/i);
+  assert.ok(
+    conversation.proposedSlots.every((slot) => slot.date === "2026-10-08"),
+  );
+  assert.ok(
+    conversation.proposedSlots.every((slot) => Number(slot.time.slice(0, 2)) >= 14),
+  );
 });
 

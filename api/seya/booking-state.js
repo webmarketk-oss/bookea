@@ -79,6 +79,12 @@ function applyBookingMessage(state, text, extras = {}) {
 
   const explicitDate = parseExplicitDate(text, now);
   if (explicitDate) {
+    next.lastOfferedSlots.forEach((slot) => {
+      if (slot?.date && slot.date !== explicitDate) {
+        next.rejectedDates = unique([...next.rejectedDates, slot.date]);
+      }
+    });
+    next.lastOfferedSlots = [];
     next.requestedDate = explicitDate;
     next.requestedWeekday = weekdayOf(explicitDate);
     next.weekHalf = null;
@@ -88,10 +94,36 @@ function applyBookingMessage(state, text, extras = {}) {
   const namedDays = WEEKDAYS.map((day, index) =>
     value.includes(day) ? index : -1,
   ).filter((index) => index >= 0);
+  const refusedDays = rejectedWeekdaysFromText(value);
+  const wantedDays = namedDays.filter((day) => !refusedDays.includes(day));
 
-  if (!explicitDate && namedDays.length === 1 && !/pas (dispo|disponible).*|pas le /.test(value)) {
-    next.requestedWeekday = namedDays[0];
-    next.requestedDate = nextDateForWeekday(namedDays[0], now);
+  if (refusedDays.length) {
+    next.rejectedWeekdays = unique([...next.rejectedWeekdays, ...refusedDays]);
+    next.lastOfferedSlots
+      .filter((slot) => refusedDays.includes(weekdayOf(slot.date)))
+      .forEach((slot) => {
+        next.rejectedDates = unique([...next.rejectedDates, slot.date]);
+      });
+    next.lastOfferedSlots = next.lastOfferedSlots.filter(
+      (slot) => !refusedDays.includes(weekdayOf(slot.date)),
+    );
+    if (!explicitDate) {
+      if (next.requestedDate && refusedDays.includes(weekdayOf(next.requestedDate))) {
+        next.requestedDate = null;
+        next.requestedWeekday = null;
+      }
+      if (next.requestedWeekday != null && refusedDays.includes(next.requestedWeekday)) {
+        next.requestedWeekday = null;
+        if (next.requestedDate && refusedDays.includes(weekdayOf(next.requestedDate))) {
+          next.requestedDate = null;
+        }
+      }
+    }
+  }
+
+  if (!explicitDate && wantedDays.length === 1) {
+    next.requestedWeekday = wantedDays[0];
+    next.requestedDate = nextDateForWeekday(wantedDays[0], now);
     next.weekHalf = null;
     next.pendingQuestion = null;
   }
@@ -177,7 +209,7 @@ function applyBookingMessage(state, text, extras = {}) {
       });
   }
 
-  const numbered = value.match(/lundi\s*(\d{1,2})/);
+  const numbered = value.match(/pas(?:\s+\w+){0,5}\s+lundi\s*(\d{1,2})/);
   if (numbered) {
     upcomingDatesForWeekday(1, now, 45)
       .filter((date) => Number(date.slice(-2)) === Number(numbered[1]))
@@ -562,7 +594,36 @@ function parseExplicitDate(text, now) {
       : now.getFullYear();
     return `${year}-${String(slash[2]).padStart(2, "0")}-${String(slash[1]).padStart(2, "0")}`;
   }
+  const weekdayNumber = value.match(
+    /\b(lundi|mardi|mercredi|jeudi|vendredi|samedi)\s+(\d{1,2})(?!\s*h)/,
+  );
+  if (weekdayNumber) {
+    const weekday = WEEKDAYS.indexOf(weekdayNumber[1]);
+    const dayNum = Number(weekdayNumber[2]);
+    if (weekday > 0 && dayNum >= 1 && dayNum <= 31) {
+      return (
+        upcomingDatesForWeekday(weekday, now, 70).find(
+          (date) => Number(date.slice(-2)) === dayNum,
+        ) || null
+      );
+    }
+  }
   return null;
+}
+
+function rejectedWeekdaysFromText(value) {
+  const found = [];
+  const pattern =
+    /\bpas(?:\s+(?:dispo(?:nible)?|disponible))?\s+(?:ce |le )?(lundi|mardi|mercredi|jeudi|vendredi|samedi)\b/g;
+  let match = pattern.exec(value);
+  while (match) {
+    const index = WEEKDAYS.indexOf(match[1]);
+    if (index > 0) {
+      found.push(index);
+    }
+    match = pattern.exec(value);
+  }
+  return unique(found);
 }
 
 function nextDateForWeekday(weekday, from) {
