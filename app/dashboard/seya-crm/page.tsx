@@ -1197,11 +1197,11 @@ export default function SeyaCrmPage() {
 
         <label className="mt-5 block">
           <span className="mb-2 block text-xs font-medium text-slate-500">
-            Consignes générales
+            Consignes générales — communes à tous les centres
           </span>
           <p className="mb-2 text-xs font-medium leading-4 text-slate-400">
-            Écris comme si tu briefais la réceptionniste du centre, pas une
-            liste d’interdits. C’est ce que Seya lit avant de répondre.
+            Seya lit ce texte avant chaque réponse. Les offres, tarifs,
+            horaires et fiches soin restent ceux du centre.
           </p>
           <textarea
             value={agentSettings.brief}
@@ -1212,8 +1212,8 @@ export default function SeyaCrmPage() {
               }))
             }
             onBlur={persistCurrentAgentSettings}
-            rows={5}
-            placeholder="Tu es Seya, au standard. Tu vouvoies. Tu parles comme au téléphone : simple, posée, sans script. Tu réponds d’abord au message. Prix seulement si on te le demande."
+            rows={18}
+            placeholder="Consignes communes Seya"
             className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm font-medium leading-6 text-slate-700 outline-none focus:border-violet-500"
           />
         </label>

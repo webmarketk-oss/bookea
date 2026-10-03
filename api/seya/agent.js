@@ -65,6 +65,7 @@ const {
   phraseFromCareTitle,
 } = require("./care-family");
 const { sanitizePersonName } = require("../../lib/seya-person-name");
+const { resolveGeneralBrief } = require("./general-brief");
 
 const BILAN_DURATION_MINUTES = 75;
 
@@ -593,7 +594,7 @@ function agentSettings(seya) {
     treatmentBriefs: briefs,
     offerMaps: offers,
     centerProfile: normalizeCenterProfile(record.centerProfile),
-    brief: String(record.brief || ""),
+    brief: resolveGeneralBrief(record.brief),
     relanceEnabled: record.relanceEnabled !== false,
     relanceDays: Array.isArray(record.relanceDays)
       ? record.relanceDays.map(Number).filter((item) => item > 0)
