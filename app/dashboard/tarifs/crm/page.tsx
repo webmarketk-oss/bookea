@@ -1,5 +1,4 @@
-import { Check } from "lucide-react";
-
+import { FeatureTicks } from "@/components/tarifs/feature-ticks";
 import { PriceCard } from "@/components/tarifs/price-card";
 import { crmOffers } from "@/lib/bookea-tarifs";
 
@@ -28,17 +27,7 @@ export default function TarifCrmPage() {
           period={crmPlus.period}
           highlight
         >
-          <ul className="mt-4 grid gap-2.5 text-sm font-medium text-slate-600">
-            {crmPlus.points.map((point) => (
-              <li key={point} className="flex items-start gap-2.5">
-                <Check
-                  className="mt-0.5 h-4 w-4 shrink-0 text-violet-600"
-                  strokeWidth={2.5}
-                />
-                <span>{point}</span>
-              </li>
-            ))}
-          </ul>
+          <FeatureTicks items={crmPlus.points} />
         </PriceCard>
       </div>
     </section>
