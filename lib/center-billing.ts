@@ -12,7 +12,9 @@ import {
 } from "@/lib/bookea-tarifs";
 import { getActiveCenterContext } from "@/lib/center-access";
 import {
+  appendOfferHistory,
   createBookeaPlan,
+  createOfferHistoryItem,
   monthlyRenewal,
   normalizeBookeaPlan,
   seyaOfferFromQuota,
@@ -108,6 +110,15 @@ export async function subscribeSmsPack(quantity: number) {
     quantity: pack.quantity,
   });
 
+  const historyItem = createOfferHistoryItem({
+    id: alert.id,
+    kind: "sms_pack",
+    label: `${pack.quantity} SMS`,
+    amountEuros: pack.price,
+    quantity: pack.quantity,
+    renewsAt: null,
+  });
+
   await persistCenterSettings(center.supabase, center.id, {
     ...center.settings,
     sms: {
@@ -115,6 +126,7 @@ export async function subscribeSmsPack(quantity: number) {
       quota: smsQuotaRecord(nextQuota),
     },
     adminAlerts: appendAdminAlert(center.settings.adminAlerts, alert),
+    offerHistory: appendOfferHistory(center.settings.offerHistory, historyItem),
   });
 
   return {
@@ -149,10 +161,21 @@ export async function subscribeSeyaPack(leads: number) {
     quantity: pack.leads,
   });
 
+  const historyItem = createOfferHistoryItem({
+    id: alert.id,
+    kind: "seya_pack",
+    label: `WhatsApp ${pack.leads} leads`,
+    amountEuros: pack.price,
+    quantity: pack.leads,
+    subscribedAt: dates.subscribedAt,
+    renewsAt: dates.renewsAt,
+  });
+
   await persistCenterSettings(center.supabase, center.id, {
     ...center.settings,
     seyaQuota: nextQuota,
     adminAlerts: appendAdminAlert(center.settings.adminAlerts, alert),
+    offerHistory: appendOfferHistory(center.settings.offerHistory, historyItem),
   });
 
   return {
@@ -201,10 +224,21 @@ export async function subscribeBookeaPlan() {
     quantity: 1,
   });
 
+  const historyItem = createOfferHistoryItem({
+    id: alert.id,
+    kind: "crm_pack",
+    label: "Bookea CRM + SMS",
+    amountEuros: plan.price,
+    quantity: 1,
+    subscribedAt: plan.subscribedAt,
+    renewsAt: plan.renewsAt,
+  });
+
   await persistCenterSettings(center.supabase, center.id, {
     ...center.settings,
     bookeaPlan: plan,
     adminAlerts: appendAdminAlert(center.settings.adminAlerts, alert),
+    offerHistory: appendOfferHistory(center.settings.offerHistory, historyItem),
   });
 
   return {

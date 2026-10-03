@@ -20,8 +20,18 @@ import {
 import type { FormEvent, ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
 
+import { formatEuro } from "@/lib/bookea-tarifs";
 import { setCenterSeyaQuota } from "@/lib/center-billing";
 import { saveActiveCenterId } from "@/lib/center-access";
+import {
+  formatOfferDate,
+  mergeOfferHistory,
+  normalizeBookeaPlan,
+  seyaOfferFromQuota,
+  withCurrentOffersInHistory,
+  type BookeaPlan,
+  type OfferHistoryItem,
+} from "@/lib/center-offers";
 import {
   SEYA_PACK_LIMITS,
   normalizeSeyaQuota,
@@ -58,6 +68,9 @@ type CenterRow = {
     seyaQuota?: {
       conversationLimit?: number | null;
     };
+    bookeaPlan?: unknown;
+    offerHistory?: unknown;
+    adminAlerts?: unknown;
   } | null;
 };
 
@@ -91,6 +104,9 @@ type CenterCardData = Omit<CenterRow, "settings"> & {
   smsUsedThisMonth: number;
   seyaUsed: number;
   seyaLimit: number | null;
+  whatsappOffer: ReturnType<typeof seyaOfferFromQuota>;
+  bookeaPlan: BookeaPlan | null;
+  offerHistory: OfferHistoryItem[];
 };
 
 const defaultSources = [
@@ -137,7 +153,7 @@ export default function AdminCentresPage() {
     try {
       const { data: centerRows, error: centersError } = await supabase
         .from("centers")
-        .select("id,name,slug,city,email,public_profile_enabled,owner_profile_id,created_at,sms:settings->sms,admin:settings->admin,seya:settings->seya,seyaQuota:settings->seyaQuota")
+        .select("id,name,slug,city,email,public_profile_enabled,owner_profile_id,created_at,sms:settings->sms,admin:settings->admin,seya:settings->seya,seyaQuota:settings->seyaQuota,bookeaPlan:settings->bookeaPlan,offerHistory:settings->offerHistory,adminAlerts:settings->adminAlerts")
         .order("created_at", { ascending: false });
 
       if (centersError) throw new Error(centersError.message);
@@ -162,11 +178,25 @@ export default function AdminCentresPage() {
             admin?: { isActive?: boolean } | null;
             seya?: { conversations?: unknown[] } | null;
             seyaQuota?: { conversationLimit?: number | null } | null;
+            bookeaPlan?: unknown;
+            offerHistory?: unknown;
+            adminAlerts?: unknown;
           }
         >).map((center) => {
           const quota = normalizeSmsQuota(center.settings?.sms?.quota ?? center.sms?.quota);
           const seyaQuota = normalizeSeyaQuota(
             center.settings?.seyaQuota ?? center.seyaQuota,
+          );
+          const bookeaPlan = normalizeBookeaPlan(
+            center.settings?.bookeaPlan ?? center.bookeaPlan,
+          );
+          const whatsappOffer = seyaOfferFromQuota(seyaQuota);
+          const offerHistory = withCurrentOffersInHistory(
+            mergeOfferHistory(
+              center.settings?.offerHistory ?? center.offerHistory,
+              center.settings?.adminAlerts ?? center.adminAlerts,
+            ),
+            { whatsapp: whatsappOffer, bookea: bookeaPlan },
           );
 
           return {
@@ -198,6 +228,9 @@ export default function AdminCentresPage() {
             smsUsedThisMonth: quota.usedThisMonth,
             seyaUsed: seyaConversationCount(center.settings?.seya ?? center.seya),
             seyaLimit: seyaQuota.conversationLimit,
+            whatsappOffer,
+            bookeaPlan,
+            offerHistory,
           };
         }),
       );
@@ -1056,6 +1089,74 @@ function CenterCard({
               </p>
             )}
           </form>
+
+          <div className="mt-5 rounded-2xl border border-violet-100 bg-violet-50/70 p-4">
+            <p className="mb-3 text-[11px] font-semibold uppercase tracking-wide text-violet-600">
+              Offre actuelle
+            </p>
+            <div className="space-y-2 text-sm font-medium text-slate-700">
+              {center.whatsappOffer ? (
+                <p>
+                  WhatsApp {center.whatsappOffer.leads} leads ·{" "}
+                  {formatEuro(center.whatsappOffer.price)} / mois
+                  <span className="block text-xs font-semibold text-slate-500">
+                    {center.whatsappOffer.subscribedAt
+                      ? `Souscrit le ${formatOfferDate(center.whatsappOffer.subscribedAt)}`
+                      : "Date de souscription non enregistrée"}
+                    {center.whatsappOffer.renewsAt
+                      ? ` · renouvellement le ${formatOfferDate(center.whatsappOffer.renewsAt)}`
+                      : ""}
+                  </span>
+                </p>
+              ) : (
+                <p className="text-slate-500">WhatsApp : pas encore souscrit</p>
+              )}
+              {center.bookeaPlan ? (
+                <p>
+                  {center.bookeaPlan.title} · {formatEuro(center.bookeaPlan.price)} /
+                  mois
+                  <span className="block text-xs font-semibold text-slate-500">
+                    Souscrit le {formatOfferDate(center.bookeaPlan.subscribedAt)} ·
+                    renouvellement le {formatOfferDate(center.bookeaPlan.renewsAt)}
+                  </span>
+                </p>
+              ) : (
+                <p className="text-slate-500">Bookea : pas encore souscrit</p>
+              )}
+              <p>
+                SMS : {center.smsRemaining} restants · sans date limite
+              </p>
+            </div>
+            <div className="mt-4">
+              <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-violet-600">
+                Historique
+              </p>
+              {center.offerHistory.length > 0 ? (
+                <ul className="max-h-48 space-y-2 overflow-y-auto text-xs font-semibold text-slate-600">
+                  {center.offerHistory.map((item) => (
+                    <li
+                      key={item.id}
+                      className="rounded-xl bg-white px-3 py-2"
+                    >
+                      <p>
+                        {item.label} · {formatEuro(item.amountEuros)}
+                      </p>
+                      <p className="font-medium text-slate-400">
+                        {formatOfferDate(item.subscribedAt)}
+                        {item.renewsAt
+                          ? ` · renouvellement ${formatOfferDate(item.renewsAt)}`
+                          : " · sans date limite"}
+                      </p>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="text-xs font-semibold text-slate-400">
+                  Aucune souscription enregistrée pour le moment.
+                </p>
+              )}
+            </div>
+          </div>
 
           <form onSubmit={submitSeyaQuota} className="mt-5 border-t border-slate-200 pt-4">
             <div className="mb-3 flex items-center justify-between gap-3">
