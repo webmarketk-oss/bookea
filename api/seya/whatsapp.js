@@ -23,7 +23,11 @@ const {
   crmUpdateFromLeadMessage,
   lockedCrmStatuses,
 } = require("./conversation");
-const { isSeyaOff, writeSeyaConversations } = require("./store");
+const {
+  isNewSeyaConversationBlocked,
+  isSeyaOff,
+  writeSeyaConversations,
+} = require("./store");
 
 const GRAPH_VERSION = "v21.0";
 
@@ -278,10 +282,24 @@ async function handleIncoming(supabase, incoming) {
 
   const conversations = Array.isArray(seya.conversations) ? seya.conversations : [];
   const phoneKey = last9Phone(incoming.phone);
-  const existing =
+  let existing =
     conversations.find((item) => item.leadId === context.leadId) ||
-    conversations.find((item) => last9Phone(item.phone) === phoneKey) ||
-    startConversation({ ...context, centerId: center.id }, center.name, seya);
+    conversations.find((item) => last9Phone(item.phone) === phoneKey);
+  if (!existing) {
+    if (isNewSeyaConversationBlocked(center.settings, conversations)) {
+      return {
+        phone: incoming.phone,
+        routed: true,
+        centerId: center.id,
+        skipped: "conversation_cap",
+      };
+    }
+    existing = startConversation(
+      { ...context, centerId: center.id },
+      center.name,
+      seya,
+    );
+  }
   existing.centerId = existing.centerId || center.id;
   if (alreadyHandledInbound(existing, incoming)) {
     return {

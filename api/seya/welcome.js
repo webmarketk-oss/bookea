@@ -1,6 +1,12 @@
 const { familyFromTreatment, inferFamily, persistableConversations, startConversation } = require("./agent");
 const { isSameSeyaConversation } = require("./conversation-key");
-const { isSeyaOff, isSeyaWelcomeOff, readCenterSeya, writeSeyaConversations } = require("./store");
+const {
+  isNewSeyaConversationBlocked,
+  isSeyaOff,
+  isSeyaWelcomeOff,
+  readCenterSeya,
+  writeSeyaConversations,
+} = require("./store");
 const { sendSharedWhatsApp } = require("./whatsapp");
 
 const ACTIVE_THREAD_HOURS = 24;
@@ -33,6 +39,9 @@ async function welcomeNewLead(supabase, center, context, now = new Date()) {
       skipped: "scheduled",
       sendAt: existing.welcomeSendAt,
     };
+  }
+  if (isNewSeyaConversationBlocked(latest.settings, conversations, existing)) {
+    return { sent: false, skipped: "conversation_cap" };
   }
 
   const started = startConversation(

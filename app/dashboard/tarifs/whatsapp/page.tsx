@@ -1,5 +1,4 @@
-import { PriceCard } from "@/components/tarifs/price-card";
-import { whatsappLeadPacks } from "@/lib/bookea-tarifs";
+import { WhatsappPacks } from "@/components/tarifs/pack-subscribe";
 
 export default function TarifWhatsappPage() {
   return (
@@ -9,20 +8,11 @@ export default function TarifWhatsappPage() {
         <p className="mt-2 max-w-3xl text-sm font-medium leading-6 text-slate-600">
           Relance, qualification et reprise de rendez-vous sur vos leads. Seya
           écrit au prospect, qualifie la demande et relance pour reposer un RDV.
+          Souscrire pose tout de suite le plafond de conversations.
         </p>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        {whatsappLeadPacks.map((pack) => (
-          <PriceCard
-            key={pack.leads}
-            title={`${pack.leads} leads`}
-            price={`${pack.price} €`}
-            detail={pack.detail}
-            highlight={pack.leads === 200}
-          />
-        ))}
-      </div>
+      <WhatsappPacks />
     </section>
   );
 }

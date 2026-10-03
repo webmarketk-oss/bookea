@@ -217,6 +217,18 @@ export function saveActiveCenterId(centerId: string) {
   window.dispatchEvent(new CustomEvent("bookea-active-center-changed"));
 }
 
+export async function loadIsBookeaAdmin(
+  supabase: SupabaseClient = createClient(),
+) {
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) {
+    return false;
+  }
+  return getIsBookeaAdmin(supabase, user.id);
+}
+
 async function getIsBookeaAdmin(supabase: SupabaseClient, profileId: string) {
   const { data, error } = await supabase
     .from("bookea_admins")

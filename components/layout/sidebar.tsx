@@ -1,13 +1,14 @@
 "use client";
 
 import {
+  BadgeEuro,
   BarChart3,
+  Bell,
+  Bot,
+  Calendar,
+  FolderOpen,
   LayoutDashboard,
   LogOut,
-  Users,
-  Calendar,
-  Bot,
-  FolderOpen,
   Mail,
   MessageCircle,
   PanelLeftClose,
@@ -15,12 +16,13 @@ import {
   ReceiptText,
   Settings,
   ShieldCheck,
-  BadgeEuro,
   UserRound,
+  Users,
 } from "lucide-react";
 import { usePathname, useRouter } from "next/navigation";
-import type { MutableRefObject, Ref } from "react";
+import { useEffect, useState, type MutableRefObject, type Ref } from "react";
 import { BookeaLogo } from "@/components/bookea-logo";
+import { loadIsBookeaAdmin } from "@/lib/center-access";
 import { createClient } from "@/lib/supabase";
 import { CenterSwitcher } from "./center-switcher";
 import NavItem from "./nav-item";
@@ -45,6 +47,7 @@ export default function Sidebar({
 }: SidebarProps) {
   const pathname = usePathname();
   const router = useRouter();
+  const [isBookeaAdmin, setIsBookeaAdmin] = useState(false);
   const crmOpen =
     pathname.startsWith("/dashboard/crm-leads") ||
     pathname.startsWith("/dashboard/crm-clients") ||
@@ -55,6 +58,18 @@ export default function Sidebar({
     pathname.startsWith("/dashboard/documents") ||
     pathname.startsWith("/dashboard/statistiques") ||
     pathname.startsWith("/dashboard/facturation");
+
+  useEffect(() => {
+    let alive = true;
+    void loadIsBookeaAdmin().then((allowed) => {
+      if (alive) {
+        setIsBookeaAdmin(allowed);
+      }
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   async function handleLogout() {
     const supabase = createClient();
@@ -248,6 +263,17 @@ export default function Sidebar({
             active={pathname.startsWith("/dashboard/tarifs/crm")}
           />
         </NavGroup>
+
+        {isBookeaAdmin ? (
+          <NavItem
+            href="/dashboard/admin-notifications"
+            label="Centre de notifications"
+            icon={Bell}
+            active={pathname.startsWith("/dashboard/admin-notifications")}
+            collapsed={collapsed}
+            onExpand={() => onCollapsedChange(false)}
+          />
+        ) : null}
 
         <NavItem
           href="/dashboard/admin-centres"

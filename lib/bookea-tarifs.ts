@@ -34,26 +34,22 @@ export const whatsappLeadPacks = [
   },
 ] as const;
 
+export function formatEuro(value: number, digits = 2) {
+  return new Intl.NumberFormat("fr-FR", {
+    style: "currency",
+    currency: "EUR",
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  }).format(value);
+}
+
 export const smsPacks = [30, 50, 100, 200, 300, 800].map((quantity) => {
-  const cost = brevoSmsCost(quantity);
-  const sell =
-    quantity === 30
-      ? 3
-      : quantity === 50
-        ? 5
-        : quantity === 100
-          ? 9
-          : quantity === 200
-            ? 15
-            : quantity === 300
-              ? 22
-              : 49;
+  const price = brevoSmsCost(quantity);
 
   return {
     quantity,
-    cost,
-    price: sell,
-    unit: Number((sell / quantity).toFixed(3)),
+    price,
+    unit: Number((price / quantity).toFixed(3)),
   };
 });
 

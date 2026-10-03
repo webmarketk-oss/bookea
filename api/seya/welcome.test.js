@@ -4,8 +4,8 @@ const assert = require("node:assert/strict");
 const { isActiveWhatsAppThread, welcomeNewLead } = require("./welcome");
 const { isSeyaOff, isSeyaWelcomeOff, writeSeyaConversations } = require("./store");
 
-function mockCenterClient(seya) {
-  let stored = { seya };
+function mockCenterClient(seya, extraSettings = {}) {
+  let stored = { seya, ...extraSettings };
   return {
     stored: () => stored,
     from(table) {
@@ -261,4 +261,51 @@ test("un vrai fil WhatsApp n’est pas évincé par 90 ouvertures automatiques",
   }));
   const kept = persistableConversations([...synthetics, live]);
   assert.ok(kept.some((item) => item.leadId === "live-collegue"));
+});
+
+test("plafond Seya : une nouvelle conversation est bloquée", async () => {
+  const supabase = mockCenterClient(
+    {
+      whatsappAgentEnabled: true,
+      autoMessageOnNewLead: true,
+      conversations: [
+        { leadId: "lead-1", phone: "0611111111" },
+        { leadId: "lead-2", phone: "0622222222" },
+      ],
+    },
+    { seyaQuota: { conversationLimit: 2 } },
+  );
+  const result = await welcomeNewLead(
+    supabase,
+    { id: "center-1", name: "JFG Clinique Clermont" },
+    {
+      leadId: "lead-3",
+      phone: "0633333333",
+      firstName: "Léa",
+    },
+  );
+  assert.equal(result.skipped, "conversation_cap");
+  assert.equal(supabase.stored().seya.conversations.length, 2);
+});
+
+test("plafond Seya : un fil existant continue", async () => {
+  const supabase = mockCenterClient(
+    {
+      whatsappAgentEnabled: true,
+      autoMessageOnNewLead: true,
+      conversations: [{ leadId: "lead-1", phone: "0612345678" }],
+    },
+    { seyaQuota: { conversationLimit: 1 } },
+  );
+  const result = await welcomeNewLead(
+    supabase,
+    { id: "center-1", name: "JFG Clinique Clermont" },
+    {
+      leadId: "lead-1",
+      phone: "0612345678",
+      firstName: "Léa",
+    },
+  );
+  assert.equal(result.skipped, "scheduled");
+  assert.equal(supabase.stored().seya.conversations.length, 1);
 });

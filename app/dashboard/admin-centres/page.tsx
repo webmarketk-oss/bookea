@@ -20,7 +20,14 @@ import {
 import type { FormEvent, ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
 
+import { setCenterSeyaQuota } from "@/lib/center-billing";
 import { saveActiveCenterId } from "@/lib/center-access";
+import {
+  SEYA_PACK_LIMITS,
+  normalizeSeyaQuota,
+  seyaConversationCount,
+  seyaRemainingConversations,
+} from "@/lib/seya-quota";
 import { createClient } from "@/lib/supabase";
 import {
   creditSmsQuota,
@@ -44,6 +51,12 @@ type CenterRow = {
     };
     sms?: {
       quota?: SmsQuotaRecord;
+    };
+    seya?: {
+      conversations?: unknown[];
+    };
+    seyaQuota?: {
+      conversationLimit?: number | null;
     };
   } | null;
 };
@@ -76,6 +89,8 @@ type CenterCardData = Omit<CenterRow, "settings"> & {
   smsRemaining: number;
   smsMonthlyGrant: number;
   smsUsedThisMonth: number;
+  seyaUsed: number;
+  seyaLimit: number | null;
 };
 
 const defaultSources = [
@@ -94,6 +109,7 @@ export default function AdminCentresPage() {
   const [removingMemberKey, setRemovingMemberKey] = useState<string | null>(null);
   const [togglingCenterId, setTogglingCenterId] = useState<string | null>(null);
   const [creditingCenterId, setCreditingCenterId] = useState<string | null>(null);
+  const [savingSeyaCenterId, setSavingSeyaCenterId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [activityFilter, setActivityFilter] = useState<"all" | "active" | "inactive">(
     "all",
@@ -121,7 +137,7 @@ export default function AdminCentresPage() {
     try {
       const { data: centerRows, error: centersError } = await supabase
         .from("centers")
-        .select("id,name,slug,city,email,public_profile_enabled,owner_profile_id,created_at,sms:settings->sms,admin:settings->admin")
+        .select("id,name,slug,city,email,public_profile_enabled,owner_profile_id,created_at,sms:settings->sms,admin:settings->admin,seya:settings->seya,seyaQuota:settings->seyaQuota")
         .order("created_at", { ascending: false });
 
       if (centersError) throw new Error(centersError.message);
@@ -140,8 +156,18 @@ export default function AdminCentresPage() {
       }
 
       setCenters(
-        ((centerRows ?? []) as Array<CenterRow & { sms?: { quota?: SmsQuotaRecord } | null; admin?: { isActive?: boolean } | null }>).map((center) => {
+        ((centerRows ?? []) as Array<
+          CenterRow & {
+            sms?: { quota?: SmsQuotaRecord } | null;
+            admin?: { isActive?: boolean } | null;
+            seya?: { conversations?: unknown[] } | null;
+            seyaQuota?: { conversationLimit?: number | null } | null;
+          }
+        >).map((center) => {
           const quota = normalizeSmsQuota(center.settings?.sms?.quota ?? center.sms?.quota);
+          const seyaQuota = normalizeSeyaQuota(
+            center.settings?.seyaQuota ?? center.seyaQuota,
+          );
 
           return {
             id: center.id,
@@ -170,6 +196,8 @@ export default function AdminCentresPage() {
             smsRemaining: quota.remaining,
             smsMonthlyGrant: quota.monthlyGrant,
             smsUsedThisMonth: quota.usedThisMonth,
+            seyaUsed: seyaConversationCount(center.settings?.seya ?? center.seya),
+            seyaLimit: seyaQuota.conversationLimit,
           };
         }),
       );
@@ -437,6 +465,48 @@ export default function AdminCentresPage() {
       });
     } finally {
       setCreditingCenterId(null);
+    }
+  }
+
+  async function handleSetSeyaQuota(
+    centerId: string,
+    conversationLimit: number | null,
+  ) {
+    setSavingSeyaCenterId(centerId);
+    setNotice(null);
+
+    try {
+      const next = await setCenterSeyaQuota(centerId, conversationLimit);
+      setCenters((current) =>
+        current.map((center) =>
+          center.id === centerId
+            ? {
+                ...center,
+                seyaLimit: next.quota.conversationLimit,
+                seyaUsed: next.used,
+              }
+            : center,
+        ),
+      );
+      setNotice({
+        type: "success",
+        message:
+          next.quota.conversationLimit == null
+            ? "Plafond Seya retiré. Le centre reste ouvert."
+            : next.quota.conversationLimit === 0
+              ? "Seya bloqué pour les nouvelles conversations."
+              : `Plafond Seya posé à ${next.quota.conversationLimit} conversations.`,
+      });
+    } catch (error) {
+      setNotice({
+        type: "error",
+        message:
+          error instanceof Error
+            ? error.message
+            : "Impossible d’enregistrer le plafond Seya.",
+      });
+    } finally {
+      setSavingSeyaCenterId(null);
     }
   }
 
@@ -730,6 +800,7 @@ export default function AdminCentresPage() {
                   removingMemberKey={removingMemberKey}
                   toggling={togglingCenterId === center.id}
                   crediting={creditingCenterId === center.id}
+                  savingSeya={savingSeyaCenterId === center.id}
                   onAttachOwner={(email) => handleAttachOwner(center.id, email)}
                   onRemoveMember={(profileId) =>
                     handleRemoveMember(center.id, profileId)
@@ -738,6 +809,7 @@ export default function AdminCentresPage() {
                     handleToggleActive(center.id, nextActive)
                   }
                   onCreditSms={(amount) => handleCreditSms(center.id, amount)}
+                  onSetSeyaQuota={(limit) => handleSetSeyaQuota(center.id, limit)}
                 />
               ))
             )}
@@ -754,27 +826,40 @@ function CenterCard({
   removingMemberKey,
   toggling,
   crediting,
+  savingSeya,
   onAttachOwner,
   onRemoveMember,
   onToggleActive,
   onCreditSms,
+  onSetSeyaQuota,
 }: {
   center: CenterCardData;
   attaching: boolean;
   removingMemberKey: string | null;
   toggling: boolean;
   crediting: boolean;
+  savingSeya: boolean;
   onAttachOwner: (
     email: string,
   ) => Promise<{ ok: boolean; error?: string }>;
   onRemoveMember: (profileId: string) => void;
   onToggleActive: (nextActive: boolean) => void;
   onCreditSms: (amount: number) => void;
+  onSetSeyaQuota: (limit: number | null) => void;
 }) {
   const [ownerEmail, setOwnerEmail] = useState("");
   const [attachError, setAttachError] = useState("");
   const [facebookPageId, setFacebookPageId] = useState("");
   const [smsAmount, setSmsAmount] = useState("");
+  const [seyaLimit, setSeyaLimit] = useState(
+    center.seyaLimit == null ? "unlimited" : String(center.seyaLimit),
+  );
+
+  useEffect(() => {
+    setSeyaLimit(
+      center.seyaLimit == null ? "unlimited" : String(center.seyaLimit),
+    );
+  }, [center.seyaLimit]);
   const facebookConnectUrl =
     center.slug && facebookPageId.trim()
       ? `/api/meta/connect?center_slug=${encodeURIComponent(center.slug)}&page_id=${encodeURIComponent(facebookPageId.trim())}`
@@ -803,8 +888,19 @@ function CenterCard({
     setSmsAmount("");
   }
 
+  function submitSeyaQuota(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    onSetSeyaQuota(seyaLimit === "unlimited" ? null : Number(seyaLimit));
+  }
+
+  const seyaRemaining = seyaRemainingConversations(
+    center.seyaUsed,
+    center.seyaLimit,
+  );
+
   return (
     <article
+      id={`center-${center.id}`}
       className={`rounded-[2rem] border bg-white p-6 shadow-sm ${
         center.isActive ? "border-slate-200" : "border-orange-200 bg-orange-50/30"
       }`}
@@ -959,6 +1055,52 @@ function CenterCard({
                 Le compte doit déjà avoir été créé sur la page connexion.
               </p>
             )}
+          </form>
+
+          <form onSubmit={submitSeyaQuota} className="mt-5 border-t border-slate-200 pt-4">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <p className="text-xs font-medium text-slate-400">Seya / WhatsApp</p>
+              <span className="inline-flex items-center gap-1 rounded-full bg-violet-50 px-3 py-1 text-xs font-medium text-violet-700">
+                {center.seyaLimit == null
+                  ? `${center.seyaUsed} · illimité`
+                  : `${center.seyaUsed} / ${center.seyaLimit}`}
+              </span>
+            </div>
+            <p className="text-xs font-semibold text-slate-500">
+              {center.seyaLimit == null
+                ? "Pas de pack posé : les nouvelles conversations restent ouvertes."
+                : center.seyaLimit === 0
+                  ? "Bloqué : Seya ne prend plus de nouveau fil."
+                  : `${seyaRemaining ?? 0} conversation${
+                      (seyaRemaining ?? 0) > 1 ? "s" : ""
+                    } restante${(seyaRemaining ?? 0) > 1 ? "s" : ""}.`}
+            </p>
+            <label className="mt-3 block text-sm font-medium text-slate-500">
+              Plafond de conversations
+            </label>
+            <div className="mt-2 flex flex-col gap-2 sm:flex-row">
+              <select
+                value={seyaLimit}
+                onChange={(event) => setSeyaLimit(event.target.value)}
+                className="h-12 min-w-0 flex-1 rounded-xl border border-slate-200 bg-white px-3 font-bold text-slate-950 outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-100"
+              >
+                <option value="unlimited">Illimité</option>
+                <option value="0">Bloqué</option>
+                {SEYA_PACK_LIMITS.map((limit) => (
+                  <option key={limit} value={limit}>
+                    {limit} conversations
+                  </option>
+                ))}
+              </select>
+              <button
+                type="submit"
+                disabled={savingSeya}
+                className="inline-flex h-12 items-center justify-center gap-2 rounded-xl bg-violet-600 px-4 font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {savingSeya ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                Appliquer
+              </button>
+            </div>
           </form>
 
           <form onSubmit={submitSmsCredit} className="mt-5 border-t border-slate-200 pt-4">

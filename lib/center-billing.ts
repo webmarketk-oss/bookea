@@ -1,0 +1,247 @@
+import {
+  appendAdminAlert,
+  createAdminAlert,
+  markAdminAlertRead,
+  normalizeAdminAlerts,
+  type AdminAlert,
+} from "@/lib/admin-alerts";
+import {
+  formatEuro,
+  smsPacks,
+  whatsappLeadPacks,
+} from "@/lib/bookea-tarifs";
+import { getActiveCenterContext } from "@/lib/center-access";
+import {
+  normalizeSeyaQuota,
+  seyaConversationCount,
+  type SeyaQuota,
+} from "@/lib/seya-quota";
+import { createClient } from "@/lib/supabase";
+import {
+  normalizeSmsQuota,
+  type SmsQuota,
+  type SmsQuotaRecord,
+} from "@/lib/sms-settings";
+
+type CenterSettings = Record<string, unknown>;
+
+function asRecord(value: unknown): CenterSettings {
+  return value && typeof value === "object" ? (value as CenterSettings) : {};
+}
+
+function smsQuotaRecord(quota: SmsQuota): SmsQuotaRecord {
+  return {
+    remaining: quota.remaining,
+    lastGrantMonth: quota.lastGrantMonth,
+    monthlyGrant: quota.monthlyGrant,
+    usedThisMonth: quota.usedThisMonth,
+  };
+}
+
+async function loadCenterSettings(centerId: string) {
+  const supabase = createClient();
+  const { data, error } = await supabase
+    .from("centers")
+    .select("id,name,settings")
+    .eq("id", centerId)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+  if (!data) {
+    throw new Error("Centre introuvable.");
+  }
+
+  return {
+    supabase,
+    id: String(data.id),
+    name: String(data.name || "Centre Bookea"),
+    settings: asRecord(data.settings),
+  };
+}
+
+async function persistCenterSettings(
+  supabase: ReturnType<typeof createClient>,
+  centerId: string,
+  settings: CenterSettings,
+) {
+  const { error } = await supabase
+    .from("centers")
+    .update({
+      settings,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", centerId);
+
+  if (error) {
+    throw new Error(error.message);
+  }
+}
+
+export async function subscribeSmsPack(quantity: number) {
+  const pack = smsPacks.find((item) => item.quantity === quantity);
+  if (!pack) {
+    throw new Error("Pack SMS inconnu.");
+  }
+
+  const context = await getActiveCenterContext();
+  const center = await loadCenterSettings(context.centerId);
+  const currentSms = asRecord(center.settings.sms);
+  const quota = normalizeSmsQuota(currentSms.quota as SmsQuotaRecord | undefined);
+  const nextQuota: SmsQuota = {
+    ...quota,
+    remaining: quota.remaining + pack.quantity,
+    changed: false,
+  };
+  const alert = createAdminAlert({
+    kind: "sms_pack",
+    title: `${center.name} a rechargé ${pack.quantity} SMS`,
+    message: `${center.name} a rechargé ${pack.quantity} SMS — ${formatEuro(pack.price)} — à recharger côté opérateur`,
+    amountEuros: pack.price,
+    quantity: pack.quantity,
+  });
+
+  await persistCenterSettings(center.supabase, center.id, {
+    ...center.settings,
+    sms: {
+      ...currentSms,
+      quota: smsQuotaRecord(nextQuota),
+    },
+    adminAlerts: appendAdminAlert(center.settings.adminAlerts, alert),
+  });
+
+  return {
+    centerId: center.id,
+    centerName: center.name,
+    remaining: nextQuota.remaining,
+    alert,
+  };
+}
+
+export async function subscribeSeyaPack(leads: number) {
+  const pack = whatsappLeadPacks.find((item) => item.leads === leads);
+  if (!pack) {
+    throw new Error("Pack WhatsApp inconnu.");
+  }
+
+  const context = await getActiveCenterContext();
+  const center = await loadCenterSettings(context.centerId);
+  const nextQuota: SeyaQuota = {
+    conversationLimit: pack.leads,
+    packLeads: pack.leads,
+    updatedAt: new Date().toISOString(),
+  };
+  const alert = createAdminAlert({
+    kind: "seya_pack",
+    title: `${center.name} a souscrit ${pack.leads} conversations Seya`,
+    message: `${center.name} a souscrit ${pack.leads} conversations Seya — ${pack.price} €`,
+    amountEuros: pack.price,
+    quantity: pack.leads,
+  });
+
+  await persistCenterSettings(center.supabase, center.id, {
+    ...center.settings,
+    seyaQuota: nextQuota,
+    adminAlerts: appendAdminAlert(center.settings.adminAlerts, alert),
+  });
+
+  return {
+    centerId: center.id,
+    centerName: center.name,
+    quota: nextQuota,
+    alert,
+  };
+}
+
+export async function setCenterSeyaQuota(
+  centerId: string,
+  conversationLimit: number | null,
+) {
+  const center = await loadCenterSettings(centerId);
+  const current = normalizeSeyaQuota(center.settings.seyaQuota);
+  const nextQuota: SeyaQuota = {
+    conversationLimit,
+    packLeads: current.packLeads,
+    updatedAt: new Date().toISOString(),
+  };
+
+  await persistCenterSettings(center.supabase, center.id, {
+    ...center.settings,
+    seyaQuota: nextQuota,
+  });
+
+  return {
+    centerId: center.id,
+    quota: nextQuota,
+    used: seyaConversationCount(center.settings.seya),
+  };
+}
+
+export async function markCenterAdminAlertRead(
+  centerId: string,
+  alertId: string,
+) {
+  const center = await loadCenterSettings(centerId);
+  await persistCenterSettings(center.supabase, center.id, {
+    ...center.settings,
+    adminAlerts: markAdminAlertRead(center.settings.adminAlerts, alertId),
+  });
+}
+
+export type AdminInboxItem = AdminAlert & {
+  centerId: string;
+  centerName: string;
+  centerSlug: string;
+};
+
+export async function loadAdminInbox(): Promise<AdminInboxItem[]> {
+  const supabase = createClient();
+  const { data, error } = await supabase
+    .from("centers")
+    .select("id,name,slug,adminAlerts:settings->adminAlerts")
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return ((data ?? []) as Array<{
+    id: string;
+    name: string | null;
+    slug: string | null;
+    adminAlerts?: unknown;
+  }>)
+    .flatMap((center) =>
+      normalizeAdminAlerts(center.adminAlerts).map((alert) => ({
+        ...alert,
+        centerId: center.id,
+        centerName: center.name || "Centre Bookea",
+        centerSlug: center.slug || "",
+      })),
+    )
+    .sort((left, right) => {
+      const unread = Number(!left.readAt) - Number(!right.readAt);
+      if (unread !== 0) {
+        return unread > 0 ? -1 : 1;
+      }
+      return Date.parse(right.createdAt) - Date.parse(left.createdAt);
+    });
+}
+
+export async function loadActiveCenterBilling() {
+  const context = await getActiveCenterContext();
+  const center = await loadCenterSettings(context.centerId);
+  const sms = normalizeSmsQuota(
+    asRecord(center.settings.sms).quota as SmsQuotaRecord | undefined,
+  );
+  const seyaQuota = normalizeSeyaQuota(center.settings.seyaQuota);
+
+  return {
+    centerId: center.id,
+    centerName: center.name,
+    smsRemaining: sms.remaining,
+    seyaQuota,
+    seyaUsed: seyaConversationCount(center.settings.seya),
+  };
+}

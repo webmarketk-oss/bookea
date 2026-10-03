@@ -63,6 +63,29 @@ function isolateSeyaFromRemote(remote, local) {
   return local && typeof local === "object" ? local : {};
 }
 
+function conversationLimitFromSettings(settings) {
+  const quota = asRecord(asRecord(settings).seyaQuota);
+  if (quota.conversationLimit == null || quota.conversationLimit === "") {
+    return null;
+  }
+  const limit = Number(quota.conversationLimit);
+  if (!Number.isFinite(limit)) {
+    return null;
+  }
+  return Math.max(0, Math.floor(limit));
+}
+
+function isNewSeyaConversationBlocked(settings, conversations, existing) {
+  if (existing) {
+    return false;
+  }
+  const limit = conversationLimitFromSettings(settings);
+  if (limit == null) {
+    return false;
+  }
+  return (Array.isArray(conversations) ? conversations.length : 0) >= limit;
+}
+
 async function writeSeyaConversations(supabase, centerId, conversations) {
   const { settings, seya } = await readCenterSeya(supabase, centerId);
   const existing = Array.isArray(seya.conversations) ? seya.conversations : [];
@@ -89,6 +112,8 @@ async function writeSeyaConversations(supabase, centerId, conversations) {
 
 module.exports = {
   asRecord,
+  conversationLimitFromSettings,
+  isNewSeyaConversationBlocked,
   isSeyaOff,
   isSeyaWelcomeOff,
   isolateSeyaFromRemote,
