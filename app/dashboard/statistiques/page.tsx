@@ -42,6 +42,7 @@ import {
   type SeyaConversation,
 } from "@/lib/seya-settings";
 import {
+  attendanceRateFromAppointments,
   buildPractitionerStats,
   isLeadWithBookedRdv,
   practitionerSoldStatuses as soldStatuses,
@@ -141,17 +142,7 @@ export default function StatisticsPage() {
   );
   const capacityMinutes = cabinCount * 11 * 60;
   const fillRate = Math.round((totalAppointmentMinutes / capacityMinutes) * 100);
-  const attendanceRate = ratio(
-    appointments.filter(
-      (appointment) =>
-        appointment.status === "Confirmé" ||
-        appointment.status === "Présent" ||
-        appointment.status === "Terminé",
-    ).length,
-    appointments.filter(
-      (appointment) => !appointment.kind || appointment.kind === "Rendez-vous",
-    ).length,
-  );
+  const attendanceRate = attendanceRateFromAppointments(appointments);
   const conversionRate = ratio(soldLeads, leadCount);
   const noShowRate = ratio(redLeads, leadCount);
   const sourceRows = groupByLeadField(leads, "source");

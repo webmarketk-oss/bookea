@@ -3,6 +3,7 @@ import test from "node:test";
 import type { Appointment, Practitioner } from "../types/agenda";
 import type { Lead } from "../types/lead";
 import {
+  attendanceRateFromAppointments,
   buildPractitionerStats,
   summarizePractitionerStats,
 } from "./practitioner-stats.ts";
@@ -221,6 +222,39 @@ test("une facture sans lead attribué n'invente pas de praticien", () => {
     rows.some((row) => row.invoices > 0 || row.name === "Inconnue"),
     false,
   );
+});
+
+test("le présentiel ignore les pauses et reste sur 100", () => {
+  const rate = attendanceRateFromAppointments([
+    appointment({
+      id: "1",
+      practitionerId: "camille",
+      status: "Présent",
+    }),
+    appointment({
+      id: "2",
+      practitionerId: "camille",
+      status: "No show",
+    }),
+    appointment({
+      id: "pause-1",
+      practitionerId: "camille",
+      status: "Confirmé",
+      kind: "Pause",
+      treatment: "Pause",
+      personName: "Pause",
+    }),
+    appointment({
+      id: "pause-2",
+      practitionerId: "marie",
+      status: "Confirmé",
+      kind: "Indisponible",
+      treatment: "Indisponible",
+      personName: "Indisponible",
+    }),
+  ]);
+
+  assert.equal(rate, 50);
 });
 
 test("le résumé équipe agrège les taux de l'onglet stats équipes", () => {

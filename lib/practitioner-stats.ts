@@ -22,6 +22,7 @@ const honoredStatuses = new Set([
   "Vendu",
   "En cours",
 ]);
+const agendaBlockKinds = new Set(["Pause", "Formation", "Indisponible"]);
 
 export type PractitionerStatRow = {
   id: string;
@@ -47,7 +48,24 @@ export function isLeadWithBookedRdv(lead: Pick<Lead, "status">) {
   );
 }
 
-export function isBookableAppointment(appointment: Pick<Appointment, "kind" | "status">) {
+export function isBookableAppointment(
+  appointment: Pick<Appointment, "kind" | "status"> & {
+    treatment?: string;
+    personName?: string;
+    notes?: string;
+  },
+) {
+  const firstName = String(appointment.personName || "")
+    .trim()
+    .split(/\s+/)[0];
+  if (
+    agendaBlockKinds.has(appointment.kind || "") ||
+    agendaBlockKinds.has(appointment.treatment || "") ||
+    agendaBlockKinds.has(firstName) ||
+    /\[kind:(Pause|Formation|Indisponible)\]/i.test(appointment.notes || "")
+  ) {
+    return false;
+  }
   if (appointment.kind && appointment.kind !== "Rendez-vous") {
     return false;
   }
@@ -292,7 +310,15 @@ export function summarizePractitionerStats(rows: PractitionerStatRow[]) {
   };
 }
 
+export function attendanceRateFromAppointments(appointments: Appointment[]) {
+  const visits = appointments.filter(isBookableAppointment);
+  return ratio(
+    visits.filter(isHonoredAppointment).length,
+    visits.length,
+  );
+}
+
 export function ratio(value: number, total: number) {
   if (!total) return 0;
-  return Math.round((value / total) * 100);
+  return Math.min(100, Math.round((value / total) * 100));
 }
