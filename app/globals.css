@@ -187,3 +187,24 @@ textarea {
     radial-gradient(circle at 88% 0%, rgba(36, 122, 242, 0.12), transparent 30%),
     linear-gradient(180deg, #ffffff 0%, #f5f6fa 100%);
 }
+
+.seya-pane-scroll {
+  overflow-y: scroll;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: #94a3b8 transparent;
+}
+
+.seya-pane-scroll::-webkit-scrollbar {
+  width: 10px;
+}
+
+.seya-pane-scroll::-webkit-scrollbar-thumb {
+  background: #94a3b8;
+  border-radius: 999px;
+}
+
+.seya-pane-scroll::-webkit-scrollbar-track {
+  background: #f1f5f9;
+}

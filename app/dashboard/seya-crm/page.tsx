@@ -950,10 +950,14 @@ export default function SeyaCrmPage() {
 
   return (
     <main
-      className="min-h-screen bg-[#eef3f9] px-4 py-4 text-slate-950 sm:px-6"
+      className={`bg-[#eef3f9] px-4 py-4 text-slate-950 sm:px-6 ${
+        view === "inbox"
+          ? "flex h-full min-h-0 flex-1 flex-col overflow-hidden"
+          : "min-h-full"
+      }`}
       data-sidebar-collapse-area="true"
     >
-      <section className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+      <section className="mb-4 flex shrink-0 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <p className="text-xs font-semibold uppercase tracking-wide text-violet-600">
             {centerName} · {sharedNumber}
@@ -986,6 +990,7 @@ export default function SeyaCrmPage() {
       </section>
 
       {view === "inbox" ? (
+        <div className="min-h-0 flex-1">
         <SeyaInbox
           inbox={inbox}
           selected={selectedConversation}
@@ -1014,6 +1019,7 @@ export default function SeyaCrmPage() {
             setAgentFeedback("Vérification santé marquée comme faite.");
           }}
         />
+        </div>
       ) : null}
 
       {view === "settings" ? (

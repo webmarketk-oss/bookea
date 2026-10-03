@@ -85,7 +85,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
       />
 
       <main
-        className="relative z-0 min-w-0 flex-1 p-0 lg:py-3 lg:pr-3 lg:pl-3"
+        className="relative z-0 flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-y-auto p-0 lg:py-3 lg:pr-3 lg:pl-3"
         onClick={collapseSidebarFromContent}
       >
         {children}

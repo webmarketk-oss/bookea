@@ -210,10 +210,10 @@ export function SeyaInbox({
     : null;
 
   return (
-    <section className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
-      <div className="grid min-h-[calc(100vh-180px)] xl:grid-cols-[300px_minmax(0,1fr)_300px]">
-        <aside className="flex flex-col border-b border-slate-200 xl:border-b-0 xl:border-r">
-          <div className="border-b border-slate-100 px-4 py-3">
+    <section className="flex h-full min-h-0 overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
+      <div className="grid h-full min-h-0 w-full overflow-hidden max-xl:grid-rows-[minmax(0,34%)_minmax(0,1fr)_minmax(0,26%)] xl:grid-cols-[300px_minmax(0,1fr)_300px]">
+        <aside className="flex min-h-0 flex-col overflow-hidden border-b border-slate-200 xl:border-b-0 xl:border-r">
+          <div className="shrink-0 border-b border-slate-100 px-4 py-3">
             <div className="flex items-center justify-between">
               <h2 className="text-sm font-semibold">Conversations</h2>
               <span className="text-xs font-medium text-slate-400">
@@ -256,7 +256,7 @@ export function SeyaInbox({
               ))}
             </div>
           </div>
-          <div className="min-h-0 flex-1 overflow-y-auto">
+          <div className="seya-pane-scroll min-h-0 flex-1">
             {visible.length === 0 ? (
               <p className="px-4 py-8 text-sm font-medium text-slate-500">
                 Aucune conversation dans ce filtre.
@@ -274,10 +274,10 @@ export function SeyaInbox({
           </div>
         </aside>
 
-        <div className="flex min-h-[520px] flex-col bg-[#f7f8fa]">
+        <div className="flex min-h-0 flex-col overflow-hidden bg-[#f7f8fa]">
           {selected ? (
             <>
-              <div className="flex items-start justify-between gap-3 border-b border-slate-200 bg-white px-5 py-3">
+              <div className="flex shrink-0 items-start justify-between gap-3 border-b border-slate-200 bg-white px-5 py-3">
                 <div>
                   <div className="flex flex-wrap items-center gap-2">
                     <h2 className="text-base font-semibold">
@@ -313,7 +313,10 @@ export function SeyaInbox({
                   {feedback}
                 </p>
               ) : null}
-              <div ref={threadRef} className="min-h-0 flex-1 space-y-3 overflow-y-auto px-5 py-4">
+              <div
+                ref={threadRef}
+                className="seya-pane-scroll min-h-0 flex-1 space-y-3 px-5 py-4"
+              >
                 {selected.messages.map((message) => {
                   const fromLead = message.author === "lead";
                   const fromCentre = message.author === "centre";
@@ -360,7 +363,7 @@ export function SeyaInbox({
                   ))}
                 </div>
               ) : null}
-              <div className="border-t border-slate-200 bg-white px-4 py-3">
+              <div className="shrink-0 border-t border-slate-200 bg-white px-4 py-3">
                 <div className="flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3">
                   <input
                     value={reply}
@@ -396,7 +399,7 @@ export function SeyaInbox({
           )}
         </div>
 
-        <aside className="bg-white p-4">
+        <aside className="seya-pane-scroll min-h-0 bg-white p-4">
           {selected ? (
             <div className="grid gap-3">
               <section className="rounded-2xl border border-slate-200 p-4">

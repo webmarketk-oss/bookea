@@ -7,7 +7,7 @@ export default function DashboardLayout({
   children: React.ReactNode;
 }) {
   return (
-    <div className="min-h-screen bg-[#f5f6fa] lg:flex">
+    <div className="flex h-dvh flex-col overflow-hidden bg-[#f5f6fa] lg:flex-row">
       <MobileDashboardNav />
       <DashboardShell>
         {children}
