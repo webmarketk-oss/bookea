@@ -15,6 +15,7 @@ import {
   ReceiptText,
   Settings,
   ShieldCheck,
+  BadgeEuro,
   UserRound,
 } from "lucide-react";
 import { usePathname, useRouter } from "next/navigation";
@@ -218,6 +219,35 @@ export default function Sidebar({
           collapsed={collapsed}
           onExpand={() => onCollapsedChange(false)}
         />
+
+        <NavGroup
+          label="Tarifs"
+          icon={BadgeEuro}
+          collapsed={collapsed}
+          href="/dashboard/tarifs"
+          active={pathname.startsWith("/dashboard/tarifs")}
+          defaultOpen={pathname.startsWith("/dashboard/tarifs")}
+          onExpand={() => onCollapsedChange(false)}
+        >
+          <NavItem
+            href="/dashboard/tarifs/whatsapp"
+            label="Tarif WhatsApp"
+            icon={MessageCircle}
+            active={pathname.startsWith("/dashboard/tarifs/whatsapp")}
+          />
+          <NavItem
+            href="/dashboard/tarifs/sms"
+            label="Tarif SMS"
+            icon={Mail}
+            active={pathname.startsWith("/dashboard/tarifs/sms")}
+          />
+          <NavItem
+            href="/dashboard/tarifs/crm"
+            label="CRM + SMS"
+            icon={Users}
+            active={pathname.startsWith("/dashboard/tarifs/crm")}
+          />
+        </NavGroup>
 
         <NavItem
           href="/dashboard/admin-centres"
