@@ -20,6 +20,7 @@ import {
   kpiBreakdown,
   REVERSE_CHARGE_MENTION,
   monthlyRevenue,
+  pendingPaymentKpi,
   nextBillingCycleOn,
   nextInvoiceNumber,
   periodRange,
@@ -125,6 +126,7 @@ export function AgencyWorkspace() {
   const range = periodRange(period, new Date(), customFrom, customTo);
   const periodInvoices = invoicesInRange(state.invoices, range.from, range.to);
   const revenue = periodInvoices.reduce((sum, item) => sum + invoiceTotal(item), 0);
+  const pending = pendingPaymentKpi(state.invoices);
   const breakdown = kpiBreakdown(periodInvoices);
   const yearBars = monthlyRevenue(
     invoicesInRange(state.invoices, `${new Date().getFullYear()}-01-01`, `${new Date().getFullYear()}-12-31`),
@@ -207,6 +209,7 @@ export function AgencyWorkspace() {
         <KpiSection
           company={company}
           revenue={revenue}
+          pending={pending}
           breakdown={breakdown}
           yearBars={yearBars}
           maxBar={maxBar}
@@ -1004,6 +1007,7 @@ function ServicesSection({
 function KpiSection({
   company,
   revenue,
+  pending,
   breakdown,
   yearBars,
   maxBar,
@@ -1016,6 +1020,7 @@ function KpiSection({
 }: {
   company: AgencyCompany;
   revenue: number;
+  pending: { count: number; amount: number };
   breakdown: Record<AgencyServiceKind, number>;
   yearBars: number[];
   maxBar: number;
@@ -1078,12 +1083,23 @@ function KpiSection({
         ) : null}
       </div>
 
-      <div className="grid gap-3 md:grid-cols-2">
+      <div className="grid gap-3 md:grid-cols-3">
         <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <p className="text-xs font-black uppercase text-slate-400">
             Chiffre d’affaires
           </p>
           <p className="mt-2 text-3xl font-black">{formatEuroAmount(revenue)}</p>
+        </article>
+        <article className="rounded-2xl border border-amber-200 bg-amber-50 p-5 shadow-sm">
+          <p className="text-xs font-black uppercase text-amber-800">
+            Factures en attente de règlement
+          </p>
+          <p className="mt-2 text-3xl font-black text-amber-950">
+            {formatEuroAmount(pending.amount)}
+          </p>
+          <p className="mt-1 text-sm font-semibold text-amber-800">
+            {pending.count} facture{pending.count > 1 ? "s" : ""}
+          </p>
         </article>
         <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <p className="text-xs font-black uppercase text-slate-400">

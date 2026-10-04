@@ -15,6 +15,7 @@ import {
   isWithinReminderWindow,
   kpiBreakdown,
   monthlyRevenue,
+  pendingPaymentKpi,
   nextBillingCycleOn,
   nextInvoiceNumber,
   normalizeAgencyState,
@@ -142,6 +143,79 @@ test("les KPI WebK séparent meta, phoning et RDV WA", () => {
     true,
   );
   assert.equal(monthlyRevenue(invoices, 2026)[9], 750);
+});
+
+test("les KPI comptent les factures en attente de règlement", () => {
+  const unpaid = pendingPaymentKpi([
+    {
+      id: "1",
+      number: "WK-2026-001",
+      clientId: "c1",
+      issuedOn: "2026-09-02",
+      nextCycleOn: "2026-10-02",
+      status: "Émise",
+      comments: "",
+      invoiceNote: "",
+      createdAt: "",
+      lines: [
+        {
+          id: "l1",
+          label: "Meta",
+          kind: "meta",
+          quantity: 1,
+          unitPrice: 400,
+          discountType: "Aucune",
+          discountValue: 0,
+        },
+      ],
+    },
+    {
+      id: "2",
+      number: "WK-2026-002",
+      clientId: "c1",
+      issuedOn: "2026-10-02",
+      nextCycleOn: "2026-11-01",
+      status: "En retard",
+      comments: "",
+      invoiceNote: "",
+      createdAt: "",
+      lines: [
+        {
+          id: "l2",
+          label: "Phoning",
+          kind: "phoning",
+          quantity: 1,
+          unitPrice: 250,
+          discountType: "Aucune",
+          discountValue: 0,
+        },
+      ],
+    },
+    {
+      id: "3",
+      number: "WK-2026-003",
+      clientId: "c1",
+      issuedOn: "2026-10-03",
+      nextCycleOn: "2026-11-02",
+      status: "Payée",
+      comments: "",
+      invoiceNote: "",
+      createdAt: "",
+      lines: [
+        {
+          id: "l3",
+          label: "Meta",
+          kind: "meta",
+          quantity: 1,
+          unitPrice: 400,
+          discountType: "Aucune",
+          discountValue: 0,
+        },
+      ],
+    },
+  ]);
+  assert.equal(unpaid.count, 2);
+  assert.equal(unpaid.amount, 650);
 });
 
 test("une remise s’applique en euros ou en pourcentage sur la prestation", () => {

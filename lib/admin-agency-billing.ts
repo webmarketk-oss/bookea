@@ -496,6 +496,18 @@ export function invoicesInRange(
   });
 }
 
+export function isPendingPayment(invoice: AgencyInvoice) {
+  return invoice.status === "Émise" || invoice.status === "En retard";
+}
+
+export function pendingPaymentKpi(invoices: AgencyInvoice[]) {
+  const pending = invoices.filter((invoice) => isPendingPayment(invoice));
+  return {
+    count: pending.length,
+    amount: pending.reduce((sum, invoice) => sum + invoiceTotal(invoice), 0),
+  };
+}
+
 export function kpiBreakdown(invoices: AgencyInvoice[]) {
   const buckets: Record<AgencyServiceKind, number> = {
     meta: 0,
