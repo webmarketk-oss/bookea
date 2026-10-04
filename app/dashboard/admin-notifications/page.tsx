@@ -12,6 +12,12 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
 import {
+  billingAlerts,
+  companyLabel,
+  type AgencyCompany,
+} from "@/lib/admin-agency-billing";
+import { loadAgencyBilling } from "@/lib/admin-agency-store";
+import {
   loadAdminInbox,
   markCenterAdminAlertRead,
   type AdminInboxItem,
@@ -47,6 +53,9 @@ export default function AdminNotificationsPage() {
   const [loading, setLoading] = useState(true);
   const [allowed, setAllowed] = useState(false);
   const [items, setItems] = useState<AdminInboxItem[]>([]);
+  const [cycleAlerts, setCycleAlerts] = useState<
+    Array<{ company: AgencyCompany; label: string; overdue: boolean }>
+  >([]);
   const [markingId, setMarkingId] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [centerFilter, setCenterFilter] = useState("tous");
@@ -54,8 +63,21 @@ export default function AdminNotificationsPage() {
   const [dateTo, setDateTo] = useState("");
 
   async function refresh() {
-    const inbox = await loadAdminInbox();
+    const [inbox, webk, bookea] = await Promise.all([
+      loadAdminInbox(),
+      loadAgencyBilling("webk"),
+      loadAgencyBilling("bookea"),
+    ]);
     setItems(inbox);
+    setCycleAlerts(
+      (["webk", "bookea"] as const).flatMap((company) =>
+        billingAlerts(company === "webk" ? webk : bookea).map((alert) => ({
+          company,
+          label: alert.label,
+          overdue: alert.overdue,
+        })),
+      ),
+    );
   }
 
   useEffect(() => {
@@ -242,6 +264,27 @@ export default function AdminNotificationsPage() {
                 </button>
               ) : null}
             </div>
+
+            {cycleAlerts.length > 0 ? (
+              <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4">
+                <p className="text-sm font-black uppercase text-amber-800">
+                  Factures à émettre
+                </p>
+                <ul className="mt-2 space-y-1 text-sm font-semibold text-amber-950">
+                  {cycleAlerts.map((alert) => (
+                    <li key={`${alert.company}-${alert.label}`}>
+                      {companyLabel(alert.company)} · {alert.label}
+                    </li>
+                  ))}
+                </ul>
+                <Link
+                  href="/dashboard/admin-gestion"
+                  className="mt-3 inline-flex h-10 items-center rounded-xl bg-slate-950 px-3 text-sm font-semibold text-white"
+                >
+                  Ouvrir la facturation
+                </Link>
+              </div>
+            ) : null}
 
             <p className="text-sm font-medium text-slate-500">
               {unreadCount} non lue{unreadCount > 1 ? "s" : ""} ·{" "}

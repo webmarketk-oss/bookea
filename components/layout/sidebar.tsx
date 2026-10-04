@@ -265,14 +265,24 @@ export default function Sidebar({
         </NavGroup>
 
         {isBookeaAdmin ? (
-          <NavItem
-            href="/dashboard/admin-notifications"
-            label="Centre de notifications"
-            icon={Bell}
-            active={pathname.startsWith("/dashboard/admin-notifications")}
-            collapsed={collapsed}
-            onExpand={() => onCollapsedChange(false)}
-          />
+          <>
+            <NavItem
+              href="/dashboard/admin-gestion"
+              label="Facturation WebK / Bookea"
+              icon={ReceiptText}
+              active={pathname.startsWith("/dashboard/admin-gestion")}
+              collapsed={collapsed}
+              onExpand={() => onCollapsedChange(false)}
+            />
+            <NavItem
+              href="/dashboard/admin-notifications"
+              label="Centre de notifications"
+              icon={Bell}
+              active={pathname.startsWith("/dashboard/admin-notifications")}
+              collapsed={collapsed}
+              onExpand={() => onCollapsedChange(false)}
+            />
+          </>
         ) : null}
 
         <NavItem
