@@ -81,6 +81,8 @@ export type AgencyInvoice = {
   number: string;
   clientId: string;
   issuedOn: string;
+  periodFrom?: string;
+  periodTo?: string;
   nextCycleOn: string;
   status: AgencyInvoiceStatus;
   lines: AgencyInvoiceLine[];
@@ -289,6 +291,50 @@ export function nextBillingCycleOn(issuedOn: string) {
   return addDaysIso(issuedOn, 30);
 }
 
+export function defaultInvoicePeriod(issuedOn: string) {
+  const periodFrom = issuedOn || toIsoDate(startOfDay(new Date()));
+  return {
+    periodFrom,
+    periodTo: addDaysIso(nextBillingCycleOn(periodFrom), -1),
+  };
+}
+
+export function invoicePeriod(
+  invoice: Pick<AgencyInvoice, "issuedOn" | "periodFrom" | "periodTo">,
+) {
+  const fallback = defaultInvoicePeriod(invoice.issuedOn);
+  return {
+    periodFrom: invoice.periodFrom || fallback.periodFrom,
+    periodTo: invoice.periodTo || fallback.periodTo,
+  };
+}
+
+export function shiftInvoicePeriod(
+  invoice: Pick<AgencyInvoice, "issuedOn" | "periodFrom" | "periodTo">,
+  days = 30,
+) {
+  const period = invoicePeriod(invoice);
+  return {
+    periodFrom: addDaysIso(period.periodFrom, days),
+    periodTo: addDaysIso(period.periodTo, days),
+  };
+}
+
+export function formatInvoicePeriod(
+  invoice: Pick<AgencyInvoice, "periodFrom" | "periodTo">,
+) {
+  if (!invoice.periodFrom && !invoice.periodTo) {
+    return "";
+  }
+  if (invoice.periodFrom && invoice.periodTo) {
+    return `Du ${formatShortDate(invoice.periodFrom)} au ${formatShortDate(invoice.periodTo)}`;
+  }
+  if (invoice.periodFrom) {
+    return `À partir du ${formatShortDate(invoice.periodFrom)}`;
+  }
+  return `Jusqu’au ${formatShortDate(invoice.periodTo || "")}`;
+}
+
 export function isWithinReminderWindow(
   nextInvoiceOn: string,
   now = new Date(),
@@ -393,6 +439,11 @@ export function buildAgencyInvoiceHtml(
         <p class="muted">Facture</p>
         <h1>${escapeHtml(invoice.number)}</h1>
         <p class="muted">Date : ${escapeHtml(formatShortDate(invoice.issuedOn))}</p>
+        ${
+          formatInvoicePeriod(invoice)
+            ? `<p class="muted">Période : ${escapeHtml(formatInvoicePeriod(invoice))}</p>`
+            : ""
+        }
       </td>
     </tr>
   </table>
@@ -445,6 +496,7 @@ export function duplicateAgencyInvoice(
     number: nextInvoiceNumber(state),
     issuedOn,
     nextCycleOn: nextBillingCycleOn(issuedOn),
+    ...shiftInvoicePeriod(invoice),
     status: "Émise" as const,
     lines: cloneInvoiceLines(invoice.lines),
     createdAt: new Date().toISOString(),
@@ -662,11 +714,18 @@ function normalizeInvoice(value: unknown): AgencyInvoice | null {
     return null;
   }
   const status = isInvoiceStatus(record.status) ? record.status : "Émise";
+  const period = invoicePeriod({
+    issuedOn,
+    periodFrom: String(record.periodFrom || "").slice(0, 10),
+    periodTo: String(record.periodTo || "").slice(0, 10),
+  });
   return {
     id: String(record.id || createId()),
     number: String(record.number || ""),
     clientId,
     issuedOn,
+    periodFrom: period.periodFrom,
+    periodTo: period.periodTo,
     nextCycleOn: String(record.nextCycleOn || nextBillingCycleOn(issuedOn)),
     status,
     lines: Array.isArray(record.lines)

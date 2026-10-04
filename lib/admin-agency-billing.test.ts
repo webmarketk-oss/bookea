@@ -19,6 +19,8 @@ import {
   nextBillingCycleOn,
   nextInvoiceNumber,
   duplicateAgencyInvoice,
+  defaultInvoicePeriod,
+  formatInvoicePeriod,
   normalizeAgencyState,
   periodRange,
 } from "./admin-agency-billing.ts";
@@ -46,6 +48,8 @@ test("les deux marques partagent la même société US et la mention d’autoliq
       number: "BK-2026-001",
       clientId: "c1",
       issuedOn: "2026-10-04",
+      periodFrom: "2026-10-01",
+      periodTo: "2026-10-31",
       nextCycleOn: "2026-11-03",
       status: "Émise",
       comments: "",
@@ -60,6 +64,7 @@ test("les deux marques partagent la même société US et la mention d’autoliq
   assert.doesNotMatch(html, /TVA\s*:/);
   assert.doesNotMatch(html, /Prix HT|Total HT|\bHT<\/h1>/);
   assert.match(html, /BK-2026-001/);
+  assert.match(html, /Période : Du 01\/10\/2026 au 31\/10\/2026/);
   assert.match(html, /BE21 9055 5762 3503/);
   assert.match(html, /TRWIBEB1XXX/);
   assert.match(html, /Merci de régler sous 8 jours/);
@@ -71,6 +76,16 @@ test("les deux marques partagent la même société US et la mention d’autoliq
 
 test("le prochain cycle est 30 jours après la facture", () => {
   assert.equal(nextBillingCycleOn("2026-10-03"), "2026-11-02");
+});
+
+test("la période de facturation couvre le cycle jusqu’à la veille du suivant", () => {
+  const period = defaultInvoicePeriod("2026-10-04");
+  assert.equal(period.periodFrom, "2026-10-04");
+  assert.equal(period.periodTo, "2026-11-02");
+  assert.equal(
+    formatInvoicePeriod(period),
+    "Du 04/10/2026 au 02/11/2026",
+  );
 });
 
 test("dupliquer une facture recopie les lignes sur le mois suivant", () => {
@@ -86,6 +101,8 @@ test("dupliquer une facture recopie les lignes sur le mois suivant", () => {
     status: "Payée",
     comments: "interne",
     invoiceNote: "Merci",
+    periodFrom: "2026-10-01",
+    periodTo: "2026-10-31",
     createdAt: "2026-10-04T00:00:00.000Z",
     lines: [
       {
@@ -106,6 +123,8 @@ test("dupliquer une facture recopie les lignes sur le mois suivant", () => {
   assert.equal(copy.status, "Émise");
   assert.equal(copy.clientId, "c1");
   assert.equal(copy.invoiceNote, "Merci");
+  assert.equal(copy.periodFrom, "2026-10-31");
+  assert.equal(copy.periodTo, "2026-11-30");
   assert.equal(copy.lines[0]?.label, "Meta");
   assert.equal(copy.lines[0]?.discountValue, 50);
   assert.notEqual(copy.lines[0]?.id, "l1");

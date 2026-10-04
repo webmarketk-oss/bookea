@@ -1,5 +1,6 @@
 "use client";
 
+import { CalendarDays } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 import {
@@ -26,6 +27,9 @@ import {
   nextInvoiceNumber,
   duplicateAgencyInvoice,
   cloneInvoiceLines,
+  defaultInvoicePeriod,
+  formatInvoicePeriod,
+  invoicePeriod,
   periodRange,
   type AgencyBillingState,
   type AgencyClient,
@@ -291,6 +295,7 @@ function BillingSection({
       comments: invoice.comments,
       invoiceNote: invoice.invoiceNote,
       lines: cloneInvoiceLines(invoice.lines),
+      ...invoicePeriod(invoice),
     });
     requestAnimationFrame(() => {
       document
@@ -310,6 +315,7 @@ function BillingSection({
     }
     const issuedOn = draft.issuedOn || new Date().toISOString().slice(0, 10);
     const nextCycleOn = nextBillingCycleOn(issuedOn);
+    const period = sanitizeInvoicePeriod(draft, issuedOn);
     if (editingId) {
       onChange({
         invoices: state.invoices.map((item) =>
@@ -319,6 +325,7 @@ function BillingSection({
                 clientId: draft.clientId,
                 issuedOn,
                 nextCycleOn,
+                ...period,
                 lines: draft.lines,
                 comments: draft.comments,
                 invoiceNote: draft.invoiceNote,
@@ -340,6 +347,7 @@ function BillingSection({
       clientId: draft.clientId,
       issuedOn,
       nextCycleOn,
+      ...period,
       status: "Émise",
       lines: draft.lines,
       comments: draft.comments,
@@ -469,29 +477,94 @@ function BillingSection({
             : "Nouvelle facture"}
         </p>
         <div className="mt-3 grid gap-3 md:grid-cols-2">
-          <select
-            value={draft.clientId}
-            onChange={(event) =>
-              setDraft((current) => ({ ...current, clientId: event.target.value }))
-            }
-            className="h-11 rounded-xl border border-slate-200 px-3 text-sm font-semibold"
-          >
-            <option value="">Choisir un client</option>
-            {state.clients.map((client) => (
-              <option key={client.id} value={client.id}>
-                {client.name}
-                {client.active ? "" : " · inactif"}
-              </option>
-            ))}
-          </select>
-          <input
-            type="date"
-            value={draft.issuedOn}
-            onChange={(event) =>
-              setDraft((current) => ({ ...current, issuedOn: event.target.value }))
-            }
-            className="h-11 rounded-xl border border-slate-200 px-3 text-sm font-semibold"
-          />
+          <label className="block text-sm font-semibold text-slate-600">
+            Client
+            <select
+              value={draft.clientId}
+              onChange={(event) =>
+                setDraft((current) => ({ ...current, clientId: event.target.value }))
+              }
+              className="mt-1 h-11 w-full rounded-xl border border-slate-200 px-3 text-sm font-semibold text-slate-900"
+            >
+              <option value="">Choisir un client</option>
+              {state.clients.map((client) => (
+                <option key={client.id} value={client.id}>
+                  {client.name}
+                  {client.active ? "" : " · inactif"}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="block text-sm font-semibold text-slate-600">
+            Date de la facture
+            <input
+              type="date"
+              value={draft.issuedOn}
+              onChange={(event) => {
+                const issuedOn = event.target.value;
+                setDraft((current) => {
+                  const previousDefault = defaultInvoicePeriod(current.issuedOn);
+                  const keepCustom =
+                    current.periodFrom !== previousDefault.periodFrom ||
+                    current.periodTo !== previousDefault.periodTo;
+                  return {
+                    ...current,
+                    issuedOn,
+                    ...(keepCustom ? {} : defaultInvoicePeriod(issuedOn)),
+                  };
+                });
+              }}
+              className="mt-1 h-11 w-full rounded-xl border border-slate-200 px-3 text-sm font-semibold text-slate-900"
+            />
+          </label>
+        </div>
+        <div className="mt-3 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+          <div className="flex items-center gap-2">
+            <CalendarDays className="h-4 w-4 text-violet-600" />
+            <p className="text-sm font-black uppercase text-slate-500">
+              Période de facturation
+            </p>
+          </div>
+          <p className="mt-1 text-xs font-semibold text-slate-500">
+            Choisis les dates couvertes par cette facture avec le calendrier.
+          </p>
+          <div className="mt-3 grid gap-3 md:grid-cols-2">
+            <label className="block text-sm font-semibold text-slate-600">
+              Du
+              <input
+                type="date"
+                value={draft.periodFrom}
+                onChange={(event) =>
+                  setDraft((current) => ({
+                    ...current,
+                    periodFrom: event.target.value,
+                    periodTo:
+                      current.periodTo &&
+                      event.target.value &&
+                      current.periodTo < event.target.value
+                        ? event.target.value
+                        : current.periodTo,
+                  }))
+                }
+                className="mt-1 h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-900"
+              />
+            </label>
+            <label className="block text-sm font-semibold text-slate-600">
+              Au
+              <input
+                type="date"
+                value={draft.periodTo}
+                min={draft.periodFrom || undefined}
+                onChange={(event) =>
+                  setDraft((current) => ({
+                    ...current,
+                    periodTo: event.target.value,
+                  }))
+                }
+                className="mt-1 h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-900"
+              />
+            </label>
+          </div>
         </div>
         <div className="mt-3 space-y-2">
           {draft.lines.map((line) => (
@@ -770,7 +843,14 @@ function BillingSection({
                   >
                     <td className="px-4 py-3 font-semibold">{invoice.number}</td>
                     <td className="px-4 py-3">{client?.name || "—"}</td>
-                    <td className="px-4 py-3">{formatShortDate(invoice.issuedOn)}</td>
+                    <td className="px-4 py-3">
+                      <p>{formatShortDate(invoice.issuedOn)}</p>
+                      {formatInvoicePeriod(invoice) ? (
+                        <p className="text-xs font-semibold opacity-70">
+                          {formatInvoicePeriod(invoice)}
+                        </p>
+                      ) : null}
+                    </td>
                     <td className="px-4 py-3">{formatShortDate(invoice.nextCycleOn)}</td>
                     <td className="px-4 py-3 font-black">
                       {formatEuroAmount(invoiceTotal(invoice))}
@@ -921,6 +1001,11 @@ function InvoiceDocument({
             <p className="mt-1 text-sm font-semibold text-slate-600">
               Date : {formatShortDate(invoice.issuedOn)}
             </p>
+            {formatInvoicePeriod(invoice) ? (
+              <p className="text-sm font-semibold text-slate-600">
+                Période : {formatInvoicePeriod(invoice)}
+              </p>
+            ) : null}
           </div>
         </div>
 
@@ -1464,13 +1549,30 @@ function emptyInvoiceDraft(state: AgencyBillingState) {
     discountType: "Aucune",
     discountValue: 0,
   };
+  const issuedOn = new Date().toISOString().slice(0, 10);
   return {
     clientId: state.clients[0]?.id || "",
-    issuedOn: new Date().toISOString().slice(0, 10),
+    issuedOn,
     comments: "",
     invoiceNote: "",
     lines: [line],
+    ...defaultInvoicePeriod(issuedOn),
   };
+}
+
+function sanitizeInvoicePeriod(
+  draft: { periodFrom?: string; periodTo?: string },
+  issuedOn: string,
+) {
+  const period = invoicePeriod({
+    issuedOn,
+    periodFrom: draft.periodFrom || "",
+    periodTo: draft.periodTo || "",
+  });
+  if (period.periodFrom && period.periodTo && period.periodTo < period.periodFrom) {
+    return { periodFrom: period.periodFrom, periodTo: period.periodFrom };
+  }
+  return period;
 }
 
 function invoiceRowTone(status: AgencyInvoice["status"]) {
