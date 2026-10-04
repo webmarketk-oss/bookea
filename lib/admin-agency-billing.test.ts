@@ -125,5 +125,11 @@ test("les KPI WebK séparent meta, phoning et RDV WA", () => {
   assert.equal(kpi.meta, 400);
   assert.equal(kpi.phoning, 250);
   assert.equal(kpi.rdv_wa, 100);
+  assert.equal(kpi.gestion, 0);
+  const withFees = normalizeAgencyState("webk", { services: [] });
+  assert.equal(
+    withFees.services.some((item) => item.kind === "gestion"),
+    true,
+  );
   assert.equal(monthlyRevenue(invoices, 2026)[9], 750);
 });

@@ -891,6 +891,7 @@ function KpiSection({
           ["Phoning", breakdown.phoning],
           ["Réseaux", breakdown.reseaux],
           ["RDV WhatsApp", breakdown.rdv_wa],
+          ["Frais de gestion", breakdown.gestion],
           ["Annexes", breakdown.autre],
         ]
       : [

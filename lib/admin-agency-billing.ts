@@ -12,6 +12,7 @@ export type AgencyServiceKind =
   | "phoning"
   | "reseaux"
   | "rdv_wa"
+  | "gestion"
   | "whatsapp"
   | "crm_sms"
   | "sms"
@@ -158,6 +159,18 @@ export function emptyAgencyState(company: AgencyCompany): AgencyBillingState {
   };
 }
 
+function ensureDefaultServices(
+  company: AgencyCompany,
+  services: AgencyService[],
+) {
+  const current = services.length > 0 ? services : defaultAgencyServices(company);
+  const kinds = new Set(current.map((item) => item.kind));
+  const missing = defaultAgencyServices(company).filter(
+    (item) => !kinds.has(item.kind),
+  );
+  return [...current, ...missing];
+}
+
 export function defaultAgencyServices(company: AgencyCompany): AgencyService[] {
   if (company === "webk") {
     return [
@@ -165,6 +178,7 @@ export function defaultAgencyServices(company: AgencyCompany): AgencyService[] {
       service("Offre phoning", 0, "phoning"),
       service("Gestion des réseaux", 0, "reseaux"),
       service("RDV WhatsApp", 0, "rdv_wa"),
+      service("Frais de gestion", 0, "gestion"),
       service("Prestation annexe", 0, "autre"),
     ];
   }
@@ -209,7 +223,7 @@ export function normalizeAgencyState(
           .map((item) => normalizeClient(item))
           .filter((item): item is AgencyClient => Boolean(item))
       : [],
-    services: services.length > 0 ? services : fallback.services,
+    services: ensureDefaultServices(company, services),
     invoices: Array.isArray(record.invoices)
       ? record.invoices
           .map((item) => normalizeInvoice(item))
@@ -422,6 +436,7 @@ export function kpiBreakdown(invoices: AgencyInvoice[]) {
     phoning: 0,
     reseaux: 0,
     rdv_wa: 0,
+    gestion: 0,
     whatsapp: 0,
     crm_sms: 0,
     sms: 0,
@@ -563,6 +578,7 @@ function isServiceKind(value: unknown): value is AgencyServiceKind {
     value === "phoning" ||
     value === "reseaux" ||
     value === "rdv_wa" ||
+    value === "gestion" ||
     value === "whatsapp" ||
     value === "crm_sms" ||
     value === "sms" ||
