@@ -27,6 +27,8 @@ test("un fil déjà envoyé n’est plus « À envoyer »", () => {
 
 test("date de rappel ou reviendra vers nous bloquent la relance", () => {
   assert.equal(isCrmRelanceHold({ status: "Reviendra vers nous" }), true);
+  assert.equal(isCrmRelanceHold({ status: "Pas intéressé" }), true);
+  assert.equal(isCrmRelanceHold({ status: "Hors zone" }), true);
   assert.equal(isCrmRelanceHold({ status: "Nouveau", recall_date: "2026-10-10" }), true);
   assert.equal(isCrmRelanceHold({ status: "Nouveau" }), false);
   assert.equal(

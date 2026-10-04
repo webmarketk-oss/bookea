@@ -87,7 +87,11 @@ function isCrmRelanceHold(row) {
   if (!row) {
     return false;
   }
-  if (/reviendra vers nous/i.test(String(row.status || ""))) {
+  if (
+    /reviendra vers nous|pas int[eé]ress|hors[- ]?zone/i.test(
+      String(row.status || ""),
+    )
+  ) {
     return true;
   }
   return Boolean(String(row.recall_date || row.reminderDate || "").trim());
@@ -127,7 +131,11 @@ async function loadRelanceHoldKeys(supabase, centerId) {
 }
 
 function conversationOnRelanceHold(conversation, hold) {
-  if (/reviendra vers nous/i.test(String(conversation?.status || ""))) {
+  if (
+    /reviendra vers nous|pas int[eé]ress|hors[- ]?zone/i.test(
+      String(conversation?.status || ""),
+    )
+  ) {
     return true;
   }
   if (!hold || hold.size === 0) {

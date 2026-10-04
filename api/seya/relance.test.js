@@ -189,6 +189,7 @@ test("pas de relance si stop, refus ou RDV confirmé", () => {
   );
   assert.equal(shouldSkipRelance(conversation({ status: "RDV confirmé" })), true);
   assert.equal(shouldSkipRelance(conversation({ status: "Pas intéressé" })), true);
+  assert.equal(shouldSkipRelance(conversation({ status: "Hors zone" })), true);
   assert.equal(
     shouldSkipRelance(conversation({ status: "Reviendra vers nous" })),
     true,

@@ -219,7 +219,7 @@ function shouldSkipRelance(conversation, extras = {}) {
   return (
     conversation?.healthReview?.status === "awaiting_human_health_review" ||
     conversation?.bookingState?.pendingQuestion === "no_slots" ||
-    /rdv pris|rdv confirm|terminé|termine|ferm[eé]|pas int[eé]ress|reviendra vers nous|recontacter|revue santé/i.test(
+    /rdv pris|rdv confirm|terminé|termine|ferm[eé]|pas int[eé]ress|hors[- ]?zone|reviendra vers nous|recontacter|revue santé/i.test(
       status,
     )
   );
