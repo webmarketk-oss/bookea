@@ -1182,6 +1182,14 @@ test("hors zone, reviendra et rappel lundi ferment le fil sans créneaux", async
   } = require("./conversation");
   const thursday = new Date("2026-10-01T12:00:00");
 
+  assert.deepEqual(
+    crmUpdateFromLeadMessage("Désolée je ne donne pas suite cordialement", thursday),
+    {
+      status: "Pas intéressé",
+      conversationStatus: "Pas intéressé",
+      reminderDate: null,
+    },
+  );
   assert.deepEqual(crmUpdateFromLeadMessage("Je suis hors zone", thursday), {
     status: "Hors zone",
     conversationStatus: "Terminé",

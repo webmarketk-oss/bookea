@@ -313,6 +313,9 @@ export function isSeyaOptOut(text: string) {
   if (/pas int[eé]ress/.test(raw)) {
     return true;
   }
+  if (/ne donne(rai)? pas (la )?suite|pas (la )?peine/i.test(raw)) {
+    return true;
+  }
   if (/ne (me )?(plus )?(e[cç]rire|contacter|d[eé]ranger|appeler)/i.test(raw)) {
     return true;
   }

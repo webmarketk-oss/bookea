@@ -188,10 +188,10 @@ async function relanceCenter(supabase, center) {
 
 function shouldSkipRelance(conversation) {
   const status = String(conversation?.status || "");
-  const lastLead = [...(conversation?.messages || [])]
-    .reverse()
-    .find((item) => item.author === "lead");
-  if (lastLead && isOptOut(lastLead.text || "")) {
+  const leadTexts = (conversation?.messages || []).filter(
+    (item) => item.author === "lead",
+  );
+  if (leadTexts.some((item) => isOptOut(item.text || ""))) {
     return true;
   }
   const seyaTexts = (conversation?.messages || [])
@@ -209,7 +209,7 @@ function shouldSkipRelance(conversation) {
   return (
     conversation?.healthReview?.status === "awaiting_human_health_review" ||
     conversation?.bookingState?.pendingQuestion === "no_slots" ||
-    /rdv pris|rdv confirm|terminé|termine|pas int[eé]ress|recontacter|revue santé/i.test(
+    /rdv pris|rdv confirm|terminé|termine|ferm[eé]|pas int[eé]ress|recontacter|revue santé/i.test(
       status,
     )
   );

@@ -363,7 +363,42 @@ function lockedCrmStatuses() {
   ];
 }
 
+function isLeadRefusal(text) {
+  const raw = String(text || "").trim();
+  const needle = normalize(raw).replace(/[!?.]+$/g, "");
+  if (!needle) {
+    return false;
+  }
+  if (/^(stop|stoppez|arrete|arretez|stop svp)$/.test(needle)) {
+    return true;
+  }
+  if (/pas int[eé]ress/.test(needle)) {
+    return true;
+  }
+  if (/ne donne(rai)? pas (la )?suite|pas (la )?peine/.test(needle)) {
+    return true;
+  }
+  if (
+    /ne (me )?(plus )?(e[cç]rire|contacter|d[eé]ranger|appeler|relancer)/.test(
+      needle,
+    )
+  ) {
+    return true;
+  }
+  if (isWrongCenter(raw)) {
+    return true;
+  }
+  return /^(non merci|plus jamais)$/.test(needle);
+}
+
 function crmUpdateFromLeadMessage(text, now) {
+  if (isLeadRefusal(text)) {
+    return {
+      status: "Pas intéressé",
+      conversationStatus: "Pas intéressé",
+      reminderDate: null,
+    };
+  }
   if (isOutOfZone(text)) {
     return {
       status: "Hors zone",
@@ -711,6 +746,7 @@ module.exports = {
   isWillComeBack,
   isAskToWriteBack,
   parseNextWeekdayIso,
+  isLeadRefusal,
   crmUpdateFromLeadMessage,
   lockedCrmStatuses,
   isShortYes,

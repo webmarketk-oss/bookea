@@ -41,6 +41,7 @@ const {
   isWrongCenter,
   wrongCenterReply,
   crmUpdateFromLeadMessage,
+  isLeadRefusal,
   isOffTopicComplaint,
   isRereadAsk,
   isAppointmentConfirmed,
@@ -180,21 +181,7 @@ function isJunkTreatment(value) {
 }
 
 function isOptOut(text) {
-  const raw = String(text || "").trim();
-  const needle = normalize(raw).replace(/[!?.]+$/g, "");
-  if (/^(stop|stoppez|arrete|arretez|stop svp)$/.test(needle)) {
-    return true;
-  }
-  if (/pas int[eé]ress/.test(raw)) {
-    return true;
-  }
-  if (/ne (me )?(plus )?(e[cç]rire|contacter|d[eé]ranger|appeler)/i.test(raw)) {
-    return true;
-  }
-  if (isWrongCenter(raw)) {
-    return true;
-  }
-  return /^(non merci|plus jamais)$/i.test(raw);
+  return isLeadRefusal(text);
 }
 
 function asksPrice(text) {

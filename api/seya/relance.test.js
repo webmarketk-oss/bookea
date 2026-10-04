@@ -142,6 +142,51 @@ test("pas de relance si stop, refus ou RDV confirmé", () => {
     ),
     true,
   );
+  assert.equal(
+    shouldSkipRelance(
+      conversation({
+        status: "Qualifié",
+        messages: [
+          {
+            id: "m1",
+            author: "lead",
+            text: "Désolée je ne donne pas suite cordialement",
+            at: hoursAgo(20),
+          },
+        ],
+      }),
+    ),
+    true,
+  );
+  assert.equal(
+    pickRelanceRound(
+      conversation({
+        status: "Qualifié",
+        messages: [
+          {
+            id: "m1",
+            author: "seya",
+            text: "Bonjour, diagnostic de peau offert.",
+            at: hoursAgo(26),
+          },
+          {
+            id: "m2",
+            author: "lead",
+            text: "Désolée je ne donne pas suite cordialement",
+            at: hoursAgo(25),
+          },
+          {
+            id: "m3",
+            author: "seya",
+            text: "D’accord, je comprends. Je vous souhaite une belle journée.",
+            at: hoursAgo(25),
+          },
+        ],
+      }),
+      NOW,
+    ),
+    0,
+  );
   assert.equal(shouldSkipRelance(conversation({ status: "RDV confirmé" })), true);
   assert.equal(shouldSkipRelance(conversation({ status: "Pas intéressé" })), true);
   assert.equal(
