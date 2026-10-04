@@ -106,7 +106,7 @@ type CenterMemberRow = {
     | null;
 };
 
-type CenterCardData = Omit<CenterRow, "settings"> & {
+type CenterCardData = Omit<CenterRow, "settings" | "phone"> & {
   legalName: string;
   address: string;
   phone: string;
@@ -229,8 +229,7 @@ export default function AdminCentresPage() {
             city: center.city,
             email:
               firstText(center.email, center.publicCenter?.email) || null,
-            phone:
-              firstText(center.phone, center.publicCenter?.phone) || null,
+            phone: firstText(center.phone, center.publicCenter?.phone),
             address_line1:
               firstText(center.address_line1, center.publicCenter?.address) ||
               null,

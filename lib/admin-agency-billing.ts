@@ -148,6 +148,18 @@ export function companyLabel(company: AgencyCompany) {
   return AGENCY_COMPANIES.find((item) => item.id === company)?.label || company;
 }
 
+export function agencyInvoiceLogoPath(company: AgencyCompany) {
+  return company === "webk" ? "/webk-invoice-logo.png" : "/bookea-invoice-logo.png";
+}
+
+export function agencyInvoiceLogoSrc(company: AgencyCompany) {
+  const path = agencyInvoiceLogoPath(company);
+  if (typeof window !== "undefined" && window.location?.origin) {
+    return `${window.location.origin}${path}`;
+  }
+  return path;
+}
+
 function invoiceBrandName(
   company: AgencyCompany,
   stored: unknown,
@@ -367,13 +379,14 @@ export function buildAgencyInvoiceHtml(
     .box { border: 1px solid #e2e8f0; border-radius: 12px; padding: 16px; margin-top: 24px; }
     .legal { border: 1px solid #f59e0b; background: #fffbeb; border-radius: 12px; padding: 14px; margin-top: 24px; font-size: 14px; }
     .right { text-align: right; }
+    .logo { height: 52px; max-width: 220px; width: auto; object-fit: contain; display: block; margin-bottom: 10px; }
   </style>
 </head>
 <body>
   <table>
     <tr>
       <td>
-        <h1>${escapeHtml(state.identity.name)}</h1>
+        <img class="logo" src="${escapeHtml(agencyInvoiceLogoSrc(state.company))}" alt="${escapeHtml(state.identity.name)}" />
         <p class="muted">${issuer}</p>
       </td>
       <td class="right">
@@ -390,12 +403,11 @@ export function buildAgencyInvoiceHtml(
   </div>
   <table>
     <thead>
-      <tr><th>Prestation</th><th>Qté</th><th>Prix HT</th><th>Remise</th><th class="right">Total HT</th></tr>
+      <tr><th>Prestation</th><th>Qté</th><th>Prix</th><th>Remise</th><th class="right">Total</th></tr>
     </thead>
     <tbody>${lines}</tbody>
   </table>
-  <p class="right muted">TVA : 0,00 €</p>
-  <h1 class="right">${escapeHtml(formatEuroAmount(total))} HT</h1>
+  <h1 class="right">${escapeHtml(formatEuroAmount(total))}</h1>
   ${
     invoice.invoiceNote
       ? `<div class="box"><p class="muted">Commentaire</p><p>${escapeHtml(invoice.invoiceNote).replace(/\n/g, "<br />")}</p></div>`

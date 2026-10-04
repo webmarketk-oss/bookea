@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import {
   AGENCY_COMPANIES,
+  agencyInvoiceLogoSrc,
   bankTransferLines,
   billingAlerts,
   buildAgencyInvoiceHtml,
@@ -607,10 +608,10 @@ function BillingSection({
                         </button>
                         <button
                           type="button"
-                          onClick={() => downloadAgencyInvoice(state, invoice)}
+                          onClick={() => void downloadAgencyInvoice(state, invoice)}
                           className="h-9 rounded-lg border border-slate-200 px-3 text-xs font-bold"
                         >
-                          Télécharger
+                          PDF
                         </button>
                       </div>
                     </td>
@@ -653,10 +654,10 @@ function InvoiceDocument({
           <div className="flex gap-2">
             <button
               type="button"
-              onClick={() => downloadAgencyInvoice(state, invoice)}
+              onClick={() => void downloadAgencyInvoice(state, invoice)}
               className="h-10 rounded-xl bg-violet-600 px-3 text-sm font-semibold text-white"
             >
-              Télécharger
+              Télécharger le PDF
             </button>
             <button
               type="button"
@@ -677,8 +678,12 @@ function InvoiceDocument({
 
         <div className="mt-4 flex flex-wrap justify-between gap-6">
           <div>
-            <p className="text-2xl font-black">{state.identity.name}</p>
-            <div className="mt-2 space-y-0.5 text-sm font-medium text-slate-600">
+            <img
+              src={agencyInvoiceLogoSrc(state.company)}
+              alt={state.identity.name}
+              className="mb-3 h-14 w-auto max-w-[220px] object-contain"
+            />
+            <div className="space-y-0.5 text-sm font-medium text-slate-600">
               {issuerAddressLines(state.identity).map((line) => (
                 <p key={line}>{line}</p>
               ))}
@@ -706,9 +711,9 @@ function InvoiceDocument({
             <tr>
               <th className="py-2">Prestation</th>
               <th className="py-2">Qté</th>
-              <th className="py-2">Prix HT</th>
+              <th className="py-2">Prix</th>
               <th className="py-2">Remise</th>
-              <th className="py-2 text-right">Total HT</th>
+              <th className="py-2 text-right">Total</th>
             </tr>
           </thead>
           <tbody>
@@ -727,8 +732,7 @@ function InvoiceDocument({
         </table>
 
         <div className="mt-4 text-right">
-          <p className="text-sm font-semibold text-slate-500">TVA : 0,00 €</p>
-          <p className="text-2xl font-black">{formatEuroAmount(total)} HT</p>
+          <p className="text-2xl font-black">{formatEuroAmount(total)}</p>
         </div>
 
         {invoice.invoiceNote ? (
@@ -1145,21 +1149,82 @@ function KpiSection({
   );
 }
 
-function downloadAgencyInvoice(
+async function downloadAgencyInvoice(
   state: AgencyBillingState,
   invoice: AgencyInvoice,
 ) {
-  const blob = new Blob([buildAgencyInvoiceHtml(state, invoice)], {
-    type: "text/html;charset=utf-8",
+  const [{ jsPDF }, html2canvasModule] = await Promise.all([
+    import("jspdf"),
+    import("html2canvas"),
+  ]);
+  const html2canvas = html2canvasModule.default;
+  const iframe = document.createElement("iframe");
+  iframe.setAttribute("aria-hidden", "true");
+  iframe.style.position = "fixed";
+  iframe.style.left = "-10000px";
+  iframe.style.top = "0";
+  iframe.style.width = "794px";
+  iframe.style.height = "1123px";
+  iframe.style.border = "0";
+  document.body.appendChild(iframe);
+
+  const frameDoc = iframe.contentDocument;
+  if (!frameDoc) {
+    iframe.remove();
+    throw new Error("Impossible de préparer le PDF.");
+  }
+
+  frameDoc.open();
+  frameDoc.write(buildAgencyInvoiceHtml(state, invoice));
+  frameDoc.close();
+
+  await waitForInvoiceImages(frameDoc);
+  const canvas = await html2canvas(frameDoc.body, {
+    scale: 2,
+    useCORS: true,
+    backgroundColor: "#ffffff",
+    windowWidth: 794,
   });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = `${invoice.number}.html`;
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  URL.revokeObjectURL(url);
+  iframe.remove();
+
+  const pdf = new jsPDF({ unit: "mm", format: "a4", orientation: "portrait" });
+  const pageWidth = pdf.internal.pageSize.getWidth();
+  const pageHeight = pdf.internal.pageSize.getHeight();
+  const imageWidth = pageWidth;
+  const imageHeight = (canvas.height * imageWidth) / canvas.width;
+  const image = canvas.toDataURL("image/png");
+  let remaining = imageHeight;
+  let offset = 0;
+
+  pdf.addImage(image, "PNG", 0, offset, imageWidth, imageHeight);
+  remaining -= pageHeight;
+  while (remaining > 0) {
+    offset -= pageHeight;
+    pdf.addPage();
+    pdf.addImage(image, "PNG", 0, offset, imageWidth, imageHeight);
+    remaining -= pageHeight;
+  }
+  pdf.save(`${invoice.number}.pdf`);
+}
+
+function waitForInvoiceImages(doc: Document) {
+  const images = Array.from(doc.images);
+  if (images.length === 0) {
+    return Promise.resolve();
+  }
+  return Promise.all(
+    images.map(
+      (image) =>
+        new Promise<void>((resolve) => {
+          if (image.complete) {
+            resolve();
+            return;
+          }
+          image.onload = () => resolve();
+          image.onerror = () => resolve();
+        }),
+    ),
+  ).then(() => undefined);
 }
 
 function emptyInvoiceDraft(state: AgencyBillingState) {

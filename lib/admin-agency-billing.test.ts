@@ -54,7 +54,10 @@ test("les deux marques partagent la même société US et la mention d’autoliq
     },
   );
   assert.match(html, /Bookea Powered by Webk/);
+  assert.match(html, /bookea-invoice-logo\.png/);
   assert.match(html, /Autoliquidation par le preneur/);
+  assert.doesNotMatch(html, /TVA\s*:/);
+  assert.doesNotMatch(html, /Prix HT|Total HT|\bHT<\/h1>/);
   assert.match(html, /BK-2026-001/);
   assert.match(html, /BE21 9055 5762 3503/);
   assert.match(html, /TRWIBEB1XXX/);
