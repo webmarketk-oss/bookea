@@ -76,6 +76,12 @@ export type AgencyInvoiceLine = {
   discountValue: number;
 };
 
+export type AgencyInvoiceComment = {
+  id: string;
+  text: string;
+  createdAt: string;
+};
+
 export type AgencyInvoice = {
   id: string;
   number: string;
@@ -87,6 +93,7 @@ export type AgencyInvoice = {
   status: AgencyInvoiceStatus;
   lines: AgencyInvoiceLine[];
   comments: string;
+  commentLog?: AgencyInvoiceComment[];
   invoiceNote: string;
   createdAt: string;
 };
@@ -499,6 +506,8 @@ export function duplicateAgencyInvoice(
     ...shiftInvoicePeriod(invoice),
     status: "Émise" as const,
     lines: cloneInvoiceLines(invoice.lines),
+    comments: "",
+    commentLog: [],
     createdAt: new Date().toISOString(),
   };
 }
@@ -646,6 +655,59 @@ export function formatEuroAmount(value: number) {
   }).format(Number(value) || 0);
 }
 
+export function invoiceCommentLog(invoice: Pick<AgencyInvoice, "comments" | "commentLog" | "createdAt" | "id">) {
+  if (invoice.commentLog?.length) {
+    return invoice.commentLog;
+  }
+  const legacy = String(invoice.comments || "").trim();
+  if (!legacy) {
+    return [];
+  }
+  return [
+    {
+      id: `${invoice.id || "invoice"}-legacy`,
+      text: legacy,
+      createdAt: invoice.createdAt || new Date().toISOString(),
+    },
+  ];
+}
+
+export function addInvoiceComment(
+  invoice: AgencyInvoice,
+  text: string,
+  now = new Date(),
+) {
+  const trimmed = text.trim();
+  if (!trimmed) {
+    return invoice;
+  }
+  const entry: AgencyInvoiceComment = {
+    id: createId(),
+    text: trimmed,
+    createdAt: now.toISOString(),
+  };
+  const commentLog = [entry, ...invoiceCommentLog(invoice)];
+  return {
+    ...invoice,
+    comments: trimmed,
+    commentLog,
+  };
+}
+
+export function formatDateTime(value: string) {
+  const time = Date.parse(value);
+  if (!Number.isFinite(time)) {
+    return value;
+  }
+  return new Intl.DateTimeFormat("fr-FR", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(time));
+}
+
 export function formatShortDate(value: string) {
   const date = parseIsoDate(value);
   if (!date) {
@@ -734,9 +796,50 @@ function normalizeInvoice(value: unknown): AgencyInvoice | null {
           .filter((item): item is AgencyInvoiceLine => Boolean(item))
       : [],
     comments: String(record.comments || ""),
+    commentLog: normalizeCommentLog(
+      record.commentLog,
+      record.comments,
+      record.createdAt,
+      record.id,
+    ),
     invoiceNote: String(record.invoiceNote || ""),
     createdAt: String(record.createdAt || new Date().toISOString()),
   };
+}
+
+function normalizeCommentLog(
+  value: unknown,
+  legacyComments: unknown,
+  createdAt: unknown,
+  invoiceId: unknown,
+): AgencyInvoiceComment[] {
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => {
+        const record = asRecord(item);
+        const text = String(record.text || "").trim();
+        if (!text) {
+          return null;
+        }
+        return {
+          id: String(record.id || createId()),
+          text,
+          createdAt: String(record.createdAt || createdAt || new Date().toISOString()),
+        };
+      })
+      .filter((item): item is AgencyInvoiceComment => Boolean(item));
+  }
+  const legacy = String(legacyComments || "").trim();
+  if (!legacy) {
+    return [];
+  }
+  return [
+    {
+      id: `${String(invoiceId || "invoice")}-legacy`,
+      text: legacy,
+      createdAt: String(createdAt || new Date().toISOString()),
+    },
+  ];
 }
 
 function normalizeBank(value: unknown): AgencyBankDetails {

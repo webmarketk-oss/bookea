@@ -26,9 +26,12 @@ import {
   nextBillingCycleOn,
   nextInvoiceNumber,
   duplicateAgencyInvoice,
+  addInvoiceComment,
   cloneInvoiceLines,
   defaultInvoicePeriod,
+  formatDateTime,
   formatInvoicePeriod,
+  invoiceCommentLog,
   invoicePeriod,
   periodRange,
   type AgencyBillingState,
@@ -292,7 +295,6 @@ function BillingSection({
     setDraft({
       clientId: invoice.clientId,
       issuedOn: invoice.issuedOn,
-      comments: invoice.comments,
       invoiceNote: invoice.invoiceNote,
       lines: cloneInvoiceLines(invoice.lines),
       ...invoicePeriod(invoice),
@@ -327,7 +329,6 @@ function BillingSection({
                 nextCycleOn,
                 ...period,
                 lines: draft.lines,
-                comments: draft.comments,
                 invoiceNote: draft.invoiceNote,
               }
             : item,
@@ -350,7 +351,8 @@ function BillingSection({
       ...period,
       status: "Émise",
       lines: draft.lines,
-      comments: draft.comments,
+      comments: "",
+      commentLog: [],
       invoiceNote: draft.invoiceNote,
       createdAt: new Date().toISOString(),
     };
@@ -380,6 +382,18 @@ function BillingSection({
               nextInvoiceOn: copy.nextCycleOn,
             }
           : client,
+      ),
+    });
+  }
+
+  function addInternalComment(invoice: AgencyInvoice, text: string) {
+    const updated = addInvoiceComment(invoice, text);
+    if (updated === invoice) {
+      return;
+    }
+    onChange({
+      invoices: state.invoices.map((item) =>
+        item.id === invoice.id ? updated : item,
       ),
     });
   }
@@ -705,17 +719,6 @@ function BillingSection({
             className="mt-1 min-h-20 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-900"
           />
         </label>
-        <label className="mt-3 block text-sm font-semibold text-slate-600">
-          Commentaire interne
-          <textarea
-            value={draft.comments}
-            onChange={(event) =>
-              setDraft((current) => ({ ...current, comments: event.target.value }))
-            }
-            placeholder="Visible seulement par nous, jamais imprimé"
-            className="mt-1 min-h-16 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-900"
-          />
-        </label>
         <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
           <button
             type="button"
@@ -816,7 +819,12 @@ function BillingSection({
               <th className="px-4 py-3">Prochain cycle</th>
               <th className="px-4 py-3">Montant</th>
               <th className="px-4 py-3">Statut</th>
-              <th className="px-4 py-3">Commentaire</th>
+              <th className="px-4 py-3">
+                Suivi interne
+                <span className="mt-0.5 block text-[10px] font-semibold normal-case tracking-normal text-slate-400">
+                  Invisible sur la facture
+                </span>
+              </th>
               <th className="px-4 py-3"></th>
             </tr>
           </thead>
@@ -881,7 +889,12 @@ function BillingSection({
                         )}
                       </select>
                     </td>
-                    <td className="px-4 py-3 text-slate-500">{invoice.comments || "—"}</td>
+                    <td className="min-w-[18rem] px-4 py-3">
+                      <InvoiceFollowUpCell
+                        invoice={invoice}
+                        onAdd={(text) => addInternalComment(invoice, text)}
+                      />
+                    </td>
                     <td className="px-4 py-3">
                       <div className="flex flex-wrap gap-2">
                         <button
@@ -936,6 +949,71 @@ function BillingSection({
           onClose={() => setPreviewId(null)}
         />
       ) : null}
+    </div>
+  );
+}
+
+function InvoiceFollowUpCell({
+  invoice,
+  onAdd,
+}: {
+  invoice: AgencyInvoice;
+  onAdd: (text: string) => void;
+}) {
+  const [text, setText] = useState("");
+  const log = invoiceCommentLog(invoice);
+
+  function save() {
+    const next = text.trim();
+    if (!next) {
+      return;
+    }
+    onAdd(next);
+    setText("");
+  }
+
+  return (
+    <div className="w-[18rem] space-y-2">
+      {log.length ? (
+        <div className="max-h-28 space-y-1.5 overflow-y-auto">
+          {log.map((item) => (
+            <div
+              key={item.id}
+              className="rounded-lg border border-black/5 bg-white/80 px-2 py-1.5"
+            >
+              <p className="text-[10px] font-black uppercase tracking-wide text-slate-400">
+                {formatDateTime(item.createdAt)}
+              </p>
+              <p className="whitespace-pre-wrap text-xs font-semibold leading-5 text-slate-800">
+                {item.text}
+              </p>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className="text-xs font-semibold text-slate-400">Aucun suivi</p>
+      )}
+      <textarea
+        value={text}
+        rows={2}
+        onChange={(event) => setText(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" && !event.shiftKey) {
+            event.preventDefault();
+            save();
+          }
+        }}
+        placeholder="Ex. Relancée par mail à 11h30"
+        className="min-h-14 w-full resize-y rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-800 outline-none focus:border-violet-400"
+      />
+      <button
+        type="button"
+        disabled={!text.trim()}
+        onClick={save}
+        className="h-8 rounded-lg bg-slate-900 px-3 text-xs font-bold text-white disabled:opacity-40"
+      >
+        Enregistrer
+      </button>
     </div>
   );
 }
@@ -1553,7 +1631,6 @@ function emptyInvoiceDraft(state: AgencyBillingState) {
   return {
     clientId: state.clients[0]?.id || "",
     issuedOn,
-    comments: "",
     invoiceNote: "",
     lines: [line],
     ...defaultInvoicePeriod(issuedOn),

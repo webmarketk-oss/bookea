@@ -18,9 +18,11 @@ import {
   pendingPaymentKpi,
   nextBillingCycleOn,
   nextInvoiceNumber,
+  addInvoiceComment,
   duplicateAgencyInvoice,
   defaultInvoicePeriod,
   formatInvoicePeriod,
+  invoiceCommentLog,
   normalizeAgencyState,
   periodRange,
 } from "./admin-agency-billing.ts";
@@ -52,7 +54,14 @@ test("les deux marques partagent la même société US et la mention d’autoliq
       periodTo: "2026-10-31",
       nextCycleOn: "2026-11-03",
       status: "Émise",
-      comments: "",
+      comments: "Relancée par SMS",
+      commentLog: [
+        {
+          id: "n1",
+          text: "Relancée par SMS le 4 octobre à 11h30",
+          createdAt: "2026-10-04T09:30:00.000Z",
+        },
+      ],
       invoiceNote: "Merci de régler sous 8 jours.",
       createdAt: "",
       lines: [{ id: "l1", label: "Pack WhatsApp", kind: "whatsapp", quantity: 1, unitPrice: 79 }],
@@ -68,6 +77,7 @@ test("les deux marques partagent la même société US et la mention d’autoliq
   assert.match(html, /BE21 9055 5762 3503/);
   assert.match(html, /TRWIBEB1XXX/);
   assert.match(html, /Merci de régler sous 8 jours/);
+  assert.doesNotMatch(html, /Relancée par SMS/);
   assert.match(html, /Wise/);
   assert.match(html, /Rue du Trône 100/);
   assert.equal(migrated.bank.iban, "BE21 9055 5762 3503");
@@ -123,6 +133,8 @@ test("dupliquer une facture recopie les lignes sur le mois suivant", () => {
   assert.equal(copy.status, "Émise");
   assert.equal(copy.clientId, "c1");
   assert.equal(copy.invoiceNote, "Merci");
+  assert.equal(copy.comments, "");
+  assert.deepEqual(copy.commentLog, []);
   assert.equal(copy.periodFrom, "2026-10-31");
   assert.equal(copy.periodTo, "2026-11-30");
   assert.equal(copy.lines[0]?.label, "Meta");
@@ -277,6 +289,33 @@ test("les KPI comptent les factures en attente de règlement", () => {
   ]);
   assert.equal(unpaid.count, 2);
   assert.equal(unpaid.amount, 650);
+});
+
+test("un suivi interne s’ajoute avec la date et reste hors facture", () => {
+  const invoice = {
+    id: "1",
+    number: "WK-2026-001",
+    clientId: "c1",
+    issuedOn: "2026-10-04",
+    nextCycleOn: "2026-11-03",
+    status: "Émise" as const,
+    comments: "Ancien suivi",
+    invoiceNote: "",
+    createdAt: "2026-10-04T08:00:00.000Z",
+    lines: [],
+  };
+  const migrated = invoiceCommentLog(invoice);
+  assert.equal(migrated.length, 1);
+  assert.equal(migrated[0]?.text, "Ancien suivi");
+  const updated = addInvoiceComment(
+    invoice,
+    "Relancée par mail",
+    new Date("2026-10-04T11:30:00.000Z"),
+  );
+  assert.equal(updated.comments, "Relancée par mail");
+  assert.equal(updated.commentLog?.[0]?.text, "Relancée par mail");
+  assert.equal(updated.commentLog?.[0]?.createdAt, "2026-10-04T11:30:00.000Z");
+  assert.equal(updated.commentLog?.[1]?.text, "Ancien suivi");
 });
 
 test("une remise s’applique en euros ou en pourcentage sur la prestation", () => {
