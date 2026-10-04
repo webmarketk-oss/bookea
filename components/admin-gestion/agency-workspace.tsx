@@ -30,6 +30,7 @@ import {
   type AgencyCompany,
   type AgencyInvoice,
   type AgencyInvoiceLine,
+  type AgencyInvoiceStatus,
   type AgencyPeriod,
   type AgencyServiceKind,
 } from "@/lib/admin-agency-billing";
@@ -235,7 +236,30 @@ function BillingSection({
 }) {
   const [draft, setDraft] = useState(() => emptyInvoiceDraft(state));
   const [previewId, setPreviewId] = useState<string | null>(null);
+  const [statusFilter, setStatusFilter] = useState<AgencyInvoiceStatus | "tous">(
+    "tous",
+  );
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
   const preview = state.invoices.find((item) => item.id === previewId);
+  const filteredInvoices = useMemo(
+    () =>
+      state.invoices.filter((invoice) => {
+        if (statusFilter !== "tous" && invoice.status !== statusFilter) {
+          return false;
+        }
+        if (dateFrom && invoice.issuedOn < dateFrom) {
+          return false;
+        }
+        if (dateTo && invoice.issuedOn > dateTo) {
+          return false;
+        }
+        return true;
+      }),
+    [dateFrom, dateTo, state.invoices, statusFilter],
+  );
+  const hasInvoiceFilters =
+    statusFilter !== "tous" || Boolean(dateFrom) || Boolean(dateTo);
 
   function addLine() {
     const service = state.services[0];
@@ -538,6 +562,64 @@ function BillingSection({
       </section>
 
       <section className="overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <div className="flex flex-wrap items-end gap-3 border-b border-slate-100 px-4 py-4">
+          <label>
+            <span className="mb-1.5 block text-xs font-black uppercase text-slate-500">
+              Statut
+            </span>
+            <select
+              value={statusFilter}
+              onChange={(event) =>
+                setStatusFilter(event.target.value as AgencyInvoiceStatus | "tous")
+              }
+              className="h-11 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-800 outline-none focus:border-violet-400"
+            >
+              <option value="tous">Tous les statuts</option>
+              {["Brouillon", "Émise", "Payée", "En retard", "Annulée"].map(
+                (status) => (
+                  <option key={status} value={status}>
+                    {status}
+                  </option>
+                ),
+              )}
+            </select>
+          </label>
+          <label>
+            <span className="mb-1.5 block text-xs font-black uppercase text-slate-500">
+              Du
+            </span>
+            <input
+              type="date"
+              value={dateFrom}
+              onChange={(event) => setDateFrom(event.target.value)}
+              className="h-11 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-800 outline-none focus:border-violet-400"
+            />
+          </label>
+          <label>
+            <span className="mb-1.5 block text-xs font-black uppercase text-slate-500">
+              Au
+            </span>
+            <input
+              type="date"
+              value={dateTo}
+              onChange={(event) => setDateTo(event.target.value)}
+              className="h-11 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-800 outline-none focus:border-violet-400"
+            />
+          </label>
+          {hasInvoiceFilters ? (
+            <button
+              type="button"
+              onClick={() => {
+                setStatusFilter("tous");
+                setDateFrom("");
+                setDateTo("");
+              }}
+              className="h-11 rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+            >
+              Réinitialiser
+            </button>
+          ) : null}
+        </div>
         <table className="min-w-full text-sm">
           <thead className="border-b bg-slate-50 text-left text-xs font-black uppercase text-slate-500">
             <tr>
@@ -558,8 +640,14 @@ function BillingSection({
                   Aucune facture pour {companyLabel(state.company)}.
                 </td>
               </tr>
+            ) : filteredInvoices.length === 0 ? (
+              <tr>
+                <td colSpan={8} className="px-4 py-8 text-center font-semibold text-slate-400">
+                  Aucune facture ne correspond à ces filtres.
+                </td>
+              </tr>
             ) : (
-              state.invoices.map((invoice) => {
+              filteredInvoices.map((invoice) => {
                 const client = state.clients.find((item) => item.id === invoice.clientId);
                 return (
                   <tr
