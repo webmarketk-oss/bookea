@@ -412,35 +412,35 @@ function BillingSection({
                 ))}
               </select>
               <input
-                type="number"
-                min="0"
-                value={line.quantity}
+                inputMode="decimal"
+                value={emptyableNumber(line.quantity)}
                 onChange={(event) =>
                   setDraft((current) => ({
                     ...current,
                     lines: current.lines.map((item) =>
                       item.id === line.id
-                        ? { ...item, quantity: Number(event.target.value) }
+                        ? { ...item, quantity: parseEmptyableNumber(event.target.value) }
                         : item,
                     ),
                   }))
                 }
+                placeholder="1"
                 className="h-10 rounded-xl border border-slate-200 px-3 text-sm font-semibold"
               />
               <input
-                type="number"
-                min="0"
-                value={line.unitPrice}
+                inputMode="decimal"
+                value={emptyableNumber(line.unitPrice)}
                 onChange={(event) =>
                   setDraft((current) => ({
                     ...current,
                     lines: current.lines.map((item) =>
                       item.id === line.id
-                        ? { ...item, unitPrice: Number(event.target.value) }
+                        ? { ...item, unitPrice: parseEmptyableNumber(event.target.value) }
                         : item,
                     ),
                   }))
                 }
+                placeholder="0"
                 className="h-10 rounded-xl border border-slate-200 px-3 text-sm font-semibold"
               />
               <select
@@ -465,21 +465,27 @@ function BillingSection({
                 <option value="%">%</option>
               </select>
               <input
-                type="number"
-                min="0"
+                inputMode="decimal"
                 disabled={line.discountType === "Aucune"}
-                value={line.discountValue}
+                value={
+                  line.discountType === "Aucune"
+                    ? ""
+                    : emptyableNumber(line.discountValue)
+                }
                 onChange={(event) =>
                   setDraft((current) => ({
                     ...current,
                     lines: current.lines.map((item) =>
                       item.id === line.id
-                        ? { ...item, discountValue: Number(event.target.value) }
+                        ? {
+                            ...item,
+                            discountValue: parseEmptyableNumber(event.target.value),
+                          }
                         : item,
                     ),
                   }))
                 }
-                placeholder="0"
+                placeholder=""
                 className="h-10 rounded-xl border border-slate-200 px-3 text-sm font-semibold disabled:bg-slate-100"
               />
             </div>
@@ -1174,4 +1180,17 @@ function emptyInvoiceDraft(state: AgencyBillingState) {
     invoiceNote: "",
     lines: [line],
   };
+}
+
+function emptyableNumber(value: number) {
+  return value ? String(value) : "";
+}
+
+function parseEmptyableNumber(raw: string) {
+  const normalized = raw.replace(",", ".").replace(/[^\d.]/g, "");
+  if (!normalized) {
+    return 0;
+  }
+  const next = Number(normalized);
+  return Number.isFinite(next) && next >= 0 ? next : 0;
 }
