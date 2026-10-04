@@ -18,11 +18,25 @@ export type ProspectFilters = {
   sortBy: "created" | "updated";
 };
 
+export const defaultProspectFilters: ProspectFilters = {
+  search: "",
+  source: "Tous",
+  campaign: "Toutes",
+  commercial: "Tous",
+  status: "Tous",
+  createdFrom: "",
+  createdTo: "",
+  updatedFrom: "",
+  updatedTo: "",
+  sortBy: "created",
+};
+
 type FiltersProps = {
   filters: ProspectFilters;
   onFiltersChange: (
     filters: ProspectFilters | ((current: ProspectFilters) => ProspectFilters),
   ) => void;
+  onReset?: () => void;
   onNewLead: () => void;
 };
 
@@ -53,18 +67,40 @@ const statusOptions: ProspectFilters["status"][] = [
 export default function Filters({
   filters,
   onFiltersChange,
+  onReset,
   onNewLead,
 }: FiltersProps) {
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
+  const [draft, setDraft] = useState<ProspectFilters>(filters);
 
-  function updateFilter<Key extends keyof ProspectFilters>(
-    key: Key,
-    value: ProspectFilters[Key]
-  ) {
+  function updateSearch(value: string) {
     onFiltersChange((current) => ({
+      ...current,
+      search: value,
+    }));
+  }
+
+  function updateDraft<Key extends keyof ProspectFilters>(
+    key: Key,
+    value: ProspectFilters[Key],
+  ) {
+    setDraft((current) => ({
       ...current,
       [key]: value,
     }));
+  }
+
+  function applyDraft() {
+    onFiltersChange((current) => ({
+      ...draft,
+      search: current.search,
+    }));
+  }
+
+  function resetFilters() {
+    setDraft({ ...defaultProspectFilters });
+    onFiltersChange({ ...defaultProspectFilters });
+    onReset?.();
   }
 
   return (
@@ -81,7 +117,7 @@ export default function Filters({
             className="h-11 w-full rounded-lg border border-slate-200 bg-white pl-10 pr-3 text-sm font-semibold text-slate-800 outline-none transition-colors placeholder:font-medium placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
             autoComplete="off"
             value={filters.search}
-            onChange={(event) => updateFilter("search", event.target.value)}
+            onChange={(event) => updateSearch(event.target.value)}
           />
 
         </div>
@@ -89,7 +125,14 @@ export default function Filters({
         <Button
           type="button"
           variant="outline"
-          onClick={() => setShowAdvancedFilters((value) => !value)}
+          onClick={() => {
+            setShowAdvancedFilters((open) => {
+              if (!open) {
+                setDraft({ ...filters, search: filters.search });
+              }
+              return !open;
+            });
+          }}
           aria-expanded={showAdvancedFilters}
         >
           <SlidersHorizontal className="mr-2 h-4 w-4" />
@@ -104,71 +147,86 @@ export default function Filters({
       </div>
 
       {showAdvancedFilters && (
+        <>
         <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
           <FilterSelect
             label="Source"
-            value={filters.source}
+            value={draft.source}
             options={sourceOptions}
             onChange={(value) =>
-              updateFilter("source", value as ProspectFilters["source"])
+              updateDraft("source", value as ProspectFilters["source"])
             }
           />
 
           <FilterSelect
             label="Campagne"
-            value={filters.campaign}
+            value={draft.campaign}
             options={campaignOptions}
-            onChange={(value) => updateFilter("campaign", value)}
+            onChange={(value) => updateDraft("campaign", value)}
           />
 
           <FilterSelect
             label="Commercial"
-            value={filters.commercial}
+            value={draft.commercial}
             options={commercialOptions}
-            onChange={(value) => updateFilter("commercial", value)}
+            onChange={(value) => updateDraft("commercial", value)}
           />
 
           <FilterSelect
             label="Statut"
-            value={filters.status}
+            value={draft.status}
             options={statusOptions}
             onChange={(value) =>
-              updateFilter("status", value as ProspectFilters["status"])
+              updateDraft("status", value as ProspectFilters["status"])
             }
           />
 
           <DateRangeFilter
             label="Date ajout prospect"
-            from={filters.createdFrom}
-            to={filters.createdTo}
-            onFromChange={(value) => updateFilter("createdFrom", value)}
-            onToChange={(value) => updateFilter("createdTo", value)}
+            from={draft.createdFrom}
+            to={draft.createdTo}
+            onFromChange={(value) => updateDraft("createdFrom", value)}
+            onToChange={(value) => updateDraft("createdTo", value)}
           />
 
           <DateRangeFilter
             label="Dernière modification"
-            from={filters.updatedFrom}
-            to={filters.updatedTo}
-            onFromChange={(value) => updateFilter("updatedFrom", value)}
-            onToChange={(value) => updateFilter("updatedTo", value)}
+            from={draft.updatedFrom}
+            to={draft.updatedTo}
+            onFromChange={(value) => updateDraft("updatedFrom", value)}
+            onToChange={(value) => updateDraft("updatedTo", value)}
           />
 
           <FilterSelect
             label="Trier"
             value={
-              filters.sortBy === "updated"
+              draft.sortBy === "updated"
                 ? "Date dernière modification"
                 : "Date d'ajout"
             }
             options={["Date d'ajout", "Date dernière modification"]}
             onChange={(value) =>
-              updateFilter(
+              updateDraft(
                 "sortBy",
                 value === "Date dernière modification" ? "updated" : "created",
               )
             }
           />
         </div>
+        <div className="mt-4 flex flex-wrap justify-end gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            className="h-11 px-4"
+            onClick={resetFilters}
+          >
+            Réinitialiser
+          </Button>
+          <Button type="button" className="h-11 px-4" onClick={applyDraft}>
+            Valider
+          </Button>
+        </div>
+        </>
       )}
 
     </div>

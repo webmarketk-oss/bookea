@@ -4,7 +4,10 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import CRMHeader from "@/components/crm/crm-header";
 import DashboardCards from "@/components/crm/dashboard-cards";
-import Filters, { ProspectFilters } from "@/components/crm/filters";
+import Filters, {
+  defaultProspectFilters,
+  ProspectFilters,
+} from "@/components/crm/filters";
 import KPIDashboard from "@/components/crm/kpi-dashboard";
 import LeadDetails from "@/components/crm/lead-details";
 import ProspectsTable from "@/components/crm/prospects-table";
@@ -168,18 +171,7 @@ export default function CRMLeadsPage() {
   const ficheColumnRef = useRef<HTMLDivElement>(null);
   const [ficheBox, setFicheBox] = useState<FicheBox | null>(null);
   const openedLeadFromQuery = useRef(false);
-  const [filters, setFilters] = useState<ProspectFilters>({
-    search: "",
-    source: "Tous",
-    campaign: "Toutes",
-    commercial: "Tous",
-    status: "Tous",
-    createdFrom: "",
-    createdTo: "",
-    updatedFrom: "",
-    updatedTo: "",
-    sortBy: "created",
-  });
+  const [filters, setFilters] = useState<ProspectFilters>(defaultProspectFilters);
   const duplicateLeadGroups = useMemo(
     () => findDuplicateLeadGroups(leadList),
     [leadList]
@@ -1093,6 +1085,7 @@ export default function CRMLeadsPage() {
                   return { ...resolved, search: "" };
                 });
               }}
+              onReset={() => setQuickDateFilter("Tous")}
               onNewLead={openNewLeadModal}
             />
 
