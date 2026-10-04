@@ -167,6 +167,7 @@ export default function CRMLeadsPage() {
   const ficheRef = useRef<HTMLElement>(null);
   const ficheColumnRef = useRef<HTMLDivElement>(null);
   const [ficheBox, setFicheBox] = useState<FicheBox | null>(null);
+  const openedLeadFromQuery = useRef(false);
   const [filters, setFilters] = useState<ProspectFilters>({
     search: "",
     source: "Tous",
@@ -323,6 +324,35 @@ export default function CRMLeadsPage() {
       }));
     }
   }, []);
+
+  useEffect(() => {
+    if (openedLeadFromQuery.current || leadList.length === 0) {
+      return;
+    }
+
+    const searchParams = new URLSearchParams(window.location.search);
+    const leadId = String(searchParams.get("lead") || "").trim();
+    const phone = String(searchParams.get("phone") || "").replace(/\D/g, "");
+    const match =
+      (leadId && leadList.find((item) => item.id === leadId)) ||
+      (phone &&
+        leadList.find((item) => {
+          const digits = String(item.phone || "").replace(/\D/g, "");
+          return (
+            Boolean(digits) &&
+            (digits === phone || digits.endsWith(phone) || phone.endsWith(digits))
+          );
+        }));
+
+    if (!match) {
+      return;
+    }
+
+    openedLeadFromQuery.current = true;
+    setActiveTab("prospects");
+    setSelectedLeadId(match.id);
+    setIsLeadDetailsOpen(true);
+  }, [leadList]);
 
   const selectedLead =
     leadList.find((lead) => lead.id === selectedLeadId) ?? leadList[0];

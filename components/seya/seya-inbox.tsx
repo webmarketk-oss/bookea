@@ -1,6 +1,7 @@
 "use client";
 
-import { CalendarCheck, MessageCircle, Search, Send } from "lucide-react";
+import { CalendarCheck, MessageCircle, Search, Send, Users } from "lucide-react";
+import Link from "next/link";
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { displayPersonName } from "@/lib/seya-person-name";
 import {
@@ -207,6 +208,13 @@ export function SeyaInbox({
   const lead = selected
     ? leads.find((item) => item.id === selected.leadId)
     : null;
+  const crmLeadHref = selected
+    ? lead?.id || selected.leadId
+      ? `/dashboard/crm-leads?lead=${encodeURIComponent(lead?.id || selected.leadId)}`
+      : selected.phone
+        ? `/dashboard/crm-leads?phone=${encodeURIComponent(selected.phone)}`
+        : "/dashboard/crm-leads"
+    : "/dashboard/crm-leads";
 
   return (
     <section className="flex h-full min-h-0 overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
@@ -293,14 +301,23 @@ export function SeyaInbox({
                     {selected.phone || "Pas de téléphone"}
                   </p>
                 </div>
-                <button
-                  type="button"
-                  onClick={onSendWhatsApp}
-                  className="inline-flex items-center gap-2 rounded-2xl bg-violet-500 px-3.5 py-2 text-sm font-semibold text-white"
-                >
-                  <MessageCircle className="h-4 w-4" />
-                  WhatsApp
-                </button>
+                <div className="flex shrink-0 items-center gap-2">
+                  <Link
+                    href={crmLeadHref}
+                    className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-3.5 py-2 text-sm font-semibold text-slate-800"
+                  >
+                    <Users className="h-4 w-4" />
+                    CRM Leads
+                  </Link>
+                  <button
+                    type="button"
+                    onClick={onSendWhatsApp}
+                    className="inline-flex items-center gap-2 rounded-2xl bg-violet-500 px-3.5 py-2 text-sm font-semibold text-white"
+                  >
+                    <MessageCircle className="h-4 w-4" />
+                    WhatsApp
+                  </button>
+                </div>
               </div>
               {selected.sendError ? (
                 <p className="bg-rose-50 px-5 py-2 text-sm font-medium text-rose-800">
