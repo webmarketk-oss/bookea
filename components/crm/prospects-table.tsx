@@ -17,7 +17,7 @@ import {
 } from "@/lib/lead-statuses";
 import { cn } from "@/lib/utils";
 import { Lead, LeadStatus } from "@/types/lead";
-import { ChevronLeft, ChevronRight, Globe } from "lucide-react";
+import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Globe } from "lucide-react";
 
 interface ProspectsTableProps {
   leads: Lead[];
@@ -45,49 +45,16 @@ export default function ProspectsTable({
   onCommercialChange,
 }: ProspectsTableProps) {
   const [commentsOpen, setCommentsOpen] = useState(true);
+  const [dateSort, setDateSort] = useState<"desc" | "asc">("desc");
   const sortedLeads = leads
     .map((lead, index) => ({ lead, index }))
     .sort((current, next) => {
-      const currentInactive = isInactiveLeadStatus(current.lead.status);
-      const nextInactive = isInactiveLeadStatus(next.lead.status);
-      const currentReminderDue = isOpenReminderDue(current.lead);
-      const nextReminderDue = isOpenReminderDue(next.lead);
-
-      if (currentInactive && !nextInactive) {
-        return 1;
-      }
-
-      if (!currentInactive && nextInactive) {
-        return -1;
-      }
-
-      const currentNew = current.lead.status === "Nouveau";
-      const nextNew = next.lead.status === "Nouveau";
-
-      if (currentNew && !nextNew) {
-        return -1;
-      }
-
-      if (!currentNew && nextNew) {
-        return 1;
-      }
-
-      if (currentReminderDue && !nextReminderDue) {
-        return -1;
-      }
-
-      if (!currentReminderDue && nextReminderDue) {
-        return 1;
-      }
-
-      const createdDiff = (next.lead.createdDate || "").localeCompare(
-        current.lead.createdDate || "",
+      const createdDiff = leadCreatedStamp(current.lead).localeCompare(
+        leadCreatedStamp(next.lead),
       );
-
       if (createdDiff !== 0) {
-        return createdDiff;
+        return dateSort === "desc" ? -createdDiff : createdDiff;
       }
-
       return current.index - next.index;
     })
     .map(({ lead }) => lead);
@@ -100,7 +67,41 @@ export default function ProspectsTable({
             <TableHead className="min-w-[12rem]">Prospect</TableHead>
             <TableHead>Campagne</TableHead>
             <TableHead>Source</TableHead>
-            <TableHead>Date</TableHead>
+            <TableHead>
+              <button
+                type="button"
+                onClick={() =>
+                  setDateSort((order) => (order === "desc" ? "asc" : "desc"))
+                }
+                className="inline-flex items-center gap-1 text-left font-medium text-foreground hover:text-slate-950"
+                aria-label={
+                  dateSort === "desc"
+                    ? "Trier du plus ancien au plus récent"
+                    : "Trier du plus récent au plus ancien"
+                }
+                title={
+                  dateSort === "desc"
+                    ? "Plus récent en haut"
+                    : "Plus ancien en haut"
+                }
+              >
+                Date
+                <span className="flex flex-col -space-y-1" aria-hidden>
+                  <ChevronUp
+                    className={cn(
+                      "h-3 w-3",
+                      dateSort === "asc" ? "text-slate-900" : "text-slate-300",
+                    )}
+                  />
+                  <ChevronDown
+                    className={cn(
+                      "h-3 w-3",
+                      dateSort === "desc" ? "text-slate-900" : "text-slate-300",
+                    )}
+                  />
+                </span>
+              </button>
+            </TableHead>
             <TableHead>Rappel</TableHead>
             <TableHead>Commercial</TableHead>
             <TableHead className="min-w-[12rem]">Statut</TableHead>
@@ -309,6 +310,15 @@ export default function ProspectsTable({
       </Table>
     </div>
   );
+}
+
+function leadCreatedStamp(lead: Lead) {
+  const isoDate = String(lead.createdDate || "").slice(0, 10);
+  const timeMatch = String(lead.createdAt || "").match(/(\d{1,2})\D(\d{2})\s*$/);
+  if (isoDate && timeMatch) {
+    return `${isoDate}T${timeMatch[1].padStart(2, "0")}:${timeMatch[2]}:00`;
+  }
+  return isoDate || String(lead.createdAt || "");
 }
 
 function SourceBadge({ source }: { source: Lead["source"] }) {
