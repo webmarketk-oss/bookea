@@ -191,6 +191,34 @@ test("pas de relance si stop, refus ou RDV confirmé", () => {
   assert.equal(shouldSkipRelance(conversation({ status: "Pas intéressé" })), true);
   assert.equal(shouldSkipRelance(conversation({ status: "Hors zone" })), true);
   assert.equal(
+    shouldSkipRelance(
+      conversation({
+        status: "En cours",
+        messages: [
+          { id: "m1", author: "lead", text: "Plus rien sur la semaine qui arrive", at: hoursAgo(20) },
+          { id: "m2", author: "centre", text: "Très bien, prenez le temps. À bientôt !", at: hoursAgo(19) },
+        ],
+      }),
+    ),
+    true,
+  );
+  assert.equal(
+    shouldSkipRelance(
+      conversation({
+        status: "En cours",
+        messages: [
+          {
+            id: "m1",
+            author: "lead",
+            text: "Plus rien sur la semaine qui arrive",
+            at: hoursAgo(20),
+          },
+        ],
+      }),
+    ),
+    true,
+  );
+  assert.equal(
     shouldSkipRelance(conversation({ status: "Reviendra vers nous" })),
     true,
   );

@@ -17,12 +17,18 @@ const {
   bookedVisitKeysFromAppointments,
   sealConfirmedConversation,
 } = require("./booking-close");
-const { threadHasConfirmedVisit } = require("./conversation");
+const {
+  isOutOfZone,
+  isWillCallBack,
+  isWillComeBack,
+  threadHasConfirmedVisit,
+} = require("./conversation");
 const { isSeyaOff, readCenterSeya, writeSeyaConversations } = require("./store");
 const {
   conversationOnRelanceHold,
   loadRelanceHoldKeys,
   markMessagedNouveauLeads,
+  syncCrmFromConversation,
 } = require("./crm-sync");
 
 const FIRST_RELANCE_HOURS = 15;
@@ -104,7 +110,16 @@ async function relanceCenter(supabase, center) {
   let closed = false;
 
   for (const conversation of conversations) {
-    const updated = { ...conversation };
+    const synced = await syncCrmFromConversation(
+      supabase,
+      center.id,
+      conversation,
+      crmHold,
+    );
+    const updated = { ...synced };
+    if (updated.status !== conversation.status) {
+      closed = true;
+    }
     const bookedVisit = conversationMatchesBookedVisit(conversation, bookedKeys);
     if (conversationHasStaffBooking(conversation) || bookedVisit) {
       const shouldSeal =
@@ -198,9 +213,22 @@ function shouldSkipRelance(conversation, extras = {}) {
   if (conversationOnRelanceHold(conversation, extras.crmHold)) {
     return true;
   }
-  const leadTexts = (conversation?.messages || []).filter(
-    (item) => item.author === "lead",
-  );
+  const messages = conversation?.messages || [];
+  const lastHuman = [...messages]
+    .reverse()
+    .find((item) => item.author === "lead" || item.author === "centre");
+  if (lastHuman?.author === "centre") {
+    return true;
+  }
+  if (
+    lastHuman?.author === "lead" &&
+    (isWillComeBack(lastHuman.text || "") ||
+      isWillCallBack(lastHuman.text || "") ||
+      isOutOfZone(lastHuman.text || ""))
+  ) {
+    return true;
+  }
+  const leadTexts = messages.filter((item) => item.author === "lead");
   if (leadTexts.some((item) => isOptOut(item.text || ""))) {
     return true;
   }
@@ -219,7 +247,7 @@ function shouldSkipRelance(conversation, extras = {}) {
   return (
     conversation?.healthReview?.status === "awaiting_human_health_review" ||
     conversation?.bookingState?.pendingQuestion === "no_slots" ||
-    /rdv pris|rdv confirm|terminé|termine|ferm[eé]|pas int[eé]ress|hors[- ]?zone|reviendra vers nous|recontacter|revue santé/i.test(
+    /rdv pris|rdv confirm|terminé|termine|ferm[eé]|pas int[eé]ress|hors[- ]?zone|reviendra vers nous|intraitable|contre[- ]?indication|recontacter|revue santé/i.test(
       status,
     )
   );

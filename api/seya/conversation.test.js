@@ -187,6 +187,26 @@ test("je reviendrai : plus de créneaux ni « noté pour le ventre »", async ()
   assert.doesNotMatch(lastSeya(conversation), /noté pour le ventre/i);
 });
 
+test("plus rien cette semaine : CRM reviendra, plus de relance créneaux", async () => {
+  let conversation = startConversation(
+    {
+      leadId: "lead-plus-rien",
+      centerId: "jfg-clinique-clermont",
+      firstName: "Annouchka",
+      lastName: "Barrier",
+      phone: "0611223344",
+      treatment: "Soin minceur",
+    },
+    "JFG Clinique Clermont",
+    seya,
+  );
+
+  conversation = await reply(conversation, "C’est pour le ventre");
+  conversation = await reply(conversation, "Plus rien sur la semaine qui arrive");
+  assert.equal(conversation.status, "Terminé");
+  assert.doesNotMatch(lastSeya(conversation), /09h00|lun\.|horaire|créneau/i);
+});
+
 test("pas sur place / je vous contacterai : elle n’insiste pas", async () => {
   let conversation = startConversation(
     {
@@ -1197,6 +1217,22 @@ test("hors zone, reviendra et rappel lundi ferment le fil sans créneaux", async
   });
   assert.deepEqual(
     crmUpdateFromLeadMessage("Je reviendrai vers vous", thursday),
+    {
+      status: "Reviendra vers nous",
+      conversationStatus: "Terminé",
+      reminderDate: null,
+    },
+  );
+  assert.deepEqual(
+    crmUpdateFromLeadMessage("Plus rien sur la semaine qui arrive", thursday),
+    {
+      status: "Reviendra vers nous",
+      conversationStatus: "Terminé",
+      reminderDate: null,
+    },
+  );
+  assert.deepEqual(
+    crmUpdateFromLeadMessage("Je vous tiens au courant", thursday),
     {
       status: "Reviendra vers nous",
       conversationStatus: "Terminé",

@@ -23,6 +23,7 @@ const {
   crmUpdateFromLeadMessage,
   lockedCrmStatuses,
 } = require("./conversation");
+const { isCrmRelanceHold } = require("./crm-sync");
 const {
   isNewSeyaConversationBlocked,
   isSeyaOff,
@@ -455,7 +456,7 @@ async function resolveCenterFromLeadPhone(supabase, phone, last9) {
   const { data: leads, error } = await supabase
     .from("leads")
     .select(
-      "id,center_id,client_id,status,next_action,service_id,updated_at,last_activity_at,phone,campaigns(name)",
+      "id,center_id,client_id,status,next_action,recall_date,service_id,updated_at,last_activity_at,phone,campaigns(name)",
     )
     .or(`phone.eq.${phone},phone.eq.0${last9},phone.ilike.%${last9}%`)
     .order("last_activity_at", { ascending: false })
@@ -508,6 +509,7 @@ async function resolveCenterFromLeadPhone(supabase, phone, last9) {
       ? lead.campaigns[0]?.name || ""
       : lead.campaigns?.name || "",
     status: lead.status || "Nouveau",
+    recall_date: lead.recall_date || "",
   };
 }
 
@@ -543,7 +545,7 @@ async function resolveCenterFromPhone(supabase, phone) {
   for (const client of matched) {
     const { data: lead } = await supabase
       .from("leads")
-      .select("id,status,next_action,latest_comment,service_id,updated_at,last_activity_at,campaigns(name)")
+      .select("id,status,next_action,recall_date,latest_comment,service_id,updated_at,last_activity_at,campaigns(name)")
       .eq("center_id", client.center_id)
       .eq("client_id", client.id)
       .order("last_activity_at", { ascending: false })
@@ -582,6 +584,7 @@ async function resolveCenterFromPhone(supabase, phone) {
         ? lead.campaigns[0]?.name || ""
         : lead.campaigns?.name || "",
       status: lead.status || "Nouveau",
+      recall_date: lead.recall_date || "",
     };
   }
 
@@ -628,7 +631,11 @@ async function syncCrmFromSeyaIntent(supabase, centerId, context, text) {
   if (
     lockedCrmStatuses().some(
       (status) => status.toLowerCase() === current.toLowerCase(),
-    )
+    ) ||
+    isCrmRelanceHold({
+      status: current,
+      recall_date: context.recall_date,
+    })
   ) {
     return;
   }

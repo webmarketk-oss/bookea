@@ -288,7 +288,15 @@ function isWillComeBack(text) {
   if (asksForHelpNow(text) || isAskToWriteBack(text)) {
     return false;
   }
-  return /je (vous |te )?(reviendrai|reviens) vers (vous|toi|nous)|je reviendrai vers vous|reviendrai vers (vous|nous)|je (vous |te )?recontacte (plus tard|moi[- ]meme)/.test(
+  if (
+    /jeudi|lundi|mardi|mercredi|vendredi|samedi|creneau|horaire|\brdv\b/.test(
+      value,
+    ) &&
+    !/plus rien|tiens au courant/.test(value)
+  ) {
+    return false;
+  }
+  return /je (vous |te )?(reviendrai|reviens) vers (vous|toi|nous)|je reviendrai vers vous|reviendrai vers (vous|nous)|je (vous |te )?recontacte (plus tard|moi[- ]meme)|je (vous |te )?(tiens|tiendrai) (au courant|informe)|on se (tient|tiendra) au courant|je (vous |te )?(dirai|previendrai)|plus rien (sur |cette |pour )?(la )?semaine|rien (sur |cette |pour )(la )?semaine (qui arrive|prochaine)/.test(
     value,
   );
 }
