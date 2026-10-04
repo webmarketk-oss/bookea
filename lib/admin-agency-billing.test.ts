@@ -7,6 +7,7 @@ import {
   billingAlerts,
   buildAgencyInvoiceHtml,
   defaultAgencyIdentity,
+  lineNet,
   invoicesInRange,
   invoiceTotal,
   isOverdueCycle,
@@ -132,4 +133,31 @@ test("les KPI WebK séparent meta, phoning et RDV WA", () => {
     true,
   );
   assert.equal(monthlyRevenue(invoices, 2026)[9], 750);
+});
+
+test("une remise s’applique en euros ou en pourcentage sur la prestation", () => {
+  assert.equal(
+    lineNet({
+      id: "1",
+      label: "Meta",
+      kind: "meta",
+      quantity: 1,
+      unitPrice: 400,
+      discountType: "%",
+      discountValue: 10,
+    }),
+    360,
+  );
+  assert.equal(
+    lineNet({
+      id: "2",
+      label: "Phoning",
+      kind: "phoning",
+      quantity: 1,
+      unitPrice: 250,
+      discountType: "€",
+      discountValue: 50,
+    }),
+    200,
+  );
 });

@@ -10,8 +10,10 @@ import {
   createId,
   formatEuroAmount,
   formatShortDate,
+  formatLineDiscount,
   invoiceTotal,
   invoicesInRange,
+  lineNet,
   issuerAddressLines,
   kpiBreakdown,
   REVERSE_CHARGE_MENTION,
@@ -230,6 +232,8 @@ function BillingSection({
           kind: service?.kind || "autre",
           quantity: 1,
           unitPrice: service?.unitPrice || 0,
+          discountType: "Aucune",
+          discountValue: 0,
         },
       ],
     }));
@@ -314,7 +318,10 @@ function BillingSection({
         </div>
         <div className="mt-3 space-y-2">
           {draft.lines.map((line) => (
-            <div key={line.id} className="grid gap-2 md:grid-cols-[1fr_7rem_7rem]">
+            <div
+              key={line.id}
+              className="grid gap-2 md:grid-cols-[1fr_5rem_7rem_6rem_7rem]"
+            >
               <select
                 value={line.label}
                 onChange={(event) => {
@@ -374,6 +381,45 @@ function BillingSection({
                   }))
                 }
                 className="h-10 rounded-xl border border-slate-200 px-3 text-sm font-semibold"
+              />
+              <select
+                value={line.discountType}
+                onChange={(event) =>
+                  setDraft((current) => ({
+                    ...current,
+                    lines: current.lines.map((item) =>
+                      item.id === line.id
+                        ? {
+                            ...item,
+                            discountType: event.target.value as AgencyInvoiceLine["discountType"],
+                          }
+                        : item,
+                    ),
+                  }))
+                }
+                className="h-10 rounded-xl border border-slate-200 px-3 text-sm font-semibold"
+              >
+                <option value="Aucune">Remise</option>
+                <option value="€">€</option>
+                <option value="%">%</option>
+              </select>
+              <input
+                type="number"
+                min="0"
+                disabled={line.discountType === "Aucune"}
+                value={line.discountValue}
+                onChange={(event) =>
+                  setDraft((current) => ({
+                    ...current,
+                    lines: current.lines.map((item) =>
+                      item.id === line.id
+                        ? { ...item, discountValue: Number(event.target.value) }
+                        : item,
+                    ),
+                  }))
+                }
+                placeholder="0"
+                className="h-10 rounded-xl border border-slate-200 px-3 text-sm font-semibold disabled:bg-slate-100"
               />
             </div>
           ))}
@@ -580,6 +626,7 @@ function InvoiceDocument({
               <th className="py-2">Prestation</th>
               <th className="py-2">Qté</th>
               <th className="py-2">Prix HT</th>
+              <th className="py-2">Remise</th>
               <th className="py-2 text-right">Total HT</th>
             </tr>
           </thead>
@@ -589,8 +636,9 @@ function InvoiceDocument({
                 <td className="py-2 font-semibold">{line.label}</td>
                 <td className="py-2">{line.quantity}</td>
                 <td className="py-2">{formatEuroAmount(line.unitPrice)}</td>
+                <td className="py-2">{formatLineDiscount(line)}</td>
                 <td className="py-2 text-right font-black">
-                  {formatEuroAmount(line.quantity * line.unitPrice)}
+                  {formatEuroAmount(lineNet(line))}
                 </td>
               </tr>
             ))}
@@ -1006,6 +1054,8 @@ function emptyInvoiceDraft(state: AgencyBillingState) {
     kind: service?.kind || "autre",
     quantity: 1,
     unitPrice: service?.unitPrice || 0,
+    discountType: "Aucune",
+    discountValue: 0,
   };
   return {
     clientId: state.clients[0]?.id || "",

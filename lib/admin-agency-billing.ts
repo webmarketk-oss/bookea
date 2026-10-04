@@ -20,6 +20,8 @@ export type AgencyServiceKind =
 
 export type AgencyPeriod = "semaine" | "mois" | "trimestre" | "annee" | "custom";
 
+export type AgencyDiscountType = "Aucune" | "€" | "%";
+
 export type AgencyIdentity = {
   name: string;
   legalName: string;
@@ -62,6 +64,8 @@ export type AgencyInvoiceLine = {
   kind: AgencyServiceKind;
   quantity: number;
   unitPrice: number;
+  discountType: AgencyDiscountType;
+  discountValue: number;
 };
 
 export type AgencyInvoice = {
@@ -266,11 +270,33 @@ export function isOverdueCycle(nextInvoiceOn: string, now = new Date()) {
   return startOfDay(now).getTime() > next.getTime();
 }
 
+export function lineGross(line: Pick<AgencyInvoiceLine, "quantity" | "unitPrice">) {
+  return Number(line.quantity || 0) * Number(line.unitPrice || 0);
+}
+
+export function lineDiscountAmount(
+  line: Pick<
+    AgencyInvoiceLine,
+    "quantity" | "unitPrice" | "discountType" | "discountValue"
+  >,
+) {
+  const gross = lineGross(line);
+  const value = Math.max(Number(line.discountValue) || 0, 0);
+  if (line.discountType === "%") {
+    return Math.min(gross, (gross * value) / 100);
+  }
+  if (line.discountType === "€") {
+    return Math.min(gross, value);
+  }
+  return 0;
+}
+
+export function lineNet(line: AgencyInvoiceLine) {
+  return Math.max(0, lineGross(line) - lineDiscountAmount(line));
+}
+
 export function invoiceTotal(invoice: Pick<AgencyInvoice, "lines">) {
-  return invoice.lines.reduce(
-    (sum, line) => sum + Number(line.quantity || 0) * Number(line.unitPrice || 0),
-    0,
-  );
+  return invoice.lines.reduce((sum, line) => sum + lineNet(line), 0);
 }
 
 export function buildAgencyInvoiceHtml(
@@ -289,8 +315,9 @@ export function buildAgencyInvoiceHtml(
           <td>${escapeHtml(line.label)}</td>
           <td>${line.quantity}</td>
           <td>${escapeHtml(formatEuroAmount(line.unitPrice))}</td>
+          <td>${escapeHtml(formatLineDiscount(line))}</td>
           <td style="text-align:right">${escapeHtml(
-            formatEuroAmount(line.quantity * line.unitPrice),
+            formatEuroAmount(lineNet(line)),
           )}</td>
         </tr>`,
     )
@@ -333,7 +360,7 @@ export function buildAgencyInvoiceHtml(
   </div>
   <table>
     <thead>
-      <tr><th>Prestation</th><th>Qté</th><th>Prix HT</th><th class="right">Total HT</th></tr>
+      <tr><th>Prestation</th><th>Qté</th><th>Prix HT</th><th>Remise</th><th class="right">Total HT</th></tr>
     </thead>
     <tbody>${lines}</tbody>
   </table>
@@ -444,7 +471,7 @@ export function kpiBreakdown(invoices: AgencyInvoice[]) {
   };
   for (const invoice of invoices) {
     for (const line of invoice.lines) {
-      buckets[line.kind] += Number(line.quantity || 0) * Number(line.unitPrice || 0);
+      buckets[line.kind] += lineNet(line);
     }
   }
   return buckets;
@@ -462,6 +489,17 @@ export function monthlyRevenue(invoices: AgencyInvoice[], year: number) {
     }
   }
   return months;
+}
+
+export function formatLineDiscount(line: AgencyInvoiceLine) {
+  const amount = lineDiscountAmount(line);
+  if (amount <= 0) {
+    return "—";
+  }
+  if (line.discountType === "%") {
+    return `${line.discountValue} % (−${formatEuroAmount(amount)})`;
+  }
+  return `−${formatEuroAmount(amount)}`;
 }
 
 export function formatEuroAmount(value: number) {
@@ -569,7 +607,15 @@ function normalizeLine(value: unknown): AgencyInvoiceLine | null {
     kind: isServiceKind(record.kind) ? record.kind : "autre",
     quantity: Math.max(0, Number(record.quantity) || 0),
     unitPrice: Number(record.unitPrice) || 0,
+    discountType: isDiscountType(record.discountType)
+      ? record.discountType
+      : "Aucune",
+    discountValue: Math.max(0, Number(record.discountValue) || 0),
   };
+}
+
+function isDiscountType(value: unknown): value is AgencyDiscountType {
+  return value === "Aucune" || value === "€" || value === "%";
 }
 
 function isServiceKind(value: unknown): value is AgencyServiceKind {
