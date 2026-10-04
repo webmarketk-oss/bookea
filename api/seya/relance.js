@@ -19,6 +19,11 @@ const {
 } = require("./booking-close");
 const { threadHasConfirmedVisit } = require("./conversation");
 const { isSeyaOff, readCenterSeya, writeSeyaConversations } = require("./store");
+const {
+  conversationOnRelanceHold,
+  loadRelanceHoldKeys,
+  markMessagedNouveauLeads,
+} = require("./crm-sync");
 
 const FIRST_RELANCE_HOURS = 15;
 const FIRST_RELANCE_UNTIL_HOURS = 27;
@@ -90,10 +95,12 @@ async function relanceCenter(supabase, center) {
   }
 
   const conversations = Array.isArray(seya.conversations) ? seya.conversations : [];
+  await markMessagedNouveauLeads(supabase, center.id, conversations);
   const nextConversations = [];
   const sent = [];
   const now = new Date();
   const bookedKeys = await loadBookedVisitKeys(supabase, center.id);
+  const crmHold = await loadRelanceHoldKeys(supabase, center.id);
   let closed = false;
 
   for (const conversation of conversations) {
@@ -114,7 +121,7 @@ async function relanceCenter(supabase, center) {
       nextConversations.push(sealed);
       continue;
     }
-    const round = pickRelanceRound(conversation, now);
+    const round = pickRelanceRound(conversation, now, { crmHold });
     if (!round) {
       nextConversations.push(updated);
       continue;
@@ -186,8 +193,11 @@ async function relanceCenter(supabase, center) {
   return sent;
 }
 
-function shouldSkipRelance(conversation) {
+function shouldSkipRelance(conversation, extras = {}) {
   const status = String(conversation?.status || "");
+  if (conversationOnRelanceHold(conversation, extras.crmHold)) {
+    return true;
+  }
   const leadTexts = (conversation?.messages || []).filter(
     (item) => item.author === "lead",
   );
@@ -209,7 +219,7 @@ function shouldSkipRelance(conversation) {
   return (
     conversation?.healthReview?.status === "awaiting_human_health_review" ||
     conversation?.bookingState?.pendingQuestion === "no_slots" ||
-    /rdv pris|rdv confirm|terminé|termine|ferm[eé]|pas int[eé]ress|recontacter|revue santé/i.test(
+    /rdv pris|rdv confirm|terminé|termine|ferm[eé]|pas int[eé]ress|reviendra vers nous|recontacter|revue santé/i.test(
       status,
     )
   );
@@ -248,8 +258,8 @@ function inWindow(hours, start, end) {
   return hours >= start && hours < end;
 }
 
-function pickRelanceRound(conversation, now = new Date()) {
-  if (shouldSkipRelance(conversation)) {
+function pickRelanceRound(conversation, now = new Date(), extras = {}) {
+  if (shouldSkipRelance(conversation, extras)) {
     return 0;
   }
 

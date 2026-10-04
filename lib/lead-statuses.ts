@@ -51,6 +51,8 @@ const leadStatusAliasMap: Record<string, LeadStatus> = {
   "Acompte validé": "Acompte reçu",
   Client: "Client converti",
   Perdu: "Prospect perdu",
+  "msg WA envoyé": "Message WhatsApp envoyé",
+  "Msg WA envoyé": "Message WhatsApp envoyé",
   "Message vocal laissé": "Message vocal envoyé",
   "Msg vocal + Mail": "Message vocal",
   "Message vocal + Mail": "Message vocal",

@@ -8,6 +8,10 @@ const {
   writeSeyaConversations,
 } = require("./store");
 const { sendSharedWhatsApp } = require("./whatsapp");
+const {
+  markLeadWhatsAppSent,
+  markMessagedNouveauLeads,
+} = require("./crm-sync");
 
 const ACTIVE_THREAD_HOURS = 24;
 const WELCOME_DELAY_MS = 4 * 60 * 1000;
@@ -170,6 +174,7 @@ async function sendDueWelcomes(
       });
       changed = true;
       if (updated.leadId) {
+        await markLeadWhatsAppSent(supabase, center.id, updated.leadId);
         await supabase.from("lead_events").insert({
           center_id: center.id,
           lead_id: updated.leadId,
@@ -191,6 +196,7 @@ async function sendDueWelcomes(
       persistableConversations(nextConversations),
     );
   }
+  await markMessagedNouveauLeads(supabase, center.id, nextConversations);
 
   return sent;
 }
