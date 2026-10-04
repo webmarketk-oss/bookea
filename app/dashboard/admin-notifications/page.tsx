@@ -19,6 +19,18 @@ import {
 import { loadIsBookeaAdmin } from "@/lib/center-access";
 import { formatEuro } from "@/lib/bookea-tarifs";
 
+function toLocalIsoDate(value: string) {
+  const time = Date.parse(value);
+  if (!Number.isFinite(time)) {
+    return "";
+  }
+  const date = new Date(time);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
 function formatWhen(value: string) {
   const time = Date.parse(value);
   if (!Number.isFinite(time)) {
@@ -37,6 +49,9 @@ export default function AdminNotificationsPage() {
   const [items, setItems] = useState<AdminInboxItem[]>([]);
   const [markingId, setMarkingId] = useState<string | null>(null);
   const [error, setError] = useState("");
+  const [centerFilter, setCenterFilter] = useState("tous");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
 
   async function refresh() {
     const inbox = await loadAdminInbox();
@@ -73,10 +88,49 @@ export default function AdminNotificationsPage() {
     };
   }, []);
 
-  const unreadCount = useMemo(
-    () => items.filter((item) => !item.readAt).length,
-    [items],
+  const centers = useMemo(() => {
+    const byId = new Map<string, string>();
+    for (const item of items) {
+      if (item.centerId && !byId.has(item.centerId)) {
+        byId.set(item.centerId, item.centerName);
+      }
+    }
+    return [...byId.entries()]
+      .map(([id, name]) => ({ id, name }))
+      .sort((left, right) => left.name.localeCompare(right.name, "fr"));
+  }, [items]);
+
+  const filteredItems = useMemo(
+    () =>
+      items.filter((item) => {
+        if (centerFilter !== "tous" && item.centerId !== centerFilter) {
+          return false;
+        }
+        const day = toLocalIsoDate(item.createdAt);
+        if (dateFrom && day < dateFrom) {
+          return false;
+        }
+        if (dateTo && day > dateTo) {
+          return false;
+        }
+        return true;
+      }),
+    [centerFilter, dateFrom, dateTo, items],
   );
+
+  const unreadCount = useMemo(
+    () => filteredItems.filter((item) => !item.readAt).length,
+    [filteredItems],
+  );
+
+  const hasActiveFilters =
+    centerFilter !== "tous" || Boolean(dateFrom) || Boolean(dateTo);
+
+  function resetFilters() {
+    setCenterFilter("tous");
+    setDateFrom("");
+    setDateTo("");
+  }
 
   async function handleMarkRead(item: AdminInboxItem) {
     setMarkingId(item.id);
@@ -138,9 +192,62 @@ export default function AdminNotificationsPage() {
               </p>
             ) : null}
 
+            <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:flex-row sm:flex-wrap sm:items-end">
+              <label className="min-w-[12rem] flex-1">
+                <span className="mb-1.5 block text-xs font-black uppercase text-slate-500">
+                  Centre
+                </span>
+                <select
+                  value={centerFilter}
+                  onChange={(event) => setCenterFilter(event.target.value)}
+                  className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-800 outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100"
+                >
+                  <option value="tous">Tous les centres</option>
+                  {centers.map((center) => (
+                    <option key={center.id} value={center.id}>
+                      {center.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                <span className="mb-1.5 block text-xs font-black uppercase text-slate-500">
+                  Du
+                </span>
+                <input
+                  type="date"
+                  value={dateFrom}
+                  onChange={(event) => setDateFrom(event.target.value)}
+                  className="h-11 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-800 outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100"
+                />
+              </label>
+              <label>
+                <span className="mb-1.5 block text-xs font-black uppercase text-slate-500">
+                  Au
+                </span>
+                <input
+                  type="date"
+                  value={dateTo}
+                  onChange={(event) => setDateTo(event.target.value)}
+                  className="h-11 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-800 outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100"
+                />
+              </label>
+              {hasActiveFilters ? (
+                <button
+                  type="button"
+                  onClick={resetFilters}
+                  className="h-11 rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                >
+                  Réinitialiser
+                </button>
+              ) : null}
+            </div>
+
             <p className="text-sm font-medium text-slate-500">
-              {unreadCount} non lue{unreadCount > 1 ? "s" : ""} · {items.length}{" "}
-              au total
+              {unreadCount} non lue{unreadCount > 1 ? "s" : ""} ·{" "}
+              {filteredItems.length} affichée
+              {filteredItems.length > 1 ? "s" : ""}
+              {hasActiveFilters ? ` · ${items.length} au total` : ""}
             </p>
 
             {items.length === 0 ? (
@@ -153,9 +260,19 @@ export default function AdminNotificationsPage() {
                   Les souscriptions Tarifs apparaîtront ici.
                 </p>
               </div>
+            ) : filteredItems.length === 0 ? (
+              <div className="rounded-[2rem] border border-dashed border-slate-200 bg-white p-10 text-center">
+                <Bell className="mx-auto h-10 w-10 text-slate-300" />
+                <p className="mt-4 text-base font-semibold">
+                  Aucune notification pour ces filtres
+                </p>
+                <p className="mt-2 font-medium text-slate-500">
+                  Changez le centre ou la période, ou réinitialisez.
+                </p>
+              </div>
             ) : (
               <div className="space-y-3">
-                {items.map((item) => {
+                {filteredItems.map((item) => {
                   const Icon =
                     item.kind === "seya_pack"
                       ? MessageCircle
