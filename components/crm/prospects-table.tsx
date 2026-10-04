@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Table,
   TableBody,
@@ -21,6 +21,7 @@ import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Globe } from "lucide
 
 interface ProspectsTableProps {
   leads: Lead[];
+  sortBy?: "created" | "updated";
   selectedLead: Lead;
   isLeadDetailsOpen?: boolean;
   onSelectLead: (lead: Lead) => void;
@@ -34,6 +35,7 @@ interface ProspectsTableProps {
 
 export default function ProspectsTable({
   leads,
+  sortBy = "created",
   selectedLead,
   isLeadDetailsOpen = false,
   onSelectLead,
@@ -46,14 +48,18 @@ export default function ProspectsTable({
 }: ProspectsTableProps) {
   const [commentsOpen, setCommentsOpen] = useState(true);
   const [dateSort, setDateSort] = useState<"desc" | "asc">("desc");
+
+  useEffect(() => {
+    setDateSort("desc");
+  }, [sortBy]);
+
   const sortedLeads = leads
     .map((lead, index) => ({ lead, index }))
     .sort((current, next) => {
-      const createdDiff = leadCreatedStamp(current.lead).localeCompare(
-        leadCreatedStamp(next.lead),
-      );
-      if (createdDiff !== 0) {
-        return dateSort === "desc" ? -createdDiff : createdDiff;
+      const stamp = sortBy === "updated" ? leadUpdatedStamp : leadCreatedStamp;
+      const dateDiff = stamp(current.lead).localeCompare(stamp(next.lead));
+      if (dateDiff !== 0) {
+        return dateSort === "desc" ? -dateDiff : dateDiff;
       }
       return current.index - next.index;
     })
@@ -319,6 +325,18 @@ function leadCreatedStamp(lead: Lead) {
     return `${isoDate}T${timeMatch[1].padStart(2, "0")}:${timeMatch[2]}:00`;
   }
   return isoDate || String(lead.createdAt || "");
+}
+
+function leadUpdatedStamp(lead: Lead) {
+  const activity = String(lead.lastActivityAt || "").trim();
+  if (activity && !Number.isNaN(Date.parse(activity))) {
+    return new Date(activity).toISOString();
+  }
+  const isoDate = String(lead.updatedDate || "").slice(0, 10);
+  if (isoDate) {
+    return `${isoDate}T00:00:00`;
+  }
+  return leadCreatedStamp(lead);
 }
 
 function SourceBadge({ source }: { source: Lead["source"] }) {

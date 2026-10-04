@@ -15,6 +15,7 @@ export type ProspectFilters = {
   createdTo: string;
   updatedFrom: string;
   updatedTo: string;
+  sortBy: "created" | "updated";
 };
 
 type FiltersProps = {
@@ -150,6 +151,22 @@ export default function Filters({
             to={filters.updatedTo}
             onFromChange={(value) => updateFilter("updatedFrom", value)}
             onToChange={(value) => updateFilter("updatedTo", value)}
+          />
+
+          <FilterSelect
+            label="Trier"
+            value={
+              filters.sortBy === "updated"
+                ? "Date dernière modification"
+                : "Date d'ajout"
+            }
+            options={["Date d'ajout", "Date dernière modification"]}
+            onChange={(value) =>
+              updateFilter(
+                "sortBy",
+                value === "Date dernière modification" ? "updated" : "created",
+              )
+            }
           />
         </div>
       )}

@@ -178,6 +178,7 @@ export default function CRMLeadsPage() {
     createdTo: "",
     updatedFrom: "",
     updatedTo: "",
+    sortBy: "created",
   });
   const duplicateLeadGroups = useMemo(
     () => findDuplicateLeadGroups(leadList),
@@ -1180,6 +1181,7 @@ export default function CRMLeadsPage() {
               <section className="min-w-0">
                 <ProspectsTable
                   leads={filteredLeads}
+                  sortBy={filters.sortBy}
                   selectedLead={selectedLead}
                   isLeadDetailsOpen={isLeadDetailsOpen}
                   onSelectLead={(lead) => {
