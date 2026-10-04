@@ -5,6 +5,7 @@ import {
   AGENCY_LEGAL_ENTITY,
   REVERSE_CHARGE_MENTION,
   billingAlerts,
+  buildAgencyInvoiceHtml,
   defaultAgencyIdentity,
   invoicesInRange,
   invoiceTotal,
@@ -30,6 +31,27 @@ test("les deux marques partagent la même société US et la mention d’autoliq
   const migrated = normalizeAgencyState("bookea", { identity: { name: "Bookea" } });
   assert.equal(migrated.identity.name, "Bookea Powered by Webk");
   assert.equal(migrated.identity.legalName, "SFK Web K Agency LLC");
+  const html = buildAgencyInvoiceHtml(
+    {
+      ...migrated,
+      clients: [{ id: "c1", name: "JFG", email: "", phone: "", city: "Clermont", centerId: "", active: true, phoningOffer: false, comments: "", firstInvoiceOn: "", nextInvoiceOn: "", createdAt: "" }],
+      invoices: [],
+    },
+    {
+      id: "i1",
+      number: "BK-2026-001",
+      clientId: "c1",
+      issuedOn: "2026-10-04",
+      nextCycleOn: "2026-11-03",
+      status: "Émise",
+      comments: "",
+      createdAt: "",
+      lines: [{ id: "l1", label: "Pack WhatsApp", kind: "whatsapp", quantity: 1, unitPrice: 79 }],
+    },
+  );
+  assert.match(html, /Bookea Powered by Webk/);
+  assert.match(html, /Autoliquidation par le preneur/);
+  assert.match(html, /BK-2026-001/);
 });
 
 test("le prochain cycle est 30 jours après la facture", () => {

@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import {
   AGENCY_COMPANIES,
   billingAlerts,
+  buildAgencyInvoiceHtml,
   companyLabel,
   createId,
   formatEuroAmount,
@@ -469,13 +470,22 @@ function BillingSection({
                     </td>
                     <td className="px-4 py-3 text-slate-500">{invoice.comments || "—"}</td>
                     <td className="px-4 py-3">
-                      <button
-                        type="button"
-                        onClick={() => setPreviewId(invoice.id)}
-                        className="h-9 rounded-lg border border-slate-200 px-3 text-xs font-bold"
-                      >
-                        Voir
-                      </button>
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setPreviewId(invoice.id)}
+                          className="h-9 rounded-lg border border-slate-200 px-3 text-xs font-bold"
+                        >
+                          Voir
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => downloadAgencyInvoice(state, invoice)}
+                          className="h-9 rounded-lg border border-slate-200 px-3 text-xs font-bold"
+                        >
+                          Télécharger
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 );
@@ -514,6 +524,13 @@ function InvoiceDocument({
         <div className="flex items-start justify-between gap-4 print:hidden">
           <p className="text-sm font-black uppercase text-slate-400">Facture</p>
           <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => downloadAgencyInvoice(state, invoice)}
+              className="h-10 rounded-xl bg-violet-600 px-3 text-sm font-semibold text-white"
+            >
+              Télécharger
+            </button>
             <button
               type="button"
               onClick={() => window.print()}
@@ -961,6 +978,23 @@ function KpiSection({
       </div>
     </div>
   );
+}
+
+function downloadAgencyInvoice(
+  state: AgencyBillingState,
+  invoice: AgencyInvoice,
+) {
+  const blob = new Blob([buildAgencyInvoiceHtml(state, invoice)], {
+    type: "text/html;charset=utf-8",
+  });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `${invoice.number}.html`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
 }
 
 function emptyInvoiceDraft(state: AgencyBillingState) {

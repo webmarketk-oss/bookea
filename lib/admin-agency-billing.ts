@@ -259,6 +259,85 @@ export function invoiceTotal(invoice: Pick<AgencyInvoice, "lines">) {
   );
 }
 
+export function buildAgencyInvoiceHtml(
+  state: AgencyBillingState,
+  invoice: AgencyInvoice,
+) {
+  const client = state.clients.find((item) => item.id === invoice.clientId);
+  const total = invoiceTotal(invoice);
+  const issuer = issuerAddressLines(state.identity)
+    .map((line) => escapeHtml(line))
+    .join("<br />");
+  const lines = invoice.lines
+    .map(
+      (line) => `
+        <tr>
+          <td>${escapeHtml(line.label)}</td>
+          <td>${line.quantity}</td>
+          <td>${escapeHtml(formatEuroAmount(line.unitPrice))}</td>
+          <td style="text-align:right">${escapeHtml(
+            formatEuroAmount(line.quantity * line.unitPrice),
+          )}</td>
+        </tr>`,
+    )
+    .join("");
+
+  return `<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <title>${escapeHtml(invoice.number)}</title>
+  <style>
+    body { font-family: Arial, sans-serif; color: #0f172a; margin: 40px; }
+    h1 { margin: 0 0 8px; }
+    table { width: 100%; border-collapse: collapse; margin-top: 24px; }
+    th, td { text-align: left; padding: 8px 0; border-bottom: 1px solid #e2e8f0; }
+    .muted { color: #475569; font-size: 14px; }
+    .box { border: 1px solid #e2e8f0; border-radius: 12px; padding: 16px; margin-top: 24px; }
+    .legal { border: 1px solid #f59e0b; background: #fffbeb; border-radius: 12px; padding: 14px; margin-top: 24px; font-size: 14px; }
+    .right { text-align: right; }
+  </style>
+</head>
+<body>
+  <table>
+    <tr>
+      <td>
+        <h1>${escapeHtml(state.identity.name)}</h1>
+        <p class="muted">${issuer}</p>
+      </td>
+      <td class="right">
+        <p class="muted">Facture</p>
+        <h1>${escapeHtml(invoice.number)}</h1>
+        <p class="muted">Date : ${escapeHtml(formatShortDate(invoice.issuedOn))}</p>
+      </td>
+    </tr>
+  </table>
+  <div class="box">
+    <p class="muted">Client</p>
+    <p><strong>${escapeHtml(client?.name || "—")}</strong></p>
+    <p class="muted">${escapeHtml([client?.city, client?.email].filter(Boolean).join(" · "))}</p>
+  </div>
+  <table>
+    <thead>
+      <tr><th>Prestation</th><th>Qté</th><th>Prix HT</th><th class="right">Total HT</th></tr>
+    </thead>
+    <tbody>${lines}</tbody>
+  </table>
+  <p class="right muted">TVA : 0,00 €</p>
+  <h1 class="right">${escapeHtml(formatEuroAmount(total))} HT</h1>
+  <p class="legal">${escapeHtml(REVERSE_CHARGE_MENTION)}</p>
+</body>
+</html>`;
+}
+
+function escapeHtml(value: string) {
+  return String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
 export function nextInvoiceNumber(state: AgencyBillingState, now = new Date()) {
   const prefix = state.company === "webk" ? "WK" : "BK";
   const year = String(now.getFullYear());
