@@ -4,9 +4,11 @@ import { useEffect, useMemo, useState } from "react";
 
 import {
   AGENCY_COMPANIES,
+  bankTransferLines,
   billingAlerts,
   buildAgencyInvoiceHtml,
   companyLabel,
+  DEFAULT_AGENCY_BANK,
   createId,
   formatEuroAmount,
   formatShortDate,
@@ -86,19 +88,30 @@ export function AgencyWorkspace() {
     [state],
   );
 
-  async function persist(next: AgencyBillingState) {
+  async function persist(...updates: AgencyBillingState[]) {
     setSaving(true);
-    const saved = await saveAgencyBilling(next);
-    setStates((current) =>
-      current ? { ...current, [saved.company]: saved } : current,
-    );
+    const savedList = await Promise.all(updates.map((item) => saveAgencyBilling(item)));
+    setStates((current) => {
+      if (!current) return current;
+      const next = { ...current };
+      for (const saved of savedList) {
+        next[saved.company] = saved;
+      }
+      return next;
+    });
     setSaving(false);
     setNotice("Enregistré.");
   }
 
   function update(patch: Partial<AgencyBillingState>) {
-    if (!state) return;
-    void persist({ ...state, ...patch });
+    if (!state || !states) return;
+    const next = { ...state, ...patch };
+    if (patch.bank) {
+      const otherId = company === "webk" ? "bookea" : "webk";
+      void persist(next, { ...states[otherId], bank: patch.bank });
+      return;
+    }
+    void persist(next);
   }
 
   if (!state) {
@@ -253,6 +266,7 @@ function BillingSection({
       status: "Émise",
       lines: draft.lines,
       comments: draft.comments,
+      invoiceNote: draft.invoiceNote,
       createdAt: new Date().toISOString(),
     };
     onChange({
@@ -285,6 +299,50 @@ function BillingSection({
         <p className="mt-3 rounded-xl bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-900">
           {REVERSE_CHARGE_MENTION}
         </p>
+      </section>
+
+      <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <p className="text-sm font-black uppercase text-slate-500">
+          Coordonnées bancaires
+        </p>
+        <p className="mt-1 text-sm font-medium text-slate-500">
+          Elles apparaissent sur chaque facture. Tu peux les modifier ici.
+        </p>
+        <div className="mt-3 grid gap-3 md:grid-cols-2">
+          {(
+            [
+              ["accountName", "Nom du compte"],
+              ["iban", "IBAN"],
+              ["bic", "Swift / BIC"],
+              ["bankName", "Banque"],
+            ] as const
+          ).map(([key, label]) => (
+            <label key={key} className="text-sm font-semibold text-slate-600">
+              {label}
+              <input
+                value={state.bank[key]}
+                onChange={(event) =>
+                  onChange({
+                    bank: { ...state.bank, [key]: event.target.value },
+                  })
+                }
+                className="mt-1 h-11 w-full rounded-xl border border-slate-200 px-3 text-sm font-semibold text-slate-900 outline-none focus:border-violet-400"
+              />
+            </label>
+          ))}
+          <label className="text-sm font-semibold text-slate-600 md:col-span-2">
+            Adresse de la banque
+            <input
+              value={state.bank.bankAddress}
+              onChange={(event) =>
+                onChange({
+                  bank: { ...state.bank, bankAddress: event.target.value },
+                })
+              }
+              className="mt-1 h-11 w-full rounded-xl border border-slate-200 px-3 text-sm font-semibold text-slate-900 outline-none focus:border-violet-400"
+            />
+          </label>
+        </div>
       </section>
 
       <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
@@ -424,14 +482,28 @@ function BillingSection({
             </div>
           ))}
         </div>
-        <textarea
-          value={draft.comments}
-          onChange={(event) =>
-            setDraft((current) => ({ ...current, comments: event.target.value }))
-          }
-          placeholder="Commentaire interne, visible seulement par nous"
-          className="mt-3 min-h-20 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold"
-        />
+        <label className="mt-3 block text-sm font-semibold text-slate-600">
+          Commentaire visible sur la facture
+          <textarea
+            value={draft.invoiceNote}
+            onChange={(event) =>
+              setDraft((current) => ({ ...current, invoiceNote: event.target.value }))
+            }
+            placeholder="Ex. Merci de régler par virement sous 8 jours."
+            className="mt-1 min-h-20 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-900"
+          />
+        </label>
+        <label className="mt-3 block text-sm font-semibold text-slate-600">
+          Commentaire interne
+          <textarea
+            value={draft.comments}
+            onChange={(event) =>
+              setDraft((current) => ({ ...current, comments: event.target.value }))
+            }
+            placeholder="Visible seulement par nous, jamais imprimé"
+            className="mt-1 min-h-16 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-900"
+          />
+        </label>
         <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
           <button
             type="button"
@@ -648,6 +720,28 @@ function InvoiceDocument({
         <div className="mt-4 text-right">
           <p className="text-sm font-semibold text-slate-500">TVA : 0,00 €</p>
           <p className="text-2xl font-black">{formatEuroAmount(total)} HT</p>
+        </div>
+
+        {invoice.invoiceNote ? (
+          <div className="mt-6 rounded-xl border border-slate-200 p-4">
+            <p className="text-xs font-black uppercase text-slate-400">
+              Commentaire
+            </p>
+            <p className="mt-1 whitespace-pre-wrap text-sm font-semibold">
+              {invoice.invoiceNote}
+            </p>
+          </div>
+        ) : null}
+
+        <div className="mt-6 rounded-xl border border-slate-200 p-4">
+          <p className="text-xs font-black uppercase text-slate-400">
+            Coordonnées pour le virement
+          </p>
+          <div className="mt-2 space-y-0.5 text-sm font-medium text-slate-700">
+            {bankTransferLines(state.bank || DEFAULT_AGENCY_BANK).map((line) => (
+              <p key={line}>{line}</p>
+            ))}
+          </div>
         </div>
 
         <p className="mt-6 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-950">
@@ -1061,6 +1155,7 @@ function emptyInvoiceDraft(state: AgencyBillingState) {
     clientId: state.clients[0]?.id || "",
     issuedOn: new Date().toISOString().slice(0, 10),
     comments: "",
+    invoiceNote: "",
     lines: [line],
   };
 }

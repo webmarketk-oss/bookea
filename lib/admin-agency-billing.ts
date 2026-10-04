@@ -36,6 +36,14 @@ export type AgencyIdentity = {
   vatNumber: string;
 };
 
+export type AgencyBankDetails = {
+  accountName: string;
+  iban: string;
+  bic: string;
+  bankName: string;
+  bankAddress: string;
+};
+
 export type AgencyClient = {
   id: string;
   centerId: string;
@@ -77,12 +85,14 @@ export type AgencyInvoice = {
   status: AgencyInvoiceStatus;
   lines: AgencyInvoiceLine[];
   comments: string;
+  invoiceNote: string;
   createdAt: string;
 };
 
 export type AgencyBillingState = {
   company: AgencyCompany;
   identity: AgencyIdentity;
+  bank: AgencyBankDetails;
   clients: AgencyClient[];
   services: AgencyService[];
   invoices: AgencyInvoice[];
@@ -109,6 +119,14 @@ export const AGENCY_LEGAL_ENTITY = {
 
 export const REVERSE_CHARGE_MENTION =
   "Il s’agit d’une prestation de services internationale transfrontalière. Autoliquidation par le preneur — Reverse Charge - Art. 283-2 du CGI. TVA non applicable.";
+
+export const DEFAULT_AGENCY_BANK: AgencyBankDetails = {
+  accountName: "SFK WEBK AGENCY LLC",
+  iban: "BE21 9055 5762 3503",
+  bic: "TRWIBEB1XXX",
+  bankName: "Wise",
+  bankAddress: "Rue du Trône 100, 3rd floor, Brussels, 1050, Belgium",
+};
 
 export function defaultAgencyIdentity(company: AgencyCompany): AgencyIdentity {
   return {
@@ -142,6 +160,16 @@ function invoiceBrandName(
   return current;
 }
 
+export function bankTransferLines(bank: AgencyBankDetails) {
+  return [
+    `Nom : ${bank.accountName}`,
+    `IBAN : ${bank.iban}`,
+    `Swift/BIC : ${bank.bic}`,
+    `Banque : ${bank.bankName}`,
+    bank.bankAddress,
+  ].filter((line) => !line.endsWith(": ") && line.trim());
+}
+
 export function issuerAddressLines(identity: AgencyIdentity) {
   return [
     identity.legalName,
@@ -156,6 +184,7 @@ export function emptyAgencyState(company: AgencyCompany): AgencyBillingState {
   return {
     company,
     identity: defaultAgencyIdentity(company),
+    bank: { ...DEFAULT_AGENCY_BANK },
     clients: [],
     services: defaultAgencyServices(company),
     invoices: [],
@@ -222,6 +251,7 @@ export function normalizeAgencyState(
       phone: String(identity.phone || ""),
       vatNumber: String(identity.vatNumber || ""),
     },
+    bank: normalizeBank(record.bank),
     clients: Array.isArray(record.clients)
       ? record.clients
           .map((item) => normalizeClient(item))
@@ -366,6 +396,15 @@ export function buildAgencyInvoiceHtml(
   </table>
   <p class="right muted">TVA : 0,00 €</p>
   <h1 class="right">${escapeHtml(formatEuroAmount(total))} HT</h1>
+  ${
+    invoice.invoiceNote
+      ? `<div class="box"><p class="muted">Commentaire</p><p>${escapeHtml(invoice.invoiceNote).replace(/\n/g, "<br />")}</p></div>`
+      : ""
+  }
+  <div class="box">
+    <p class="muted">Coordonnées pour le virement</p>
+    <p>${bankTransferLines(state.bank || DEFAULT_AGENCY_BANK).map((line) => escapeHtml(line)).join("<br />")}</p>
+  </div>
   <p class="legal">${escapeHtml(REVERSE_CHARGE_MENTION)}</p>
 </body>
 </html>`;
@@ -591,7 +630,19 @@ function normalizeInvoice(value: unknown): AgencyInvoice | null {
           .filter((item): item is AgencyInvoiceLine => Boolean(item))
       : [],
     comments: String(record.comments || ""),
+    invoiceNote: String(record.invoiceNote || ""),
     createdAt: String(record.createdAt || new Date().toISOString()),
+  };
+}
+
+function normalizeBank(value: unknown): AgencyBankDetails {
+  const record = asRecord(value);
+  return {
+    accountName: String(record.accountName || DEFAULT_AGENCY_BANK.accountName),
+    iban: String(record.iban || DEFAULT_AGENCY_BANK.iban),
+    bic: String(record.bic || DEFAULT_AGENCY_BANK.bic),
+    bankName: String(record.bankName || DEFAULT_AGENCY_BANK.bankName),
+    bankAddress: String(record.bankAddress || DEFAULT_AGENCY_BANK.bankAddress),
   };
 }
 

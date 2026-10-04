@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  DEFAULT_AGENCY_BANK,
   AGENCY_LEGAL_ENTITY,
   REVERSE_CHARGE_MENTION,
   billingAlerts,
@@ -46,6 +47,7 @@ test("les deux marques partagent la même société US et la mention d’autoliq
       nextCycleOn: "2026-11-03",
       status: "Émise",
       comments: "",
+      invoiceNote: "Merci de régler sous 8 jours.",
       createdAt: "",
       lines: [{ id: "l1", label: "Pack WhatsApp", kind: "whatsapp", quantity: 1, unitPrice: 79 }],
     },
@@ -53,6 +55,13 @@ test("les deux marques partagent la même société US et la mention d’autoliq
   assert.match(html, /Bookea Powered by Webk/);
   assert.match(html, /Autoliquidation par le preneur/);
   assert.match(html, /BK-2026-001/);
+  assert.match(html, /BE21 9055 5762 3503/);
+  assert.match(html, /TRWIBEB1XXX/);
+  assert.match(html, /Merci de régler sous 8 jours/);
+  assert.match(html, /Wise/);
+  assert.match(html, /Rue du Trône 100/);
+  assert.equal(migrated.bank.iban, "BE21 9055 5762 3503");
+  assert.equal(DEFAULT_AGENCY_BANK.accountName, "SFK WEBK AGENCY LLC");
 });
 
 test("le prochain cycle est 30 jours après la facture", () => {
