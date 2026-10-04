@@ -1901,7 +1901,7 @@ function relanceCopy(conversation, round = 1, centerName = "", seya) {
   const hello = named;
   const centre = String(centerName || "").trim() || "le centre";
   const care = relanceCareLabel(conversation);
-  const about = /^une?\s/i.test(care) ? `d’${care}` : `de ${care}`;
+  const about = relanceAbout(care);
   const crmOffer = crmOfferForRelance(conversation, seya);
   const lastLead = lastLeadText(conversation);
   const candidates =
@@ -1966,6 +1966,17 @@ function offerFromOpeningMessage(conversation) {
     /demande pour\s+(.+?)(?:\s*[.?!]|$)/i,
   );
   return String(match?.[1] || "").replace(/\s+/g, " ").trim();
+}
+
+function relanceAbout(care) {
+  const value = String(care || "").replace(/\s+/g, " ").trim() || "notre offre";
+  if (/^(de |d['’])/i.test(value)) {
+    return value;
+  }
+  if (/^une?\s/i.test(value)) {
+    return `d’${value}`;
+  }
+  return `de ${value}`;
 }
 
 function relanceOfferMention(raw) {

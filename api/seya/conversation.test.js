@@ -1184,6 +1184,32 @@ test("le 1er WhatsApp reprend le texte d’offre du centre, pas l’intitulé ca
   assert.match(opening, /diagnostic de votre peau détaillé offert/i);
   assert.doesNotMatch(opening, /lift 4 149-copy|un soin minceur/i);
   assert.equal(conversation.campaign, "lift 4 149-copy");
+
+  const minceur = startConversation(
+    {
+      leadId: "lead-offre-decouverte",
+      firstName: "Aurore",
+      lastName: "Test",
+      phone: "0611223345",
+      treatment: "Soin minceur",
+      campaign: "Soin minceur",
+    },
+    "JFG Clinique Clermont-ferrand",
+    {
+      offerMaps: [
+        {
+          match: "Soin minceur",
+          label: "offre découverte minceur (bilan + séance découverte offerte)",
+        },
+      ],
+    },
+  );
+  const minceurOpening = minceur.messages[0].text;
+  assert.match(
+    minceurOpening,
+    /demande pour notre offre découverte minceur/i,
+  );
+  assert.doesNotMatch(minceurOpening, /pour offre découverte|d['’]un offre/i);
 });
 
 test("un lead visage reprend le titre du soin, pas l’enseigne", () => {

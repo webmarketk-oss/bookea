@@ -385,6 +385,17 @@ test("relance 2 et 3 : offre CRM {offre}, jamais l’intitulé campagne", () => 
     treatment: "Soin visage",
     qualification: { need: "Soin visage" },
   });
+  const minceur = conversation({
+    firstName: "Aurore",
+    campaign: "Soin minceur",
+    offerLabel: "offre découverte minceur (bilan + séance découverte offerte)",
+    treatment: "Soin minceur",
+    qualification: { need: "Soin minceur" },
+  });
+  const firstMinceur = relanceCopy(minceur, 1, "JFG Clinique Clermont", seya);
+  assert.match(firstMinceur, /au sujet de notre offre découverte minceur/i);
+  assert.doesNotMatch(firstMinceur, /d['’]un offre|au sujet d['’]un offre/i);
+
   const second = relanceCopy(paid, 2, "JFG Clinique Clermont", seya);
   assert.match(second, /^Samantha,/);
   assert.match(second, /diagnostic de votre peau détaillé offert/i);

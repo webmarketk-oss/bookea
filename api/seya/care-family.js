@@ -123,6 +123,9 @@ function humanizeOfferTitle(value) {
     .replace(/^bilan\b/i, "un bilan")
     .replace(/\bet seance\b/gi, "et une séance")
     .replace(/\bet séance\b/gi, "et une séance");
+  if (/^offre\b/i.test(text)) {
+    return `notre ${text}`;
+  }
   if (!/^(un|une|le|la|les|l['’]|votre|notre)\b/i.test(text)) {
     if (/minceur|cryo/.test(needle)) {
       return /bilan|soin/.test(needle) ? `un ${text}` : "un soin minceur";
@@ -155,6 +158,9 @@ function phraseFromCareTitle(value) {
   }
   if (/^épilation\b/i.test(text) || /^epilation\b/i.test(text) || /^séance\b/i.test(text) || /^seance\b/i.test(text)) {
     return `une ${text}`;
+  }
+  if (/^offre\b/i.test(text)) {
+    return `notre ${text}`;
   }
   return `un ${text}`;
 }
@@ -306,7 +312,14 @@ function phraseConfiguredOffer(value) {
   if (!text) {
     return "";
   }
-  return text.charAt(0).toLowerCase() + text.slice(1);
+  const lowered = text.charAt(0).toLowerCase() + text.slice(1);
+  if (/^(un|une|le|la|les|des|l['’]|votre|notre)\b/i.test(lowered)) {
+    return lowered;
+  }
+  if (/^offre\b/i.test(lowered)) {
+    return `notre ${lowered}`;
+  }
+  return lowered;
 }
 
 module.exports = {

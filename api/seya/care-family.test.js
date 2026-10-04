@@ -122,7 +122,7 @@ test("l’offre se dit naturellement, jamais « le minceur »", () => {
 });
 
 test("l’intitulé campagne du centre choisit le texte WhatsApp du 1er message", () => {
-  const { findOfferMap, phraseConfiguredOffer } = require("./care-family");
+  const { findOfferMap, humanizeOfferTitle, phraseConfiguredOffer } = require("./care-family");
   const seya = {
     offerMaps: [
       {
@@ -147,6 +147,15 @@ test("l’intitulé campagne du centre choisit le texte WhatsApp du 1er message"
     phraseConfiguredOffer(lift.label),
     "diagnostic de votre peau détaillé offert",
   );
+  assert.equal(
+    phraseConfiguredOffer(minceur.label),
+    "notre offre découverte minceur (bilan + séance découverte offerte)",
+  );
+  assert.match(
+    humanizeOfferTitle(minceur.label),
+    /notre offre découverte minceur/i,
+  );
+  assert.doesNotMatch(humanizeOfferTitle(minceur.label), /un offre/i);
   assert.equal(findOfferMap({ offerMaps: [] }, "Soin minceur"), null);
 });
 
