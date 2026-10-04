@@ -2,7 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  AGENCY_LEGAL_ENTITY,
+  REVERSE_CHARGE_MENTION,
   billingAlerts,
+  defaultAgencyIdentity,
   invoicesInRange,
   invoiceTotal,
   isOverdueCycle,
@@ -14,6 +17,20 @@ import {
   normalizeAgencyState,
   periodRange,
 } from "./admin-agency-billing.ts";
+
+test("les deux marques partagent la même société US et la mention d’autoliquidation", () => {
+  const webk = defaultAgencyIdentity("webk");
+  const bookea = defaultAgencyIdentity("bookea");
+  assert.equal(webk.name, "WEBK");
+  assert.equal(bookea.name, "Bookea Powered by Webk");
+  assert.equal(webk.legalName, AGENCY_LEGAL_ENTITY.legalName);
+  assert.equal(bookea.legalName, AGENCY_LEGAL_ENTITY.legalName);
+  assert.equal(webk.city, "ALBUQUERQUE");
+  assert.match(REVERSE_CHARGE_MENTION, /Art\. 283-2 du CGI/);
+  const migrated = normalizeAgencyState("bookea", { identity: { name: "Bookea" } });
+  assert.equal(migrated.identity.name, "Bookea Powered by Webk");
+  assert.equal(migrated.identity.legalName, "SFK Web K Agency LLC");
+});
 
 test("le prochain cycle est 30 jours après la facture", () => {
   assert.equal(nextBillingCycleOn("2026-10-03"), "2026-11-02");

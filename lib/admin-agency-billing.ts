@@ -21,7 +21,12 @@ export type AgencyPeriod = "semaine" | "mois" | "trimestre" | "annee" | "custom"
 
 export type AgencyIdentity = {
   name: string;
+  legalName: string;
+  contactName: string;
   address: string;
+  postalCode: string;
+  city: string;
+  country: string;
   siret: string;
   email: string;
   phone: string;
@@ -88,26 +93,64 @@ export const AGENCY_COMPANIES: Array<{
   { id: "bookea", label: "Bookea", short: "BK" },
 ];
 
-const EMPTY_IDENTITY: AgencyIdentity = {
-  name: "",
-  address: "",
-  siret: "",
-  email: "",
-  phone: "",
-  vatNumber: "",
+export const AGENCY_LEGAL_ENTITY = {
+  legalName: "SFK Web K Agency LLC",
+  contactName: "Samantha Kahlaoui",
+  address: "1209 MOUNTAIN ROAD PL NE",
+  postalCode: "87110",
+  city: "ALBUQUERQUE",
+  country: "États-Unis",
 };
+
+export const REVERSE_CHARGE_MENTION =
+  "Il s’agit d’une prestation de services internationale transfrontalière. Autoliquidation par le preneur — Reverse Charge - Art. 283-2 du CGI. TVA non applicable.";
+
+export function defaultAgencyIdentity(company: AgencyCompany): AgencyIdentity {
+  return {
+    name: company === "webk" ? "WEBK" : "Bookea Powered by Webk",
+    legalName: AGENCY_LEGAL_ENTITY.legalName,
+    contactName: AGENCY_LEGAL_ENTITY.contactName,
+    address: AGENCY_LEGAL_ENTITY.address,
+    postalCode: AGENCY_LEGAL_ENTITY.postalCode,
+    city: AGENCY_LEGAL_ENTITY.city,
+    country: AGENCY_LEGAL_ENTITY.country,
+    siret: "",
+    email: "",
+    phone: "",
+    vatNumber: "",
+  };
+}
 
 export function companyLabel(company: AgencyCompany) {
   return AGENCY_COMPANIES.find((item) => item.id === company)?.label || company;
 }
 
+function invoiceBrandName(
+  company: AgencyCompany,
+  stored: unknown,
+  fallback: string,
+) {
+  const current = String(stored || "").trim();
+  if (!current || current === "WebK" || current === "Bookea") {
+    return fallback;
+  }
+  return current;
+}
+
+export function issuerAddressLines(identity: AgencyIdentity) {
+  return [
+    identity.legalName,
+    identity.contactName,
+    identity.address,
+    [identity.postalCode, identity.city].filter(Boolean).join(" "),
+    identity.country,
+  ].filter(Boolean);
+}
+
 export function emptyAgencyState(company: AgencyCompany): AgencyBillingState {
   return {
     company,
-    identity: {
-      ...EMPTY_IDENTITY,
-      name: company === "webk" ? "WebK" : "Bookea",
-    },
+    identity: defaultAgencyIdentity(company),
     clients: [],
     services: defaultAgencyServices(company),
     invoices: [],
@@ -149,8 +192,13 @@ export function normalizeAgencyState(
   return {
     company,
     identity: {
-      name: String(identity.name || fallback.identity.name),
-      address: String(identity.address || ""),
+      name: invoiceBrandName(company, identity.name, fallback.identity.name),
+      legalName: String(identity.legalName || fallback.identity.legalName),
+      contactName: String(identity.contactName || fallback.identity.contactName),
+      address: String(identity.address || fallback.identity.address),
+      postalCode: String(identity.postalCode || fallback.identity.postalCode),
+      city: String(identity.city || fallback.identity.city),
+      country: String(identity.country || fallback.identity.country),
       siret: String(identity.siret || ""),
       email: String(identity.email || ""),
       phone: String(identity.phone || ""),

@@ -11,7 +11,9 @@ import {
   formatShortDate,
   invoiceTotal,
   invoicesInRange,
+  issuerAddressLines,
   kpiBreakdown,
+  REVERSE_CHARGE_MENTION,
   monthlyRevenue,
   nextBillingCycleOn,
   nextInvoiceNumber,
@@ -212,6 +214,8 @@ function BillingSection({
   onChange: (patch: Partial<AgencyBillingState>) => void;
 }) {
   const [draft, setDraft] = useState(() => emptyInvoiceDraft(state));
+  const [previewId, setPreviewId] = useState<string | null>(null);
+  const preview = state.invoices.find((item) => item.id === previewId);
 
   function addLine() {
     const service = state.services[0];
@@ -264,42 +268,18 @@ function BillingSection({
   return (
     <div className="space-y-4">
       <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <p className="text-xs font-black uppercase text-slate-400">
-              Identité {companyLabel(state.company)}
-            </p>
-            <p className="mt-1 text-sm font-medium text-slate-500">
-              Tu me donneras le SIRET et l’adresse : on les mettra ici pour les
-              factures.
-            </p>
-          </div>
-        </div>
-        <div className="mt-4 grid gap-3 md:grid-cols-2">
-          {(
-            [
-              ["name", "Raison sociale"],
-              ["address", "Adresse"],
-              ["siret", "SIRET"],
-              ["email", "Email"],
-              ["phone", "Téléphone"],
-              ["vatNumber", "N° TVA"],
-            ] as const
-          ).map(([key, label]) => (
-            <label key={key} className="text-sm font-semibold text-slate-600">
-              {label}
-              <input
-                value={state.identity[key]}
-                onChange={(event) =>
-                  onChange({
-                    identity: { ...state.identity, [key]: event.target.value },
-                  })
-                }
-                className="mt-1 h-11 w-full rounded-xl border border-slate-200 px-3 text-sm font-semibold text-slate-900 outline-none focus:border-violet-400"
-              />
-            </label>
+        <p className="text-xs font-black uppercase text-slate-400">
+          Émetteur des factures {companyLabel(state.company)}
+        </p>
+        <p className="mt-2 text-lg font-semibold">{state.identity.name}</p>
+        <div className="mt-1 space-y-0.5 text-sm font-medium text-slate-600">
+          {issuerAddressLines(state.identity).map((line) => (
+            <p key={line}>{line}</p>
           ))}
         </div>
+        <p className="mt-3 rounded-xl bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-900">
+          {REVERSE_CHARGE_MENTION}
+        </p>
       </section>
 
       <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
@@ -439,12 +419,13 @@ function BillingSection({
               <th className="px-4 py-3">Montant</th>
               <th className="px-4 py-3">Statut</th>
               <th className="px-4 py-3">Commentaire</th>
+              <th className="px-4 py-3"></th>
             </tr>
           </thead>
           <tbody>
             {state.invoices.length === 0 ? (
               <tr>
-                <td colSpan={7} className="px-4 py-8 text-center font-semibold text-slate-400">
+                <td colSpan={8} className="px-4 py-8 text-center font-semibold text-slate-400">
                   Aucune facture pour {companyLabel(state.company)}.
                 </td>
               </tr>
@@ -487,6 +468,15 @@ function BillingSection({
                       </select>
                     </td>
                     <td className="px-4 py-3 text-slate-500">{invoice.comments || "—"}</td>
+                    <td className="px-4 py-3">
+                      <button
+                        type="button"
+                        onClick={() => setPreviewId(invoice.id)}
+                        className="h-9 rounded-lg border border-slate-200 px-3 text-xs font-bold"
+                      >
+                        Voir
+                      </button>
+                    </td>
                   </tr>
                 );
               })
@@ -494,6 +484,111 @@ function BillingSection({
           </tbody>
         </table>
       </section>
+
+      {preview ? (
+        <InvoiceDocument
+          state={state}
+          invoice={preview}
+          onClose={() => setPreviewId(null)}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+function InvoiceDocument({
+  state,
+  invoice,
+  onClose,
+}: {
+  state: AgencyBillingState;
+  invoice: AgencyInvoice;
+  onClose: () => void;
+}) {
+  const client = state.clients.find((item) => item.id === invoice.clientId);
+  const total = invoiceTotal(invoice);
+
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/40 p-4 print:static print:bg-white print:p-0">
+      <div className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-2xl bg-white p-8 shadow-xl print:max-h-none print:rounded-none print:shadow-none">
+        <div className="flex items-start justify-between gap-4 print:hidden">
+          <p className="text-sm font-black uppercase text-slate-400">Facture</p>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => window.print()}
+              className="h-10 rounded-xl bg-slate-950 px-3 text-sm font-semibold text-white"
+            >
+              Imprimer
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              className="h-10 rounded-xl border border-slate-200 px-3 text-sm font-semibold"
+            >
+              Fermer
+            </button>
+          </div>
+        </div>
+
+        <div className="mt-4 flex flex-wrap justify-between gap-6">
+          <div>
+            <p className="text-2xl font-black">{state.identity.name}</p>
+            <div className="mt-2 space-y-0.5 text-sm font-medium text-slate-600">
+              {issuerAddressLines(state.identity).map((line) => (
+                <p key={line}>{line}</p>
+              ))}
+            </div>
+          </div>
+          <div className="text-right">
+            <p className="text-sm font-black uppercase text-slate-400">Facture</p>
+            <p className="text-xl font-black">{invoice.number}</p>
+            <p className="mt-1 text-sm font-semibold text-slate-600">
+              Date : {formatShortDate(invoice.issuedOn)}
+            </p>
+          </div>
+        </div>
+
+        <div className="mt-6 rounded-xl border border-slate-200 p-4">
+          <p className="text-xs font-black uppercase text-slate-400">Client</p>
+          <p className="mt-1 text-base font-semibold">{client?.name || "—"}</p>
+          <p className="text-sm font-medium text-slate-600">
+            {[client?.city, client?.email].filter(Boolean).join(" · ")}
+          </p>
+        </div>
+
+        <table className="mt-6 w-full text-sm">
+          <thead className="border-b text-left text-xs font-black uppercase text-slate-500">
+            <tr>
+              <th className="py-2">Prestation</th>
+              <th className="py-2">Qté</th>
+              <th className="py-2">Prix HT</th>
+              <th className="py-2 text-right">Total HT</th>
+            </tr>
+          </thead>
+          <tbody>
+            {invoice.lines.map((line) => (
+              <tr key={line.id} className="border-b last:border-0">
+                <td className="py-2 font-semibold">{line.label}</td>
+                <td className="py-2">{line.quantity}</td>
+                <td className="py-2">{formatEuroAmount(line.unitPrice)}</td>
+                <td className="py-2 text-right font-black">
+                  {formatEuroAmount(line.quantity * line.unitPrice)}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+
+        <div className="mt-4 text-right">
+          <p className="text-sm font-semibold text-slate-500">TVA : 0,00 €</p>
+          <p className="text-2xl font-black">{formatEuroAmount(total)} HT</p>
+        </div>
+
+        <p className="mt-6 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-950">
+          {REVERSE_CHARGE_MENTION}
+        </p>
+      </div>
     </div>
   );
 }
