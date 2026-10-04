@@ -46,12 +46,26 @@ import {
   type SmsQuotaRecord,
 } from "@/lib/sms-settings";
 
+type CenterLegal = {
+  legalName?: string;
+};
+
+type CenterPublicCenter = {
+  legalName?: string;
+  address?: string;
+  phone?: string;
+  email?: string;
+};
+
 type CenterRow = {
   id: string;
   name: string | null;
   slug: string | null;
   city: string | null;
   email: string | null;
+  phone: string | null;
+  address_line1: string | null;
+  postal_code: string | null;
   public_profile_enabled: boolean | null;
   owner_profile_id: string | null;
   created_at: string;
@@ -71,6 +85,7 @@ type CenterRow = {
     bookeaPlan?: unknown;
     offerHistory?: unknown;
     adminAlerts?: unknown;
+    legal?: CenterLegal;
   } | null;
 };
 
@@ -92,6 +107,9 @@ type CenterMemberRow = {
 };
 
 type CenterCardData = Omit<CenterRow, "settings"> & {
+  legalName: string;
+  address: string;
+  phone: string;
   isActive: boolean;
   members: Array<{
     profileId: string;
@@ -126,6 +144,9 @@ export default function AdminCentresPage() {
   const [togglingCenterId, setTogglingCenterId] = useState<string | null>(null);
   const [creditingCenterId, setCreditingCenterId] = useState<string | null>(null);
   const [savingSeyaCenterId, setSavingSeyaCenterId] = useState<string | null>(null);
+  const [savingIdentityCenterId, setSavingIdentityCenterId] = useState<string | null>(
+    null,
+  );
   const [search, setSearch] = useState("");
   const [activityFilter, setActivityFilter] = useState<"all" | "active" | "inactive">(
     "all",
@@ -153,7 +174,7 @@ export default function AdminCentresPage() {
     try {
       const { data: centerRows, error: centersError } = await supabase
         .from("centers")
-        .select("id,name,slug,city,email,public_profile_enabled,owner_profile_id,created_at,sms:settings->sms,admin:settings->admin,seya:settings->seya,seyaQuota:settings->seyaQuota,bookeaPlan:settings->bookeaPlan,offerHistory:settings->offerHistory,adminAlerts:settings->adminAlerts")
+        .select("id,name,slug,city,email,phone,address_line1,postal_code,public_profile_enabled,owner_profile_id,created_at,sms:settings->sms,admin:settings->admin,seya:settings->seya,seyaQuota:settings->seyaQuota,bookeaPlan:settings->bookeaPlan,offerHistory:settings->offerHistory,adminAlerts:settings->adminAlerts,legal:settings->legal,publicCenter:settings->public->center")
         .order("created_at", { ascending: false });
 
       if (centersError) throw new Error(centersError.message);
@@ -181,6 +202,8 @@ export default function AdminCentresPage() {
             bookeaPlan?: unknown;
             offerHistory?: unknown;
             adminAlerts?: unknown;
+            legal?: CenterLegal | null;
+            publicCenter?: CenterPublicCenter | null;
           }
         >).map((center) => {
           const quota = normalizeSmsQuota(center.settings?.sms?.quota ?? center.sms?.quota);
@@ -204,7 +227,23 @@ export default function AdminCentresPage() {
             name: center.name,
             slug: center.slug,
             city: center.city,
-            email: center.email,
+            email:
+              firstText(center.email, center.publicCenter?.email) || null,
+            phone:
+              firstText(center.phone, center.publicCenter?.phone) || null,
+            address_line1:
+              firstText(center.address_line1, center.publicCenter?.address) ||
+              null,
+            postal_code: center.postal_code,
+            legalName: firstText(
+              center.settings?.legal?.legalName,
+              center.legal?.legalName,
+              center.publicCenter?.legalName,
+            ),
+            address: firstText(
+              center.address_line1,
+              center.publicCenter?.address,
+            ),
             public_profile_enabled: center.public_profile_enabled,
             owner_profile_id: center.owner_profile_id,
             created_at: center.created_at,
@@ -543,6 +582,100 @@ export default function AdminCentresPage() {
     }
   }
 
+  async function handleSaveIdentity(
+    centerId: string,
+    identity: {
+      legalName: string;
+      address: string;
+      phone: string;
+      email: string;
+    },
+  ) {
+    setSavingIdentityCenterId(centerId);
+    setNotice(null);
+
+    try {
+      const { data, error } = await supabase
+        .from("centers")
+        .select("settings")
+        .eq("id", centerId)
+        .maybeSingle();
+
+      if (error) {
+        throw new Error(error.message);
+      }
+
+      const currentSettings = asObject(data?.settings);
+      const currentLegal = asObject(currentSettings.legal);
+      const currentPublic = asObject(currentSettings.public);
+      const currentPublicCenter = asObject(currentPublic.center);
+      const legalName = identity.legalName.trim();
+      const address = identity.address.trim();
+      const phone = identity.phone.trim();
+      const email = identity.email.trim();
+
+      const { error: updateError } = await supabase
+        .from("centers")
+        .update({
+          email: email || null,
+          phone: phone || null,
+          address_line1: address || null,
+          settings: {
+            ...currentSettings,
+            legal: {
+              ...currentLegal,
+              legalName,
+            },
+            public: {
+              ...currentPublic,
+              center: {
+                ...currentPublicCenter,
+                legalName,
+                address,
+                phone,
+                email,
+              },
+            },
+          },
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", centerId);
+
+      if (updateError) {
+        throw new Error(updateError.message);
+      }
+
+      setCenters((current) =>
+        current.map((center) =>
+          center.id === centerId
+            ? {
+                ...center,
+                legalName,
+                address,
+                phone,
+                email: email || null,
+                address_line1: address || null,
+              }
+            : center,
+        ),
+      );
+      setNotice({
+        type: "success",
+        message: "Coordonnées du centre enregistrées.",
+      });
+    } catch (error) {
+      setNotice({
+        type: "error",
+        message:
+          error instanceof Error
+            ? error.message
+            : "Impossible d’enregistrer les coordonnées du centre.",
+      });
+    } finally {
+      setSavingIdentityCenterId(null);
+    }
+  }
+
   async function attachOwnerViaApi(centerId: string, email: string) {
     const ownerEmail = email.trim().toLowerCase();
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(ownerEmail)) {
@@ -628,6 +761,9 @@ export default function AdminCentresPage() {
         center.slug,
         center.city,
         center.email,
+        center.legalName,
+        center.address,
+        center.phone,
         ...center.members.map((member) => `${member.name} ${member.email}`),
       ]
         .join(" ")
@@ -843,6 +979,10 @@ export default function AdminCentresPage() {
                   }
                   onCreditSms={(amount) => handleCreditSms(center.id, amount)}
                   onSetSeyaQuota={(limit) => handleSetSeyaQuota(center.id, limit)}
+                  savingIdentity={savingIdentityCenterId === center.id}
+                  onSaveIdentity={(identity) =>
+                    handleSaveIdentity(center.id, identity)
+                  }
                 />
               ))
             )}
@@ -860,11 +1000,13 @@ function CenterCard({
   toggling,
   crediting,
   savingSeya,
+  savingIdentity,
   onAttachOwner,
   onRemoveMember,
   onToggleActive,
   onCreditSms,
   onSetSeyaQuota,
+  onSaveIdentity,
 }: {
   center: CenterCardData;
   attaching: boolean;
@@ -872,6 +1014,7 @@ function CenterCard({
   toggling: boolean;
   crediting: boolean;
   savingSeya: boolean;
+  savingIdentity: boolean;
   onAttachOwner: (
     email: string,
   ) => Promise<{ ok: boolean; error?: string }>;
@@ -879,8 +1022,20 @@ function CenterCard({
   onToggleActive: (nextActive: boolean) => void;
   onCreditSms: (amount: number) => void;
   onSetSeyaQuota: (limit: number | null) => void;
+  onSaveIdentity: (identity: {
+    legalName: string;
+    address: string;
+    phone: string;
+    email: string;
+  }) => void;
 }) {
   const [ownerEmail, setOwnerEmail] = useState("");
+  const [identity, setIdentity] = useState({
+    legalName: center.legalName,
+    address: center.address,
+    phone: center.phone || "",
+    email: center.email || "",
+  });
   const [attachError, setAttachError] = useState("");
   const [facebookPageId, setFacebookPageId] = useState("");
   const [smsAmount, setSmsAmount] = useState("");
@@ -893,6 +1048,15 @@ function CenterCard({
       center.seyaLimit == null ? "unlimited" : String(center.seyaLimit),
     );
   }, [center.seyaLimit]);
+
+  useEffect(() => {
+    setIdentity({
+      legalName: center.legalName,
+      address: center.address,
+      phone: center.phone || "",
+      email: center.email || "",
+    });
+  }, [center.address, center.email, center.legalName, center.phone]);
   const facebookConnectUrl =
     center.slug && facebookPageId.trim()
       ? `/api/meta/connect?center_slug=${encodeURIComponent(center.slug)}&page_id=${encodeURIComponent(facebookPageId.trim())}`
@@ -924,6 +1088,11 @@ function CenterCard({
   function submitSeyaQuota(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     onSetSeyaQuota(seyaLimit === "unlimited" ? null : Number(seyaLimit));
+  }
+
+  function submitIdentity(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    onSaveIdentity(identity);
   }
 
   const seyaRemaining = seyaRemainingConversations(
@@ -997,6 +1166,56 @@ function CenterCard({
               {center.isActive ? "Centre actif" : "Centre inactif"}
             </Badge>
           </div>
+
+          <form
+            onSubmit={submitIdentity}
+            className="mt-5 space-y-3 rounded-2xl border border-slate-200 bg-slate-50 p-4"
+          >
+            <p className="text-xs font-medium text-slate-400">
+              Coordonnées du centre
+            </p>
+            <TextField
+              label="Raison sociale"
+              value={identity.legalName}
+              onChange={(value) =>
+                setIdentity((current) => ({ ...current, legalName: value }))
+              }
+              placeholder="Ex. JFG Clinic SARL"
+            />
+            <TextField
+              label="Adresse"
+              value={identity.address}
+              onChange={(value) =>
+                setIdentity((current) => ({ ...current, address: value }))
+              }
+              placeholder="12 rue de la Paix, 63000 Clermont-Ferrand"
+            />
+            <TextField
+              label="Téléphone"
+              value={identity.phone}
+              onChange={(value) =>
+                setIdentity((current) => ({ ...current, phone: value }))
+              }
+              placeholder="04 73 00 00 00"
+            />
+            <TextField
+              label="Email"
+              type="email"
+              value={identity.email}
+              onChange={(value) =>
+                setIdentity((current) => ({ ...current, email: value }))
+              }
+              placeholder="contact@centre.fr"
+            />
+            <button
+              type="submit"
+              disabled={savingIdentity}
+              className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-slate-950 px-4 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {savingIdentity ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+              Enregistrer les coordonnées
+            </button>
+          </form>
         </div>
 
         <div className="rounded-2xl bg-slate-50 p-4 xl:min-w-80">
@@ -1353,4 +1572,20 @@ function slugify(value: string) {
 
 function relationObject<T>(relation: T | T[] | null | undefined) {
   return Array.isArray(relation) ? relation[0] : relation;
+}
+
+function firstText(...values: unknown[]) {
+  for (const value of values) {
+    const text = String(value ?? "").trim();
+    if (text) {
+      return text;
+    }
+  }
+  return "";
+}
+
+function asObject(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
 }

@@ -169,6 +169,7 @@ export type CenterReviewAutomation = {
 export type StoredCenterSettings = {
   center?: {
     name: string;
+    legalName?: string;
     slug: string;
     city: string;
     address: string;
@@ -569,6 +570,10 @@ export async function savePublicCenterProfile(
     tiktok_url: emptyToNull(nextSettings.center?.socialLinks?.tiktok),
     settings: {
       ...currentSettings,
+      legal: {
+        ...asRecord(currentSettings.legal),
+        legalName: nextSettings.center?.legalName?.trim() || "",
+      },
       public: publicSettings,
     },
     updated_at: new Date().toISOString(),
@@ -711,6 +716,10 @@ function storedSettingsFromCenterRow(row: CenterProfileRow): StoredCenterSetting
   return {
     center: {
       name: asString(row.name, asString(fromJsonCenter.name)),
+      legalName: asString(
+        asRecord(asRecord(row.settings).legal).legalName,
+        asString(fromJsonCenter.legalName),
+      ),
       slug: asString(row.slug, asString(fromJsonCenter.slug)),
       city: asString(row.city, asString(fromJsonCenter.city)),
       address: asString(row.address_line1, asString(fromJsonCenter.address)),

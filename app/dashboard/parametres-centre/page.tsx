@@ -117,6 +117,7 @@ type Service = {
 
 type CenterProfile = {
   name: string;
+  legalName: string;
   slug: string;
   city: string;
   address: string;
@@ -374,6 +375,7 @@ export default function CenterSettingsPage() {
   const [loadedCenterId, setLoadedCenterId] = useState("");
   const [center, setCenter] = useState<CenterProfile>({
     name: "",
+    legalName: "",
     slug: "",
     city: "",
     address: "",
@@ -1512,6 +1514,11 @@ export default function CenterSettingsPage() {
                 label="Nom du centre"
                 value={center.name}
                 onChange={(value) => setCenter({ ...center, name: value })}
+              />
+              <Field
+                label="Raison sociale"
+                value={center.legalName}
+                onChange={(value) => setCenter({ ...center, legalName: value })}
               />
               <Field
                 label="URL publique"
