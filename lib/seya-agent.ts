@@ -213,12 +213,6 @@ export function applyLeadReply(
         qualification,
         status: "RDV pris" as const,
         proposedSlots: [],
-        bookingState: {
-          ...(conversation.bookingState || {}),
-          appointmentStatus: "confirmed",
-          pendingQuestion: "no_slots",
-          lastOfferedSlots: [],
-        },
         messages: [
           ...conversation.messages,
           createSeyaMessage("lead", text),
