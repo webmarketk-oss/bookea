@@ -461,8 +461,11 @@ function BillingSection({
         className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"
       >
         <p className="text-sm font-black uppercase text-slate-500">
-          {editingId}
-            ? `Modifier ${state.invoices.find((item) => item.id === editingId)?.number || "la facture"}`
+          {editingId
+            ? `Modifier ${
+                state.invoices.find((item) => item.id === editingId)?.number ||
+                "la facture"
+              }`
             : "Nouvelle facture"}
         </p>
         <div className="mt-3 grid gap-3 md:grid-cols-2">
