@@ -27,6 +27,7 @@ test("les consignes communes remplacent l’ancien brief JFG et les textes legac
     COMMON_SEYA_GENERAL_BRIEF,
     /N’applique aucune grille horaire commune/i,
   );
+  assert.match(COMMON_SEYA_GENERAL_BRIEF, /Planity/i);
   assert.equal(
     resolveGeneralBrief("Consignes spécifiques du centre Gap."),
     "Consignes spécifiques du centre Gap.",

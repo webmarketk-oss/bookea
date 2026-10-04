@@ -559,6 +559,52 @@ test("ok je préfère vous recontacter : elle note, elle n’insiste pas", async
   assert.equal((conversation.proposedSlots || []).length, 0);
 });
 
+test("j’ai déjà pris le rdv : elle arrête de proposer des créneaux", async () => {
+  const { isAlreadyBookedElsewhere } = require("./conversation");
+  assert.equal(
+    isAlreadyBookedElsewhere("J'ai pris le rdv à l'instant le 8 octobre"),
+    true,
+  );
+  assert.equal(
+    isAlreadyBookedElsewhere("J'ai déjà pris le rdv sur planity"),
+    true,
+  );
+  assert.equal(isAlreadyBookedElsewhere("je veux prendre rdv le 8 octobre"), false);
+
+  let conversation = startConversation(
+    {
+      leadId: "lead-planity",
+      centerId: "jfg-clinique-clermont",
+      firstName: "Anastasiia",
+      lastName: "Kostiuchenko",
+      phone: "33749570454",
+      treatment: "Soin minceur",
+    },
+    "JFG Clinique Clermont",
+    seya,
+  );
+  conversation = await reply(conversation, "C’est pour le ventre");
+  conversation = await reply(
+    conversation,
+    "J'ai pris le rdv à l'instant le 8 octobre",
+  );
+  assert.match(lastSeya(conversation), /déjà pris|c’est noté|à très vite/i);
+  assert.doesNotMatch(
+    lastSeya(conversation),
+    /11h30|12h00|12h30|début de semaine|fin de semaine|lequel/i,
+  );
+  assert.equal((conversation.proposedSlots || []).length, 0);
+  assert.equal(conversation.status, "RDV pris");
+
+  conversation = await reply(conversation, "J'ai déjà pris le rdv sur planity");
+  assert.match(lastSeya(conversation), /déjà pris|planity|c’est noté|à très vite/i);
+  assert.doesNotMatch(
+    lastSeya(conversation),
+    /début de semaine|fin de semaine|11h30|lequel/i,
+  );
+  assert.equal((conversation.proposedSlots || []).length, 0);
+});
+
 test("ok merci après un RDV déjà confirmé : elle ne reprend pas le créneau", async () => {
   const slots = [
     { date: "2026-09-29", time: "09:00", label: "mar. 29/09 à 09h00" },

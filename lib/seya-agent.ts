@@ -199,7 +199,41 @@ export function applyLeadReply(
     /conseill|parler (a|à) (un |une )?(humain|quelqu|personne)/i.test(text) &&
     !/rendez-vous|\brdv\b|creneau|dispo/i.test(text);
   const refuses = isSeyaOptOut(text);
-  const asksRdv = /rendez-vous|\brdv\b|prendre rendez|un creneau/i.test(text);
+  const alreadyBooked =
+    /j['’ ]?ai (deja )?pris|deja pris (le )?(rdv|rendez-vous)|sur planity|je viens de (prendre|reserver)/i.test(
+      text,
+    );
+  const asksRdv =
+    /rendez-vous|\brdv\b|prendre rendez|un creneau/i.test(text) && !alreadyBooked;
+
+  if (alreadyBooked) {
+    return {
+      conversation: {
+        ...conversation,
+        qualification,
+        status: "RDV pris" as const,
+        proposedSlots: [],
+        bookingState: {
+          ...(conversation.bookingState || {}),
+          appointmentStatus: "confirmed",
+          pendingQuestion: "no_slots",
+          lastOfferedSlots: [],
+        },
+        messages: [
+          ...conversation.messages,
+          createSeyaMessage("lead", text),
+          createSeyaMessage(
+            "seya",
+            /planity/i.test(text)
+              ? "Parfait, c’est noté, votre rendez-vous est déjà pris sur Planity. Je n’ai plus de créneau à vous proposer. À très vite au centre."
+              : "Parfait, c’est noté, votre rendez-vous est déjà pris. Je n’ai plus de créneau à vous proposer. À très vite au centre.",
+          ),
+        ],
+        updatedAt: new Date().toISOString(),
+      },
+      shouldBook: null,
+    };
+  }
 
   if (refuses) {
     return {

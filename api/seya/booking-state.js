@@ -2,6 +2,8 @@ const { classifyPriceQuestion, isPriceRepeatComplaint } = require("./price");
 const {
   asksOtherDay,
   dayPartFromText,
+  isAlreadyBookedElsewhere,
+  isAppointmentConfirmed,
   isAskToWriteBack,
   isHesitation,
   isOutOfZone,
@@ -72,6 +74,13 @@ function applyBookingMessage(state, text, extras = {}) {
   }
   const value = normalize(text);
   const now = extras.now instanceof Date ? extras.now : new Date();
+
+  if (isAlreadyBookedElsewhere(text)) {
+    next.pendingQuestion = "no_slots";
+    next.lastOfferedSlots = [];
+    next.appointmentStatus = "confirmed";
+    return next;
+  }
 
   if (/ventre|poids|minceur|mincir|maigrir|cryo|graisse|cellulite/.test(value)) {
     next.serviceIntent = "minceur_ventre";
@@ -279,6 +288,9 @@ function applyBookingMessage(state, text, extras = {}) {
 
 function shouldSearchSlots(state, text, conversation) {
   const forceSearch = lastSeyaAskedToSearch(conversation) && isShortYes(text);
+  if (isAlreadyBookedElsewhere(text) || isAppointmentConfirmed(conversation)) {
+    return false;
+  }
   if (
     asksPrice(text) ||
     asksLocation(text) ||

@@ -33,8 +33,10 @@ const {
   stripBookingCta,
 } = require("./health");
 const {
+  alreadyBookedReply,
   alreadyTold,
   conversationalReply,
+  isAlreadyBookedElsewhere,
   isBookingThread,
   isHesitation,
   isIdentityQuestion,
@@ -1292,6 +1294,22 @@ function applyLeadReply(conversation, text, seya, slots, extras = {}) {
     conversation.treatment,
   );
   const pool = offeredSlots(conversation, slots);
+  if (isAlreadyBookedElsewhere(intentText) || isAlreadyBookedElsewhere(text)) {
+    return finishLeadReply(
+      conversation,
+      qualification,
+      "RDV pris",
+      text,
+      alreadyBookedReply(intentText || text),
+      {
+        ...bookingState,
+        pendingQuestion: "no_slots",
+        lastOfferedSlots: [],
+        appointmentStatus: "confirmed",
+      },
+      { proposedSlots: [] },
+    );
+  }
   const confirmYes = isConfirmingOfferedTime(intentText, conversation);
   const chosenSlot =
     (isAppointmentConfirmed(conversation) && !confirmYes) ||

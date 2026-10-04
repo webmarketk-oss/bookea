@@ -173,6 +173,50 @@ function isAppointmentConfirmed(conversation) {
   );
 }
 
+function isAlreadyBookedElsewhere(text) {
+  const value = normalize(text);
+  if (!value) {
+    return false;
+  }
+  if (
+    /je (veux|voudrais|souhaite|aimerais|peux) (prendre|reserver)/.test(value)
+  ) {
+    return false;
+  }
+  if (
+    /(prendre|reserver) (un )?(rdv|rendez-vous|creneau)/.test(value) &&
+    !/j[' ]?ai |je viens de |deja |a l[' ]instant/.test(value)
+  ) {
+    return false;
+  }
+  const mentionsVisit = /(rdv|rendez-vous|creneau|reserve|reservation|booke)/.test(
+    value,
+  );
+  if (!mentionsVisit) {
+    return false;
+  }
+  const done =
+    /j[' ]?ai (deja )?(pris|reserve|booke)/.test(value) ||
+    /je viens de (prendre|reserver|booker)/.test(value) ||
+    /a l[' ]instant/.test(value) ||
+    /deja (pris|reserve|booke)/.test(value) ||
+    /rdv (deja )?pris/.test(value) ||
+    /rendez-vous (deja )?(pris|reserve)/.test(value);
+  const elsewhere =
+    /planity|treatwell|en ligne|sur (le )?site|sur (votre )?agenda/.test(value);
+  return done || (elsewhere && /pris|reserve|booke/.test(value));
+}
+
+function alreadyBookedReply(text) {
+  const value = normalize(text);
+  const via = /planity/.test(value)
+    ? " sur Planity"
+    : /treatwell/.test(value)
+      ? " sur Treatwell"
+      : "";
+  return `Parfait, c’est noté, votre rendez-vous est déjà pris${via}. Je n’ai plus de créneau à vous proposer. À très vite au centre.`;
+}
+
 function isConfirmingOfferedTime(text, conversation) {
   if (!conversation) {
     return false;
@@ -180,7 +224,12 @@ function isConfirmingOfferedTime(text, conversation) {
   if (isAppointmentConfirmed(conversation) && !offeredSlots(conversation).length) {
     return false;
   }
-  if (isHesitation(text) || refusesSlots(text) || classifyPriceQuestion(text)) {
+  if (
+    isHesitation(text) ||
+    refusesSlots(text) ||
+    classifyPriceQuestion(text) ||
+    isAlreadyBookedElsewhere(text)
+  ) {
     return false;
   }
   if (lastSeyaAskedToSearch(conversation)) {
@@ -530,6 +579,9 @@ function refusesSlots(text) {
 }
 
 function wantsSlots(text, conversation) {
+  if (isAlreadyBookedElsewhere(text)) {
+    return false;
+  }
   if (isAppointmentConfirmed(conversation) && (isShortYes(text) || isThanks(text, conversation))) {
     return false;
   }
@@ -650,6 +702,9 @@ function conversationalReply(text, conversation, qualification, now) {
   if (isAwayForNow(text) || isWillCallBack(text)) {
     return willCallBackReply(now);
   }
+  if (isAlreadyBookedElsewhere(text)) {
+    return alreadyBookedReply(text);
+  }
   if (isHesitation(text) || refusesSlots(text)) {
     return pickFresh(
       [
@@ -727,8 +782,10 @@ function composeReplies(parts) {
 
 module.exports = {
   acceptsBookingOffer,
+  alreadyBookedReply,
   alreadyTold,
   checkingSlotReply,
+  isAlreadyBookedElsewhere,
   isAppointmentConfirmed,
   threadHasConfirmedVisit,
   isConfirmingOfferedTime,
