@@ -430,6 +430,27 @@ function escapeHtml(value: string) {
     .replace(/"/g, "&quot;");
 }
 
+export function cloneInvoiceLines(lines: AgencyInvoiceLine[]) {
+  return lines.map((line) => ({ ...line, id: createId() }));
+}
+
+export function duplicateAgencyInvoice(
+  state: AgencyBillingState,
+  invoice: AgencyInvoice,
+) {
+  const issuedOn = nextBillingCycleOn(invoice.issuedOn);
+  return {
+    ...invoice,
+    id: createId(),
+    number: nextInvoiceNumber(state),
+    issuedOn,
+    nextCycleOn: nextBillingCycleOn(issuedOn),
+    status: "Émise" as const,
+    lines: cloneInvoiceLines(invoice.lines),
+    createdAt: new Date().toISOString(),
+  };
+}
+
 export function nextInvoiceNumber(state: AgencyBillingState, now = new Date()) {
   const prefix = state.company === "webk" ? "WK" : "BK";
   const year = String(now.getFullYear());

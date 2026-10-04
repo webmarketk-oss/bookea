@@ -24,6 +24,8 @@ import {
   pendingPaymentKpi,
   nextBillingCycleOn,
   nextInvoiceNumber,
+  duplicateAgencyInvoice,
+  cloneInvoiceLines,
   periodRange,
   type AgencyBillingState,
   type AgencyClient,
@@ -235,6 +237,7 @@ function BillingSection({
   onChange: (patch: Partial<AgencyBillingState>) => void;
 }) {
   const [draft, setDraft] = useState(() => emptyInvoiceDraft(state));
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [previewId, setPreviewId] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<AgencyInvoiceStatus | "tous">(
     "tous",
@@ -280,17 +283,63 @@ function BillingSection({
     }));
   }
 
-  function issueInvoice() {
+  function startEdit(invoice: AgencyInvoice) {
+    setEditingId(invoice.id);
+    setDraft({
+      clientId: invoice.clientId,
+      issuedOn: invoice.issuedOn,
+      comments: invoice.comments,
+      invoiceNote: invoice.invoiceNote,
+      lines: cloneInvoiceLines(invoice.lines),
+    });
+    requestAnimationFrame(() => {
+      document
+        .getElementById("agency-invoice-form")
+        ?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  }
+
+  function cancelEdit() {
+    setEditingId(null);
+    setDraft(emptyInvoiceDraft(state));
+  }
+
+  function saveInvoice() {
     if (!draft.clientId || draft.lines.length === 0) {
       return;
     }
     const issuedOn = draft.issuedOn || new Date().toISOString().slice(0, 10);
+    const nextCycleOn = nextBillingCycleOn(issuedOn);
+    if (editingId) {
+      onChange({
+        invoices: state.invoices.map((item) =>
+          item.id === editingId
+            ? {
+                ...item,
+                clientId: draft.clientId,
+                issuedOn,
+                nextCycleOn,
+                lines: draft.lines,
+                comments: draft.comments,
+                invoiceNote: draft.invoiceNote,
+              }
+            : item,
+        ),
+        clients: state.clients.map((client) =>
+          client.id === draft.clientId
+            ? { ...client, nextInvoiceOn: nextCycleOn }
+            : client,
+        ),
+      });
+      cancelEdit();
+      return;
+    }
     const invoice: AgencyInvoice = {
       id: createId(),
       number: nextInvoiceNumber(state),
       clientId: draft.clientId,
       issuedOn,
-      nextCycleOn: nextBillingCycleOn(issuedOn),
+      nextCycleOn,
       status: "Émise",
       lines: draft.lines,
       comments: draft.comments,
@@ -304,12 +353,46 @@ function BillingSection({
           ? {
               ...client,
               firstInvoiceOn: client.firstInvoiceOn || issuedOn,
-              nextInvoiceOn: nextBillingCycleOn(issuedOn),
+              nextInvoiceOn: nextCycleOn,
             }
           : client,
       ),
     });
     setDraft(emptyInvoiceDraft(state));
+  }
+
+  function duplicateInvoice(invoice: AgencyInvoice) {
+    const copy = duplicateAgencyInvoice(state, invoice);
+    onChange({
+      invoices: [copy, ...state.invoices],
+      clients: state.clients.map((client) =>
+        client.id === copy.clientId
+          ? {
+              ...client,
+              nextInvoiceOn: copy.nextCycleOn,
+            }
+          : client,
+      ),
+    });
+  }
+
+  function deleteInvoice(invoice: AgencyInvoice) {
+    if (
+      !window.confirm(
+        `Supprimer la facture ${invoice.number} ? Cette action est définitive.`,
+      )
+    ) {
+      return;
+    }
+    onChange({
+      invoices: state.invoices.filter((item) => item.id !== invoice.id),
+    });
+    if (editingId === invoice.id) {
+      cancelEdit();
+    }
+    if (previewId === invoice.id) {
+      setPreviewId(null);
+    }
   }
 
   return (
@@ -373,9 +456,14 @@ function BillingSection({
         </div>
       </section>
 
-      <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+      <section
+        id="agency-invoice-form"
+        className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"
+      >
         <p className="text-sm font-black uppercase text-slate-500">
-          Nouvelle facture
+          {editingId}
+            ? `Modifier ${state.invoices.find((item) => item.id === editingId)?.number || "la facture"}`
+            : "Nouvelle facture"}
         </p>
         <div className="mt-3 grid gap-3 md:grid-cols-2">
           <select
@@ -406,7 +494,7 @@ function BillingSection({
           {draft.lines.map((line) => (
             <div
               key={line.id}
-              className="grid gap-2 md:grid-cols-[1fr_5rem_7rem_6rem_7rem]"
+              className="grid gap-2 md:grid-cols-[1fr_5rem_7rem_6rem_7rem_2.5rem]"
             >
               <select
                 value={line.label}
@@ -513,6 +601,20 @@ function BillingSection({
                 placeholder=""
                 className="h-10 rounded-xl border border-slate-200 px-3 text-sm font-semibold disabled:bg-slate-100"
               />
+              <button
+                type="button"
+                disabled={draft.lines.length <= 1}
+                onClick={() =>
+                  setDraft((current) => ({
+                    ...current,
+                    lines: current.lines.filter((item) => item.id !== line.id),
+                  }))
+                }
+                className="h-10 rounded-xl border border-slate-200 text-sm font-bold text-slate-400 hover:border-rose-200 hover:text-rose-600 disabled:opacity-30"
+                aria-label="Retirer la prestation"
+              >
+                ×
+              </button>
             </div>
           ))}
         </div>
@@ -550,12 +652,21 @@ function BillingSection({
             <p className="text-sm font-black">
               {formatEuroAmount(invoiceTotal({ lines: draft.lines }))}
             </p>
+            {editingId ? (
+              <button
+                type="button"
+                onClick={cancelEdit}
+                className="h-11 rounded-xl border border-slate-200 px-4 text-sm font-semibold"
+              >
+                Annuler
+              </button>
+            ) : null}
             <button
               type="button"
-              onClick={issueInvoice}
+              onClick={saveInvoice}
               className="h-11 rounded-xl bg-violet-600 px-4 text-sm font-semibold text-white"
             >
-              Émettre la facture
+              {editingId ? "Enregistrer" : "Émettre la facture"}
             </button>
           </div>
         </div>
@@ -703,6 +814,27 @@ function BillingSection({
                           className="h-9 rounded-lg border border-slate-200 px-3 text-xs font-bold"
                         >
                           PDF
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => startEdit(invoice)}
+                          className="h-9 rounded-lg border border-slate-200 px-3 text-xs font-bold"
+                        >
+                          Modifier
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => duplicateInvoice(invoice)}
+                          className="h-9 rounded-lg border border-slate-200 px-3 text-xs font-bold"
+                        >
+                          Dupliquer
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => deleteInvoice(invoice)}
+                          className="h-9 rounded-lg border border-rose-200 px-3 text-xs font-bold text-rose-700"
+                        >
+                          Supprimer
                         </button>
                       </div>
                     </td>
