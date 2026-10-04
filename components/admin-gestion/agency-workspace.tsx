@@ -562,7 +562,10 @@ function BillingSection({
               state.invoices.map((invoice) => {
                 const client = state.clients.find((item) => item.id === invoice.clientId);
                 return (
-                  <tr key={invoice.id} className="border-b last:border-0">
+                  <tr
+                    key={invoice.id}
+                    className={`border-b last:border-0 ${invoiceRowTone(invoice.status)}`}
+                  >
                     <td className="px-4 py-3 font-semibold">{invoice.number}</td>
                     <td className="px-4 py-3">{client?.name || "—"}</td>
                     <td className="px-4 py-3">{formatShortDate(invoice.issuedOn)}</td>
@@ -585,7 +588,7 @@ function BillingSection({
                             ),
                           })
                         }
-                        className="h-9 rounded-lg border border-slate-200 px-2 text-xs font-bold"
+                        className="h-9 rounded-lg border border-black/10 bg-white/70 px-2 text-xs font-bold"
                       >
                         {["Brouillon", "Émise", "Payée", "En retard", "Annulée"].map(
                           (status) => (
@@ -1245,6 +1248,25 @@ function emptyInvoiceDraft(state: AgencyBillingState) {
     invoiceNote: "",
     lines: [line],
   };
+}
+
+function invoiceRowTone(status: AgencyInvoice["status"]) {
+  if (status === "Payée") {
+    return "bg-emerald-50 text-emerald-950";
+  }
+  if (status === "En retard") {
+    return "bg-rose-50 text-rose-950";
+  }
+  if (status === "Émise") {
+    return "bg-orange-50 text-orange-950";
+  }
+  if (status === "Brouillon") {
+    return "bg-blue-50 text-blue-950";
+  }
+  if (status === "Annulée") {
+    return "bg-yellow-50 text-yellow-950";
+  }
+  return "";
 }
 
 function emptyableNumber(value: number) {
