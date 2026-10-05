@@ -11,6 +11,8 @@ const {
   isWillComeBack,
   isOpeningHoursAsk,
   isThreadComplaint,
+  isServiceAsk,
+  isWaitUntilLater,
   isMessageTimeMention,
   lastSeyaAskedToSearch,
   parseClockMinutes,
@@ -88,8 +90,13 @@ function applyBookingMessage(state, text, extras = {}) {
     return next;
   }
 
+  if (isServiceAsk(text)) {
+    return next;
+  }
+
   if (
     isWillComeBack(text) ||
+    isWaitUntilLater(text) ||
     isHesitation(text) ||
     isAskToWriteBack(text) ||
     isOutOfZone(text) ||

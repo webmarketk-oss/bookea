@@ -644,9 +644,67 @@ function isOutOfZone(text) {
   );
 }
 
+function isWaitUntilLater(text) {
+  const value = normalize(text);
+  return /j[' ]attends la fin|fin (du |de )?mois|d[' ]ici (la )?fin (du |de )?mois|dans (un |1 |deux |2 )mois/.test(
+    value,
+  );
+}
+
+function parseLaterIso(text, now) {
+  if (!isWaitUntilLater(text)) {
+    return null;
+  }
+  const date = now instanceof Date ? now : new Date();
+  const last = new Date(date.getFullYear(), date.getMonth() + 1, 0);
+  const y = last.getFullYear();
+  const m = String(last.getMonth() + 1).padStart(2, "0");
+  const d = String(last.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+function askedServiceName(text) {
+  const value = normalize(text)
+    .replace(/[?!.…]+$/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  const match = value.match(
+    /(?:faites|proposez|offrez|avez)(?:[- ]vous)?(?: aussi)?(?: le | la | l'| les | de | du | des | un | une )(.+)$/,
+  );
+  return String(match?.[1] || "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function isServiceAsk(text) {
+  const value = normalize(text);
+  if (askedServiceName(text)) {
+    return true;
+  }
+  return /est[- ]ce que vous (faites|proposez|avez|offrez)|vous (faites|proposez) (le |la |l'|les |un |une )/.test(
+    value,
+  );
+}
+
+function asksOpenQuestion(text) {
+  const raw = String(text || "");
+  const value = normalize(raw);
+  if (isServiceAsk(text)) {
+    return true;
+  }
+  return (
+    /j[' ]ai une question|est[- ]ce que|c[' ]est quoi|comment (ca |cela )?marche/.test(
+      value,
+    ) || /\?/.test(raw)
+  );
+}
+
 function isAskToWriteBack(text) {
   const value = normalize(text);
-  if (asksForHelpNow(text)) {
+  if (asksForHelpNow(text) || isServiceAsk(text) || asksOpenQuestion(text)) {
+    return false;
+  }
+  if (isWaitUntilLater(text)) {
     return false;
   }
   return /renvoy(ez|e)[- ]moi|rappelez[- ]moi|recontactez[- ]moi|recontactez moi|un message (lundi|mardi|mercredi|jeudi|vendredi|samedi)|ecrivez[- ]moi (lundi|mardi|mercredi|jeudi|vendredi|samedi)/.test(
@@ -748,6 +806,16 @@ function crmUpdateFromLeadMessage(text, now) {
       status: "Hors zone",
       conversationStatus: "Terminé",
       reminderDate: null,
+    };
+  }
+  if (isServiceAsk(text) || (asksOpenQuestion(text) && !isWaitUntilLater(text))) {
+    return null;
+  }
+  if (isWaitUntilLater(text)) {
+    return {
+      status: "À relancer",
+      conversationStatus: "À recontacter",
+      reminderDate: parseLaterIso(text, now),
     };
   }
   if (isAskToWriteBack(text)) {
@@ -875,6 +943,9 @@ function wantsSlots(text, conversation) {
   if (isWillComeBack(text) || isWillCallBack(text) || isThreadComplaint(text)) {
     return false;
   }
+  if (isServiceAsk(text) || isWaitUntilLater(text)) {
+    return false;
+  }
   if (isMessageTimeMention(text) && !comeBackPhrase(normalize(text))) {
     if (isOpeningHoursAsk(text) || isRobotComplaint(text) || isRereadAsk(text)) {
       return false;
@@ -968,6 +1039,9 @@ function conversationalReply(text, conversation, qualification, now) {
   }
   if (isOutOfZone(text)) {
     return "D’accord, je note que ce n’est pas dans notre secteur. Je vous souhaite une belle journée.";
+  }
+  if (isWaitUntilLater(text)) {
+    return "D’accord, on se reparle fin du mois.";
   }
   if (isAskToWriteBack(text)) {
     const day = parseNextWeekdayIso(text, now);
@@ -1114,6 +1188,11 @@ module.exports = {
   isOutOfZone,
   isWillComeBack,
   isAskToWriteBack,
+  isWaitUntilLater,
+  isServiceAsk,
+  asksOpenQuestion,
+  askedServiceName,
+  parseLaterIso,
   isCentrePause,
   isRobotComplaint,
   isOpeningHoursAsk,

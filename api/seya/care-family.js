@@ -317,6 +317,67 @@ function findOfferMap(seya, ...parts) {
   return best;
 }
 
+function offeredTreatmentNames(seya) {
+  const briefs = Array.isArray(seya?.treatmentBriefs) ? seya.treatmentBriefs : [];
+  const maps = Array.isArray(seya?.offerMaps) ? seya.offerMaps : [];
+  return [
+    ...briefs.map((item) => item?.name),
+    ...maps.map((item) => `${item?.match || ""} ${item?.label || ""}`),
+  ]
+    .map((item) => String(item || "").trim())
+    .filter(Boolean);
+}
+
+function serviceIsOffered(asked, seya) {
+  const needle = normalizeCare(asked);
+  if (!needle) {
+    return false;
+  }
+  if (/yoga|pilates|massage|coiffure|ongle|manucure|pedicure/.test(needle)) {
+    return offeredTreatmentNames(seya).some((name) =>
+      /yoga|pilates|massage|coiffure|ongle/.test(normalizeCare(name)),
+    );
+  }
+  if (
+    offeredTreatmentNames(seya).some((name) => {
+      const current = normalizeCare(name);
+      return current.includes(needle) || needle.includes(current);
+    })
+  ) {
+    return true;
+  }
+  const family = inferCareFamily(asked);
+  return Boolean(
+    family &&
+      offeredTreatmentNames(seya).some((name) => inferCareFamily(name) === family),
+  );
+}
+
+function phraseAskedService(asked) {
+  const value = String(asked || "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!value) {
+    return "cette prestation";
+  }
+  if (/^(le |la |l'|les |un |une )/i.test(value)) {
+    return value;
+  }
+  return `le ${value}`;
+}
+
+function serviceOfferReply(text, seya) {
+  const { askedServiceName, isServiceAsk } = require("./conversation");
+  if (!isServiceAsk(text)) {
+    return "";
+  }
+  const asked = askedServiceName(text) || "cette prestation";
+  if (serviceIsOffered(asked, seya)) {
+    return "Oui, nous proposons ça. Je peux regarder un créneau si vous le souhaitez.";
+  }
+  return `Non, nous ne faisons pas ${phraseAskedService(asked)}.`;
+}
+
 function phraseConfiguredOffer(value) {
   const text = String(value || "").replace(/\s+/g, " ").trim();
   if (!text) {
@@ -342,6 +403,9 @@ module.exports = {
   isGenericWelcomeTemplate,
   naturalOfferPhrase,
   phraseConfiguredOffer,
+  phraseAskedService,
+  serviceIsOffered,
+  serviceOfferReply,
   phraseFromCareTitle,
   pickApprovedTemplate,
   templateFitsFamily,

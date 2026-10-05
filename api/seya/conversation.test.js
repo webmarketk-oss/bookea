@@ -1510,3 +1510,69 @@ test("robot + dimanche 17h50 déjà clair : elle s’excuse, elle ne redemande p
   assert.equal(conversation.status, "Terminé");
 });
 
+test("fin du mois + yoga face : elle note la date et répond à la prestation", async () => {
+  const { crmUpdateFromLeadMessage } = require("./conversation");
+  const now = new Date("2026-10-05T11:00:00");
+  assert.deepEqual(
+    crmUpdateFromLeadMessage(
+      "Merci. Dans ce cas, j’attends la fin du mois et je vous rappelle ou vous rappelez moi.",
+      now,
+    ),
+    {
+      status: "À relancer",
+      conversationStatus: "À recontacter",
+      reminderDate: "2026-10-31",
+    },
+  );
+
+  let conversation = startConversation(
+    {
+      leadId: "lead-yoga-face",
+      centerId: "jfg-clinique-clermont",
+      firstName: "Souham",
+      lastName: "Test",
+      phone: "0611223344",
+      treatment: "Soin visage",
+    },
+    "JFG Clinique Clermont",
+    {
+      ...seya,
+      treatmentBriefs: [
+        {
+          name: "Soin visage",
+          brief: "Réceptionniste.",
+          pricing: { bilan: "", discovery: "", session: "", package: "" },
+        },
+      ],
+    },
+  );
+  conversation.qualification = {
+    need: "Soin visage",
+    zone: "",
+    delay: "",
+    availability: "",
+  };
+  conversation.bookingState = {
+    ...(conversation.bookingState || {}),
+    pendingQuestion: "no_slots",
+  };
+
+  conversation = await reply(
+    conversation,
+    "Merci. Dans ce cas, j’attends la fin du mois et je vous rappelle ou vous rappelez moi.",
+    { now },
+  );
+  assert.match(lastSeya(conversation), /fin du mois/i);
+  assert.doesNotMatch(lastSeya(conversation), /^Très bien, je vous recontacte\.?$/i);
+  assert.equal(conversation.status, "À recontacter");
+
+  conversation = await reply(
+    conversation,
+    "J’ai une question aussi : est-ce que vous faites le yoga face ?",
+    { now },
+  );
+  const answer = lastSeya(conversation);
+  assert.match(answer, /non.*yoga face/i);
+  assert.doesNotMatch(answer, /je reste là si une question|je vous recontacte|dites-moi un jour/i);
+});
+

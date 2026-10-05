@@ -60,6 +60,9 @@ const {
   asksOtherDay,
   isWillComeBack,
   isThreadComplaint,
+  isServiceAsk,
+  asksOpenQuestion,
+  isWaitUntilLater,
   threadIsPaused,
   withStaffOfferedSlots,
   willCallBackReply,
@@ -72,6 +75,7 @@ const {
   naturalOfferPhrase,
   phraseConfiguredOffer,
   phraseFromCareTitle,
+  serviceOfferReply,
 } = require("./care-family");
 const { sanitizePersonName } = require("../../lib/seya-person-name");
 const { resolveGeneralBrief } = require("./general-brief");
@@ -1557,6 +1561,18 @@ function applyLeadReply(conversation, text, seya, slots, extras = {}) {
     );
   }
 
+  const service = serviceOfferReply(text, seya);
+  if (service) {
+    return finishLeadReply(
+      conversation,
+      qualification,
+      qualification.need ? "Qualifié" : conversation.status || "En cours",
+      text,
+      service,
+      bookingState,
+    );
+  }
+
   const faq = faqReply(text);
   if (faq) {
     return finishLeadReply(
@@ -1792,7 +1808,7 @@ function applyLeadReply(conversation, text, seya, slots, extras = {}) {
       conversation,
       text,
       extras.now,
-    ) || fallbackAfterNote(qualification, conversation);
+    ) || fallbackAfterNote(qualification, conversation, text);
   return finishLeadReply(
     conversation,
     qualification,
@@ -1827,11 +1843,18 @@ function withRereadPrefix(reread, text) {
   return `Vous avez raison, je reprends votre demande. ${reply}`;
 }
 
-function fallbackAfterNote(qualification, conversation) {
+function fallbackAfterNote(qualification, conversation, text) {
+  if (isServiceAsk(text)) {
+    return serviceOfferReply(text, conversation?._seya) ||
+      "Je vérifie cette prestation auprès de l’équipe et je vous dis.";
+  }
+  if (asksOpenQuestion(text)) {
+    return "Oui, je vous écoute. Dites-moi précisément ce que vous voulez savoir.";
+  }
   if (isAppointmentConfirmed(conversation)) {
     return "Avec plaisir, à bientôt.";
   }
-  if (threadIsPaused(conversation)) {
+  if (threadIsPaused(conversation) || isWaitUntilLater(text)) {
     return willCallBackReply();
   }
   if (

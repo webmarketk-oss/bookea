@@ -277,6 +277,7 @@ function polishPrompt({
     "Si elle dit fin de journée, tu proposes des horaires en fin de journée parmi les créneaux autorisés, pas 12h.",
     "Si elle dit qu’elle ne veut pas qu’on la recontacte mais demande un créneau, une proposition ou un prix, tu réponds à ÇA. Tu ne clôtures pas.",
     "Si elle a réfléchi et demande le prix, tu donnes le tarif autorisé. Tu n’envoies pas « écrivez-moi quand vous voulez reprendre ».",
+    "Si elle demande si vous faites une prestation (yoga face, massage, etc.), tu réponds d’abord à ÇA. Si ce n’est pas dans les soins du centre, tu dis non, clairement. Interdit de répondre « je reste là si une question vous vient » alors qu’elle vient de poser une question.",
     "Si elle dit qu’elle a déjà pris le rendez-vous, qu’elle vient de réserver, ou qu’elle a booké sur Planity ou un autre agenda, tu confirmes que c’est noté et tu n’offres plus aucun créneau. Tu ne redemandes pas un jour ni un horaire.",
     "Si elle préfère recontacter elle-même, sans autre demande, tu dis seulement : « D’accord, aucun souci, je vous laisse revenir vers nous quand ça sera le moment pour vous. Je vous souhaite une belle journée / une bonne soirée :) ». Pas de créneau, pas de jour.",
     "Si Bookea cite des horaires ou demande un jour, tu gardes cette étape. Tu ne remplaces jamais ça par un au revoir.",
