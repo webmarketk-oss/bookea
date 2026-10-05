@@ -236,7 +236,7 @@ function shouldSkipRelance(conversation, extras = {}) {
     return true;
   }
   const leadTexts = messages.filter((item) => item.author === "lead");
-  if (leadTexts.some((item) => isOptOut(item.text || ""))) {
+  if (leadTexts.some((item) => isOptOut(item.text || "") || isOutOfZone(item.text || ""))) {
     return true;
   }
   const seyaTexts = (conversation?.messages || [])

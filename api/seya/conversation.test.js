@@ -1288,6 +1288,17 @@ test("hors zone, reviendra et rappel lundi ferment le fil sans créneaux", async
     reminderDate: null,
   });
   assert.deepEqual(
+    crmUpdateFromLeadMessage(
+      "Bonjour, désolée, merci pour votre réponse !! Mais j’ai fait une erreur, j’habite dans le 01, et j’ai peur que cela me fasse beaucoup de route !! Bonne journée !!",
+      thursday,
+    ),
+    {
+      status: "Hors zone",
+      conversationStatus: "Terminé",
+      reminderDate: null,
+    },
+  );
+  assert.deepEqual(
     crmUpdateFromLeadMessage("Je reviendrai vers vous", thursday),
     {
       status: "Reviendra vers nous",
@@ -1342,6 +1353,27 @@ test("hors zone, reviendra et rappel lundi ferment le fil sans créneaux", async
   conversation = await reply(conversation, "Je suis trop loin, c’est hors zone");
   assert.equal(conversation.status, "Terminé");
   assert.match(lastSeya(conversation), /secteur|belle journée/i);
+  assert.equal((conversation.proposedSlots || []).length, 0);
+
+  conversation = startConversation(
+    {
+      leadId: "lead-01",
+      centerId: "jfg-clinique-clermont",
+      firstName: "Evelyne",
+      lastName: "Marcelen",
+      phone: "0611223344",
+      treatment: "Soin visage",
+    },
+    "JFG Clinique Clermont",
+    seya,
+  );
+  conversation = await reply(
+    conversation,
+    "Bonjour, désolée, merci pour votre réponse !! Mais j’ai fait une erreur, j’habite dans le 01, et j’ai peur que cela me fasse beaucoup de route !! Bonne journée !!",
+  );
+  assert.equal(conversation.status, "Terminé");
+  assert.match(lastSeya(conversation), /secteur|belle journée/i);
+  assert.doesNotMatch(lastSeya(conversation), SLOT_PUSH);
   assert.equal((conversation.proposedSlots || []).length, 0);
 
   conversation = startConversation(

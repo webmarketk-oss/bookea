@@ -637,11 +637,44 @@ function isWillComeBack(text) {
   );
 }
 
-function isOutOfZone(text) {
+function mentionedDepartment(text) {
   const value = normalize(text);
-  return /hors[- ]?zone|trop loin|pas (dans )?(le |votre )?secteur|pas de votre cote|j[' ]habite (trop )?loin|je (n[' ]?habite|suis) pas (du tout )?(a cote|a proximite|dans le coin|sur (place|votre ville))/.test(
-    value,
+  const match = value.match(
+    /(?:j[' ]habite|je (?:suis|habite)|habite).{0,24}dans le (\d{2})\b|dans le (\d{2})(?=\s*(?:,|et|!|\.|$))|departement (\d{2})\b/,
   );
+  return match?.[1] || match?.[2] || match?.[3] || "";
+}
+
+function centerDepartment(extras = {}) {
+  const hay = [
+    extras.centerAddress,
+    extras.centerPostal,
+    extras.centerProfile?.address,
+    extras.centerProfile?.postalCode,
+  ]
+    .filter(Boolean)
+    .join(" ");
+  return hay.match(/\b(\d{2})\d{3}\b/)?.[1] || "";
+}
+
+function isOutOfZone(text, extras = {}) {
+  const value = normalize(text);
+  if (
+    /hors[- ]?zone|trop loin|beaucoup de route|trop de route|trop de trajet|loin pour (venir|se deplacer)|pas (dans )?(le |votre )?secteur|pas de votre cote|j[' ]habite (trop )?loin|je (n[' ]?habite|suis) pas (du tout )?(a cote|a proximite|dans le coin|sur (place|votre ville))/.test(
+      value,
+    )
+  ) {
+    return true;
+  }
+  const dept = mentionedDepartment(text);
+  if (!dept) {
+    return false;
+  }
+  const local = centerDepartment(extras);
+  if (local && dept !== local) {
+    return true;
+  }
+  return /route|trajet|loin|deplacement|erreur/.test(value);
 }
 
 function isWaitUntilLater(text) {
@@ -793,7 +826,7 @@ function isLeadRefusal(text) {
   return /^(non merci|plus jamais)$/.test(needle);
 }
 
-function crmUpdateFromLeadMessage(text, now) {
+function crmUpdateFromLeadMessage(text, now, extras = {}) {
   if (isLeadRefusal(text)) {
     return {
       status: "Pas intéressé",
@@ -801,7 +834,7 @@ function crmUpdateFromLeadMessage(text, now) {
       reminderDate: null,
     };
   }
-  if (isOutOfZone(text)) {
+  if (isOutOfZone(text, extras)) {
     return {
       status: "Hors zone",
       conversationStatus: "Terminé",

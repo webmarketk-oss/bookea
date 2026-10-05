@@ -141,3 +141,65 @@ test("un « plus rien cette semaine » met le CRM en Reviendra vers nous", async
   assert.equal(updated.status, "Reviendra vers nous");
   assert.equal(hold.has("id:lead-1"), true);
 });
+
+test("j’habite dans le 01 / trop de route met le CRM en Hors zone", async () => {
+  let updated = null;
+  const supabase = {
+    from(table) {
+      assert.equal(table, "leads");
+      return {
+        select() {
+          return {
+            eq() {
+              return {
+                eq() {
+                  return {
+                    maybeSingle: async () => ({
+                      data: {
+                        id: "lead-evelyne",
+                        phone: "0664307133",
+                        status: "Qualifié",
+                        recall_date: null,
+                      },
+                      error: null,
+                    }),
+                  };
+                },
+              };
+            },
+          };
+        },
+        update(payload) {
+          updated = payload;
+          return {
+            eq() {
+              return {
+                eq: async () => ({ error: null }),
+              };
+            },
+          };
+        },
+      };
+    },
+  };
+  const hold = new Set();
+  const next = await syncCrmFromConversation(
+    supabase,
+    "center-1",
+    {
+      leadId: "lead-evelyne",
+      phone: "0664307133",
+      status: "Qualifié",
+      messages: [
+        {
+          author: "lead",
+          text: "j’habite dans le 01, j’ai peur que cela me fasse beaucoup de route",
+        },
+      ],
+    },
+    hold,
+  );
+  assert.equal(next.status, "Terminé");
+  assert.equal(updated.status, "Hors zone");
+  assert.equal(hold.has("id:lead-evelyne"), true);
+});

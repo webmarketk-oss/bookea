@@ -1375,7 +1375,7 @@ function applyLeadReply(conversation, text, seya, slots, extras = {}) {
     );
   }
 
-  const crmIntent = crmUpdateFromLeadMessage(text, extras.now);
+  const crmIntent = crmUpdateFromLeadMessage(text, extras.now, extras);
   const alreadyBooked =
     isAppointmentConfirmed(conversation) ||
     /rdv pris|rdv confirm/i.test(String(conversation.status || ""));
