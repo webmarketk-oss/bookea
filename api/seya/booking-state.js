@@ -9,7 +9,11 @@ const {
   isOutOfZone,
   isShortYes,
   isWillComeBack,
+  isOpeningHoursAsk,
+  isThreadComplaint,
+  isMessageTimeMention,
   lastSeyaAskedToSearch,
+  parseClockMinutes,
   refusesSlots,
   wantsSlots,
   weekHalfFromText,
@@ -43,6 +47,7 @@ function emptyBookingState(centerId) {
     lastPriceIntent: null,
     unansweredPriceIntent: null,
     lastLeadPriceText: "",
+    preferredTime: null,
   };
 }
 
@@ -64,6 +69,7 @@ function normalizeBookingState(value, centerId) {
     lastPriceIntent: current.lastPriceIntent || null,
     unansweredPriceIntent: current.unansweredPriceIntent || null,
     lastLeadPriceText: current.lastLeadPriceText || "",
+    preferredTime: current.preferredTime || null,
   };
 }
 
@@ -82,6 +88,22 @@ function applyBookingMessage(state, text, extras = {}) {
     return next;
   }
 
+  if (
+    isWillComeBack(text) ||
+    isHesitation(text) ||
+    isAskToWriteBack(text) ||
+    isOutOfZone(text) ||
+    refusesSlots(text)
+  ) {
+    next.pendingQuestion = "no_slots";
+    next.lastOfferedSlots = [];
+    return next;
+  }
+
+  if (isThreadComplaint(text) || isOpeningHoursAsk(text) || isMessageTimeMention(text)) {
+    return next;
+  }
+
   if (/ventre|poids|minceur|mincir|maigrir|cryo|graisse|cellulite/.test(value)) {
     next.serviceIntent = "minceur_ventre";
   }
@@ -93,7 +115,9 @@ function applyBookingMessage(state, text, extras = {}) {
         next.rejectedDates = unique([...next.rejectedDates, slot.date]);
       }
     });
-    next.lastOfferedSlots = [];
+    next.lastOfferedSlots = (next.lastOfferedSlots || []).filter(
+      (slot) => slot?.date === explicitDate,
+    );
     next.requestedDate = explicitDate;
     next.requestedWeekday = weekdayOf(explicitDate);
     next.weekHalf = null;
@@ -147,6 +171,13 @@ function applyBookingMessage(state, text, extras = {}) {
     next.requestedWeekday = weekdayOf(next.requestedDate);
     next.weekHalf = null;
     next.pendingQuestion = null;
+  }
+
+  const clocks = parseClockMinutes(text);
+  if (clocks.length === 1 && !isMessageTimeMention(text)) {
+    const hours = Math.floor(clocks[0] / 60);
+    const minutes = clocks[0] % 60;
+    next.preferredTime = `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
   }
 
   const dayPart = dayPartFromText(text);
@@ -302,7 +333,9 @@ function shouldSearchSlots(state, text, conversation) {
     isHesitation(text) ||
     isAskToWriteBack(text) ||
     isOutOfZone(text) ||
-    isWillComeBack(text)
+    isWillComeBack(text) ||
+    isThreadComplaint(text) ||
+    isOpeningHoursAsk(text)
   ) {
     return false;
   }

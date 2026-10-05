@@ -30,6 +30,7 @@ import {
   suggestAvailableSlots,
   whatsappHref,
 } from "@/lib/seya-agent";
+import { applyCentreMessage } from "@/api/seya/conversation";
 import {
   defaultSeyaAgentSettings,
   emptySeyaCenterProfile,
@@ -755,16 +756,21 @@ export default function SeyaCrmPage() {
       return;
     }
 
+    const patched = applyCentreMessage(
+      {
+        ...selectedConversation,
+        messages: [
+          ...selectedConversation.messages,
+          createSeyaMessage("centre", text),
+        ],
+      },
+      text,
+      new Date(),
+    );
     const next: SeyaConversation = {
-      ...selectedConversation,
-      messages: [
-        ...selectedConversation.messages,
-        createSeyaMessage("centre", text),
-      ],
+      ...patched,
       status:
-        selectedConversation.status === "À envoyer"
-          ? "En cours"
-          : selectedConversation.status,
+        patched.status === "À envoyer" ? "En cours" : patched.status,
       sendError: null,
       sentVia: "whatsapp",
       updatedAt: new Date().toISOString(),

@@ -11,17 +11,285 @@ function normalize(value) {
 
 function isRereadAsk(text) {
   const value = normalize(text);
-  return /relis|re[- ]lis|regarde ce que je (te |vous )?demande|tu (n[' ]as |n[' ]a )?(rien |pas )?compris|essaie de comprendre|comprendre mes questions/.test(
+  return /relis|re[- ]lis|regarde ce que je (te |vous )?demande|tu (n[' ]as |n[' ]a )?(rien |pas )?compris|essaie de comprendre|comprendre mes questions|(info|message).{0,28}(clair|claire)|a ete clair|vous n[' ]avez pas lu/.test(
     value,
   );
+}
+
+function isRobotComplaint(text) {
+  const value = normalize(text);
+  return /robot (qui )?(beug|bug|bugg)|c[' ]est (votre |un )?robot qui|votre robot/.test(
+    value,
+  );
+}
+
+function isOpeningHoursAsk(text) {
+  const value = normalize(text);
+  return /travaill[ez].{0,24}(dimanche|lundi|mardi|mercredi|jeudi|vendredi|samedi)|ouvert[e]? (aussi )?(le )?(dimanche|lundi|mardi|mercredi|jeudi|vendredi|samedi)|vous venez travailler/.test(
+    value,
+  );
+}
+
+function isThreadComplaint(text) {
+  return isRobotComplaint(text) || isRereadAsk(text) || isOpeningHoursAsk(text);
 }
 
 function isOffTopicComplaint(text) {
   const value = normalize(text);
   return (
     isRereadAsk(text) ||
+    isRobotComplaint(text) ||
     /c[' ]est quoi le rapport|hors sujet|rien a voir/.test(value)
   );
+}
+
+function isMessageTimeMention(text) {
+  const value = normalize(text);
+  return /info (message )?(de )?\d|message (de |a )?\d{1,2}\s*h/.test(value);
+}
+
+const WEEKDAY_LABELS = [
+  "dimanche",
+  "lundi",
+  "mardi",
+  "mercredi",
+  "jeudi",
+  "vendredi",
+  "samedi",
+];
+const WEEKDAY_SHORT = ["dim.", "lun.", "mar.", "mer.", "jeu.", "ven.", "sam."];
+
+function comeBackPhrase(value) {
+  return /je (vous |te )?(reviendrai|reviendrais|reviens) vers|reviendrai[s]? vers (vous|nous|toi)|a un autre moment|aucun (ce jour|de ces jours|jour)|plus rien (sur |cette |pour )?(la )?semaine|rien (sur |cette |pour )(la )?semaine (qui arrive|prochaine)|je (vous |te )?(tiens|tiendrai) (au courant|informe)|on se (tient|tiendra) au courant/.test(
+    value,
+  );
+}
+
+function isCentrePause(text) {
+  const value = normalize(text);
+  if (parseClockMinutes(text).length) {
+    return false;
+  }
+  return /prenez le temps|a bientot|quand vous (voulez|souhaitez)|je vous laisse|on reste dispo/.test(
+    value,
+  );
+}
+
+function nextIsoForWeekday(weekday, now) {
+  const date = now instanceof Date ? new Date(now.getTime()) : new Date();
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Europe/Paris",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(date);
+  const year = parts.find((part) => part.type === "year")?.value;
+  const month = parts.find((part) => part.type === "month")?.value;
+  const day = parts.find((part) => part.type === "day")?.value;
+  const paris = new Date(`${year}-${month}-${day}T12:00:00`);
+  for (let offset = 0; offset < 21; offset += 1) {
+    const probe = new Date(paris);
+    probe.setDate(paris.getDate() + offset);
+    if (probe.getDay() === weekday) {
+      const y = probe.getFullYear();
+      const m = String(probe.getMonth() + 1).padStart(2, "0");
+      const d = String(probe.getDate()).padStart(2, "0");
+      return `${y}-${m}-${d}`;
+    }
+  }
+  return "";
+}
+
+function dateFromOfferedText(text, now) {
+  const value = normalize(text);
+  const months = {
+    janvier: 0,
+    fevrier: 1,
+    mars: 2,
+    avril: 3,
+    mai: 4,
+    juin: 5,
+    juillet: 6,
+    aout: 7,
+    septembre: 8,
+    octobre: 9,
+    novembre: 10,
+    decembre: 11,
+  };
+  const named = value.match(
+    /(\d{1,2})(?:er|e)?\s+(janvier|fevrier|mars|avril|mai|juin|juillet|aout|septembre|octobre|novembre|decembre)/,
+  );
+  if (named) {
+    const base = now instanceof Date ? now : new Date();
+    let date = new Date(base.getFullYear(), months[named[2]], Number(named[1]));
+    const today = new Date(base.getFullYear(), base.getMonth(), base.getDate());
+    if (date < today) {
+      date = new Date(base.getFullYear() + 1, months[named[2]], Number(named[1]));
+    }
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, "0");
+    const d = String(date.getDate()).padStart(2, "0");
+    return `${y}-${m}-${d}`;
+  }
+  const slash = value.match(/\b(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?\b/);
+  if (slash) {
+    const year = slash[3]
+      ? Number(slash[3].length === 2 ? `20${slash[3]}` : slash[3])
+      : (now instanceof Date ? now : new Date()).getFullYear();
+    return `${year}-${String(slash[2]).padStart(2, "0")}-${String(slash[1]).padStart(2, "0")}`;
+  }
+  const weekdayNumber = value.match(
+    /\b(lundi|mardi|mercredi|jeudi|vendredi|samedi)\s+(\d{1,2})(?!\s*h)/,
+  );
+  if (weekdayNumber) {
+    const weekday = WEEKDAY_LABELS.indexOf(weekdayNumber[1]);
+    const dayNum = Number(weekdayNumber[2]);
+    if (weekday > 0 && dayNum >= 1 && dayNum <= 31) {
+      for (let offset = 0; offset < 70; offset += 1) {
+        const iso = nextIsoForWeekday(weekday, now);
+        const probe = now instanceof Date ? new Date(now.getTime()) : new Date();
+        probe.setDate(probe.getDate() + offset);
+        if (probe.getDay() === weekday && probe.getDate() === dayNum) {
+          const y = probe.getFullYear();
+          const m = String(probe.getMonth() + 1).padStart(2, "0");
+          const d = String(probe.getDate()).padStart(2, "0");
+          return `${y}-${m}-${d}`;
+        }
+      }
+    }
+  }
+  const weekday = WEEKDAY_LABELS.findIndex((day) =>
+    new RegExp(`\\b${day}\\b`).test(value),
+  );
+  if (weekday >= 0) {
+    return nextIsoForWeekday(weekday, now);
+  }
+  return "";
+}
+
+function minutesToClock(minutes) {
+  const hours = Math.floor(minutes / 60);
+  const mins = minutes % 60;
+  return `${String(hours).padStart(2, "0")}:${String(mins).padStart(2, "0")}`;
+}
+
+function staffSlotLabel(date, time) {
+  const weekday = new Date(`${date}T12:00:00`).getDay();
+  const [, month, day] = String(date || "").split("-");
+  return `${WEEKDAY_SHORT[weekday] || ""} ${day}/${month} à ${String(time).replace(":", "h")}`.trim();
+}
+
+function slotsFromOfferedText(text, now) {
+  const clocks = parseClockMinutes(text);
+  if (!clocks.length) {
+    return [];
+  }
+  const date = dateFromOfferedText(text, now);
+  if (!date) {
+    return [];
+  }
+  return clocks.map((minutes) => {
+    const time = minutesToClock(minutes);
+    return { date, time, label: staffSlotLabel(date, time) };
+  });
+}
+
+function slotsFromStaffThread(conversation, now) {
+  let slots = [];
+  for (const item of conversation?.messages || []) {
+    if (item.author !== "centre") {
+      continue;
+    }
+    const at = item.at ? new Date(item.at) : now;
+    const clock = Number.isFinite(at?.getTime()) ? at : now;
+    const parsed = slotsFromOfferedText(item.text, clock);
+    if (parsed.length) {
+      slots = parsed;
+    }
+  }
+  return slots;
+}
+
+function withStaffOfferedSlots(conversation, now) {
+  const staffSlots = slotsFromStaffThread(conversation, now);
+  if (!staffSlots.length) {
+    return conversation;
+  }
+  return {
+    ...conversation,
+    proposedSlots: staffSlots,
+    bookingState: {
+      ...(conversation.bookingState || {}),
+      lastOfferedSlots: staffSlots,
+      appointmentStatus:
+        conversation.bookingState?.appointmentStatus === "confirmed"
+          ? "confirmed"
+          : "proposed",
+      pendingQuestion:
+        conversation.bookingState?.pendingQuestion === "no_slots"
+          ? conversation.bookingState.pendingQuestion
+          : null,
+    },
+  };
+}
+
+function applyCentreMessage(conversation, text, now) {
+  const slots = slotsFromOfferedText(text, now);
+  if (slots.length) {
+    return {
+      ...conversation,
+      proposedSlots: slots,
+      bookingState: {
+        ...(conversation.bookingState || {}),
+        lastOfferedSlots: slots,
+        appointmentStatus: "proposed",
+        pendingQuestion: null,
+      },
+    };
+  }
+  if (isCentrePause(text)) {
+    const booked = /rdv pris|rdv confirm/i.test(String(conversation?.status || ""));
+    return {
+      ...conversation,
+      status: booked ? conversation.status : "Terminé",
+      proposedSlots: [],
+      bookingState: {
+        ...(conversation.bookingState || {}),
+        lastOfferedSlots: [],
+        pendingQuestion: "no_slots",
+      },
+    };
+  }
+  return conversation;
+}
+
+function threadIsPaused(conversation, extraText) {
+  const messages = [...(conversation?.messages || [])];
+  if (extraText) {
+    messages.push({ author: "lead", text: extraText });
+  }
+  const leads = messages.filter((item) => item.author === "lead");
+  for (let index = leads.length - 1; index >= 0; index -= 1) {
+    const text = leads[index].text || "";
+    if (isThreadComplaint(text) || isOpeningHoursAsk(text)) {
+      continue;
+    }
+    if (
+      isWillComeBack(text) ||
+      isWillCallBack(text) ||
+      isOutOfZone(text) ||
+      isLeadRefusal(text)
+    ) {
+      return true;
+    }
+    if (wantsSlots(text, conversation)) {
+      return false;
+    }
+  }
+  const lastHuman = [...messages]
+    .reverse()
+    .find((item) => item.author === "lead" || item.author === "centre");
+  return lastHuman?.author === "centre" && isCentrePause(lastHuman.text || "");
 }
 
 function isIdentityQuestion(text) {
@@ -302,6 +570,9 @@ function isThanks(text, conversation) {
 
 function asksForHelpNow(text) {
   const value = normalize(text);
+  if (comeBackPhrase(value)) {
+    return false;
+  }
   if (classifyPriceQuestion(text) || isPriceRepeatComplaint(text)) {
     return true;
   }
@@ -334,18 +605,34 @@ function isWillCallBack(text) {
 
 function isWillComeBack(text) {
   const value = normalize(text);
-  if (asksForHelpNow(text) || isAskToWriteBack(text)) {
+  if (isAskToWriteBack(text)) {
+    return false;
+  }
+  if (comeBackPhrase(value)) {
+    if (
+      /plus rien|aucun (ce jour|de ces jours|jour)|a un autre moment|tiens au courant/.test(
+        value,
+      )
+    ) {
+      return true;
+    }
+    if (parseClockMinutes(text).length && !isMessageTimeMention(text)) {
+      return false;
+    }
+    return true;
+  }
+  if (asksForHelpNow(text)) {
     return false;
   }
   if (
     /jeudi|lundi|mardi|mercredi|vendredi|samedi|creneau|horaire|\brdv\b/.test(
       value,
     ) &&
-    !/plus rien|tiens au courant/.test(value)
+    !/plus rien|tiens au courant|aucun (ce jour|de ces jours)/.test(value)
   ) {
     return false;
   }
-  return /je (vous |te )?(reviendrai|reviens) vers (vous|toi|nous)|je reviendrai vers vous|reviendrai vers (vous|nous)|je (vous |te )?recontacte (plus tard|moi[- ]meme)|je (vous |te )?(tiens|tiendrai) (au courant|informe)|on se (tient|tiendra) au courant|je (vous |te )?(dirai|previendrai)|plus rien (sur |cette |pour )?(la )?semaine|rien (sur |cette |pour )(la )?semaine (qui arrive|prochaine)/.test(
+  return /je (vous |te )?recontacte (plus tard|moi[- ]meme)|je (vous |te )?(dirai|previendrai)/.test(
     value,
   );
 }
@@ -532,7 +819,10 @@ function dayPartFromText(text) {
 
 function asksOtherDay(text) {
   const value = normalize(text);
-  return /change de jour|d[' ]?autres? ?j|un autre jour|autre journee|autres? (jours?|horaires)|pas ce jour|d[' ]autres creneaux/.test(
+  if (comeBackPhrase(value)) {
+    return false;
+  }
+  return /change de jour|d[' ]?autres? ?j|un autre jour|autre journee|autres? (jours?|horaires)|pas ce jour|aucun ce jour|d[' ]autres creneaux/.test(
     value,
   );
 }
@@ -581,6 +871,14 @@ function refusesSlots(text) {
 function wantsSlots(text, conversation) {
   if (isAlreadyBookedElsewhere(text)) {
     return false;
+  }
+  if (isWillComeBack(text) || isWillCallBack(text) || isThreadComplaint(text)) {
+    return false;
+  }
+  if (isMessageTimeMention(text) && !comeBackPhrase(normalize(text))) {
+    if (isOpeningHoursAsk(text) || isRobotComplaint(text) || isRereadAsk(text)) {
+      return false;
+    }
   }
   if (isAppointmentConfirmed(conversation) && (isShortYes(text) || isThanks(text, conversation))) {
     return false;
@@ -689,6 +987,12 @@ function conversationalReply(text, conversation, qualification, now) {
   }
   if (isWillComeBack(text) || isWillCallBack(text)) {
     return willCallBackReply(now);
+  }
+  if (isThreadComplaint(text) && threadIsPaused(conversation, text)) {
+    return "Vous avez raison, c’était bien noté. On vous laisse revenir quand ça vous arrange, je ne vous relance pas.";
+  }
+  if (isOpeningHoursAsk(text) && /dimanche/.test(normalize(text))) {
+    return "Non, nous ne travaillons pas le dimanche. Dites-moi un jour d’ouverture qui vous arrange, je regarde.";
   }
   if (isAppointmentConfirmed(conversation) && (isThanks(text, conversation) || isShortYes(text))) {
     return pickFresh(
@@ -810,6 +1114,11 @@ module.exports = {
   isOutOfZone,
   isWillComeBack,
   isAskToWriteBack,
+  isCentrePause,
+  isRobotComplaint,
+  isOpeningHoursAsk,
+  isThreadComplaint,
+  isMessageTimeMention,
   parseNextWeekdayIso,
   isLeadRefusal,
   crmUpdateFromLeadMessage,
@@ -821,4 +1130,9 @@ module.exports = {
   parseClockMinutes,
   refusesSlots,
   wantsSlots,
+  slotsFromOfferedText,
+  slotsFromStaffThread,
+  withStaffOfferedSlots,
+  applyCentreMessage,
+  threadIsPaused,
 };

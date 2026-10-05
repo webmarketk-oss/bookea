@@ -45,6 +45,9 @@ const {
   isAlreadyBookedElsewhere,
   offeredSlots,
   wantsSlots,
+  isWillComeBack,
+  isThreadComplaint,
+  withStaffOfferedSlots,
 } = require("./conversation");
 const { understandThread } = require("./care-family");
 
@@ -72,6 +75,7 @@ async function generateSeyaReply({
   centerId,
   now,
 }) {
+  conversation = withStaffOfferedSlots(conversation, now);
   const previousLead = [...(conversation.messages || [])]
     .reverse()
     .find((item) => item.author === "lead")?.text;
@@ -127,6 +131,8 @@ async function generateSeyaReply({
     isOptOut(text) ||
     isWrongCenter(text) ||
     crmUpdateFromLeadMessage(text, now) ||
+    isWillComeBack(text) ||
+    isThreadComplaint(text) ||
     isAlreadyBookedElsewhere(text) ||
     /pas int[eé]ress|termin[eé]|recontacter/i.test(
       String(fallback.conversation?.status || ""),
@@ -258,7 +264,7 @@ function polishPrompt({
   return [
     "Tu es Seya, au standard WhatsApp. Chaleureuse, naturelle, claire, vouvoiement. Tu parles comme une réceptionniste au téléphone, 1 à 3 phrases.",
     "Ton objectif est d’accompagner jusqu’à la prise de rendez-vous, sans insister et sans coller deux fois la même réponse.",
-    "Avant de répondre, tu relis tout le fil et tu t’y tiens. Si le prospect a corrigé le soin (visage, minceur, laser), tu restes sur CE soin. Interdit de revenir à la campagne d’origine.",
+    "Avant de répondre, tu relis tout le fil (prospect + équipe + toi) et tu t’y tiens. Les horaires écrits par l’équipe priment. Si elle a proposé 15h et que le prospect le choisit, tu confirmes 15h : interdit de dire que ce n’est pas disponible ou de proposer 11h30/12h. Si le prospect a dit qu’il reviendrait, qu’il n’a rien cette semaine, ou que l’info était claire, tu n’as plus à demander un jour. Si le prospect a corrigé le soin (visage, minceur, laser), tu restes sur CE soin. Interdit de revenir à la campagne d’origine.",
     "Tu réponds au dernier message, dans ce contexte. Interdit de reposer une question déjà traitée. Interdit de recoller le dernier message Seya.",
     "Le texte Bookea est une fiche de faits autorisés, pas un script. Si Bookea propose un créneau ou pose une question alors que la cliente n’a pas demandé ça, tu ne le recopies pas.",
     "Tu ne mets jamais fin à la conversation. Interdit : « écrivez-moi quand vous voulez reprendre », « je vous prie », « je reviendrai vers vous », « une conseillère vous recontacte », « préférez-vous en rester là », « vous préférez rester là », sauf si elle demande clairement à parler à quelqu’un.",

@@ -58,6 +58,12 @@ const {
   refusesSlots,
   wantsSlots,
   asksOtherDay,
+  isWillComeBack,
+  isThreadComplaint,
+  threadIsPaused,
+  withStaffOfferedSlots,
+  willCallBackReply,
+  slotsFromStaffThread,
 } = require("./conversation");
 const {
   findOfferMap,
@@ -832,6 +838,9 @@ function extractDelay(text) {
 }
 
 function extractAvailability(text) {
+  if (isWillComeBack(text) || isThreadComplaint(text)) {
+    return "";
+  }
   const value = normalize(text);
   const days = weekdayNames.filter((day) => value.includes(day));
   const time = String(text || "").toLowerCase().match(/\b(\d{1,2})\s*h(?:\s*(\d{2}))?\b/);
@@ -1152,6 +1161,7 @@ function pickSlotsForState(appointments, hours, state, now) {
     excludeSlots: state.rejectedSlots,
     duration: BILAN_DURATION_MINUTES,
     dayPart: state.dayPart,
+    preferredTime: state.preferredTime || "",
     now,
   };
   return suggestAvailableSlots(appointments, hours, options);
@@ -1190,8 +1200,10 @@ function suggestAvailableSlots(appointments, hours, countOrOptions = 3, duration
   const today = todayIso(clock);
   const nowMinutes = currentMinutes(clock);
   const week = Array.isArray(hours) && hours.length ? hours : defaultHours();
+  const preferred = options.preferredTime ? timeToMinutes(options.preferredTime) : null;
+  const wantAllDay = preferred != null && Boolean(onlyDate);
 
-  for (let offset = 0; offset < maxDays && slots.length < count; offset += 1) {
+  for (let offset = 0; offset < maxDays && (wantAllDay || slots.length < count); offset += 1) {
     const date = addDaysIso(today, offset);
     const weekday = new Date(`${date}T12:00:00`).getDay();
     if (onlyDate && date !== onlyDate) {
@@ -1232,10 +1244,19 @@ function suggestAvailableSlots(appointments, hours, countOrOptions = 3, duration
         continue;
       }
       slots.push({ date, time, label: formatSlotLabel(date, time) });
-      if (slots.length >= count) {
+      if (!wantAllDay && slots.length >= count) {
         break;
       }
     }
+  }
+  if (preferred != null && slots.length) {
+    return [...slots]
+      .sort(
+        (left, right) =>
+          Math.abs(timeToMinutes(left.time) - preferred) -
+          Math.abs(timeToMinutes(right.time) - preferred),
+      )
+      .slice(0, count);
   }
   return slots;
 }
@@ -1251,12 +1272,13 @@ function defaultHours() {
 
 function applyLeadReply(conversation, text, seya, slots, extras = {}) {
   const settings = agentSettings(seya);
+  conversation = withStaffOfferedSlots(conversation, extras.now);
   const previousLead = lastOtherLeadText(conversation, text);
   const reread =
     isRereadAsk(text) ||
     (isOffTopicComplaint(text) && isBookingThread(conversation));
   const intentText = reread && previousLead ? previousLead : text;
-  const bookingState =
+  let bookingState =
     extras.bookingState && !reread
       ? extras.bookingState
       : applyBookingMessage(conversation.bookingState, intentText, {
@@ -1264,10 +1286,21 @@ function applyLeadReply(conversation, text, seya, slots, extras = {}) {
           now: extras.now,
           conversation,
         });
+  const staffSlots = slotsFromStaffThread(conversation, extras.now);
+  if (staffSlots.length) {
+    const dated = bookingState.requestedDate
+      ? staffSlots.filter((slot) => slot.date === bookingState.requestedDate)
+      : staffSlots;
+    bookingState = {
+      ...bookingState,
+      lastOfferedSlots: dated.length ? dated : staffSlots,
+    };
+  }
   conversation = {
     ...conversation,
     centerId: extras.centerId || conversation.centerId || bookingState.centerId,
     bookingState,
+    proposedSlots: staffSlots.length ? staffSlots : conversation.proposedSlots,
     _seya: seya,
   };
   const allowRepeat =
@@ -1349,6 +1382,28 @@ function applyLeadReply(conversation, text, seya, slots, extras = {}) {
       crmIntent.conversationStatus,
       text,
       conversationalReply(text, conversation, qualification, extras.now),
+      {
+        ...bookingState,
+        pendingQuestion: "no_slots",
+        lastOfferedSlots: [],
+      },
+      { proposedSlots: [] },
+    );
+  }
+
+  if (
+    isThreadComplaint(text) &&
+    !wantsSlots(intentText, conversation) &&
+    !asksPrice(text) &&
+    !classifyPriceQuestion(text) &&
+    !asksLocation(text)
+  ) {
+    return finishLeadReply(
+      conversation,
+      qualification,
+      "Terminé",
+      text,
+      "Vous avez raison, c’était bien noté. On vous laisse revenir quand ça vous arrange, je ne vous relance pas.",
       {
         ...bookingState,
         pendingQuestion: "no_slots",
@@ -1551,14 +1606,24 @@ function applyLeadReply(conversation, text, seya, slots, extras = {}) {
     );
   }
 
+  const staffOwned = Boolean(
+    chosenSlot &&
+      staffSlots.some(
+        (slot) => slot.date === chosenSlot.date && slot.time === chosenSlot.time,
+      ),
+  );
   if (
     chosenSlot &&
     settings.bookAppointment &&
     !threadHasMedical(conversation, text) &&
-    slotAllowed(chosenSlot, bookingState)
+    (slotAllowed(chosenSlot, bookingState) || staffOwned)
   ) {
     const occupancy = extras.appointments || [];
-    if (occupancy.length && isSlotBusy(occupancy, chosenSlot.date, chosenSlot.time)) {
+    if (
+      occupancy.length &&
+      !staffOwned &&
+      isSlotBusy(occupancy, chosenSlot.date, chosenSlot.time)
+    ) {
       const remaining = remainingOfferedSlots(
         offeredSlots(conversation, slots),
         occupancy,
@@ -1593,7 +1658,7 @@ function applyLeadReply(conversation, text, seya, slots, extras = {}) {
           : `Parfait, je vérifie le créneau dont nous avions parlé et je reviens vers vous tout de suite 😊`,
       ),
       { ...bookingState, appointmentStatus: "proposed" },
-      { bookedSlot: chosenSlot, shouldBook: chosenSlot },
+      { bookedSlot: chosenSlot, shouldBook: chosenSlot, staffOwned },
     );
   }
 
@@ -1766,6 +1831,9 @@ function fallbackAfterNote(qualification, conversation) {
   if (isAppointmentConfirmed(conversation)) {
     return "Avec plaisir, à bientôt.";
   }
+  if (threadIsPaused(conversation)) {
+    return willCallBackReply();
+  }
   if (
     conversation?.bookingState?.pendingQuestion === "no_slots" &&
     !isBookingThread(conversation)
@@ -1773,6 +1841,9 @@ function fallbackAfterNote(qualification, conversation) {
     return "Très bien. Je reste là si une question vous vient.";
   }
   if (alreadyTold(conversation, "debut de semaine.*fin de semaine|fin de semaine.*debut de semaine")) {
+    if (threadIsPaused(conversation)) {
+      return willCallBackReply();
+    }
     return "Dites-moi un jour qui vous arrange, je regarde tout de suite.";
   }
   if (isBookingThread(conversation) || alreadyTold(conversation, "c['’]est note pour|propose un creneau")) {
@@ -1841,7 +1912,8 @@ function finishLeadReply(
       updatedAt: new Date().toISOString(),
     },
     shouldBook:
-      extra.shouldBook && slotAllowed(extra.shouldBook, bookingState)
+      extra.shouldBook &&
+      (slotAllowed(extra.shouldBook, bookingState) || extra.staffOwned)
         ? extra.shouldBook
         : null,
   };

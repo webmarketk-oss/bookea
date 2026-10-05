@@ -407,3 +407,70 @@ test("relance 2 et 3 : offre CRM {offre}, jamais l’intitulé campagne", () => 
   assert.match(third, /bénéficier/i);
   assert.doesNotMatch(third, /lift 4 149-copy/i);
 });
+
+test("relance bloquée après je reviendrai, plus rien, centre et plainte robot", () => {
+  assert.equal(
+    shouldSkipRelance(
+      conversation({
+        status: "En cours",
+        proposedSlots: [{ date: "2026-10-08", time: "15:00", label: "jeu. 08/10 à 15h00" }],
+        messages: [
+          {
+            id: "m1",
+            author: "lead",
+            text: "Aucun ce jour pas de souci je reviendrais vers vous à un autre moment",
+            at: hoursAgo(30),
+          },
+          {
+            id: "m2",
+            author: "seya",
+            text: "Dites-moi un jour qui vous arrange, je regarde tout de suite.",
+            at: hoursAgo(29),
+          },
+          {
+            id: "m3",
+            author: "lead",
+            text: "Plus rien sur la semaine qui arrive",
+            at: hoursAgo(28),
+          },
+          {
+            id: "m4",
+            author: "centre",
+            text: "Très bien, prenez le temps. À bientôt !",
+            at: hoursAgo(27),
+          },
+        ],
+      }),
+    ),
+    true,
+  );
+  assert.equal(
+    shouldSkipRelance(
+      conversation({
+        status: "En cours",
+        proposedSlots: [{ date: "2026-10-08", time: "15:00", label: "jeu. 08/10 à 15h00" }],
+        messages: [
+          {
+            id: "m1",
+            author: "lead",
+            text: "Plus rien sur la semaine qui arrive",
+            at: hoursAgo(26),
+          },
+          {
+            id: "m2",
+            author: "seya",
+            text: "L’horaire évoqué vous convient-il toujours ?",
+            at: hoursAgo(20),
+          },
+          {
+            id: "m3",
+            author: "lead",
+            text: "c'est votre Robot qui beugue ? l'info message de 17h50 a été claire",
+            at: hoursAgo(16),
+          },
+        ],
+      }),
+    ),
+    true,
+  );
+});

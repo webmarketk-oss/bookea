@@ -75,9 +75,19 @@ function understandThread(conversation, extraText) {
     asked.push("technique");
   }
 
+  const staffTexts = lines
+    .filter((item) => item.author === "centre")
+    .map((item) => item.text);
+
   const summary = [
     family ? `Soin actuel, d’après tout le fil : ${need || family}.` : "Soin actuel encore flou.",
     asked.length ? `Elle demande maintenant : ${asked.join(", ")}.` : "",
+    staffTexts.length
+      ? `Messages de l’équipe (prioritaires sur l’agenda automatique) : ${staffTexts
+          .slice(-6)
+          .map((text) => text.slice(0, 160))
+          .join(" · ")}`
+      : "",
     leadTexts.length
       ? `Fil prospect : ${leadTexts
           .slice(-12)

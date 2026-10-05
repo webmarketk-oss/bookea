@@ -21,6 +21,9 @@ const {
   isOutOfZone,
   isWillCallBack,
   isWillComeBack,
+  isThreadComplaint,
+  isCentrePause,
+  threadIsPaused,
   threadHasConfirmedVisit,
 } = require("./conversation");
 const { isSeyaOff, readCenterSeya, writeSeyaConversations } = require("./store");
@@ -220,11 +223,15 @@ function shouldSkipRelance(conversation, extras = {}) {
   if (lastHuman?.author === "centre") {
     return true;
   }
+  if (threadIsPaused(conversation) || isCentrePause(lastHuman?.text || "")) {
+    return true;
+  }
   if (
     lastHuman?.author === "lead" &&
     (isWillComeBack(lastHuman.text || "") ||
       isWillCallBack(lastHuman.text || "") ||
-      isOutOfZone(lastHuman.text || ""))
+      isOutOfZone(lastHuman.text || "") ||
+      isThreadComplaint(lastHuman.text || ""))
   ) {
     return true;
   }
