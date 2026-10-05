@@ -15,10 +15,13 @@ export type BookeaPlan = {
 };
 
 const WHATSAPP_PRICES: Record<number, number> = {
-  100: 79,
-  200: 159,
-  300: 229,
-  500: 389,
+  100: 69.97,
+  150: 99.97,
+  200: 129.95,
+  250: 159.95,
+  300: 189.95,
+  400: 249.92,
+  500: 309.9,
 };
 
 function asRecord(value: unknown) {

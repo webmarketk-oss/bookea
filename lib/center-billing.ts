@@ -156,7 +156,7 @@ export async function subscribeSeyaPack(leads: number) {
   const alert = createAdminAlert({
     kind: "seya_pack",
     title: `${center.name} a souscrit ${pack.leads} conversations Seya`,
-    message: `${center.name} a souscrit ${pack.leads} conversations Seya — ${pack.price} €`,
+    message: `${center.name} a souscrit ${pack.leads} conversations Seya — ${formatEuro(pack.price)}`,
     amountEuros: pack.price,
     quantity: pack.leads,
   });

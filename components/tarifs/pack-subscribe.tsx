@@ -117,12 +117,12 @@ export function WhatsappPacks() {
       {status ? (
         <p className="text-sm font-medium text-slate-500">{status}</p>
       ) : null}
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
         {whatsappLeadPacks.map((pack) => (
           <PriceCard
             key={pack.leads}
             title={`${pack.leads} leads`}
-            price={`${pack.price} €`}
+            price={formatEuro(pack.price)}
             highlight={pack.leads === 200}
           >
             <FeatureTicks items={WHATSAPP_PACK_POINTS} />

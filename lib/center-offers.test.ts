@@ -28,7 +28,7 @@ test("une souscription Seya affiche le pack et la date de renouvellement", () =>
   });
 
   assert.equal(offer?.leads, 200);
-  assert.equal(offer?.price, 159);
+  assert.equal(offer?.price, 129.95);
   assert.match(formatOfferDate(offer?.renewsAt), /novembre 2026/i);
 });
 

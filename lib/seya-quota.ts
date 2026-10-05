@@ -1,4 +1,4 @@
-export const SEYA_PACK_LIMITS = [100, 200, 300, 500] as const;
+export const SEYA_PACK_LIMITS = [100, 150, 200, 250, 300, 400, 500] as const;
 
 export type SeyaQuota = {
   conversationLimit: number | null;

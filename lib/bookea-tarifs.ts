@@ -18,10 +18,13 @@ export const WHATSAPP_PACK_POINTS = [
 ] as const;
 
 export const whatsappLeadPacks = [
-  { leads: 100, price: 79 },
-  { leads: 200, price: 159 },
-  { leads: 300, price: 229 },
-  { leads: 500, price: 389 },
+  { leads: 100, price: 69.97 },
+  { leads: 150, price: 99.97 },
+  { leads: 200, price: 129.95 },
+  { leads: 250, price: 159.95 },
+  { leads: 300, price: 189.95 },
+  { leads: 400, price: 249.92 },
+  { leads: 500, price: 309.9 },
 ] as const;
 
 export function formatEuro(value: number, digits = 2) {
