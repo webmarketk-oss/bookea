@@ -6,7 +6,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { cabins, practitioners } from "@/lib/agenda-data";
 import {
   createCrmAppointment,
+  isPersistedAppointmentId,
   loadCrmAppointments,
+  persistCrmAppointment,
 } from "@/lib/agenda-supabase";
 import {
   defaultCenterDepositLinks,
@@ -891,30 +893,64 @@ export default function SeyaCrmPage() {
       "Soin à préciser";
 
     try {
-      const created = await createCrmAppointment({
-        id: `seya-${Date.now()}`,
-        personName: displayPersonName(
-          selectedConversation.firstName,
-          selectedConversation.lastName,
-        ),
-        phone: selectedConversation.phone,
-        treatment,
-        practitionerId: practitioners[0]?.id ?? "samantha",
-        cabinId: cabins[0]?.id ?? "cabine-1",
-        date: result.shouldBook.date,
-        start: result.shouldBook.time,
-        duration: 60,
-        status: "À confirmer",
-        source: "Seya",
-        notes: "RDV pris par l’agent Seya WhatsApp",
-      });
-      setAppointments((current) => [...current, created]);
+      const previous = selectedConversation.bookedSlot;
+      const digits = (value: string) => String(value || "").replace(/\D/g, "").slice(-9);
+      const phoneKey = digits(selectedConversation.phone);
+      const sameSlot = previous?.date && previous?.time
+        ? appointments.filter((item) => {
+            if (/annul/i.test(String(item.status || ""))) {
+              return false;
+            }
+            return (
+              String(item.date).slice(0, 10) === String(previous.date).slice(0, 10) &&
+              String(item.start).slice(0, 5) === String(previous.time).slice(0, 5)
+            );
+          })
+        : [];
+      const existingAppointment =
+        sameSlot.find((item) => phoneKey.length >= 9 && digits(item.phone) === phoneKey) ||
+        (sameSlot.length === 1 ? sameSlot[0] : undefined);
+
+      let saved;
+      if (existingAppointment && isPersistedAppointmentId(existingAppointment.id)) {
+        saved = {
+          ...existingAppointment,
+          date: result.shouldBook.date,
+          start: result.shouldBook.time,
+          notes: `RDV Seya décalé · ${treatment}`,
+        };
+        await persistCrmAppointment(saved);
+        setAppointments((current) =>
+          current.map((item) => (item.id === saved.id ? saved : item)),
+        );
+      } else {
+        saved = await createCrmAppointment({
+          id: `seya-${Date.now()}`,
+          personName: displayPersonName(
+            selectedConversation.firstName,
+            selectedConversation.lastName,
+          ),
+          phone: selectedConversation.phone,
+          treatment,
+          practitionerId: practitioners[0]?.id ?? "samantha",
+          cabinId: cabins[0]?.id ?? "cabine-1",
+          date: result.shouldBook.date,
+          start: result.shouldBook.time,
+          duration: 60,
+          status: "À confirmer",
+          source: "Seya",
+          notes: "RDV pris par l’agent Seya WhatsApp",
+        });
+        setAppointments((current) => [...current, saved]);
+      }
       if (lead) {
         await updateCrmLeadStatus(lead, "RDV pris");
       }
       await addCrmLeadActivity(
         selectedConversation.leadId,
-        `RDV Seya posé le ${result.shouldBook.label}.`,
+        existingAppointment
+          ? `RDV Seya décalé au ${result.shouldBook.label}.`
+          : `RDV Seya posé le ${result.shouldBook.label}.`,
       );
       setAgentFeedback(`Rendez-vous posé dans l’agenda : ${result.shouldBook.label}.`);
     } catch {

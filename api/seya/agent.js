@@ -469,7 +469,10 @@ function isBlockingAppointment(appointment, date) {
   if (!appointment) {
     return false;
   }
-  if (appointment.date && appointment.date !== date) {
+  const appointmentDate = String(
+    appointment.date || appointment.appointment_date || "",
+  ).slice(0, 10);
+  if (appointmentDate && appointmentDate !== String(date || "").slice(0, 10)) {
     return false;
   }
   if (/annul|cancel/i.test(String(appointment.status || ""))) {
@@ -1665,7 +1668,10 @@ function applyLeadReply(conversation, text, seya, slots, extras = {}) {
         return true;
       }
       const start = String(appointment.start || appointment.starts_at || "").slice(0, 5);
-      return !(appointment.date === own.date && start === own.time);
+      return !(
+        String(appointment.date || "").slice(0, 10) === String(own.date || "").slice(0, 10) &&
+        start === String(own.time || "").slice(0, 5)
+      );
     });
     if (
       occupancy.length &&

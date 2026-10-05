@@ -19,6 +19,8 @@ const {
 } = require("./agent");
 const { dbStatusWhenSlotPositioned } = require("./booking-state");
 const { isSameSeyaConversation } = require("./conversation-key");
+const { findOwnSeyaAppointment, slotDate, slotTime } = require("./own-appointment");
+const { appointmentSlot } = require("../appointments/token-utils");
 const {
   crmUpdateFromLeadMessage,
   lockedCrmStatuses,
@@ -361,8 +363,13 @@ async function handleIncoming(supabase, incoming) {
     } catch (bookError) {
       console.error("[seya/whatsapp] book failed", bookError);
       result.shouldBook = null;
-      next.status = "RDV proposé";
-      next.bookedSlot = undefined;
+      if (existing.bookedSlot) {
+        next.status = existing.status || "RDV confirmé";
+        next.bookedSlot = existing.bookedSlot;
+      } else {
+        next.status = "RDV proposé";
+        next.bookedSlot = undefined;
+      }
       const latestOccupancy = await loadCenterAppointments(supabase, center.id);
       const remaining = remainingOfferedSlots(
         existing.proposedSlots || existing.bookingState?.lastOfferedSlots || [],
@@ -679,52 +686,83 @@ async function bookSeyaAppointment(supabase, centerId, context, conversation, sl
     supabase.from("practitioners").select("id").eq("center_id", centerId).limit(1),
   ]);
 
-  const start = slot.time;
+  const start = slotTime(slot.time);
+  const duration =
+    Number(conversation?.bookedSlot && conversation.bookedSlot.duration) > 0
+      ? Number(conversation.bookedSlot.duration)
+      : BILAN_DURATION_MINUTES;
   const [hours, minutes] = start.split(":").map(Number);
   const startMinutes = hours * 60 + minutes;
-  const endMinutes = startMinutes + BILAN_DURATION_MINUTES;
+  const endMinutes = startMinutes + duration;
   const endsAt = `${String(Math.floor(endMinutes / 60)).padStart(2, "0")}:${String(endMinutes % 60).padStart(2, "0")}`;
+  const bookedDate = slotDate(conversation?.bookedSlot?.date);
+  const today = new Date().toISOString().slice(0, 10);
+  const fromDate =
+    bookedDate && bookedDate < today ? bookedDate : today;
 
   const { data: existing } = await supabase
     .from("appointments")
-    .select("id,lead_id,starts_at,duration_minutes,status,appointment_date")
+    .select(
+      "id,lead_id,client_id,starts_at,duration_minutes,status,appointment_date,notes,cancelled_at,status_history",
+    )
     .eq("center_id", centerId)
-    .gte("appointment_date", new Date().toISOString().slice(0, 10));
-  const own = (existing || []).find(
-    (row) =>
-      String(row.lead_id || "") === String(context.leadId || "") &&
-      !/annul|cancel/i.test(String(row.status || "")),
-  );
+    .gte("appointment_date", fromDate);
+  const own = findOwnSeyaAppointment(existing, context, conversation);
+  const durationMinutes = Number(own?.duration_minutes) > 0 ? Number(own.duration_minutes) : duration;
+  const ownEndsAt =
+    Number(own?.duration_minutes) > 0
+      ? `${String(Math.floor((startMinutes + durationMinutes) / 60)).padStart(2, "0")}:${String((startMinutes + durationMinutes) % 60).padStart(2, "0")}`
+      : endsAt;
   const busy = (existing || [])
     .filter((row) => row.id !== own?.id)
-    .filter((row) => row.appointment_date === slot.date)
+    .filter((row) => slotDate(row.appointment_date) === slotDate(slot.date))
     .map((row) => ({
-      date: slot.date,
-      start: row.starts_at,
+      date: slotDate(slot.date),
+      start: slotTime(row.starts_at),
       duration: row.duration_minutes,
       status: row.status || "",
     }));
-  if (isSlotBusy(busy, slot.date, slot.time, BILAN_DURATION_MINUTES)) {
+  if (isSlotBusy(busy, slot.date, start, durationMinutes)) {
     throw new Error("slot_taken");
   }
 
   if (own?.id) {
-    const { error } = await supabase
+    const now = new Date().toISOString();
+    const history = Array.isArray(own.status_history) ? own.status_history : [];
+    const { data, error } = await supabase
       .from("appointments")
       .update({
-        appointment_date: slot.date,
+        appointment_date: slotDate(slot.date),
         starts_at: start,
-        ends_at: endsAt,
-        duration_minutes: BILAN_DURATION_MINUTES,
-        status: dbStatusWhenSlotPositioned(slot.date, slot.time),
+        ends_at: ownEndsAt,
+        duration_minutes: durationMinutes,
+        status: dbStatusWhenSlotPositioned(slot.date, start),
         notes: `RDV Seya décalé · ${conversation.qualification?.need || context.treatment || "soin"}`,
-        updated_at: new Date().toISOString(),
+        confirmation_token_slot: appointmentSlot(slot.date, start),
+        status_history: [
+          ...history,
+          {
+            at: now,
+            source: "seya",
+            action: "move",
+            from: `${slotDate(own.appointment_date)}|${slotTime(own.starts_at)}`,
+            to: `${slotDate(slot.date)}|${start}`,
+          },
+        ].slice(-30),
+        updated_at: now,
       })
       .eq("id", own.id)
-      .eq("center_id", centerId);
+      .eq("center_id", centerId)
+      .select("id,starts_at,appointment_date")
+      .maybeSingle();
     if (error) {
       throw new Error(error.message);
     }
+    if (!data || slotTime(data.starts_at) !== start) {
+      throw new Error("slot_update_empty");
+    }
+  } else if (conversation?.bookedSlot?.date && conversation?.bookedSlot?.time) {
+    throw new Error("slot_missing");
   } else {
     const { error } = await supabase.from("appointments").insert({
       center_id: centerId,
@@ -732,11 +770,11 @@ async function bookSeyaAppointment(supabase, centerId, context, conversation, sl
       lead_id: context.leadId || null,
       room_id: rooms?.[0]?.id || null,
       practitioner_id: practitioners?.[0]?.id || null,
-      appointment_date: slot.date,
+      appointment_date: slotDate(slot.date),
       starts_at: start,
       ends_at: endsAt,
-      duration_minutes: BILAN_DURATION_MINUTES,
-      status: dbStatusWhenSlotPositioned(slot.date, slot.time),
+      duration_minutes: durationMinutes,
+      status: dbStatusWhenSlotPositioned(slot.date, start),
       origin: "seya",
       notes: `RDV Seya WhatsApp · ${conversation.qualification?.need || context.treatment || "soin"}`,
       updated_at: new Date().toISOString(),
