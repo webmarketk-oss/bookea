@@ -687,37 +687,63 @@ async function bookSeyaAppointment(supabase, centerId, context, conversation, sl
 
   const { data: existing } = await supabase
     .from("appointments")
-    .select("starts_at,duration_minutes,status")
+    .select("id,lead_id,starts_at,duration_minutes,status,appointment_date")
     .eq("center_id", centerId)
-    .eq("appointment_date", slot.date);
-  const busy = (existing || []).map((row) => ({
-    date: slot.date,
-    start: row.starts_at,
-    duration: row.duration_minutes,
-    status: row.status || "",
-  }));
+    .gte("appointment_date", new Date().toISOString().slice(0, 10));
+  const own = (existing || []).find(
+    (row) =>
+      String(row.lead_id || "") === String(context.leadId || "") &&
+      !/annul|cancel/i.test(String(row.status || "")),
+  );
+  const busy = (existing || [])
+    .filter((row) => row.id !== own?.id)
+    .filter((row) => row.appointment_date === slot.date)
+    .map((row) => ({
+      date: slot.date,
+      start: row.starts_at,
+      duration: row.duration_minutes,
+      status: row.status || "",
+    }));
   if (isSlotBusy(busy, slot.date, slot.time, BILAN_DURATION_MINUTES)) {
     throw new Error("slot_taken");
   }
 
-  const { error } = await supabase.from("appointments").insert({
-    center_id: centerId,
-    client_id: context.clientId || null,
-    lead_id: context.leadId || null,
-    room_id: rooms?.[0]?.id || null,
-    practitioner_id: practitioners?.[0]?.id || null,
-    appointment_date: slot.date,
-    starts_at: start,
-    ends_at: endsAt,
-    duration_minutes: BILAN_DURATION_MINUTES,
-    status: dbStatusWhenSlotPositioned(slot.date, slot.time),
-    origin: "seya",
-    notes: `RDV Seya WhatsApp · ${conversation.qualification?.need || context.treatment || "soin"}`,
-    updated_at: new Date().toISOString(),
-  });
-
-  if (error) {
-    throw new Error(error.message);
+  if (own?.id) {
+    const { error } = await supabase
+      .from("appointments")
+      .update({
+        appointment_date: slot.date,
+        starts_at: start,
+        ends_at: endsAt,
+        duration_minutes: BILAN_DURATION_MINUTES,
+        status: dbStatusWhenSlotPositioned(slot.date, slot.time),
+        notes: `RDV Seya décalé · ${conversation.qualification?.need || context.treatment || "soin"}`,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", own.id)
+      .eq("center_id", centerId);
+    if (error) {
+      throw new Error(error.message);
+    }
+  } else {
+    const { error } = await supabase.from("appointments").insert({
+      center_id: centerId,
+      client_id: context.clientId || null,
+      lead_id: context.leadId || null,
+      room_id: rooms?.[0]?.id || null,
+      practitioner_id: practitioners?.[0]?.id || null,
+      appointment_date: slot.date,
+      starts_at: start,
+      ends_at: endsAt,
+      duration_minutes: BILAN_DURATION_MINUTES,
+      status: dbStatusWhenSlotPositioned(slot.date, slot.time),
+      origin: "seya",
+      notes: `RDV Seya WhatsApp · ${conversation.qualification?.need || context.treatment || "soin"}`,
+      updated_at: new Date().toISOString(),
+    });
+    if (error) {
+      throw new Error(error.message);
+    }
   }
 
   if (context.leadId) {
@@ -737,7 +763,9 @@ async function bookSeyaAppointment(supabase, centerId, context, conversation, sl
       event_type: "status",
       from_value: context.status || "",
       to_value: "RDV pris",
-      note: `RDV Seya posé le ${slot.label}.`,
+      note: own?.id
+        ? `RDV Seya décalé au ${slot.label}.`
+        : `RDV Seya posé le ${slot.label}.`,
     });
   }
 }

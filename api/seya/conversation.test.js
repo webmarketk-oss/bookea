@@ -1608,3 +1608,83 @@ test("fin du mois + yoga face : elle note la date et répond à la prestation", 
   assert.doesNotMatch(answer, /je reste là si une question|je vous recontacte|dites-moi un jour/i);
 });
 
+test("midi après un 11h30 posé : elle décale vraiment à 12h", async () => {
+  const now = new Date("2026-10-05T11:00:00");
+  let conversation = startConversation(
+    {
+      leadId: "lead-midi",
+      centerId: "jfg-clinique-clermont",
+      firstName: "Adélaïde",
+      lastName: "Privat",
+      phone: "0665689800",
+      treatment: "Soin minceur",
+    },
+    "JFG Clinique Clermont",
+    seya,
+  );
+  conversation.status = "RDV confirmé";
+  conversation.bookedSlot = {
+    date: "2026-10-08",
+    time: "11:30",
+    label: "jeu. 08/10 à 11h30",
+  };
+  conversation.qualification = {
+    need: "Soin minceur",
+    zone: "ventre",
+    delay: "",
+    availability: "jeudi 11h30",
+  };
+  conversation.bookingState = {
+    ...(conversation.bookingState || {}),
+    requestedDate: "2026-10-08",
+    appointmentStatus: "confirmed",
+    lastOfferedSlots: [],
+  };
+  conversation.messages.push({
+    author: "seya",
+    text: "Parfait, votre rendez-vous est confirmé jeudi 08/10 à 11h30.",
+    at: "2026-10-05T08:00:00.000Z",
+  });
+
+  const first = await generateSeyaReply({
+    conversation,
+    text: "Je n’ai pas dit oui pour cet horaire mais à midi",
+    seya,
+    appointments: [{ date: "2026-10-08", start: "11:30", duration: 75 }],
+    hours: hours(),
+    centerName: "JFG Clinique Clermont",
+    centerAddress: "12 rue de la République, 63000 Clermont-Ferrand",
+    centerId: "jfg-clinique-clermont",
+    now,
+  });
+  assert.equal(first.shouldBook?.date, "2026-10-08");
+  assert.equal(first.shouldBook?.time, "12:00");
+  assert.match(lastSeya(first.conversation), /12h|décale|vérifie/i);
+  assert.doesNotMatch(
+    lastSeya(first.conversation),
+    /à bientôt|je vais ajuster|je m['’]occupe|je vous tiens informée/i,
+  );
+
+  conversation = first.conversation;
+  conversation.bookedSlot = { date: "2026-10-08", time: "11:30", label: "jeu. 08/10 à 11h30" };
+  conversation.status = "RDV confirmé";
+  conversation.bookingState = {
+    ...(conversation.bookingState || {}),
+    appointmentStatus: "confirmed",
+  };
+  const second = await generateSeyaReply({
+    conversation,
+    text: "J’ai reçu une confirmation pour un rdv jeudi 07/10 à 11h30. L’heure ne convient pas. Comment faire pour modifier ?",
+    seya,
+    appointments: [{ date: "2026-10-08", start: "11:30", duration: 75 }],
+    hours: hours(),
+    centerName: "JFG Clinique Clermont",
+    centerAddress: "12 rue de la République, 63000 Clermont-Ferrand",
+    centerId: "jfg-clinique-clermont",
+    now,
+  });
+  assert.equal(second.shouldBook?.time, "12:00");
+  assert.equal(second.shouldBook?.date, "2026-10-08");
+  assert.doesNotMatch(lastSeya(second.conversation), /à bientôt au centre|je vais m['’]occuper/i);
+});
+

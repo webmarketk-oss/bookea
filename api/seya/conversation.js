@@ -327,9 +327,36 @@ function compactText(text) {
     .trim();
 }
 
+function wantsNoon(text) {
+  const value = normalize(text);
+  if (/apres[- ]?midi/.test(value)) {
+    return false;
+  }
+  return /\bmidi\b/.test(value);
+}
+
+function isRescheduleAsk(text) {
+  const value = normalize(text);
+  return /comment (faire )?(pour )?modifi|modifi(er|ez)|changer (l[' ]heure|le (creneau|rdv|rendez-vous|horaire))|l[' ]heure ne (me )?convient|ne convient pas|pas (dit )?oui pour (cet |cette )?(horaire|creneau)|pas cet horaire|mais a midi/.test(
+    value,
+  );
+}
+
+function threadWantsNoon(conversation, extraText) {
+  if (wantsNoon(extraText)) {
+    return true;
+  }
+  return (conversation?.messages || []).some(
+    (item) => item.author === "lead" && wantsNoon(item.text),
+  );
+}
+
 function parseClockMinutes(text) {
   const value = compactText(text);
   const times = [];
+  if (wantsNoon(text)) {
+    times.push(12 * 60);
+  }
   const pattern = /\b(\d{1,2})\s*(?:h|:)?\s*(\d{2})?\b/g;
   let match = pattern.exec(value);
   while (match) {
@@ -973,6 +1000,9 @@ function wantsSlots(text, conversation) {
   if (isAlreadyBookedElsewhere(text)) {
     return false;
   }
+  if (isRescheduleAsk(text) || wantsNoon(text)) {
+    return true;
+  }
   if (isWillComeBack(text) || isWillCallBack(text) || isThreadComplaint(text)) {
     return false;
   }
@@ -1223,6 +1253,9 @@ module.exports = {
   isAskToWriteBack,
   isWaitUntilLater,
   isServiceAsk,
+  wantsNoon,
+  isRescheduleAsk,
+  threadWantsNoon,
   asksOpenQuestion,
   askedServiceName,
   parseLaterIso,

@@ -14,6 +14,8 @@ const {
   isServiceAsk,
   isWaitUntilLater,
   isMessageTimeMention,
+  isRescheduleAsk,
+  wantsNoon,
   lastSeyaAskedToSearch,
   parseClockMinutes,
   refusesSlots,
@@ -181,14 +183,24 @@ function applyBookingMessage(state, text, extras = {}) {
   }
 
   const clocks = parseClockMinutes(text);
-  if (clocks.length === 1 && !isMessageTimeMention(text)) {
+  if (wantsNoon(text)) {
+    next.preferredTime = "12:00";
+    next.dayPart = null;
+  } else if (clocks.length === 1 && !isMessageTimeMention(text) && !isRescheduleAsk(text)) {
     const hours = Math.floor(clocks[0] / 60);
     const minutes = clocks[0] % 60;
     next.preferredTime = `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
   }
 
+  const bookedDate = extras.conversation?.bookedSlot?.date;
+  if ((isRescheduleAsk(text) || wantsNoon(text)) && bookedDate) {
+    next.requestedDate = bookedDate;
+    next.requestedWeekday = weekdayOf(bookedDate);
+    next.weekHalf = null;
+  }
+
   const dayPart = dayPartFromText(text);
-  if (dayPart) {
+  if (dayPart && !wantsNoon(text)) {
     next.dayPart = dayPart;
     next.lastOfferedSlots = [];
     next.pendingQuestion = null;
@@ -326,6 +338,9 @@ function applyBookingMessage(state, text, extras = {}) {
 
 function shouldSearchSlots(state, text, conversation) {
   const forceSearch = lastSeyaAskedToSearch(conversation) && isShortYes(text);
+  if (isRescheduleAsk(text) || wantsNoon(text)) {
+    return true;
+  }
   if (isAlreadyBookedElsewhere(text) || isAppointmentConfirmed(conversation)) {
     return false;
   }

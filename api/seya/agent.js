@@ -63,6 +63,9 @@ const {
   isServiceAsk,
   asksOpenQuestion,
   isWaitUntilLater,
+  isRescheduleAsk,
+  wantsNoon,
+  threadWantsNoon,
   threadIsPaused,
   withStaffOfferedSlots,
   willCallBackReply,
@@ -1348,10 +1351,18 @@ function applyLeadReply(conversation, text, seya, slots, extras = {}) {
     );
   }
   const confirmYes = isConfirmingOfferedTime(intentText, conversation);
-  const chosenSlot =
-    (isAppointmentConfirmed(conversation) && !confirmYes) ||
-    (lastSeyaAskedToSearch(conversation) && isShortYes(intentText)) ||
-    (bookingState.pendingQuestion === "no_slots" && !lastSeyaOfferedToBook(conversation))
+  const reschedule =
+    isRescheduleAsk(intentText) ||
+    wantsNoon(intentText) ||
+    (isAppointmentConfirmed(conversation) &&
+      threadWantsNoon(conversation, intentText) &&
+      (isRescheduleAsk(text) || wantsNoon(text)));
+  let chosenSlot =
+    (isAppointmentConfirmed(conversation) && !confirmYes && !reschedule) ||
+    (lastSeyaAskedToSearch(conversation) && isShortYes(intentText) && !reschedule) ||
+    (bookingState.pendingQuestion === "no_slots" &&
+      !lastSeyaOfferedToBook(conversation) &&
+      !reschedule)
       ? null
       : matchProposedSlot(intentText, conversation.proposedSlots, {
           confirmYes,
@@ -1362,6 +1373,19 @@ function applyLeadReply(conversation, text, seya, slots, extras = {}) {
           date: bookingState.requestedDate,
         }) ||
         matchProposedSlot(intentText, pool, { date: bookingState.requestedDate });
+  if (reschedule && (wantsNoon(intentText) || threadWantsNoon(conversation, intentText))) {
+    const date =
+      conversation.bookedSlot?.date ||
+      bookingState.requestedDate ||
+      (pool[0] && pool[0].date);
+    if (date) {
+      chosenSlot = {
+        date,
+        time: "12:00",
+        label: formatSlotLabel(date, "12:00"),
+      };
+    }
+  }
   const refuses = isOptOut(text);
 
   if (isWrongCenter(text)) {
@@ -1433,10 +1457,11 @@ function applyLeadReply(conversation, text, seya, slots, extras = {}) {
   }
 
   if (
-    isThanks(text, conversation) ||
-    isHesitation(text) ||
-    refusesSlots(text) ||
-    (isAppointmentConfirmed(conversation) && isShortYes(text) && !confirmYes)
+    !reschedule &&
+    (isThanks(text, conversation) ||
+      isHesitation(text) ||
+      refusesSlots(text) ||
+      (isAppointmentConfirmed(conversation) && isShortYes(text) && !confirmYes))
   ) {
     const confirmed = isAppointmentConfirmed(conversation);
     const pause = !confirmed && (refusesSlots(text) || isHesitation(text));
@@ -1632,9 +1657,16 @@ function applyLeadReply(conversation, text, seya, slots, extras = {}) {
     chosenSlot &&
     settings.bookAppointment &&
     !threadHasMedical(conversation, text) &&
-    (slotAllowed(chosenSlot, bookingState) || staffOwned)
+    (slotAllowed(chosenSlot, bookingState) || staffOwned || reschedule)
   ) {
-    const occupancy = extras.appointments || [];
+    const occupancy = (extras.appointments || []).filter((appointment) => {
+      const own = conversation.bookedSlot;
+      if (!reschedule || !own) {
+        return true;
+      }
+      const start = String(appointment.start || appointment.starts_at || "").slice(0, 5);
+      return !(appointment.date === own.date && start === own.time);
+    });
     if (
       occupancy.length &&
       !staffOwned &&
@@ -1669,12 +1701,18 @@ function applyLeadReply(conversation, text, seya, slots, extras = {}) {
       text,
       withRereadPrefix(
         reread,
-        isConfirmingOfferedTime(intentText, conversation)
-          ? checkingSlotReply()
-          : `Parfait, je vérifie le créneau dont nous avions parlé et je reviens vers vous tout de suite 😊`,
+        reschedule
+          ? `Parfait, je décale votre rendez-vous à ${String(chosenSlot.time).replace(":", "h")} et je vous confirme tout de suite.`
+          : isConfirmingOfferedTime(intentText, conversation)
+            ? checkingSlotReply()
+            : `Parfait, je vérifie le créneau dont nous avions parlé et je reviens vers vous tout de suite 😊`,
       ),
       { ...bookingState, appointmentStatus: "proposed" },
-      { bookedSlot: chosenSlot, shouldBook: chosenSlot, staffOwned },
+      {
+        bookedSlot: chosenSlot,
+        shouldBook: chosenSlot,
+        staffOwned: staffOwned || reschedule,
+      },
     );
   }
 
@@ -1852,6 +1890,9 @@ function fallbackAfterNote(qualification, conversation, text) {
     return "Oui, je vous écoute. Dites-moi précisément ce que vous voulez savoir.";
   }
   if (isAppointmentConfirmed(conversation)) {
+    if (isRescheduleAsk(text) || wantsNoon(text)) {
+      return "Dites-moi l’horaire qui vous convient, je décale le rendez-vous.";
+    }
     return "Avec plaisir, à bientôt.";
   }
   if (threadIsPaused(conversation) || isWaitUntilLater(text)) {
