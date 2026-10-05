@@ -374,6 +374,7 @@ export default function AgendaBoard() {
   const boardScrollRef = useRef<HTMLDivElement>(null);
   const boardFrameRef = useRef<HTMLDivElement>(null);
   const boardSectionRef = useRef<HTMLElement>(null);
+  const openedFocusAppointmentRef = useRef("");
   const [slotRowHeightPx, setSlotRowHeightPx] = useState<number | null>(null);
   const [cabinColumnWidthPx, setCabinColumnWidthPx] = useState<number | null>(
     null,
@@ -558,7 +559,12 @@ export default function AgendaBoard() {
       return;
     }
 
-    if (!agendaFocus?.appointmentId && !agendaFocus?.date && !agendaFocus?.start) {
+    if (
+      !agendaFocus?.appointmentId &&
+      !agendaFocus?.date &&
+      !agendaFocus?.start &&
+      !agendaFocus?.phone
+    ) {
       return;
     }
 
@@ -568,13 +574,22 @@ export default function AgendaBoard() {
             (appointment) => appointment.id === agendaFocus.appointmentId,
           )
         : undefined) ??
-      appointmentList.find(
-        (appointment) =>
-          Boolean(agendaFocus.date) &&
-          Boolean(agendaFocus.start) &&
-          appointment.date === agendaFocus.date &&
-          appointment.start === agendaFocus.start,
-      );
+      appointmentList.find((appointment) => {
+        if (agendaFocus.date && appointment.date !== agendaFocus.date) {
+          return false;
+        }
+        if (agendaFocus.start && appointment.start !== agendaFocus.start) {
+          return false;
+        }
+        if (
+          agendaFocus.phone &&
+          String(appointment.phone || "").replace(/\D/g, "").slice(-9) !==
+            agendaFocus.phone
+        ) {
+          return false;
+        }
+        return Boolean(agendaFocus.date || agendaFocus.start || agendaFocus.phone);
+      });
 
     if (focusedAppointment && focusedAppointment.date !== selectedDate) {
       setSelectedDate(focusedAppointment.date);
@@ -620,6 +635,13 @@ export default function AgendaBoard() {
 
     if (focusedAppointment && focusedAppointmentId !== focusedAppointment.id) {
       setFocusedAppointmentId(focusedAppointment.id);
+    }
+    if (
+      focusedAppointment &&
+      openedFocusAppointmentRef.current !== focusedAppointment.id
+    ) {
+      openedFocusAppointmentRef.current = focusedAppointment.id;
+      setSelectedAppointmentId(focusedAppointment.id);
     }
 
     const targetId = focusedAppointment?.id ?? agendaFocus.appointmentId;
@@ -680,6 +702,7 @@ export default function AgendaBoard() {
     activeTab,
     agendaFocus?.appointmentId,
     agendaFocus?.date,
+    agendaFocus?.phone,
     agendaFocus?.start,
     agendaSlots,
     agendaView,
@@ -4700,8 +4723,9 @@ function getAgendaFocus(searchParams: Pick<URLSearchParams, "get">) {
   const date = searchParams.get("date");
   const appointmentId = searchParams.get("rdv");
   const start = searchParams.get("heure");
+  const phone = String(searchParams.get("tel") || "").replace(/\D/g, "").slice(-9);
 
-  if (!date && !appointmentId && !start) {
+  if (!date && !appointmentId && !start && phone.length < 9) {
     return null;
   }
 
@@ -4709,6 +4733,7 @@ function getAgendaFocus(searchParams: Pick<URLSearchParams, "get">) {
     date: date && /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : null,
     appointmentId: appointmentId?.trim() || null,
     start: start && /^\d{2}:\d{2}/.test(start) ? start.slice(0, 5) : null,
+    phone: phone.length >= 9 ? phone : null,
   };
 }
 

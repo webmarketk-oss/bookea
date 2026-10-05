@@ -4,9 +4,11 @@ import {
   agendaSeyaClientName,
   agendaSeyaSuggestionTexts,
   createAgendaDeskConversation,
+  findSeyaConversationAppointment,
   isSeyaAgendaBlockCommand,
   pickFreeCabinId,
   seyaAgendaOccupancyAppointments,
+  seyaPlanningHref,
 } from "./seya-agenda.ts";
 import type { Appointment } from "../types/agenda.ts";
 
@@ -97,4 +99,56 @@ test("les suggestions viennent des vrais créneaux et des RDV à confirmer", () 
   assert.match(suggestions[0] ?? "", /Léa/);
   assert.match(suggestions[1] ?? "", /16h00/);
   assert.match(suggestions[2] ?? "", /pause|créneau|tarif|Planning/i);
+});
+
+test("le lien planning ouvre le RDV de la conversation, pas un autre créneau", () => {
+  const appointments = [
+    {
+      id: "11111111-1111-4111-8111-111111111111",
+      personName: "Autre",
+      phone: "0611111111",
+      treatment: "Cryo",
+      practitionerId: "samantha",
+      cabinId: "cabine-1",
+      date: "2026-10-08",
+      start: "09:00",
+      duration: 75,
+      status: "Confirmé",
+      source: "Seya",
+    },
+    {
+      id: "22222222-2222-4222-8222-222222222222",
+      personName: "Adélaïde Privat",
+      phone: "33666568980",
+      treatment: "Soin minceur",
+      practitionerId: "samantha",
+      cabinId: "cabine-2",
+      date: "2026-10-08",
+      start: "11:30",
+      duration: 75,
+      status: "À confirmer",
+      source: "Seya",
+    },
+  ] as Appointment[];
+
+  const found = findSeyaConversationAppointment(
+    {
+      firstName: "Adélaïde",
+      lastName: "Privat",
+      phone: "33666568980",
+      bookedSlot: { date: "2026-10-08", time: "11:30" },
+    },
+    appointments,
+  );
+  assert.equal(found?.id, "22222222-2222-4222-8222-222222222222");
+  assert.match(
+    seyaPlanningHref(
+      {
+        phone: "33666568980",
+        bookedSlot: { date: "2026-10-08", time: "11:30" },
+      },
+      appointments,
+    ) || "",
+    /rdv=22222222-2222-4222-8222-222222222222/,
+  );
 });

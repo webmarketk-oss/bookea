@@ -4,6 +4,7 @@ import { CalendarCheck, MessageCircle, Search, Send, Users } from "lucide-react"
 import Link from "next/link";
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { displayPersonName } from "@/lib/seya-person-name";
+import { seyaPlanningHref } from "@/lib/seya-agenda";
 import {
   inboxTag,
   inboxTagLabel,
@@ -12,6 +13,7 @@ import {
   type SeyaConversation,
   type SeyaInboxTag,
 } from "@/lib/seya-settings";
+import type { Appointment } from "@/types/agenda";
 import type { Lead } from "@/types/lead";
 
 const tagStyles: Record<SeyaInboxTag, string> = {
@@ -133,6 +135,7 @@ export function SeyaInbox({
   inbox,
   selected,
   leads,
+  appointments = [],
   settings,
   reply,
   feedback,
@@ -147,6 +150,7 @@ export function SeyaInbox({
   inbox: SeyaConversation[];
   selected: SeyaConversation | null;
   leads: Lead[];
+  appointments?: Appointment[];
   settings: SeyaAgentSettings;
   reply: string;
   feedback: string;
@@ -215,6 +219,10 @@ export function SeyaInbox({
         ? `/dashboard/crm-leads?phone=${encodeURIComponent(selected.phone)}`
         : "/dashboard/crm-leads"
     : "/dashboard/crm-leads";
+  const selectedTag = selected ? inboxTag(selected) : null;
+  const planningHref = selected
+    ? seyaPlanningHref(selected, appointments)
+    : null;
 
   return (
     <section className="flex h-full min-h-0 overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
@@ -296,6 +304,14 @@ export function SeyaInbox({
                     >
                       {inboxTagLabel(inboxTag(selected))}
                     </span>
+                    {selectedTag === "rdv" && planningHref ? (
+                      <Link
+                        href={planningHref}
+                        className="text-[11px] font-semibold text-violet-700 underline-offset-2 hover:underline"
+                      >
+                        voir le planning
+                      </Link>
+                    ) : null}
                   </div>
                   <p className="mt-1 text-sm font-medium text-slate-500">
                     {selected.phone || "Pas de téléphone"}
@@ -499,6 +515,14 @@ export function SeyaInbox({
                       ? "À poser après vérification"
                       : "Aucun RDV")}
                 </p>
+                {planningHref ? (
+                  <Link
+                    href={planningHref}
+                    className="mt-2 inline-flex text-sm font-semibold text-violet-700 underline-offset-2 hover:underline"
+                  >
+                    voir le planning
+                  </Link>
+                ) : null}
               </section>
               <section className="rounded-2xl border border-slate-200 p-4">
                 <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">

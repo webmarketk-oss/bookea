@@ -1037,6 +1037,7 @@ export default function SeyaCrmPage() {
           inbox={inbox}
           selected={selectedConversation}
           leads={leads}
+          appointments={appointments}
           settings={agentSettings}
           reply={reply}
           feedback={agentFeedback}

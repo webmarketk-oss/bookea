@@ -169,3 +169,137 @@ export function agendaSeyaClientName(firstName?: string, lastName?: string) {
 
   return name;
 }
+
+function last9Phone(value?: string | null) {
+  return String(value || "").replace(/\D/g, "").slice(-9);
+}
+
+function isLiveAgendaAppointment(appointment: Appointment) {
+  if (appointment.kind && appointment.kind !== "Rendez-vous") {
+    return false;
+  }
+  return !/annul/i.test(String(appointment.status || ""));
+}
+
+function compactPersonName(value?: string | null) {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+export function findSeyaConversationAppointment(
+  conversation: {
+    phone?: string | null;
+    firstName?: string | null;
+    lastName?: string | null;
+    bookedSlot?: { date?: string; time?: string } | null;
+  },
+  appointments: Appointment[],
+) {
+  const live = (appointments || []).filter(isLiveAgendaAppointment);
+  const phone = last9Phone(conversation.phone);
+  const byPhone =
+    phone.length >= 9
+      ? live.filter((item) => last9Phone(item.phone) === phone)
+      : [];
+  const bookedDate = String(conversation.bookedSlot?.date || "").slice(0, 10);
+  const bookedTime = String(conversation.bookedSlot?.time || "").slice(0, 5);
+
+  if (bookedDate && bookedTime) {
+    const sameSlot = (item: Appointment) =>
+      String(item.date).slice(0, 10) === bookedDate &&
+      String(item.start).slice(0, 5) === bookedTime;
+    const exactPhone = byPhone.find(sameSlot);
+    if (exactPhone) {
+      return exactPhone;
+    }
+    const exactAll = live.filter(sameSlot);
+    if (exactAll.length === 1) {
+      return exactAll[0];
+    }
+    const sameDay = byPhone.find(
+      (item) => String(item.date).slice(0, 10) === bookedDate,
+    );
+    if (sameDay) {
+      return sameDay;
+    }
+  }
+
+  const wantedName = compactPersonName(
+    `${conversation.firstName || ""} ${conversation.lastName || ""}`,
+  );
+  const byName =
+    wantedName.length > 2
+      ? live.filter((item) => {
+          const person = compactPersonName(item.personName);
+          return person.includes(wantedName) || wantedName.includes(person);
+        })
+      : [];
+  const candidates = byPhone.length ? byPhone : byName;
+  if (!candidates.length) {
+    return null;
+  }
+
+  const ranked = [...candidates].sort((a, b) =>
+    `${a.date}${a.start}`.localeCompare(`${b.date}${b.start}`),
+  );
+  const today = new Date().toISOString().slice(0, 10);
+  return ranked.find((item) => String(item.date).slice(0, 10) >= today) || ranked.at(-1) || null;
+}
+
+export function agendaFocusHref(appointment: {
+  id?: string;
+  date: string;
+  start?: string;
+  phone?: string;
+}) {
+  const params = new URLSearchParams({
+    date: String(appointment.date || "").slice(0, 10),
+    view: "day",
+  });
+  if (
+    appointment.id &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+      appointment.id,
+    )
+  ) {
+    params.set("rdv", appointment.id);
+  }
+  const start = String(appointment.start || "").slice(0, 5);
+  if (/^\d{2}:\d{2}$/.test(start)) {
+    params.set("heure", start);
+  }
+  const phone = last9Phone(appointment.phone);
+  if (phone.length >= 9) {
+    params.set("tel", phone);
+  }
+  return `/dashboard/agenda?${params.toString()}`;
+}
+
+export function seyaPlanningHref(
+  conversation: {
+    phone?: string | null;
+    firstName?: string | null;
+    lastName?: string | null;
+    bookedSlot?: { date?: string; time?: string } | null;
+  },
+  appointments: Appointment[],
+) {
+  const found = findSeyaConversationAppointment(conversation, appointments);
+  if (found) {
+    return agendaFocusHref(found);
+  }
+  const booked = conversation.bookedSlot;
+  if (booked?.date && booked?.time) {
+    return agendaFocusHref({
+      date: booked.date,
+      start: booked.time,
+      phone: conversation.phone || undefined,
+    });
+  }
+  return null;
+}
+
