@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import {
   AGENCY_COMPANIES,
+  AGENCY_INVOICE_STATUSES,
   agencyInvoiceLogoSrc,
   bankTransferLines,
   billingAlerts,
@@ -349,7 +350,7 @@ function BillingSection({
       issuedOn,
       nextCycleOn,
       ...period,
-      status: "Émise",
+      status: "En attente de paiement",
       lines: draft.lines,
       comments: "",
       commentLog: [],
@@ -765,13 +766,11 @@ function BillingSection({
               className="h-11 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-800 outline-none focus:border-violet-400"
             >
               <option value="tous">Tous les statuts</option>
-              {["Brouillon", "Émise", "Payée", "En retard", "Annulée"].map(
-                (status) => (
-                  <option key={status} value={status}>
-                    {status}
-                  </option>
-                ),
-              )}
+              {AGENCY_INVOICE_STATUSES.map((status) => (
+                <option key={status} value={status}>
+                  {status}
+                </option>
+              ))}
             </select>
           </label>
           <label>
@@ -813,19 +812,19 @@ function BillingSection({
         <table className="min-w-full text-sm">
           <thead className="border-b bg-slate-50 text-left text-xs font-black uppercase text-slate-500">
             <tr>
-              <th className="px-4 py-3">N°</th>
-              <th className="px-4 py-3">Client</th>
-              <th className="px-4 py-3">Date</th>
-              <th className="px-4 py-3">Prochain cycle</th>
-              <th className="px-4 py-3">Montant</th>
-              <th className="px-4 py-3">Statut</th>
-              <th className="px-4 py-3">
+              <th className="whitespace-nowrap px-3 py-2">N°</th>
+              <th className="px-3 py-2">Client</th>
+              <th className="px-3 py-2">Date</th>
+              <th className="px-3 py-2">Prochain cycle</th>
+              <th className="px-3 py-2">Montant</th>
+              <th className="px-3 py-2">Statut</th>
+              <th className="px-3 py-2">
                 Suivi interne
                 <span className="mt-0.5 block text-[10px] font-semibold normal-case tracking-normal text-slate-400">
                   Invisible sur la facture
                 </span>
               </th>
-              <th className="px-4 py-3"></th>
+              <th className="px-3 py-2"></th>
             </tr>
           </thead>
           <tbody>
@@ -849,9 +848,11 @@ function BillingSection({
                     key={invoice.id}
                     className={`border-b last:border-0 ${invoiceRowTone(invoice.status)}`}
                   >
-                    <td className="px-4 py-3 font-semibold">{invoice.number}</td>
-                    <td className="px-4 py-3">{client?.name || "—"}</td>
-                    <td className="px-4 py-3">
+                    <td className="whitespace-nowrap px-3 py-2 font-semibold">
+                      {invoice.number}
+                    </td>
+                    <td className="px-3 py-2">{client?.name || "—"}</td>
+                    <td className="whitespace-nowrap px-3 py-2">
                       <p>{formatShortDate(invoice.issuedOn)}</p>
                       {formatInvoicePeriod(invoice) ? (
                         <p className="text-xs font-semibold opacity-70">
@@ -859,11 +860,13 @@ function BillingSection({
                         </p>
                       ) : null}
                     </td>
-                    <td className="px-4 py-3">{formatShortDate(invoice.nextCycleOn)}</td>
-                    <td className="px-4 py-3 font-black">
+                    <td className="whitespace-nowrap px-3 py-2">
+                      {formatShortDate(invoice.nextCycleOn)}
+                    </td>
+                    <td className="whitespace-nowrap px-3 py-2 font-black">
                       {formatEuroAmount(invoiceTotal(invoice))}
                     </td>
-                    <td className="px-4 py-3">
+                    <td className="px-3 py-2">
                       <select
                         value={invoice.status}
                         onChange={(event) =>
@@ -878,57 +881,55 @@ function BillingSection({
                             ),
                           })
                         }
-                        className="h-9 rounded-lg border border-black/10 bg-white/70 px-2 text-xs font-bold"
+                        className="h-8 max-w-[11.5rem] rounded-lg border border-black/10 bg-white/70 px-2 text-[11px] font-bold"
                       >
-                        {["Brouillon", "Émise", "Payée", "En retard", "Annulée"].map(
-                          (status) => (
-                            <option key={status} value={status}>
-                              {status}
-                            </option>
-                          ),
-                        )}
+                        {AGENCY_INVOICE_STATUSES.map((status) => (
+                          <option key={status} value={status}>
+                            {status}
+                          </option>
+                        ))}
                       </select>
                     </td>
-                    <td className="min-w-[18rem] px-4 py-3">
+                    <td className="min-w-[13rem] px-3 py-2">
                       <InvoiceFollowUpCell
                         invoice={invoice}
                         onAdd={(text) => addInternalComment(invoice, text)}
                       />
                     </td>
-                    <td className="px-4 py-3">
-                      <div className="flex flex-wrap gap-2">
+                    <td className="px-3 py-2">
+                      <div className="grid w-[9rem] grid-cols-2 gap-1">
                         <button
                           type="button"
                           onClick={() => setPreviewId(invoice.id)}
-                          className="h-9 rounded-lg border border-slate-200 px-3 text-xs font-bold"
+                          className="h-7 rounded-md border border-slate-200 px-2 text-[11px] font-bold"
                         >
                           Voir
                         </button>
                         <button
                           type="button"
                           onClick={() => void downloadAgencyInvoice(state, invoice)}
-                          className="h-9 rounded-lg border border-slate-200 px-3 text-xs font-bold"
+                          className="h-7 rounded-md border border-slate-200 px-2 text-[11px] font-bold"
                         >
                           PDF
                         </button>
                         <button
                           type="button"
                           onClick={() => startEdit(invoice)}
-                          className="h-9 rounded-lg border border-slate-200 px-3 text-xs font-bold"
+                          className="h-7 rounded-md border border-slate-200 px-2 text-[11px] font-bold"
                         >
                           Modifier
                         </button>
                         <button
                           type="button"
                           onClick={() => duplicateInvoice(invoice)}
-                          className="h-9 rounded-lg border border-slate-200 px-3 text-xs font-bold"
+                          className="h-7 rounded-md border border-slate-200 px-2 text-[11px] font-bold"
                         >
                           Dupliquer
                         </button>
                         <button
                           type="button"
                           onClick={() => deleteInvoice(invoice)}
-                          className="h-9 rounded-lg border border-rose-200 px-3 text-xs font-bold text-rose-700"
+                          className="col-span-2 h-7 rounded-md border border-rose-200 px-2 text-[11px] font-bold text-rose-700"
                         >
                           Supprimer
                         </button>
@@ -973,9 +974,9 @@ function InvoiceFollowUpCell({
   }
 
   return (
-    <div className="w-[18rem] space-y-2">
+    <div className="w-[13rem] space-y-1.5">
       {log.length ? (
-        <div className="max-h-28 space-y-1.5 overflow-y-auto">
+        <div className="max-h-20 space-y-1 overflow-y-auto">
           {log.map((item) => (
             <div
               key={item.id}
@@ -995,7 +996,7 @@ function InvoiceFollowUpCell({
       )}
       <textarea
         value={text}
-        rows={2}
+        rows={1}
         onChange={(event) => setText(event.target.value)}
         onKeyDown={(event) => {
           if (event.key === "Enter" && !event.shiftKey) {
@@ -1004,13 +1005,13 @@ function InvoiceFollowUpCell({
           }
         }}
         placeholder="Ex. Relancée par mail à 11h30"
-        className="min-h-14 w-full resize-y rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-800 outline-none focus:border-violet-400"
+        className="min-h-8 w-full resize-y rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs font-semibold text-slate-800 outline-none focus:border-violet-400"
       />
       <button
         type="button"
         disabled={!text.trim()}
         onClick={save}
-        className="h-8 rounded-lg bg-slate-900 px-3 text-xs font-bold text-white disabled:opacity-40"
+        className="h-7 rounded-md bg-slate-900 px-3 text-[11px] font-bold text-white disabled:opacity-40"
       >
         Enregistrer
       </button>
@@ -1659,7 +1660,7 @@ function invoiceRowTone(status: AgencyInvoice["status"]) {
   if (status === "En retard") {
     return "bg-rose-50 text-rose-950";
   }
-  if (status === "Émise") {
+  if (status === "En attente de paiement") {
     return "bg-orange-50 text-orange-950";
   }
   if (status === "Brouillon") {

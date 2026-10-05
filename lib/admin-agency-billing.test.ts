@@ -53,7 +53,7 @@ test("les deux marques partagent la même société US et la mention d’autoliq
       periodFrom: "2026-10-01",
       periodTo: "2026-10-31",
       nextCycleOn: "2026-11-03",
-      status: "Émise",
+      status: "En attente de paiement",
       comments: "Relancée par SMS",
       commentLog: [
         {
@@ -98,6 +98,21 @@ test("la période de facturation couvre le cycle jusqu’à la veille du suivant
   );
 });
 
+test("une ancienne facture émise passe en attente de paiement", () => {
+  const state = normalizeAgencyState("webk", {
+    invoices: [
+      {
+        id: "1",
+        number: "WK-2026-001",
+        clientId: "c1",
+        issuedOn: "2026-10-04",
+        status: "Émise",
+      },
+    ],
+  });
+  assert.equal(state.invoices[0]?.status, "En attente de paiement");
+});
+
 test("dupliquer une facture recopie les lignes sur le mois suivant", () => {
   const state = normalizeAgencyState("webk", {
     invoices: [{ id: "1", clientId: "c1", issuedOn: "2026-10-04", number: "WK-2026-001" }],
@@ -130,7 +145,7 @@ test("dupliquer une facture recopie les lignes sur le mois suivant", () => {
   assert.equal(copy.number, "WK-2026-002");
   assert.equal(copy.issuedOn, "2026-11-03");
   assert.equal(copy.nextCycleOn, "2026-12-03");
-  assert.equal(copy.status, "Émise");
+  assert.equal(copy.status, "En attente de paiement");
   assert.equal(copy.clientId, "c1");
   assert.equal(copy.invoiceNote, "Merci");
   assert.equal(copy.comments, "");
@@ -226,7 +241,7 @@ test("les KPI comptent les factures en attente de règlement", () => {
       clientId: "c1",
       issuedOn: "2026-09-02",
       nextCycleOn: "2026-10-02",
-      status: "Émise",
+      status: "En attente de paiement",
       comments: "",
       invoiceNote: "",
       createdAt: "",
@@ -298,7 +313,7 @@ test("un suivi interne s’ajoute avec la date et reste hors facture", () => {
     clientId: "c1",
     issuedOn: "2026-10-04",
     nextCycleOn: "2026-11-03",
-    status: "Émise" as const,
+    status: "En attente de paiement" as const,
     comments: "Ancien suivi",
     invoiceNote: "",
     createdAt: "2026-10-04T08:00:00.000Z",

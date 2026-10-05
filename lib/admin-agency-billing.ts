@@ -2,10 +2,18 @@ export type AgencyCompany = "webk" | "bookea";
 
 export type AgencyInvoiceStatus =
   | "Brouillon"
-  | "Émise"
+  | "En attente de paiement"
   | "Payée"
   | "En retard"
   | "Annulée";
+
+export const AGENCY_INVOICE_STATUSES: AgencyInvoiceStatus[] = [
+  "Brouillon",
+  "En attente de paiement",
+  "Payée",
+  "En retard",
+  "Annulée",
+];
 
 export type AgencyServiceKind =
   | "meta"
@@ -504,7 +512,7 @@ export function duplicateAgencyInvoice(
     issuedOn,
     nextCycleOn: nextBillingCycleOn(issuedOn),
     ...shiftInvoicePeriod(invoice),
-    status: "Émise" as const,
+    status: "En attente de paiement" as const,
     lines: cloneInvoiceLines(invoice.lines),
     comments: "",
     commentLog: [],
@@ -591,7 +599,9 @@ export function invoicesInRange(
 }
 
 export function isPendingPayment(invoice: AgencyInvoice) {
-  return invoice.status === "Émise" || invoice.status === "En retard";
+  return (
+    invoice.status === "En attente de paiement" || invoice.status === "En retard"
+  );
 }
 
 export function pendingPaymentKpi(invoices: AgencyInvoice[]) {
@@ -775,7 +785,7 @@ function normalizeInvoice(value: unknown): AgencyInvoice | null {
   if (!clientId || !issuedOn) {
     return null;
   }
-  const status = isInvoiceStatus(record.status) ? record.status : "Émise";
+  const status = normalizeInvoiceStatus(record.status);
   const period = invoicePeriod({
     issuedOn,
     periodFrom: String(record.periodFrom || "").slice(0, 10),
@@ -891,13 +901,14 @@ function isServiceKind(value: unknown): value is AgencyServiceKind {
 }
 
 function isInvoiceStatus(value: unknown): value is AgencyInvoiceStatus {
-  return (
-    value === "Brouillon" ||
-    value === "Émise" ||
-    value === "Payée" ||
-    value === "En retard" ||
-    value === "Annulée"
-  );
+  return AGENCY_INVOICE_STATUSES.includes(value as AgencyInvoiceStatus);
+}
+
+function normalizeInvoiceStatus(value: unknown): AgencyInvoiceStatus {
+  if (value === "Émise") {
+    return "En attente de paiement";
+  }
+  return isInvoiceStatus(value) ? value : "En attente de paiement";
 }
 
 function asRecord(value: unknown) {
