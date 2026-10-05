@@ -911,7 +911,7 @@ export default function SeyaCrmPage() {
         sameSlot.find((item) => phoneKey.length >= 9 && digits(item.phone) === phoneKey) ||
         (sameSlot.length === 1 ? sameSlot[0] : undefined);
 
-      let saved;
+      let saved: Appointment;
       if (existingAppointment && isPersistedAppointmentId(existingAppointment.id)) {
         saved = {
           ...existingAppointment,
