@@ -32,7 +32,7 @@ module.exports = async function handler(req, res) {
 
   req.query = {
     ...(req.query || {}),
-    source: req.query?.source || req.query?.origin || "make",
+    source: req.query?.source || req.query?.origin || "facebook",
   };
   return saveleads(req, res);
 };
