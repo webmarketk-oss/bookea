@@ -40,10 +40,15 @@ module.exports = async function handler(req, res) {
       return res.status(400).json({ ok: false, error: "missing_center" });
     }
 
-    const mapped = mapIncomingLead(payload, req.query);
+    const mapped = recoverIncomingLead(
+      mapIncomingLead(payload, req.query),
+      { ...payload, ...req.query },
+    );
     const sourceName = resolveIncomingSource(payload, req.query, "Facebook");
+    const phone = isPlaceholderValue(mapped.phone) ? "" : mapped.phone;
+    const email = isPlaceholderValue(mapped.email) ? "" : mapped.email;
 
-    if (!mapped.phone && !mapped.email) {
+    if (!phone && !email) {
       return res.status(400).json({ ok: false, error: "missing_contact" });
     }
 
@@ -160,13 +165,13 @@ function firstNonEmpty(...values) {
 
 function extractLooseContact(text) {
   const raw = String(text || "").replace(/\u00a0/g, " ");
-  const emailMatch = raw.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i);
+  const emailMatch = extractEmailFromBlob(raw);
   const phoneMatch = raw.match(
     /(?:\+33|0033|0)\s*[1-9](?:[\s.-]*\d{2}){4}/,
   );
   let leftover = raw;
   if (emailMatch) {
-    leftover = leftover.replace(emailMatch[0], "\n");
+    leftover = leftover.replace(emailMatch, "\n");
   }
   if (phoneMatch) {
     leftover = leftover.replace(phoneMatch[0], "\n");
@@ -178,9 +183,30 @@ function extractLooseContact(text) {
   return {
     full_name: lines[0] || "",
     phone: phoneMatch ? phoneMatch[0] : "",
-    email: emailMatch ? emailMatch[0] : "",
+    email: emailMatch || "",
     offre: lines.slice(1).join(" ").trim(),
   };
+}
+
+function extractEmailFromBlob(text) {
+  const found = [];
+  const raw = String(text || "");
+  const pattern =
+    /[A-Z0-9._%+-]+@[A-Z0-9-]+(?:\.[A-Z0-9-]+)*\.(?:com|fr|net|org|io|co|uk|eu|be|ch|info|app)/gi;
+  let match;
+  while ((match = pattern.exec(raw))) {
+    found.push(match[0]);
+    const [local, domain] = match[0].split("@");
+    const splitOnPhone = String(local || "").match(/0[1-9]\d{8}([A-Z0-9._%+-]+)$/i);
+    if (splitOnPhone?.[1] && domain) {
+      found.push(`${splitOnPhone[1]}@${domain}`);
+    }
+  }
+  const clean = found.filter((email) => {
+    const local = email.split("@")[0] || "";
+    return local.length >= 2 && local.length <= 64 && !/(?:0[1-9]\d{8})/.test(local);
+  });
+  return [...clean].sort((a, b) => a.length - b.length)[0] || "";
 }
 
 function payloadFromBody(body) {
@@ -267,7 +293,7 @@ function mapIncomingLead(payload, query) {
     fields,
   );
 
-  return {
+  const mapped = {
     firstName: person.firstName || "Prospect",
     lastName: person.lastName,
     email: pickLeadEmail(fields),
@@ -295,6 +321,79 @@ function mapIncomingLead(payload, query) {
     formName,
     pageName,
     offer,
+  };
+  return recoverIncomingLead(mapped, fields);
+}
+
+function isPlaceholderValue(value) {
+  return /^(nom|tel|mail|email|offre|ici[1-4])$/i.test(String(value || "").trim());
+}
+
+function stripPlaceholderTokens(text) {
+  return String(text || "")
+    .replace(/^(OFFRE|NOM|TEL|MAIL)+/i, "")
+    .replace(/\b(NOM|TEL|MAIL|OFFRE|ICI[1-4])\b/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function recoverIncomingLead(mapped, fields) {
+  const phone = isPlaceholderValue(mapped.phone) ? "" : mapped.phone;
+  const email = isPlaceholderValue(mapped.email) ? "" : mapped.email;
+  const firstName = isPlaceholderValue(mapped.firstName) ? "" : mapped.firstName;
+  const campaign = isPlaceholderValue(mapped.campaign)
+    ? ""
+    : String(mapped.campaign || "").startsWith("OFFRE")
+      ? ""
+      : mapped.campaign;
+  const needsRecovery =
+    !firstName ||
+    firstName === "Prospect" ||
+    !phone ||
+    !email ||
+    /^OFFRE/i.test(String(mapped.campaign || ""));
+
+  if (!needsRecovery) {
+    return { ...mapped, phone, email, firstName };
+  }
+
+  const blob = stripPlaceholderTokens(
+    [
+      mapped.campaign,
+      mapped.treatment,
+      mapped.offer,
+      fields?.offre,
+      fields?.offer,
+      mapped.firstName,
+      mapped.lastName,
+      mapped.phone,
+      mapped.email,
+    ]
+      .filter(Boolean)
+      .join("\n"),
+  );
+  const loose = extractLooseContact(blob);
+  const recovered = resolvePersonName(
+    { full_name: loose.full_name, first_name: firstName },
+    pickExact,
+  );
+
+  return {
+    ...mapped,
+    firstName:
+      firstName && firstName !== "Prospect"
+        ? firstName
+        : recovered.firstName || "Prospect",
+    lastName: mapped.lastName || recovered.lastName,
+    phone: phone || loose.phone,
+    email: email || loose.email,
+    campaign: campaign || loose.offre || mapped.campaign,
+    treatment:
+      mapped.treatment &&
+      !isPlaceholderValue(mapped.treatment) &&
+      !String(mapped.treatment).startsWith("OFFRE")
+        ? mapped.treatment
+        : loose.offre || mapped.treatment,
   };
 }
 

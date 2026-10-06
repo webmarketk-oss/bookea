@@ -115,6 +115,25 @@ test("payload_offer_title est lu comme campagne", () => {
   assert.equal(mapped.campaign, "Laser jumelles");
 });
 
+test("Make : NOM/TEL collés dans l’offre sont recollés en vrai contact", () => {
+  const mapped = mapIncomingLead(
+    {},
+    {
+      center: "depil-tech-vichy",
+      full_name: "NOM",
+      phone: "TEL",
+      email: "MAIL",
+      offre:
+        "OFFRERéseau Beauté Exclusive0613277582reseaubeauteexclusive@gmail.comBilan laser offert",
+    },
+  );
+  assert.equal(mapped.firstName, "Réseau");
+  assert.match(mapped.lastName, /Beaut/);
+  assert.equal(mapped.email, "reseaubeauteexclusive@gmail.com");
+  assert.match(mapped.phone.replace(/\D/g, ""), /613277582/);
+  assert.match(mapped.campaign, /Bilan laser/);
+});
+
 test("Make : 4 lignes collées (nom, tel, email, offre) suffisent", () => {
   const { payloadFromBody, mapIncomingLead } = require("./saveleads");
   const payload = payloadFromBody(
