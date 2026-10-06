@@ -115,6 +115,19 @@ test("payload_offer_title est lu comme campagne", () => {
   assert.equal(mapped.campaign, "Laser jumelles");
 });
 
+test("Make : 4 lignes collées (nom, tel, email, offre) suffisent", () => {
+  const { payloadFromBody, mapIncomingLead } = require("./saveleads");
+  const payload = payloadFromBody(
+    "Marie Dupont\n06 12 34 56 78\nmarie@cliente.fr\nÉpilation laser",
+  );
+  const mapped = mapIncomingLead(payload, {});
+  assert.equal(mapped.firstName, "Marie");
+  assert.equal(mapped.lastName, "Dupont");
+  assert.equal(mapped.email, "marie@cliente.fr");
+  assert.match(mapped.phone.replace(/\D/g, ""), /612345678/);
+  assert.equal(mapped.campaign, "Épilation laser");
+});
+
 test("Make / Systeme.io : la source n’est pas Facebook", () => {
   const { resolveIncomingSource } = require("./saveleads");
   assert.equal(resolveIncomingSource({}, { source: "make" }, "Facebook"), "Make");

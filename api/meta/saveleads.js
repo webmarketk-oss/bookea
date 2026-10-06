@@ -28,7 +28,7 @@ module.exports = async function handler(req, res) {
   }
 
   try {
-    const payload = parsePayload(req.body);
+    const payload = payloadFromBody(req.body);
     const centerSlug = firstValue(
       req.query.center,
       req.query.center_slug,
@@ -120,10 +120,83 @@ function parsePayload(body) {
       return JSON.parse(text);
     }
 
+    const loose = extractLooseContact(text);
+    if (loose.phone || loose.email) {
+      return loose;
+    }
+
     return Object.fromEntries(new URLSearchParams(text).entries());
   }
 
   return body;
+}
+
+function stringifyBody(body) {
+  if (typeof body === "string") {
+    return body;
+  }
+  if (body == null) {
+    return "";
+  }
+  if (typeof body === "object") {
+    try {
+      return JSON.stringify(body);
+    } catch {
+      return Object.values(body).join("\n");
+    }
+  }
+  return String(body);
+}
+
+function firstNonEmpty(...values) {
+  for (const value of values) {
+    const text = String(value ?? "").trim();
+    if (text) {
+      return text;
+    }
+  }
+  return "";
+}
+
+function extractLooseContact(text) {
+  const raw = String(text || "").replace(/\u00a0/g, " ");
+  const emailMatch = raw.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i);
+  const phoneMatch = raw.match(
+    /(?:\+33|0033|0)\s*[1-9](?:[\s.-]*\d{2}){4}/,
+  );
+  let leftover = raw;
+  if (emailMatch) {
+    leftover = leftover.replace(emailMatch[0], "\n");
+  }
+  if (phoneMatch) {
+    leftover = leftover.replace(phoneMatch[0], "\n");
+  }
+  const lines = leftover
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  return {
+    full_name: lines[0] || "",
+    phone: phoneMatch ? phoneMatch[0] : "",
+    email: emailMatch ? emailMatch[0] : "",
+    offre: lines.slice(1).join(" ").trim(),
+  };
+}
+
+function payloadFromBody(body) {
+  const parsed = parsePayload(body);
+  const loose = extractLooseContact(stringifyBody(body));
+  if (!loose.phone && !loose.email) {
+    return parsed;
+  }
+  return {
+    ...loose,
+    ...parsed,
+    full_name: firstNonEmpty(parsed.full_name, parsed.name, loose.full_name),
+    phone: firstNonEmpty(parsed.phone, parsed.phone_number, parsed.telephone, loose.phone),
+    email: firstNonEmpty(parsed.email, loose.email),
+    offre: firstNonEmpty(parsed.offre, parsed.offer, loose.offre),
+  };
 }
 
 function pickExact(fields, names) {
@@ -815,3 +888,5 @@ function firstValue(...values) {
 
 module.exports.mapIncomingLead = mapIncomingLead;
 module.exports.resolveIncomingSource = resolveIncomingSource;
+module.exports.extractLooseContact = extractLooseContact;
+module.exports.payloadFromBody = payloadFromBody;
