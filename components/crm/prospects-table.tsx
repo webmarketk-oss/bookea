@@ -165,7 +165,7 @@ export default function ProspectsTable({
               data-lead-row="true"
               onClick={() => onSelectLead(lead)}
               className={cn(
-                "h-20 cursor-pointer transition-all hover:bg-slate-50",
+                "min-h-20 cursor-pointer transition-all hover:bg-slate-50",
                 isInactive && "bg-slate-50 hover:bg-slate-100",
                 isOpenReminderDue(lead) &&
                   !isInactive &&
@@ -181,6 +181,9 @@ export default function ProspectsTable({
                     {lead.firstName} {lead.lastName}
                   </p>
                   <p className="text-sm text-slate-500">{lead.phone}</p>
+                  {lead.email ? (
+                    <p className="truncate text-sm text-slate-500">{lead.email}</p>
+                  ) : null}
                 </div>
               </TableCell>
 
