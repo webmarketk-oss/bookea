@@ -28,7 +28,7 @@ module.exports = async function handler(req, res) {
   }
 
   try {
-    const payload = payloadFromBody(req.body);
+    const payload = await readRequestPayload(req);
     const centerSlug = firstValue(
       req.query.center,
       req.query.center_slug,
@@ -42,11 +42,12 @@ module.exports = async function handler(req, res) {
 
     const mapped = recoverIncomingLead(
       mapIncomingLead(payload, req.query),
-      { ...payload, ...req.query },
+      { ...payload, ...queryFields(req.query) },
     );
     const sourceName = resolveIncomingSource(payload, req.query, "Facebook");
     const phone = isPlaceholderValue(mapped.phone) ? "" : mapped.phone;
     const email = isPlaceholderValue(mapped.email) ? "" : mapped.email;
+    const firstName = isJunkLeadName(mapped.firstName) ? "" : mapped.firstName;
 
     if (!phone && !email) {
       return res.status(400).json({ ok: false, error: "missing_contact" });
@@ -63,23 +64,29 @@ module.exports = async function handler(req, res) {
       });
     }
 
+    const imported = {
+      ...mapped,
+      firstName: firstName || "Prospect",
+      phone,
+      email,
+    };
     const existingId = await findExistingLeadByPhone(
       supabase,
       center.id,
-      mapped.phone,
+      imported.phone,
     );
-    const leadId = await importPostedLead(supabase, center.id, mapped, {
+    const leadId = await importPostedLead(supabase, center.id, imported, {
       possibleDuplicate: Boolean(existingId),
       sourceName,
     });
 
     let whatsapp = { sent: false, skipped: "no_phone" };
-    if (mapped.phone) {
+    if (imported.phone) {
       whatsapp = await welcomeNewLead(supabase, center, {
         leadId,
-        firstName: mapped.firstName,
-        lastName: mapped.lastName,
-        phone: mapped.phone,
+        firstName: imported.firstName,
+        lastName: imported.lastName,
+        phone: imported.phone,
         treatment: mapped.treatment,
         campaign: mapped.campaign,
       }).catch((error) => {
@@ -180,12 +187,47 @@ function extractLooseContact(text) {
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter(Boolean);
+  const names = [];
+  const offers = [];
+  for (const line of lines) {
+    const split = splitNameAndOffer(line);
+    if (split.name) {
+      names.push(split.name);
+    }
+    if (split.offer) {
+      offers.push(split.offer);
+    }
+  }
   return {
-    full_name: lines[0] || "",
+    full_name: names[0] || "",
     phone: phoneMatch ? phoneMatch[0] : "",
     email: emailMatch || "",
-    offre: lines.slice(1).join(" ").trim(),
+    offre: offers.join(" ").trim(),
   };
+}
+
+function looksLikeOfferText(value) {
+  return /\b(offert|offre|bilan|laser|epilation|épilation|seance|séance|hydrafacial|minceur|cryolipolyse)\b/i.test(
+    String(value || ""),
+  );
+}
+
+function splitNameAndOffer(line) {
+  const text = String(line || "").trim();
+  if (!text) {
+    return { name: "", offer: "" };
+  }
+  const match = text.match(
+    /^(.*?)(?=\b(?:bilan|laser|offert|offre|epilation|épilation|hydrafacial|minceur|cryolipolyse)\b)/i,
+  );
+  const maybeName = String(match?.[1] || "").trim();
+  if (maybeName && maybeName.split(/\s+/).length >= 2) {
+    return { name: maybeName, offer: text.slice(maybeName.length).trim() };
+  }
+  if (looksLikeOfferText(text)) {
+    return { name: "", offer: text };
+  }
+  return { name: text, offer: "" };
 }
 
 function extractEmailFromBlob(text) {
@@ -210,7 +252,7 @@ function extractEmailFromBlob(text) {
 }
 
 function payloadFromBody(body) {
-  const parsed = parsePayload(body);
+  const parsed = unwrapLeadPayload(parsePayload(body));
   const loose = extractLooseContact(stringifyBody(body));
   if (!loose.phone && !loose.email) {
     return parsed;
@@ -218,11 +260,111 @@ function payloadFromBody(body) {
   return {
     ...loose,
     ...parsed,
-    full_name: firstNonEmpty(parsed.full_name, parsed.name, loose.full_name),
-    phone: firstNonEmpty(parsed.phone, parsed.phone_number, parsed.telephone, loose.phone),
-    email: firstNonEmpty(parsed.email, loose.email),
-    offre: firstNonEmpty(parsed.offre, parsed.offer, loose.offre),
+    full_name: firstNonEmpty(
+      skipPlaceholder(parsed.full_name),
+      skipPlaceholder(parsed.name),
+      loose.full_name,
+    ),
+    phone: firstNonEmpty(
+      skipPlaceholder(parsed.phone),
+      skipPlaceholder(parsed.phone_number),
+      skipPlaceholder(parsed.telephone),
+      loose.phone,
+    ),
+    email: firstNonEmpty(skipPlaceholder(parsed.email), loose.email),
+    offre: firstNonEmpty(
+      skipPlaceholder(parsed.offre),
+      skipPlaceholder(parsed.offer),
+      loose.offre,
+    ),
   };
+}
+
+async function readRawBody(req) {
+  if (typeof req.body === "string" && req.body.trim()) {
+    return req.body;
+  }
+  if (Buffer.isBuffer(req.body) && req.body.length) {
+    return req.body.toString("utf8");
+  }
+  if (req.rawBody) {
+    return String(req.rawBody);
+  }
+  if (req.body && typeof req.body === "object" && !Buffer.isBuffer(req.body)) {
+    return "";
+  }
+  const chunks = [];
+  try {
+    for await (const chunk of req) {
+      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    }
+  } catch {
+    chunks.length = 0;
+  }
+  if (chunks.length) {
+    return Buffer.concat(chunks).toString("utf8");
+  }
+  return "";
+}
+
+async function readRequestPayload(req) {
+  const parsedObject =
+    req.body && typeof req.body === "object" && !Buffer.isBuffer(req.body)
+      ? req.body
+      : null;
+  const raw = await readRawBody(req);
+  const fromRaw = raw ? payloadFromBody(raw) : {};
+  const fromParsed = parsedObject ? payloadFromBody(parsedObject) : {};
+  return unwrapLeadPayload({ ...fromRaw, ...fromParsed });
+}
+
+function unwrapLeadPayload(payload) {
+  if (Array.isArray(payload)) {
+    return unwrapLeadPayload(payload[0] || {});
+  }
+  if (!payload || typeof payload !== "object") {
+    return payload || {};
+  }
+  const nestedKeys = [
+    "data",
+    "payload",
+    "body",
+    "bundle",
+    "lead",
+    "contact",
+    "item",
+    "webhook",
+  ];
+  for (const key of nestedKeys) {
+    const nested = payload[key];
+    if (Array.isArray(nested)) {
+      const rest = { ...payload };
+      delete rest[key];
+      return unwrapLeadPayload({ ...rest, ...(nested[0] || {}) });
+    }
+    if (nested && typeof nested === "object") {
+      const rest = { ...payload };
+      delete rest[key];
+      return unwrapLeadPayload({ ...rest, ...nested });
+    }
+    if (typeof nested === "string" && nested.trim().startsWith("{")) {
+      try {
+        const parsed = JSON.parse(nested);
+        if (parsed && typeof parsed === "object") {
+          const rest = { ...payload };
+          delete rest[key];
+          return unwrapLeadPayload({ ...rest, ...parsed });
+        }
+      } catch {
+        // keep going
+      }
+    }
+  }
+  return payload;
+}
+
+function skipPlaceholder(value) {
+  return isPlaceholderValue(value) ? "" : String(value ?? "").trim();
 }
 
 function pickExact(fields, names) {
@@ -329,6 +471,18 @@ function isPlaceholderValue(value) {
   return /^(nom|tel|mail|email|offre|ici[1-4])$/i.test(String(value || "").trim());
 }
 
+function isJunkLeadName(value) {
+  if (isPlaceholderValue(value)) {
+    return true;
+  }
+  const needle = String(value || "")
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+  return /sfk|agency fz/.test(needle);
+}
+
 function stripPlaceholderTokens(text) {
   return String(text || "")
     .replace(/^(OFFRE|NOM|TEL|MAIL)+/i, "")
@@ -340,7 +494,7 @@ function stripPlaceholderTokens(text) {
 function recoverIncomingLead(mapped, fields) {
   const phone = isPlaceholderValue(mapped.phone) ? "" : mapped.phone;
   const email = isPlaceholderValue(mapped.email) ? "" : mapped.email;
-  const firstName = isPlaceholderValue(mapped.firstName) ? "" : mapped.firstName;
+  const firstName = isJunkLeadName(mapped.firstName) ? "" : mapped.firstName;
   const campaign = isPlaceholderValue(mapped.campaign)
     ? ""
     : String(mapped.campaign || "").startsWith("OFFRE")
@@ -667,7 +821,10 @@ function flattenFields(raw, prefix = "") {
   }
 
   if (typeof raw === "string") {
-    const text = raw.trim();
+    const text = skipPlaceholder(raw.trim());
+    if (!text) {
+      return result;
+    }
     if (prefix) {
       result[normalizeFieldName(prefix)] = text;
     }
@@ -722,7 +879,16 @@ function flattenFields(raw, prefix = "") {
     for (const [key, value] of Object.entries(raw)) {
       Object.assign(result, flattenFields(value, prefix ? `${prefix}.${key}` : key));
       if (value != null && (typeof value === "string" || typeof value === "number")) {
-        result[normalizeFieldName(key)] = String(value).trim();
+        const text = skipPlaceholder(value);
+        if (!text) {
+          continue;
+        }
+        const short = normalizeFieldName(key);
+        if (!prefix) {
+          result[short] = text;
+        } else if (shouldPromoteNestedField(prefix, short) && !result[short]) {
+          result[short] = text;
+        }
       }
     }
   }
@@ -818,7 +984,7 @@ function pickLeadValue(fields, names) {
   for (const name of names) {
     for (const group of [preferred, keys]) {
       if (fields[name] && group.includes(name)) {
-        const value = String(fields[name]).trim();
+        const value = skipPlaceholder(fields[name]);
         if (value && !blockedNames.has(normalizeNameValue(value))) {
           return value;
         }
@@ -828,7 +994,7 @@ function pickLeadValue(fields, names) {
           key === name || key.endsWith(`_${name}`) || key.endsWith(`.${name}`),
       );
       for (const match of matches) {
-        const value = String(fields[match] || "").trim();
+        const value = skipPlaceholder(fields[match]);
         if (value && !blockedNames.has(normalizeNameValue(value))) {
           return value;
         }
@@ -864,13 +1030,18 @@ function pickUseful(fields, names) {
   const keys = Object.keys(fields || {});
   for (const name of names) {
     const direct = fields[name];
-    if (direct && !isJunkIncoming(direct)) {
+    if (direct && !isJunkIncoming(direct) && !isPlaceholderValue(direct)) {
       return String(direct).trim();
     }
     const match = keys.find(
       (key) => key === name || key.endsWith(`_${name}`) || key.endsWith(`.${name}`),
     );
-    if (match && fields[match] && !isJunkIncoming(fields[match])) {
+    if (
+      match &&
+      fields[match] &&
+      !isJunkIncoming(fields[match]) &&
+      !isPlaceholderValue(fields[match])
+    ) {
       return String(fields[match]).trim();
     }
   }
@@ -915,9 +1086,24 @@ function queryFields(query) {
     if (key === "center" || key === "center_slug") {
       continue;
     }
-    result[key] = Array.isArray(value) ? value[0] : value;
+    const text = Array.isArray(value) ? value[0] : value;
+    if (isPlaceholderValue(text)) {
+      continue;
+    }
+    result[key] = text;
   }
   return result;
+}
+
+function shouldPromoteNestedField(prefix, short) {
+  if (short !== "name") {
+    return true;
+  }
+  const last = String(prefix || "")
+    .split(/[._]/)
+    .filter(Boolean)
+    .pop();
+  return /^\d+$/.test(last || "");
 }
 
 function isFieldPair(item) {
@@ -989,3 +1175,4 @@ module.exports.mapIncomingLead = mapIncomingLead;
 module.exports.resolveIncomingSource = resolveIncomingSource;
 module.exports.extractLooseContact = extractLooseContact;
 module.exports.payloadFromBody = payloadFromBody;
+module.exports.unwrapLeadPayload = unwrapLeadPayload;

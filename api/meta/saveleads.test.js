@@ -147,6 +147,54 @@ test("Make : 4 lignes collées (nom, tel, email, offre) suffisent", () => {
   assert.equal(mapped.campaign, "Épilation laser");
 });
 
+test("Make : un bundle webhook Facebook suffit, même avec NOM/TEL dans l’URL", () => {
+  const { payloadFromBody, mapIncomingLead } = require("./saveleads");
+  const payload = payloadFromBody({
+    bundle: {
+      full_name: "Réseau Beauté Exclusive",
+      phone: "0613277582",
+      email: "reseaubeauteexclusive@gmail.com",
+      offer: "Bilan laser offert + test offert",
+    },
+  });
+  const mapped = mapIncomingLead(payload, {
+    center: "depil-tech-vichy",
+    full_name: "NOM",
+    phone: "TEL",
+    email: "MAIL",
+    offre: "OFFRE",
+  });
+  assert.equal(mapped.firstName, "Réseau");
+  assert.match(mapped.lastName, /Beaut/);
+  assert.equal(mapped.email, "reseaubeauteexclusive@gmail.com");
+  assert.match(mapped.phone.replace(/\D/g, ""), /613277582/);
+  assert.match(mapped.campaign, /Bilan laser/);
+});
+
+test("Make : le nom de page SFK n’écrase pas le contact Facebook", () => {
+  const mapped = mapIncomingLead({
+    page: { name: "SFK Agency fz llc" },
+    full_name: "Réseau Beauté Exclusive",
+    phone: "0613277582",
+    email: "reseaubeauteexclusive@gmail.com",
+    offer: "Bilan laser offert + test offert",
+  });
+  assert.equal(mapped.firstName, "Réseau");
+  assert.match(mapped.lastName, /Beaut/);
+});
+
+test("Make : SFK Agency n’est pas un nom de prospect", () => {
+  const mapped = mapIncomingLead({
+    full_name: "SFK Agency fz llc",
+    phone: "0613277582",
+    offer: "Bilan laser offert + test offert",
+  });
+  assert.notEqual(String(mapped.firstName).toLowerCase(), "sfk");
+  assert.doesNotMatch(String(mapped.firstName), /agency/i);
+  assert.match(mapped.phone.replace(/\D/g, ""), /613277582/);
+  assert.match(mapped.campaign, /Bilan laser/);
+});
+
 test("Make / Systeme.io : la source n’est pas Facebook", () => {
   const { resolveIncomingSource } = require("./saveleads");
   assert.equal(resolveIncomingSource({}, { source: "make" }, "Facebook"), "Make");
