@@ -531,14 +531,19 @@ function recoverIncomingLead(mapped, fields) {
     { full_name: loose.full_name, first_name: firstName },
     pickExact,
   );
+  const fromEmail = nameFromEmailLocal(email || loose.email);
+  const recoveredEmail = fromEmail
+    ? resolvePersonName({ full_name: fromEmail }, pickExact)
+    : { firstName: "", lastName: "" };
+  const lastName = isJunkLeadName(mapped.lastName) ? "" : mapped.lastName;
 
   return {
     ...mapped,
     firstName:
       firstName && firstName !== "Prospect"
         ? firstName
-        : recovered.firstName || "Prospect",
-    lastName: mapped.lastName || recovered.lastName,
+        : recovered.firstName || recoveredEmail.firstName || "Prospect",
+    lastName: lastName || recovered.lastName || recoveredEmail.lastName,
     phone: phone || loose.phone,
     email: email || loose.email,
     campaign: campaign || loose.offre || mapped.campaign,
@@ -549,6 +554,55 @@ function recoverIncomingLead(mapped, fields) {
         ? mapped.treatment
         : loose.offre || mapped.treatment,
   };
+}
+
+function nameFromEmailLocal(email) {
+  const local = String(email || "")
+    .split("@")[0]
+    .replace(/[0-9]+/g, " ")
+    .trim();
+  if (!local) {
+    return "";
+  }
+  const separated = local.split(/[._+\-]+/).filter(Boolean);
+  if (separated.length >= 2) {
+    return separated.map(titleCaseNameWord).join(" ");
+  }
+  return splitConcatenatedName(separated[0] || local);
+}
+
+function splitConcatenatedName(value) {
+  const chunks = [
+    ["exclusive", "Exclusive"],
+    ["beaute", "Beauté"],
+    ["reseau", "Réseau"],
+    ["beauty", "Beauty"],
+    ["institut", "Institut"],
+  ];
+  const found = [];
+  let rest = String(value || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+  while (rest.length) {
+    const match = chunks
+      .filter(([token]) => rest.startsWith(token))
+      .sort((a, b) => b[0].length - a[0].length)[0];
+    if (!match) {
+      break;
+    }
+    found.push(match[1]);
+    rest = rest.slice(match[0].length);
+  }
+  return found.length >= 2 && !rest ? found.join(" ") : "";
+}
+
+function titleCaseNameWord(value) {
+  const word = String(value || "").trim();
+  if (!word) {
+    return "";
+  }
+  return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
 }
 
 function isJunkIncoming(value) {

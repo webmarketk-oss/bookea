@@ -195,6 +195,29 @@ test("Make : SFK Agency n’est pas un nom de prospect", () => {
   assert.match(mapped.campaign, /Bilan laser/);
 });
 
+test("Make : SFK + email reseaubeauteexclusive reconstruit le nom", () => {
+  const mapped = mapIncomingLead({
+    full_name: "SFK Agency fz llc",
+    phone: "0613277583",
+    email: "reseaubeauteexclusive@gmail.com",
+    offer: "Bilan laser offert + test offert",
+  });
+  assert.equal(mapped.firstName, "Réseau");
+  assert.match(mapped.lastName, /Beaut/);
+  assert.match(mapped.lastName, /Exclusive/);
+  assert.equal(mapped.email, "reseaubeauteexclusive@gmail.com");
+});
+
+test("Make : jean.dupont@ reconstruit le nom si full_name est SFK", () => {
+  const mapped = mapIncomingLead({
+    full_name: "SFK Agency fz llc",
+    phone: "0611111111",
+    email: "jean.dupont@gmail.com",
+  });
+  assert.equal(mapped.firstName, "Jean");
+  assert.equal(mapped.lastName, "Dupont");
+});
+
 test("Make / Systeme.io : la source n’est pas Facebook", () => {
   const { resolveIncomingSource } = require("./saveleads");
   assert.equal(resolveIncomingSource({}, { source: "make" }, "Facebook"), "Make");
