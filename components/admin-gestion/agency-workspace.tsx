@@ -89,12 +89,6 @@ export function AgencyWorkspace() {
         return;
       }
       setStates({ webk: nextWebk, bookea: nextBookea });
-      const dirty = [nextWebk, nextBookea].filter(
-        (item, index) => item !== [webk, bookea][index],
-      );
-      if (dirty.length) {
-        await Promise.all(dirty.map((item) => saveAgencyBilling(item)));
-      }
     })();
     return () => {
       alive = false;
@@ -127,7 +121,10 @@ export function AgencyWorkspace() {
     const next = { ...state, ...patch };
     if (patch.bank) {
       const otherId = company === "webk" ? "bookea" : "webk";
-      void persist(next, { ...states[otherId], bank: patch.bank });
+      void (async () => {
+        const other = await loadAgencyBilling(otherId);
+        await persist(next, { ...other, bank: patch.bank });
+      })();
       return;
     }
     void persist(next);

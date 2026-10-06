@@ -28,6 +28,7 @@ import {
   invoiceCommentLog,
   normalizeAgencyState,
   periodRange,
+  protectInvoicesFromEmptyOverwrite,
 } from "./admin-agency-billing.ts";
 
 test("les deux marques partagent la même société US et la mention d’autoliquidation", () => {
@@ -160,6 +161,22 @@ test("la facture reprend les coordonnées admin du centre", () => {
     city: "LYON",
   });
   assert.deepEqual(emptyLegal.lines, ["Lyon", "contact@heliaskininstitut.com"]);
+});
+
+test("une sauvegarde vide n’efface pas les factures déjà enregistrées", () => {
+  const current = normalizeAgencyState("bookea", {
+    invoices: [
+      {
+        id: "1",
+        number: "BK-2026-001",
+        clientId: "c1",
+        issuedOn: "2026-10-04",
+      },
+    ],
+  });
+  const empty = normalizeAgencyState("bookea", { invoices: [] });
+  const kept = protectInvoicesFromEmptyOverwrite(empty, current);
+  assert.equal(kept.invoices[0]?.number, "BK-2026-001");
 });
 
 test("le prochain cycle est 30 jours après la facture", () => {

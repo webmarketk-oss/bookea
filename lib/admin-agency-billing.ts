@@ -368,6 +368,16 @@ export function withSyncedCenterContacts(
     : state;
 }
 
+export function protectInvoicesFromEmptyOverwrite(
+  next: AgencyBillingState,
+  remote: Pick<AgencyBillingState, "invoices"> | null,
+) {
+  if (!remote?.invoices.length || next.invoices.length > 0) {
+    return next;
+  }
+  return { ...next, invoices: remote.invoices };
+}
+
 export function emptyAgencyState(company: AgencyCompany): AgencyBillingState {
   return {
     company,

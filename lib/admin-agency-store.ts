@@ -2,6 +2,7 @@ import {
   billingCenterContactFromRow,
   emptyAgencyState,
   normalizeAgencyState,
+  protectInvoicesFromEmptyOverwrite,
   type AgencyBillingState,
   type AgencyCompany,
   type BillingCenterContact,
@@ -33,8 +34,7 @@ function writeLocal(state: AgencyBillingState) {
   window.localStorage.setItem(storageKey(state.company), JSON.stringify(state));
 }
 
-export async function loadAgencyBilling(company: AgencyCompany) {
-  const local = readLocal(company);
+async function loadRemote(company: AgencyCompany) {
   try {
     const supabase = createClient();
     const { data, error } = await supabase
@@ -43,20 +43,39 @@ export async function loadAgencyBilling(company: AgencyCompany) {
       .eq("company", company)
       .maybeSingle();
     if (error || !data) {
-      return local;
+      return error ? ("error" as const) : null;
     }
     return normalizeAgencyState(company, data.payload);
   } catch {
-    return local;
+    return "error" as const;
   }
 }
 
+export async function loadAgencyBilling(company: AgencyCompany) {
+  const local = readLocal(company);
+  const remote = await loadRemote(company);
+  if (remote === "error" || !remote) {
+    return local;
+  }
+  return remote;
+}
+
 export async function saveAgencyBilling(state: AgencyBillingState) {
-  const next = {
-    ...state,
-    updatedAt: new Date().toISOString(),
-  };
+  const remote = await loadRemote(state.company);
+  const next = protectInvoicesFromEmptyOverwrite(
+    {
+      ...state,
+      updatedAt: new Date().toISOString(),
+    },
+    remote === "error" ? null : remote,
+  );
   writeLocal(next);
+  if (remote === "error" && next.invoices.length === 0) {
+    console.warn(
+      "[admin-agency-billing] skip empty invoice save while remote billing is unread",
+    );
+    return next;
+  }
   try {
     const supabase = createClient();
     const { error } = await supabase.from("admin_agency_billing").upsert(
