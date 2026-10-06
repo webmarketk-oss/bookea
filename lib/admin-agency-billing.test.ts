@@ -6,8 +6,11 @@ import {
   AGENCY_LEGAL_ENTITY,
   REVERSE_CHARGE_MENTION,
   billingAlerts,
+  billingCenterContactFromRow,
   buildAgencyInvoiceHtml,
   defaultAgencyIdentity,
+  invoiceClientDetails,
+  syncAgencyClientsWithCenters,
   lineNet,
   invoicesInRange,
   invoiceTotal,
@@ -42,7 +45,7 @@ test("les deux marques partagent la même société US et la mention d’autoliq
   const html = buildAgencyInvoiceHtml(
     {
       ...migrated,
-      clients: [{ id: "c1", name: "JFG", email: "", phone: "", city: "Clermont", centerId: "", active: true, phoningOffer: false, comments: "", firstInvoiceOn: "", nextInvoiceOn: "", createdAt: "" }],
+      clients: [{ id: "c1", name: "JFG", legalName: "JFG Clinic SARL", address: "12 rue de la Paix, 63000 Clermont-Ferrand", email: "contact@jfg.fr", phone: "04 73 00 00 00", city: "Clermont", centerId: "", active: true, phoningOffer: false, comments: "", firstInvoiceOn: "", nextInvoiceOn: "", createdAt: "" }],
       invoices: [],
     },
     {
@@ -80,8 +83,83 @@ test("les deux marques partagent la même société US et la mention d’autoliq
   assert.doesNotMatch(html, /Relancée par SMS/);
   assert.match(html, /Wise/);
   assert.match(html, /Rue du Trône 100/);
+  assert.match(html, /Helvetica Neue/);
+  assert.match(html, /JFG Clinic SARL/);
+  assert.match(html, /12 rue de la Paix, 63000 Clermont-Ferrand/);
+  assert.match(html, /04 73 00 00 00/);
+  assert.match(html, /contact@jfg\.fr/);
+  assert.doesNotMatch(html, /font-family: Arial, sans-serif/);
   assert.equal(migrated.bank.iban, "BE21 9055 5762 3503");
   assert.equal(DEFAULT_AGENCY_BANK.accountName, "SFK WEBK AGENCY LLC");
+});
+
+test("la facture reprend les coordonnées admin du centre", () => {
+  const center = billingCenterContactFromRow({
+    id: "center-1",
+    name: "HELIASKIN INSTITUT",
+    city: "LYON",
+    email: "contact@heliaskininstitut.com",
+    phone: null,
+    address_line1: null,
+    postal_code: "69006",
+    legal: { legalName: "Heliaskin Institut SARL" },
+    publicCenter: {
+      address: "1209 rue Bellecombe",
+      phone: "04 78 00 00 00",
+      email: "contact@heliaskininstitut.com",
+    },
+  });
+  assert.equal(center.legalName, "Heliaskin Institut SARL");
+  assert.equal(center.address, "1209 rue Bellecombe, 69006 LYON");
+  assert.equal(center.phone, "04 78 00 00 00");
+  assert.equal(center.email, "contact@heliaskininstitut.com");
+  const details = invoiceClientDetails({
+    name: "HELIASKIN INSTITUT",
+    legalName: center.legalName,
+    address: center.address,
+    phone: center.phone,
+    email: center.email,
+    city: center.city,
+  });
+  assert.deepEqual(details.lines, [
+    "Heliaskin Institut SARL",
+    "1209 rue Bellecombe, 69006 LYON",
+    "04 78 00 00 00",
+    "contact@heliaskininstitut.com",
+  ]);
+  const synced = syncAgencyClientsWithCenters(
+    [
+      {
+        id: "c1",
+        centerId: "center-1",
+        name: "HELIASKIN INSTITUT",
+        legalName: "",
+        address: "",
+        email: "contact@heliaskininstitut.com",
+        phone: "",
+        city: "LYON",
+        active: true,
+        phoningOffer: false,
+        comments: "",
+        firstInvoiceOn: "",
+        nextInvoiceOn: "",
+        createdAt: "",
+      },
+    ],
+    [center],
+  );
+  assert.equal(synced[0]?.legalName, "Heliaskin Institut SARL");
+  assert.equal(synced[0]?.address, "1209 rue Bellecombe, 69006 LYON");
+  assert.equal(synced[0]?.phone, "04 78 00 00 00");
+  const emptyLegal = invoiceClientDetails({
+    name: "HELIASKIN INSTITUT",
+    legalName: "",
+    address: "Lyon",
+    phone: "",
+    email: "contact@heliaskininstitut.com",
+    city: "LYON",
+  });
+  assert.deepEqual(emptyLegal.lines, ["Lyon", "contact@heliaskininstitut.com"]);
 });
 
 test("le prochain cycle est 30 jours après la facture", () => {

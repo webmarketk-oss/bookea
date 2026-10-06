@@ -56,6 +56,8 @@ export type AgencyClient = {
   id: string;
   centerId: string;
   name: string;
+  legalName: string;
+  address: string;
   email: string;
   phone: string;
   city: string;
@@ -65,6 +67,16 @@ export type AgencyClient = {
   firstInvoiceOn: string;
   nextInvoiceOn: string;
   createdAt: string;
+};
+
+export type BillingCenterContact = {
+  id: string;
+  name: string;
+  legalName: string;
+  address: string;
+  email: string;
+  phone: string;
+  city: string;
 };
 
 export type AgencyService = {
@@ -207,6 +219,153 @@ export function issuerAddressLines(identity: AgencyIdentity) {
     [identity.postalCode, identity.city].filter(Boolean).join(" "),
     identity.country,
   ].filter(Boolean);
+}
+
+function firstFilled(...values: unknown[]) {
+  for (const value of values) {
+    const text = String(value ?? "").trim();
+    if (text) {
+      return text;
+    }
+  }
+  return "";
+}
+
+function includesIgnoreCase(haystack: string, needle: string) {
+  return Boolean(needle) && haystack.toLowerCase().includes(needle.toLowerCase());
+}
+
+export function billingCenterContactFromRow(row: {
+  id?: unknown;
+  name?: unknown;
+  city?: unknown;
+  email?: unknown;
+  phone?: unknown;
+  address_line1?: unknown;
+  postal_code?: unknown;
+  legal?: { legalName?: unknown } | null;
+  publicCenter?: {
+    legalName?: unknown;
+    address?: unknown;
+    phone?: unknown;
+    email?: unknown;
+  } | null;
+  settings?: {
+    legal?: { legalName?: unknown };
+    center?: {
+      legalName?: unknown;
+      address?: unknown;
+      phone?: unknown;
+      email?: unknown;
+    };
+    public?: {
+      center?: {
+        legalName?: unknown;
+        address?: unknown;
+        phone?: unknown;
+        email?: unknown;
+      };
+    };
+  } | null;
+}): BillingCenterContact {
+  const settings = row.settings || {};
+  const settingsCenter = settings.center || {};
+  const legal = row.legal || settings.legal || {};
+  const publicCenter = row.publicCenter || settings.public?.center || {};
+  const city = firstFilled(row.city);
+  const street = firstFilled(
+    row.address_line1,
+    publicCenter.address,
+    settingsCenter.address,
+  );
+  const cityLine = [firstFilled(row.postal_code), city].filter(Boolean).join(" ");
+  const address =
+    street &&
+    cityLine &&
+    !includesIgnoreCase(street, cityLine) &&
+    !includesIgnoreCase(street, city)
+      ? `${street}, ${cityLine}`
+      : street || cityLine;
+
+  return {
+    id: String(row.id || ""),
+    name: firstFilled(row.name) || "Centre",
+    legalName: firstFilled(
+      legal.legalName,
+      publicCenter.legalName,
+      settingsCenter.legalName,
+    ),
+    address,
+    email: firstFilled(row.email, publicCenter.email, settingsCenter.email),
+    phone: firstFilled(row.phone, publicCenter.phone, settingsCenter.phone),
+    city,
+  };
+}
+
+export function invoiceClientDetails(
+  client?: Pick<
+    AgencyClient,
+    "name" | "legalName" | "address" | "phone" | "email" | "city"
+  > | null,
+) {
+  if (!client) {
+    return { title: "—", lines: [] as string[] };
+  }
+  const title = client.name.trim() || "—";
+  const legalName = client.legalName.trim();
+  const address = client.address.trim();
+  const lines = [
+    legalName && legalName.toLowerCase() !== title.toLowerCase() ? legalName : "",
+    address,
+    !address ? client.city.trim() : "",
+    client.phone.trim(),
+    client.email.trim(),
+  ].filter(Boolean);
+  return { title, lines };
+}
+
+export function applyBillingCenterContact(
+  client: AgencyClient,
+  center: BillingCenterContact,
+): AgencyClient {
+  const next = {
+    ...client,
+    name: center.name || client.name,
+    legalName: center.legalName || client.legalName,
+    address: center.address || client.address,
+    email: center.email || client.email,
+    phone: center.phone || client.phone,
+    city: center.city || client.city,
+  };
+  return next.name === client.name &&
+    next.legalName === client.legalName &&
+    next.address === client.address &&
+    next.email === client.email &&
+    next.phone === client.phone &&
+    next.city === client.city
+    ? client
+    : next;
+}
+
+export function syncAgencyClientsWithCenters(
+  clients: AgencyClient[],
+  centers: BillingCenterContact[],
+) {
+  const byId = new Map(centers.map((center) => [center.id, center]));
+  return clients.map((client) => {
+    const center = byId.get(client.centerId);
+    return center ? applyBillingCenterContact(client, center) : client;
+  });
+}
+
+export function withSyncedCenterContacts(
+  state: AgencyBillingState,
+  centers: BillingCenterContact[],
+) {
+  const clients = syncAgencyClientsWithCenters(state.clients, centers);
+  return clients.some((client, index) => client !== state.clients[index])
+    ? { ...state, clients }
+    : state;
 }
 
 export function emptyAgencyState(company: AgencyCompany): AgencyBillingState {
@@ -406,9 +565,14 @@ export function buildAgencyInvoiceHtml(
   state: AgencyBillingState,
   invoice: AgencyInvoice,
 ) {
-  const client = state.clients.find((item) => item.id === invoice.clientId);
+  const client = invoiceClientDetails(
+    state.clients.find((item) => item.id === invoice.clientId),
+  );
   const total = invoiceTotal(invoice);
   const issuer = issuerAddressLines(state.identity)
+    .map((line) => escapeHtml(line))
+    .join("<br />");
+  const clientLines = client.lines
     .map((line) => escapeHtml(line))
     .join("<br />");
   const lines = invoice.lines
@@ -419,9 +583,7 @@ export function buildAgencyInvoiceHtml(
           <td>${line.quantity}</td>
           <td>${escapeHtml(formatEuroAmount(line.unitPrice))}</td>
           <td>${escapeHtml(formatLineDiscount(line))}</td>
-          <td style="text-align:right">${escapeHtml(
-            formatEuroAmount(lineNet(line)),
-          )}</td>
+          <td class="right">${escapeHtml(formatEuroAmount(lineNet(line)))}</td>
         </tr>`,
     )
     .join("");
@@ -432,56 +594,127 @@ export function buildAgencyInvoiceHtml(
   <meta charset="utf-8" />
   <title>${escapeHtml(invoice.number)}</title>
   <style>
-    body { font-family: Arial, sans-serif; color: #0f172a; margin: 40px; }
-    h1 { margin: 0 0 8px; }
-    table { width: 100%; border-collapse: collapse; margin-top: 24px; }
-    th, td { text-align: left; padding: 8px 0; border-bottom: 1px solid #e2e8f0; }
-    .muted { color: #475569; font-size: 14px; }
-    .box { border: 1px solid #e2e8f0; border-radius: 12px; padding: 16px; margin-top: 24px; }
-    .legal { border: 1px solid #f59e0b; background: #fffbeb; border-radius: 12px; padding: 14px; margin-top: 24px; font-size: 14px; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 36px 40px;
+      color: #1e293b;
+      font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+      font-size: 12px;
+      font-weight: 400;
+      line-height: 1.5;
+      letter-spacing: 0.01em;
+      -webkit-font-smoothing: antialiased;
+    }
+    p { margin: 0; }
+    .header { width: 100%; border-collapse: collapse; }
+    .header td { vertical-align: top; padding: 0; border: 0; }
+    .logo { display: block; height: 38px; max-width: 180px; width: auto; object-fit: contain; margin-bottom: 12px; }
+    .issuer { color: #475569; font-size: 11.5px; line-height: 1.55; }
+    .doc-label {
+      margin: 0 0 6px;
+      color: #64748b;
+      font-size: 10px;
+      font-weight: 500;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+    .doc-number {
+      margin: 0 0 8px;
+      color: #0f172a;
+      font-size: 20px;
+      font-weight: 600;
+      letter-spacing: -0.01em;
+    }
+    .meta { color: #475569; font-size: 12px; }
     .right { text-align: right; }
-    .logo { height: 52px; max-width: 220px; width: auto; object-fit: contain; display: block; margin-bottom: 10px; }
+    .box {
+      margin-top: 28px;
+      padding: 14px 16px;
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+    }
+    .client-name {
+      margin: 2px 0 6px;
+      color: #0f172a;
+      font-size: 14px;
+      font-weight: 600;
+    }
+    .lines { width: 100%; border-collapse: collapse; margin-top: 28px; }
+    .lines th {
+      padding: 0 0 8px;
+      border-bottom: 1px solid #e2e8f0;
+      color: #64748b;
+      font-size: 10px;
+      font-weight: 500;
+      letter-spacing: 0.06em;
+      text-align: left;
+      text-transform: uppercase;
+    }
+    .lines td {
+      padding: 10px 0;
+      border-bottom: 1px solid #f1f5f9;
+      font-size: 12px;
+      font-weight: 400;
+    }
+    .total {
+      margin: 18px 0 0;
+      color: #0f172a;
+      font-size: 18px;
+      font-weight: 600;
+    }
+    .note, .bank { color: #334155; font-size: 12px; line-height: 1.55; }
+    .legal {
+      margin-top: 28px;
+      padding: 12px 14px;
+      border-left: 2px solid #d97706;
+      border-radius: 0 8px 8px 0;
+      background: #fffbeb;
+      color: #78350f;
+      font-size: 11px;
+      line-height: 1.55;
+    }
   </style>
 </head>
 <body>
-  <table>
+  <table class="header">
     <tr>
       <td>
         <img class="logo" src="${escapeHtml(agencyInvoiceLogoSrc(state.company))}" alt="${escapeHtml(state.identity.name)}" />
-        <p class="muted">${issuer}</p>
+        <p class="issuer">${issuer}</p>
       </td>
       <td class="right">
-        <p class="muted">Facture</p>
-        <h1>${escapeHtml(invoice.number)}</h1>
-        <p class="muted">Date : ${escapeHtml(formatShortDate(invoice.issuedOn))}</p>
+        <p class="doc-label">Facture</p>
+        <p class="doc-number">${escapeHtml(invoice.number)}</p>
+        <p class="meta">Date : ${escapeHtml(formatShortDate(invoice.issuedOn))}</p>
         ${
           formatInvoicePeriod(invoice)
-            ? `<p class="muted">Période : ${escapeHtml(formatInvoicePeriod(invoice))}</p>`
+            ? `<p class="meta">Période : ${escapeHtml(formatInvoicePeriod(invoice))}</p>`
             : ""
         }
       </td>
     </tr>
   </table>
   <div class="box">
-    <p class="muted">Client</p>
-    <p><strong>${escapeHtml(client?.name || "—")}</strong></p>
-    <p class="muted">${escapeHtml([client?.city, client?.email].filter(Boolean).join(" · "))}</p>
+    <p class="doc-label">Client</p>
+    <p class="client-name">${escapeHtml(client.title)}</p>
+    ${clientLines ? `<p class="meta">${clientLines}</p>` : ""}
   </div>
-  <table>
+  <table class="lines">
     <thead>
       <tr><th>Prestation</th><th>Qté</th><th>Prix</th><th>Remise</th><th class="right">Total</th></tr>
     </thead>
     <tbody>${lines}</tbody>
   </table>
-  <h1 class="right">${escapeHtml(formatEuroAmount(total))}</h1>
+  <p class="total right">${escapeHtml(formatEuroAmount(total))}</p>
   ${
     invoice.invoiceNote
-      ? `<div class="box"><p class="muted">Commentaire</p><p>${escapeHtml(invoice.invoiceNote).replace(/\n/g, "<br />")}</p></div>`
+      ? `<div class="box"><p class="doc-label">Commentaire</p><p class="note">${escapeHtml(invoice.invoiceNote).replace(/\n/g, "<br />")}</p></div>`
       : ""
   }
   <div class="box">
-    <p class="muted">Coordonnées pour le virement</p>
-    <p>${bankTransferLines(state.bank || DEFAULT_AGENCY_BANK).map((line) => escapeHtml(line)).join("<br />")}</p>
+    <p class="doc-label">Coordonnées pour le virement</p>
+    <p class="bank">${bankTransferLines(state.bank || DEFAULT_AGENCY_BANK).map((line) => escapeHtml(line)).join("<br />")}</p>
   </div>
   <p class="legal">${escapeHtml(REVERSE_CHARGE_MENTION)}</p>
 </body>
@@ -752,6 +985,8 @@ function normalizeClient(value: unknown): AgencyClient | null {
     id: String(record.id || createId()),
     centerId: String(record.centerId || ""),
     name,
+    legalName: String(record.legalName || "").trim(),
+    address: String(record.address || "").trim(),
     email: String(record.email || ""),
     phone: String(record.phone || ""),
     city: String(record.city || ""),

@@ -1,24 +1,19 @@
 "use client";
 
 import { CalendarDays } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import {
   AGENCY_COMPANIES,
   AGENCY_INVOICE_STATUSES,
-  agencyInvoiceLogoSrc,
-  bankTransferLines,
   billingAlerts,
   buildAgencyInvoiceHtml,
   companyLabel,
-  DEFAULT_AGENCY_BANK,
   createId,
   formatEuroAmount,
   formatShortDate,
-  formatLineDiscount,
   invoiceTotal,
   invoicesInRange,
-  lineNet,
   issuerAddressLines,
   kpiBreakdown,
   REVERSE_CHARGE_MENTION,
@@ -35,6 +30,7 @@ import {
   invoiceCommentLog,
   invoicePeriod,
   periodRange,
+  withSyncedCenterContacts,
   type AgencyBillingState,
   type AgencyClient,
   type AgencyCompany,
@@ -82,12 +78,22 @@ export function AgencyWorkspace() {
   useEffect(() => {
     let alive = true;
     void (async () => {
-      const [webk, bookea] = await Promise.all([
+      const [webk, bookea, centers] = await Promise.all([
         loadAgencyBilling("webk"),
         loadAgencyBilling("bookea"),
+        loadBookeaCentersForBilling().catch(() => []),
       ]);
-      if (alive) {
-        setStates({ webk, bookea });
+      const nextWebk = withSyncedCenterContacts(webk, centers);
+      const nextBookea = withSyncedCenterContacts(bookea, centers);
+      if (!alive) {
+        return;
+      }
+      setStates({ webk: nextWebk, bookea: nextBookea });
+      const dirty = [nextWebk, nextBookea].filter(
+        (item, index) => item !== [webk, bookea][index],
+      );
+      if (dirty.length) {
+        await Promise.all(dirty.map((item) => saveAgencyBilling(item)));
       }
     })();
     return () => {
@@ -1028,14 +1034,16 @@ function InvoiceDocument({
   invoice: AgencyInvoice;
   onClose: () => void;
 }) {
-  const client = state.clients.find((item) => item.id === invoice.clientId);
-  const total = invoiceTotal(invoice);
+  const frameRef = useRef<HTMLIFrameElement>(null);
+  const html = buildAgencyInvoiceHtml(state, invoice);
 
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/40 p-4 print:static print:bg-white print:p-0">
-      <div className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-2xl bg-white p-8 shadow-xl print:max-h-none print:rounded-none print:shadow-none">
+      <div className="max-h-[90vh] w-full max-w-3xl overflow-hidden rounded-2xl bg-white p-5 shadow-xl print:max-h-none print:rounded-none print:p-0 print:shadow-none">
         <div className="flex items-start justify-between gap-4 print:hidden">
-          <p className="text-sm font-black uppercase text-slate-400">Facture</p>
+          <p className="text-sm font-semibold uppercase tracking-[0.12em] text-slate-400">
+            Facture
+          </p>
           <div className="flex gap-2">
             <button
               type="button"
@@ -1046,7 +1054,7 @@ function InvoiceDocument({
             </button>
             <button
               type="button"
-              onClick={() => window.print()}
+              onClick={() => frameRef.current?.contentWindow?.print()}
               className="h-10 rounded-xl bg-slate-950 px-3 text-sm font-semibold text-white"
             >
               Imprimer
@@ -1060,96 +1068,12 @@ function InvoiceDocument({
             </button>
           </div>
         </div>
-
-        <div className="mt-4 flex flex-wrap justify-between gap-6">
-          <div>
-            <img
-              src={agencyInvoiceLogoSrc(state.company)}
-              alt={state.identity.name}
-              className="mb-3 h-14 w-auto max-w-[220px] object-contain"
-            />
-            <div className="space-y-0.5 text-sm font-medium text-slate-600">
-              {issuerAddressLines(state.identity).map((line) => (
-                <p key={line}>{line}</p>
-              ))}
-            </div>
-          </div>
-          <div className="text-right">
-            <p className="text-sm font-black uppercase text-slate-400">Facture</p>
-            <p className="text-xl font-black">{invoice.number}</p>
-            <p className="mt-1 text-sm font-semibold text-slate-600">
-              Date : {formatShortDate(invoice.issuedOn)}
-            </p>
-            {formatInvoicePeriod(invoice) ? (
-              <p className="text-sm font-semibold text-slate-600">
-                Période : {formatInvoicePeriod(invoice)}
-              </p>
-            ) : null}
-          </div>
-        </div>
-
-        <div className="mt-6 rounded-xl border border-slate-200 p-4">
-          <p className="text-xs font-black uppercase text-slate-400">Client</p>
-          <p className="mt-1 text-base font-semibold">{client?.name || "—"}</p>
-          <p className="text-sm font-medium text-slate-600">
-            {[client?.city, client?.email].filter(Boolean).join(" · ")}
-          </p>
-        </div>
-
-        <table className="mt-6 w-full text-sm">
-          <thead className="border-b text-left text-xs font-black uppercase text-slate-500">
-            <tr>
-              <th className="py-2">Prestation</th>
-              <th className="py-2">Qté</th>
-              <th className="py-2">Prix</th>
-              <th className="py-2">Remise</th>
-              <th className="py-2 text-right">Total</th>
-            </tr>
-          </thead>
-          <tbody>
-            {invoice.lines.map((line) => (
-              <tr key={line.id} className="border-b last:border-0">
-                <td className="py-2 font-semibold">{line.label}</td>
-                <td className="py-2">{line.quantity}</td>
-                <td className="py-2">{formatEuroAmount(line.unitPrice)}</td>
-                <td className="py-2">{formatLineDiscount(line)}</td>
-                <td className="py-2 text-right font-black">
-                  {formatEuroAmount(lineNet(line))}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-
-        <div className="mt-4 text-right">
-          <p className="text-2xl font-black">{formatEuroAmount(total)}</p>
-        </div>
-
-        {invoice.invoiceNote ? (
-          <div className="mt-6 rounded-xl border border-slate-200 p-4">
-            <p className="text-xs font-black uppercase text-slate-400">
-              Commentaire
-            </p>
-            <p className="mt-1 whitespace-pre-wrap text-sm font-semibold">
-              {invoice.invoiceNote}
-            </p>
-          </div>
-        ) : null}
-
-        <div className="mt-6 rounded-xl border border-slate-200 p-4">
-          <p className="text-xs font-black uppercase text-slate-400">
-            Coordonnées pour le virement
-          </p>
-          <div className="mt-2 space-y-0.5 text-sm font-medium text-slate-700">
-            {bankTransferLines(state.bank || DEFAULT_AGENCY_BANK).map((line) => (
-              <p key={line}>{line}</p>
-            ))}
-          </div>
-        </div>
-
-        <p className="mt-6 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-950">
-          {REVERSE_CHARGE_MENTION}
-        </p>
+        <iframe
+          ref={frameRef}
+          title={invoice.number}
+          srcDoc={html}
+          className="mt-4 h-[min(70vh,880px)] w-full rounded-xl border border-slate-100 bg-white"
+        />
       </div>
     </div>
   );
@@ -1175,8 +1099,10 @@ function ClientsSection({
         id: createId(),
         centerId: center.id,
         name: center.name,
+        legalName: center.legalName,
+        address: center.address,
         email: center.email,
-        phone: "",
+        phone: center.phone,
         city: center.city,
         active: true,
         phoningOffer: false,
@@ -1185,8 +1111,9 @@ function ClientsSection({
         nextInvoiceOn: "",
         createdAt: new Date().toISOString(),
       }));
-    if (imported.length > 0) {
-      onChange({ clients: [...imported, ...state.clients] });
+    const refreshed = withSyncedCenterContacts(state, centers).clients;
+    if (imported.length > 0 || refreshed !== state.clients) {
+      onChange({ clients: [...imported, ...refreshed] });
     }
   }
 
@@ -1198,6 +1125,8 @@ function ClientsSection({
           id: createId(),
           centerId: "",
           name: name.trim(),
+          legalName: "",
+          address: "",
           email: email.trim(),
           phone: "",
           city: city.trim(),
@@ -1265,8 +1194,15 @@ function ClientsSection({
               <div>
                 <p className="text-base font-semibold">{client.name}</p>
                 <p className="text-sm font-medium text-slate-500">
-                  {[client.city, client.email].filter(Boolean).join(" · ") ||
-                    "Fiche à compléter"}
+                  {[
+                    client.legalName,
+                    client.address,
+                    client.phone,
+                    client.city,
+                    client.email,
+                  ]
+                    .filter(Boolean)
+                    .join(" · ") || "Fiche à compléter"}
                 </p>
                 <p className="mt-1 text-xs font-semibold text-slate-400">
                   {client.nextInvoiceOn

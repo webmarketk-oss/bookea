@@ -1,8 +1,10 @@
 import {
+  billingCenterContactFromRow,
   emptyAgencyState,
   normalizeAgencyState,
   type AgencyBillingState,
   type AgencyCompany,
+  type BillingCenterContact,
 } from "@/lib/admin-agency-billing";
 import { createClient } from "@/lib/supabase";
 
@@ -74,24 +76,20 @@ export async function saveAgencyBilling(state: AgencyBillingState) {
   return next;
 }
 
-export async function loadBookeaCentersForBilling() {
+export async function loadBookeaCentersForBilling(): Promise<
+  BillingCenterContact[]
+> {
   const supabase = createClient();
   const { data, error } = await supabase
     .from("centers")
-    .select("id,name,city,email")
+    .select(
+      "id,name,city,email,phone,address_line1,postal_code,legal:settings->legal,publicCenter:settings->public->center",
+    )
     .order("name", { ascending: true });
   if (error) {
     throw new Error(error.message);
   }
-  return ((data ?? []) as Array<{
-    id: string;
-    name: string | null;
-    city: string | null;
-    email: string | null;
-  }>).map((center) => ({
-    id: center.id,
-    name: center.name || "Centre",
-    city: center.city || "",
-    email: center.email || "",
-  }));
+  return ((data ?? []) as Array<Record<string, unknown>>).map((center) =>
+    billingCenterContactFromRow(center),
+  );
 }
