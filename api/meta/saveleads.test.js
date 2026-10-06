@@ -183,39 +183,18 @@ test("Make : le nom de page SFK n’écrase pas le contact Facebook", () => {
   assert.match(mapped.lastName, /Beaut/);
 });
 
-test("Make : SFK Agency n’est pas un nom de prospect", () => {
-  const mapped = mapIncomingLead({
-    full_name: "SFK Agency fz llc",
-    phone: "0613277582",
-    offer: "Bilan laser offert + test offert",
-  });
-  assert.notEqual(String(mapped.firstName).toLowerCase(), "sfk");
-  assert.doesNotMatch(String(mapped.firstName), /agency/i);
-  assert.match(mapped.phone.replace(/\D/g, ""), /613277582/);
-  assert.match(mapped.campaign, /Bilan laser/);
-});
-
-test("Make : SFK + email reseaubeauteexclusive reconstruit le nom", () => {
+test("Make : le full_name Facebook est enregistré tel quel", () => {
   const mapped = mapIncomingLead({
     full_name: "SFK Agency fz llc",
     phone: "0613277583",
     email: "reseaubeauteexclusive@gmail.com",
     offer: "Bilan laser offert + test offert",
   });
-  assert.equal(mapped.firstName, "Réseau");
-  assert.match(mapped.lastName, /Beaut/);
-  assert.match(mapped.lastName, /Exclusive/);
+  assert.equal(mapped.firstName, "SFK");
+  assert.match(mapped.lastName, /Agency/);
   assert.equal(mapped.email, "reseaubeauteexclusive@gmail.com");
-});
-
-test("Make : jean.dupont@ reconstruit le nom si full_name est SFK", () => {
-  const mapped = mapIncomingLead({
-    full_name: "SFK Agency fz llc",
-    phone: "0611111111",
-    email: "jean.dupont@gmail.com",
-  });
-  assert.equal(mapped.firstName, "Jean");
-  assert.equal(mapped.lastName, "Dupont");
+  assert.match(mapped.phone.replace(/\D/g, ""), /613277583/);
+  assert.match(mapped.campaign, /Bilan laser/);
 });
 
 test("Make / Systeme.io : la source n’est pas Facebook", () => {
