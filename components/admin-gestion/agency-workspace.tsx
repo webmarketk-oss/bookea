@@ -120,10 +120,11 @@ export function AgencyWorkspace() {
     if (!state || !states) return;
     const next = { ...state, ...patch };
     if (patch.bank) {
+      const bank = patch.bank;
       const otherId = company === "webk" ? "bookea" : "webk";
       void (async () => {
         const other = await loadAgencyBilling(otherId);
-        await persist(next, { ...other, bank: patch.bank });
+        await persist(next, { ...other, bank });
       })();
       return;
     }
