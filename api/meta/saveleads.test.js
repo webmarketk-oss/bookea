@@ -267,6 +267,38 @@ test("SaveMyLeads : le mail du compte n’est pas collé sur le prospect", () =>
   assert.equal(mapped.lastName, "RAMOS");
 });
 
+test("SaveMyLeads : user_email est le mail Facebook du prospect", () => {
+  const mapped = mapIncomingLead({
+    user_email: "nathalie.ramos@outlook.fr",
+    full_name: "NATHALIE RAMOS",
+    phone: "33679836461",
+    form_name: "Soin minceur",
+  });
+  assert.equal(mapped.email, "nathalie.ramos@outlook.fr");
+  assert.equal(mapped.firstName, "NATHALIE");
+});
+
+test("SaveMyLeads : email + user_email identiques = mail du prospect", () => {
+  const mapped = mapIncomingLead({
+    email: "nathalie.ramos@outlook.fr",
+    user_email: "nathalie.ramos@outlook.fr",
+    phone: "33679836461",
+    full_name: "NATHALIE RAMOS",
+  });
+  assert.equal(mapped.email, "nathalie.ramos@outlook.fr");
+});
+
+test("SaveMyLeads : le mail Facebook gagne sur payload_member_email du compte", () => {
+  const mapped = mapIncomingLead({
+    email: "nathalie.ramos@outlook.fr",
+    payload_member_email: "webmarket.k@gmail.com",
+    payload_affiliate_user_email: "webmarket.k@gmail.com",
+    phone: "33679836461",
+    full_name: "NATHALIE RAMOS",
+  });
+  assert.equal(mapped.email, "nathalie.ramos@outlook.fr");
+});
+
 test("SaveMyLeads : Options Name/Value sans email Facebook", () => {
   const mapped = mapIncomingLead({
     options: [

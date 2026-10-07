@@ -29,9 +29,9 @@ module.exports = async function handler(req, res) {
       },
       notes: [
         "Dans SaveMyLeads : Facebook Lead Ads → Webhooks → POST json vers cette URL.",
-        "Name = champ Bookea, Value = champ Facebook (First name, Last name, Phone number, Email, Form name).",
-        "Ne mapper Email que si le formulaire Facebook demande un mail. Sinon, supprimer la ligne email.",
-        "Ne pas envoyer payload_member_email ni le mail du compte Facebook.",
+        "Name = champ Bookea, Value = champ Facebook (First name, Last name, Phone number, Email ou user_email, Form name).",
+        "Mapper email ← Email / user_email. C’est le mail du prospect Facebook, pas celui du compte.",
+        "Ne pas envoyer le mail du compte SaveMyLeads / Facebook dans email.",
       ],
     });
   }
@@ -54,16 +54,13 @@ module.exports = async function handler(req, res) {
       return res.status(400).json({ ok: false, error: "missing_center" });
     }
 
-    const mapped = recoverIncomingLead(
-      mapIncomingLead(payload, req.query),
-      { ...payload, ...queryFields(req.query) },
-    );
+    const fields = incomingLeadFields(payload, req.query);
+    const mapped = recoverIncomingLead(mapIncomingLead(payload, req.query), fields);
     const sourceName = resolveIncomingSource(payload, req.query, "Facebook", req);
     const phone = isPlaceholderValue(mapped.phone) ? "" : mapped.phone;
-    let email = isPlaceholderValue(mapped.email) ? "" : mapped.email;
     const firstName = isJunkLeadName(mapped.firstName) ? "" : mapped.firstName;
 
-    if (!phone && !email) {
+    if (!phone && !mapped.email) {
       return res.status(400).json({ ok: false, error: "missing_contact" });
     }
 
@@ -78,7 +75,10 @@ module.exports = async function handler(req, res) {
       });
     }
 
-    email = rejectOwnerEmail(email, await ownerEmailsForCenter(supabase, center, payload));
+    const email = pickLeadEmail(
+      fields,
+      await ownerEmailsForCenter(supabase, center, fields),
+    );
 
     const imported = {
       ...mapped,
@@ -392,11 +392,15 @@ function pickExact(fields, names) {
   return "";
 }
 
-function mapIncomingLead(payload, query) {
-  const fields = {
+function incomingLeadFields(payload, query) {
+  return {
     ...flattenFields(queryFields(query)),
     ...flattenFields(payload),
   };
+}
+
+function mapIncomingLead(payload, query) {
+  const fields = incomingLeadFields(payload, query);
   const person = resolvePersonName(
     {
       ...fields,
@@ -969,9 +973,15 @@ function isOwnerEmailField(key) {
   if (!/email|mail/.test(needle)) {
     return false;
   }
-  return /affiliate|account|owner|user_email|from_email|connected|workspace/.test(
-    needle,
-  );
+  return /affiliate|account|owner|from_email|connected|workspace/.test(needle);
+}
+
+function looksLikeEmail(value) {
+  const text = skipPlaceholder(value);
+  if (!text) {
+    return "";
+  }
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(text) ? text : "";
 }
 
 function normalizeEmail(value) {
@@ -1058,19 +1068,29 @@ async function ownerEmailsForCenter(supabase, center, fields) {
   return emails;
 }
 
-function pickLeadEmail(fields) {
+function pickLeadEmail(fields, extraBlocked) {
   const blocked = new Set([
     ...affiliateEmailsFrom(fields),
     ...ownerEmailsFromPayload(fields),
+    ...(extraBlocked || []),
   ]);
   const candidates = [
-    pickLeadValue(fields, ["contact_email"]),
-    pickLeadValue(fields, ["email", "email_address", "mail"]),
+    pickExact(fields, ["contact_email", "payload_contact_email"]),
+    pickExact(fields, [
+      "email",
+      "email_address",
+      "mail",
+      "e_mail",
+      "courriel",
+      "adresse_email",
+    ]),
+    pickExact(fields, ["user_email"]),
     pickLeadValue(fields, ["member_email"]),
+    pickLeadValue(fields, ["email", "email_address", "mail"]),
   ];
 
   for (const candidate of candidates) {
-    const email = rejectOwnerEmail(candidate, blocked);
+    const email = rejectOwnerEmail(looksLikeEmail(candidate), blocked);
     if (email) {
       return email;
     }
@@ -1213,7 +1233,7 @@ function shouldPromoteNestedField(prefix, short) {
   const root = String(prefix || "")
     .split(/[._]/)
     .filter(Boolean)[0];
-  if (/^(user|account|owner|affiliate|workspace|sml)$/i.test(root || "")) {
+  if (/^(account|owner|affiliate|workspace)$/i.test(root || "")) {
     return false;
   }
   if (short !== "name") {
