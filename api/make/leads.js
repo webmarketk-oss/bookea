@@ -14,7 +14,7 @@ module.exports = async function handler(req, res) {
       ok: true,
       endpoint: "make/leads",
       method: "POST",
-      url: "https://www.bookeai.fr/api/make/leads?center=SLUG_DU_CENTRE&source=systeme.io",
+      url: "https://www.bookeai.fr/api/leads?center=SLUG_DU_CENTRE&source=systeme.io",
       body: {
         first_name: "Marie",
         last_name: "Dupont",
@@ -23,14 +23,15 @@ module.exports = async function handler(req, res) {
         offre: "Soin minceur",
       },
       notes: [
-        "Dans Make : Systeme.io (nouveau contact / tag) → HTTP POST vers cette URL.",
-        "Le centre se choisit dans l’URL, pas dans Systeme.io.",
-        "Mapper le contact (prénom, nom, email, téléphone) et le titre d’offre, jamais l’affilié.",
+        "Systeme.io : webhook / HTTP POST json vers /api/leads?center=SLUG&source=systeme.io",
+        "Le centre se choisit dans l’URL. Mapper le contact, jamais l’affilié.",
       ],
     });
   }
 
-  if (req.query?.origin && !req.query?.source) {
+  if (!req.query?.source && !req.query?.origin) {
+    req.query = { ...(req.query || {}), source: "systeme.io" };
+  } else if (req.query?.origin && !req.query?.source) {
     req.query = { ...(req.query || {}), source: req.query.origin };
   }
   return saveleads(req, res);

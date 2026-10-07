@@ -1491,8 +1491,12 @@ function CenterCard({
               </a>
             </div>
             <p className="mt-2 text-xs font-semibold text-slate-400">
-              Exemple GAP : collez l&apos;ID de la Page, puis connectez-vous avec
-              le compte Meta admin de cette page.
+              Collez l&apos;ID de la Page, connectez-vous avec le compte Meta
+              admin, puis dans Meta : webhook{" "}
+              <span className="font-mono text-slate-600">
+                https://www.bookeai.fr/api/meta/leads
+              </span>
+              . Systeme.io se colle dans Paramètres → Sources.
             </p>
           </div>
         </div>

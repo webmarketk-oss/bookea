@@ -19,7 +19,7 @@ module.exports = async function handler(req, res) {
       ok: true,
       endpoint: "saveleads",
       method: "POST",
-      url: "https://www.bookeai.fr/api/meta/saveleads?center=SLUG_DU_CENTRE&source=savemyleads",
+      url: "https://www.bookeai.fr/api/leads?center=SLUG_DU_CENTRE&source=savemyleads",
       body: {
         first_name: "Marie",
         last_name: "Dupont",
@@ -913,16 +913,6 @@ function flattenFields(raw, prefix = "") {
 }
 
 function resolveIncomingSource(payload, query, fallback = "Facebook", req) {
-  const ua = String(
-    req?.headers?.["user-agent"] ||
-      req?.headers?.["User-Agent"] ||
-      payload?.user_agent ||
-      "",
-  );
-  if (/savemyleads|save.?my.?leads/i.test(ua)) {
-    return "SaveMyLeads";
-  }
-
   const raw = firstValue(
     query?.source,
     query?.origin,
@@ -930,13 +920,16 @@ function resolveIncomingSource(payload, query, fallback = "Facebook", req) {
     payload?.origin,
     payload?.via,
   );
-  const needle = String(raw || fallback || "facebook")
+  const needle = String(raw || "")
     .trim()
     .toLowerCase()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "");
   if (/systeme/.test(needle)) {
     return "Systeme.io";
+  }
+  if (/bookea|vercel/.test(needle)) {
+    return "Bookea";
   }
   if (/make/.test(needle)) {
     return "Make";
@@ -947,6 +940,17 @@ function resolveIncomingSource(payload, query, fallback = "Facebook", req) {
   if (/facebook|meta/.test(needle)) {
     return "Facebook";
   }
+
+  const ua = String(
+    req?.headers?.["user-agent"] ||
+      req?.headers?.["User-Agent"] ||
+      payload?.user_agent ||
+      "",
+  );
+  if (/savemyleads|save.?my.?leads/i.test(ua)) {
+    return "SaveMyLeads";
+  }
+
   const label = String(raw || fallback || "Facebook").trim();
   return label || "Facebook";
 }

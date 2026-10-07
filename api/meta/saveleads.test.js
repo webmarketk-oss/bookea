@@ -246,10 +246,20 @@ test("Make / Systeme.io / SaveMyLeads : la source n’est pas Facebook", () => {
     "SaveMyLeads",
   );
   assert.equal(
-    resolveIncomingSource({}, { source: "facebook" }, "Facebook", {
+    resolveIncomingSource({}, { source: "bookea" }, "Facebook"),
+    "Bookea",
+  );
+  assert.equal(
+    resolveIncomingSource({}, {}, "Facebook", {
       headers: { "user-agent": "SaveMyLeads" },
     }),
     "SaveMyLeads",
+  );
+  assert.equal(
+    resolveIncomingSource({}, { source: "systeme.io" }, "Facebook", {
+      headers: { "user-agent": "SaveMyLeads" },
+    }),
+    "Systeme.io",
   );
   assert.equal(resolveIncomingSource({}, {}, "Facebook"), "Facebook");
 });

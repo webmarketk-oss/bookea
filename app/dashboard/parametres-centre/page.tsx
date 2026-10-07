@@ -12,6 +12,7 @@ import {
   Check,
   CheckCircle2,
   ChevronDown,
+  Copy,
   CreditCard,
   ExternalLink,
   Eye,
@@ -2546,7 +2547,8 @@ export default function CenterSettingsPage() {
 
       {activeTab === "sources" && (
         <section className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-sm">
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+          <InboundLeadsCard slug={center.slug} />
+          <div className="mt-8 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
             <SectionTitle
               icon={<Share2 className="h-4 w-4" />}
               title="Sources & provenances"
@@ -3108,6 +3110,87 @@ function MetricCard({
         <div className="grid h-10 w-10 place-items-center rounded-xl bg-slate-50 text-slate-600">
           {icon}
         </div>
+      </div>
+    </div>
+  );
+}
+
+function inboundLeadUrls(slug: string) {
+  const center = encodeURIComponent(slug.trim() || "SLUG_DU_CENTRE");
+  return {
+    facebook: "https://www.bookeai.fr/api/meta/leads",
+    systeme: `https://www.bookeai.fr/api/leads?center=${center}&source=systeme.io`,
+    bookea: `https://www.bookeai.fr/api/leads?center=${center}&source=bookea`,
+  };
+}
+
+function InboundLeadsCard({ slug }: { slug: string }) {
+  const urls = inboundLeadUrls(slug);
+  return (
+    <div className="rounded-[24px] border border-violet-100 bg-violet-50/70 p-5">
+      <SectionTitle
+        icon={<Share2 className="h-4 w-4" />}
+        title="Leads Facebook, Systeme.io, Bookea"
+        subtitle="Un seul format : prénom, nom, email, téléphone, offre. La source est dans l’URL."
+      />
+      <div className="mt-5 grid gap-3">
+        <CopyLeadUrl
+          label="Facebook (formulaire Lead Ads)"
+          hint="Brancher la Page dans Admin centres, puis coller cette URL dans le webhook Meta. Plus SaveMyLeads."
+          url={urls.facebook}
+        />
+        <CopyLeadUrl
+          label="Systeme.io"
+          hint="Webhook Systeme.io → POST json. Mapper le contact, jamais l’affilié."
+          url={urls.systeme}
+        />
+        <CopyLeadUrl
+          label="Site Bookea (Vercel)"
+          hint="Formulaire ou outil Bookea."
+          url={urls.bookea}
+        />
+      </div>
+    </div>
+  );
+}
+
+function CopyLeadUrl({
+  label,
+  hint,
+  url,
+}: {
+  label: string;
+  hint: string;
+  url: string;
+}) {
+  const [copied, setCopied] = useState(false);
+
+  async function copyUrl() {
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1600);
+    } catch {
+      setCopied(false);
+    }
+  }
+
+  return (
+    <div className="rounded-2xl border border-white bg-white p-4 shadow-sm">
+      <p className="text-sm font-semibold text-slate-950">{label}</p>
+      <p className="mt-1 text-xs text-slate-500">{hint}</p>
+      <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center">
+        <code className="min-w-0 flex-1 truncate rounded-xl bg-slate-50 px-3 py-2 text-xs font-medium text-slate-700">
+          {url}
+        </code>
+        <button
+          type="button"
+          onClick={() => void copyUrl()}
+          className="inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-xl bg-slate-950 px-3 text-sm font-medium text-white"
+        >
+          {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+          {copied ? "Copié" : "Copier"}
+        </button>
       </div>
     </div>
   );
