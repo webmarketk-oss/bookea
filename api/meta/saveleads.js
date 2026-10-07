@@ -46,7 +46,7 @@ module.exports = async function handler(req, res) {
     );
     const sourceName = resolveIncomingSource(payload, req.query, "Facebook");
     const phone = isPlaceholderValue(mapped.phone) ? "" : mapped.phone;
-    const email = isPlaceholderValue(mapped.email) ? "" : mapped.email;
+    let email = isPlaceholderValue(mapped.email) ? "" : mapped.email;
     const firstName = isJunkLeadName(mapped.firstName) ? "" : mapped.firstName;
 
     if (!phone && !email) {
@@ -63,6 +63,8 @@ module.exports = async function handler(req, res) {
         center: centerSlug,
       });
     }
+
+    email = rejectOwnerEmail(email, await ownerEmailsForCenter(supabase, center, payload));
 
     const imported = {
       ...mapped,
@@ -624,7 +626,11 @@ async function importPostedLead(supabase, centerId, mapped, options = {}) {
 }
 
 async function findCenter(supabase, slug) {
-  return findCenterBySlug(supabase, slug);
+  return findCenterBySlug(
+    supabase,
+    slug,
+    "id,name,slug,settings,email,owner_profile_id",
+  );
 }
 
 async function findExistingLeadByPhone(supabase, centerId, phone) {
@@ -934,6 +940,16 @@ function isAffiliateField(key) {
   return /affiliate/.test(String(key || "").toLowerCase());
 }
 
+function isOwnerEmailField(key) {
+  const needle = String(key || "").toLowerCase();
+  if (!/email|mail/.test(needle)) {
+    return false;
+  }
+  return /affiliate|account|owner|user_email|from_email|connected|workspace/.test(
+    needle,
+  );
+}
+
 function normalizeEmail(value) {
   return String(value || "").trim().toLowerCase();
 }
@@ -946,17 +962,92 @@ function affiliateEmailsFrom(fields) {
   );
 }
 
+function ownerEmailsFromPayload(fields) {
+  return new Set(
+    Object.entries(fields || {})
+      .filter(([key, value]) => isOwnerEmailField(key) && value)
+      .map(([, value]) => normalizeEmail(value))
+      .filter(Boolean),
+  );
+}
+
+function ownerEmailsFromCenter(center) {
+  const settings =
+    center?.settings && typeof center.settings === "object" ? center.settings : {};
+  return new Set(
+    [
+      center?.email,
+      settings.email,
+      settings.center?.email,
+      settings.centerProfile?.supportEmail,
+      settings.seya?.centerProfile?.supportEmail,
+    ]
+      .map((value) => normalizeEmail(value))
+      .filter(Boolean),
+  );
+}
+
+function rejectOwnerEmail(email, blocked) {
+  const value = String(email || "").trim();
+  if (!value) {
+    return "";
+  }
+  if (blocked && typeof blocked.has === "function" && blocked.has(normalizeEmail(value))) {
+    return "";
+  }
+  return value;
+}
+
+async function staffEmailsForCenter(supabase, center) {
+  const emails = ownerEmailsFromCenter(center);
+  if (center?.owner_profile_id) {
+    const { data: owner } = await supabase
+      .from("profiles")
+      .select("email")
+      .eq("id", center.owner_profile_id)
+      .maybeSingle();
+    const email = normalizeEmail(owner?.email);
+    if (email) {
+      emails.add(email);
+    }
+  }
+  const { data: members } = await supabase
+    .from("center_members")
+    .select("profiles(email)")
+    .eq("center_id", center.id)
+    .eq("is_active", true);
+  for (const row of members || []) {
+    const profile = Array.isArray(row.profiles) ? row.profiles[0] : row.profiles;
+    const email = normalizeEmail(profile?.email);
+    if (email) {
+      emails.add(email);
+    }
+  }
+  return emails;
+}
+
+async function ownerEmailsForCenter(supabase, center, fields) {
+  const emails = new Set([
+    ...ownerEmailsFromPayload(fields),
+    ...(await staffEmailsForCenter(supabase, center)),
+  ]);
+  return emails;
+}
+
 function pickLeadEmail(fields) {
-  const blocked = affiliateEmailsFrom(fields);
+  const blocked = new Set([
+    ...affiliateEmailsFrom(fields),
+    ...ownerEmailsFromPayload(fields),
+  ]);
   const candidates = [
-    pickLeadValue(fields, ["member_email"]),
     pickLeadValue(fields, ["contact_email"]),
     pickLeadValue(fields, ["email", "email_address", "mail"]),
+    pickLeadValue(fields, ["member_email"]),
   ];
 
   for (const candidate of candidates) {
-    const email = String(candidate || "").trim();
-    if (email && !blocked.has(normalizeEmail(email))) {
+    const email = rejectOwnerEmail(candidate, blocked);
+    if (email) {
       return email;
     }
   }
@@ -1168,3 +1259,6 @@ module.exports.resolveIncomingSource = resolveIncomingSource;
 module.exports.extractLooseContact = extractLooseContact;
 module.exports.payloadFromBody = payloadFromBody;
 module.exports.unwrapLeadPayload = unwrapLeadPayload;
+module.exports.rejectOwnerEmail = rejectOwnerEmail;
+module.exports.ownerEmailsFromCenter = ownerEmailsFromCenter;
+module.exports.ownerEmailsFromPayload = ownerEmailsFromPayload;

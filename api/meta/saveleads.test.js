@@ -77,6 +77,43 @@ test("Systeme.io : même si email = mail affilié, on garde le mail du membre", 
   assert.equal(mapped.email, "cliente.test@outlook.com");
 });
 
+test("le mail contact gagne sur le mail du membre / du compte", () => {
+  const mapped = mapIncomingLead({
+    email: "webmarket.k@gmail.com",
+    payload_member_email: "webmarket.k@gmail.com",
+    payload_contact_email: "nathalie.ramos@outlook.fr",
+    payload_member_first_name: "Nathalie",
+    payload_member_last_name: "Ramos",
+    payload_contact_phone_number: "33679836461",
+    offre: "Soin minceur",
+  });
+  assert.equal(mapped.email, "nathalie.ramos@outlook.fr");
+});
+
+test("le mail du centre n’est pas collé sur le prospect Facebook", () => {
+  const { rejectOwnerEmail, ownerEmailsFromCenter } = require("./saveleads");
+  const blocked = ownerEmailsFromCenter({
+    email: "webmarket.k@gmail.com",
+    settings: { center: { email: "webmarket.k@gmail.com" } },
+  });
+  assert.equal(rejectOwnerEmail("webmarket.k@gmail.com", blocked), "");
+  assert.equal(rejectOwnerEmail("nathalie@cliente.fr", blocked), "nathalie@cliente.fr");
+});
+
+test("Make : email mappé sur payload_member_email du compte → ignoré s’il est affilié", () => {
+  const mapped = mapIncomingLead({
+    email: "webmarket.k@gmail.com",
+    payload_affiliate_user_email: "webmarket.k@gmail.com",
+    payload_member_email: "webmarket.k@gmail.com",
+    prénom: "Nathalie",
+    nom: "Ramos",
+    téléphone: "33679836461",
+    offre: "Soin minceur",
+  });
+  assert.equal(mapped.email, "");
+  assert.equal(mapped.firstName, "Nathalie");
+});
+
 test("Systeme.io : un mail affilié tout seul n’est pas collé sur le lead", () => {
   const mapped = mapIncomingLead({
     email: "webmarket.k@gmail.com",
