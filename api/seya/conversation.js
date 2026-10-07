@@ -945,13 +945,23 @@ function dayPartFromText(text) {
   return "";
 }
 
+function asksNextWeek(text) {
+  const value = normalize(text);
+  return /semaine (d[' ]?)?(apres|suivante|prochaine)|la semaine prochaine/.test(
+    value,
+  );
+}
+
 function asksOtherDay(text) {
   const value = normalize(text);
   if (comeBackPhrase(value)) {
     return false;
   }
-  return /change de jour|d[' ]?autres? ?j|un autre jour|autre journee|autres? (jours?|horaires)|pas ce jour|aucun ce jour|d[' ]autres creneaux/.test(
-    value,
+  return (
+    asksNextWeek(text) ||
+    /change de jour|d[' ]?autres? ?j|un autre jour|autre journee|autres? (jours?|horaires)|pas ce jour|aucun ce jour|aucun je |d[' ]autres creneaux/.test(
+      value,
+    )
   );
 }
 
@@ -1241,6 +1251,7 @@ module.exports = {
   greetingForTime,
   weekHalfFromText,
   dayPartFromText,
+  asksNextWeek,
   asksOtherDay,
   lastSeyaAskedToSearch,
   willCallBackReply,

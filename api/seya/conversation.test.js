@@ -1224,6 +1224,164 @@ test("prix pour 6 séances puis « le prix avant » : elle ne se tait pas", asyn
   assert.match(secondAnswer, /avant de venir|fourchette|rappeler/i);
 });
 
+test("13h ou 18h : elle propose ces horaires, pas 16h", async () => {
+  const now = new Date("2026-10-06T10:00:00");
+  let conversation = startConversation(
+    {
+      leadId: "lead-nathalie-horaires",
+      centerId: "jfg-clinique-clermont",
+      firstName: "Nathalie",
+      lastName: "Test",
+      phone: "0611223344",
+      treatment: "Soin minceur",
+    },
+    "JFG Clinique Clermont",
+    seya,
+  );
+  conversation.qualification = {
+    need: "Soin minceur",
+    zone: "ventre",
+    delay: "",
+    availability: "",
+  };
+  conversation = await reply(
+    conversation,
+    "Oui plutôt le soir à 18h si possible ? Ou pendant ma pause déjeuner à 13h ?",
+    { now },
+  );
+  const answer = lastSeya(conversation);
+  assert.match(answer, /13h00|18h00/i);
+  assert.doesNotMatch(answer, /revenez|plus tard|pas d['’]autres créneaux/i);
+  const times = (conversation.proposedSlots || []).map((slot) => slot.time);
+  assert.ok(
+    times.some((time) => time === "13:00" || time === "18:00"),
+    String(times),
+  );
+});
+
+test("aucun cette semaine + semaine d’après : elle cherche jusqu’à 30 jours", async () => {
+  const now = new Date("2026-10-06T10:00:00");
+  let conversation = startConversation(
+    {
+      leadId: "lead-nathalie-semaine",
+      centerId: "jfg-clinique-clermont",
+      firstName: "Nathalie",
+      lastName: "Test",
+      phone: "0611223344",
+      treatment: "Soin minceur",
+    },
+    "JFG Clinique Clermont",
+    seya,
+  );
+  conversation.qualification = {
+    need: "Soin minceur",
+    zone: "ventre",
+    delay: "",
+    availability: "",
+  };
+  conversation.proposedSlots = [
+    { date: "2026-10-13", time: "16:00", label: "mar. 13/10 à 16h00" },
+    { date: "2026-10-14", time: "17:30", label: "mer. 14/10 à 17h30" },
+    { date: "2026-10-15", time: "16:00", label: "jeu. 15/10 à 16h00" },
+  ];
+  conversation.bookingState = {
+    ...(conversation.bookingState || {}),
+    lastOfferedSlots: conversation.proposedSlots,
+    preferredTimes: ["18:00", "13:00"],
+    preferredTime: "18:00",
+    appointmentStatus: "proposed",
+    pendingQuestion: "offer_slots",
+  };
+  conversation.messages.push({
+    author: "seya",
+    text: "Je peux vous proposer mardi 13/10 à 16h00, mercredi 14/10 à 17h30 ou jeudi 15/10 à 16h00.",
+  });
+  conversation = await reply(
+    conversation,
+    "Aucun je travaille et la semaine d’après ?",
+    { now },
+  );
+  const answer = lastSeya(conversation);
+  assert.doesNotMatch(
+    answer,
+    /pas d['’]autres créneaux|revenir vers nous un peu plus tard|invite à revenir/i,
+  );
+  assert.match(answer, /13h00|18h00|20\/10|21\/10|22\/10|23\/10|lun\.|mar\.|mer\.|jeu\./i);
+  const dates = (conversation.proposedSlots || []).map((slot) => slot.date);
+  assert.ok(
+    dates.every((date) => date > "2026-10-15"),
+    String(dates),
+  );
+});
+
+test("fil Nathalie : elle écoute 13h/18h et cherche jusqu’à 30 jours", async () => {
+  const now = new Date("2026-10-06T10:00:00");
+  const taken = [{ date: "2026-10-14", start: "17:30", duration: 75 }];
+  let conversation = startConversation(
+    {
+      leadId: "lead-nathalie-fil",
+      centerId: "jfg-clinique-clermont",
+      firstName: "Nathalie",
+      lastName: "Test",
+      phone: "0611223344",
+      treatment: "Soin minceur",
+    },
+    "JFG Clinique Clermont",
+    seya,
+  );
+  conversation.qualification = {
+    need: "Soin minceur",
+    zone: "",
+    delay: "",
+    availability: "",
+  };
+
+  conversation = await reply(conversation, "Bonjour. Ventres/hanches", { now });
+  conversation = await reply(
+    conversation,
+    "Oui plutôt le soir à 18h si possible ? Ou pendant ma pause déjeuner à 13h ?",
+    { now },
+  );
+  let answer = lastSeya(conversation);
+  assert.match(answer, /13h00|18h00/i);
+  assert.doesNotMatch(answer, /16h00|revenez|plus tard|pas d['’]autres créneaux/i);
+  assert.ok(
+    (conversation.proposedSlots || []).some(
+      (slot) => slot.time === "13:00" || slot.time === "18:00",
+    ),
+    String((conversation.proposedSlots || []).map((slot) => slot.time)),
+  );
+
+  conversation = await reply(
+    conversation,
+    "Si vraiment pas possible à 13h ou à 18h j'essaie de m'arranger pour mercredi 14 octobre à 17h30 ?",
+    { now, appointments: taken },
+  );
+  answer = lastSeya(conversation);
+  assert.doesNotMatch(
+    answer,
+    /pas d['’]autres créneaux|revenir vers nous un peu plus tard|invite à revenir/i,
+  );
+
+  conversation = await reply(
+    conversation,
+    "Aucun je travaille et la semaine d’après ?",
+    { now, appointments: taken },
+  );
+  answer = lastSeya(conversation);
+  assert.doesNotMatch(
+    answer,
+    /pas d['’]autres créneaux|revenir vers nous un peu plus tard|invite à revenir|recontacte/i,
+  );
+  assert.match(answer, /13h00|18h00|20\/10|21\/10|22\/10|23\/10|lun\.|mar\.|mer\.|jeu\./i);
+  const dates = (conversation.proposedSlots || []).map((slot) => slot.date);
+  assert.ok(dates.length, answer);
+  assert.ok(
+    dates.every((date) => date >= "2026-10-16"),
+    String(dates),
+  );
+});
+
 test("le 1er WhatsApp reprend le texte d’offre du centre, pas l’intitulé campagne", () => {
   const conversation = startConversation(
     {

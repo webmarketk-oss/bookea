@@ -21,6 +21,7 @@ const {
   refusesSlots,
   wantsSlots,
   weekHalfFromText,
+  asksNextWeek,
 } = require("./conversation");
 
 const WEEKDAYS = [
@@ -52,6 +53,8 @@ function emptyBookingState(centerId) {
     unansweredPriceIntent: null,
     lastLeadPriceText: "",
     preferredTime: null,
+    preferredTimes: [],
+    searchFrom: null,
   };
 }
 
@@ -74,6 +77,12 @@ function normalizeBookingState(value, centerId) {
     unansweredPriceIntent: current.unansweredPriceIntent || null,
     lastLeadPriceText: current.lastLeadPriceText || "",
     preferredTime: current.preferredTime || null,
+    preferredTimes: Array.isArray(current.preferredTimes)
+      ? current.preferredTimes.filter(Boolean)
+      : current.preferredTime
+        ? [current.preferredTime]
+        : [],
+    searchFrom: current.searchFrom || null,
   };
 }
 
@@ -185,11 +194,16 @@ function applyBookingMessage(state, text, extras = {}) {
   const clocks = parseClockMinutes(text);
   if (wantsNoon(text)) {
     next.preferredTime = "12:00";
+    next.preferredTimes = ["12:00"];
     next.dayPart = null;
-  } else if (clocks.length === 1 && !isMessageTimeMention(text) && !isRescheduleAsk(text)) {
-    const hours = Math.floor(clocks[0] / 60);
-    const minutes = clocks[0] % 60;
-    next.preferredTime = `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
+  } else if (clocks.length && !isMessageTimeMention(text) && !isRescheduleAsk(text)) {
+    next.preferredTimes = unique(clocks.map(minutesToClock));
+    next.preferredTime = next.preferredTimes[0];
+    const hasLunch = clocks.some((minutes) => minutes >= 12 * 60 && minutes <= 14 * 60);
+    const hasEvening = clocks.some((minutes) => minutes >= 17 * 60);
+    if (hasLunch && hasEvening) {
+      next.dayPart = null;
+    }
   }
 
   const bookedDate = extras.conversation?.bookedSlot?.date;
@@ -200,7 +214,7 @@ function applyBookingMessage(state, text, extras = {}) {
   }
 
   const dayPart = dayPartFromText(text);
-  if (dayPart && !wantsNoon(text)) {
+  if (dayPart && !wantsNoon(text) && !(next.preferredTimes || []).some(isLunchClock)) {
     next.dayPart = dayPart;
     next.lastOfferedSlots = [];
     next.pendingQuestion = null;
@@ -275,6 +289,32 @@ function applyBookingMessage(state, text, extras = {}) {
       .forEach((date) => {
         next.rejectedDates = unique([...next.rejectedDates, date]);
       });
+  }
+
+  if (asksNextWeek(text)) {
+    next.lastOfferedSlots.forEach((slot) => {
+      if (slot?.date) {
+        next.rejectedDates = unique([...next.rejectedDates, slot.date]);
+      }
+    });
+    const lastDiscussed = [
+      ...(next.lastOfferedSlots || []).map((slot) => slot?.date),
+      next.requestedDate,
+      ...((extras.conversation && extras.conversation.proposedSlots) || []).map(
+        (slot) => slot?.date,
+      ),
+    ]
+      .filter(Boolean)
+      .sort()
+      .at(-1);
+    next.searchFrom = lastDiscussed
+      ? startOfFollowingWeek(lastDiscussed)
+      : nextWeekStart(now);
+    next.requestedDate = null;
+    next.requestedWeekday = null;
+    next.weekHalf = null;
+    next.lastOfferedSlots = [];
+    next.pendingQuestion = null;
   }
 
   if (asksOtherDay(text)) {
@@ -383,7 +423,9 @@ function asksForOtherSlots(text) {
   const value = normalize(text);
   return (
     asksOtherDay(text) ||
+    asksNextWeek(text) ||
     Boolean(dayPartFromText(text)) ||
+    Boolean(parseClockMinutes(text).length) ||
     /propose quoi|suivant|prochain|debut de semaine|fin de semaine|aujourd[' ]?hui/.test(
       value,
     ) ||
@@ -449,6 +491,7 @@ function guardSlots(slots, state, extras = {}) {
     if (!matchesDayPart(slot, state)) return true;
     if (rejected.has(slot.date)) return true;
     if (rejectedDays.has(weekdayOf(slot.date))) return true;
+    if (state.searchFrom && slot.date < state.searchFrom) return true;
     return false;
   });
 
@@ -484,6 +527,9 @@ function guardSlots(slots, state, extras = {}) {
     if (rejected.has(slot.date) || rejectedDays.has(weekdayOf(slot.date))) {
       return false;
     }
+    if (state.searchFrom && slot.date < state.searchFrom) {
+      return false;
+    }
     if (
       (state.rejectedSlots || []).some(
         (item) => item.date === slot.date && item.time === slot.time,
@@ -516,6 +562,12 @@ function emptySlotFallback(state) {
   }
   if (state.requestedWeekday != null) {
     return `Je n’ai pas de disponibilité ${WEEKDAYS[state.requestedWeekday]} pour ce bilan. Souhaitez-vous un autre jour ?`;
+  }
+  if ((state.preferredTimes || []).length) {
+    const hours = state.preferredTimes
+      .map((time) => String(time).replace(":", "h"))
+      .join(" ou ");
+    return `Je n’ai pas de ${hours} dans les 30 prochains jours. Souhaitez-vous un horaire proche, ou une autre journée ?`;
   }
   if (state.dayPart === "evening") {
     return "Je n’ai pas de créneau en fin de journée sur ces jours-là. Souhaitez-vous un autre horaire, ou une autre journée ?";
@@ -762,6 +814,33 @@ function normalize(value) {
 
 function unique(list) {
   return [...new Set((list || []).filter((item) => item || item === 0))];
+}
+
+function minutesToClock(total) {
+  const hours = Math.floor(Number(total) / 60);
+  const minutes = Number(total) % 60;
+  return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
+}
+
+function isLunchClock(value) {
+  if (typeof value === "number") {
+    return value >= 12 * 60 && value <= 14 * 60;
+  }
+  const [hours, minutes] = String(value || "00:00").split(":").map(Number);
+  const total = (hours || 0) * 60 + (minutes || 0);
+  return total >= 12 * 60 && total <= 14 * 60;
+}
+
+function nextWeekStart(now) {
+  const weekday = (now instanceof Date ? now : new Date()).getDay();
+  const add = weekday === 0 ? 1 : 8 - weekday;
+  return addDays(todayIso(now), add);
+}
+
+function startOfFollowingWeek(iso) {
+  const weekday = weekdayOf(iso);
+  const add = weekday === 0 ? 1 : 8 - weekday;
+  return addDays(iso, add);
 }
 
 function dbStatusWhenSlotPositioned(date, start) {

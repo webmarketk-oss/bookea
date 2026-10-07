@@ -382,6 +382,38 @@ test("un créneau déjà refusé n’est pas reproposé", () => {
   assert.ok(slots.length > 0);
 });
 
+test("semaine d’après : cherche à partir du lundi suivant, pas le lendemain", () => {
+  const now = new Date("2026-10-06T10:00:00");
+  const next = applyBookingMessage(
+    {
+      ...emptyBookingState(CENTER_ID),
+      lastOfferedSlots: [
+        { date: "2026-10-13", time: "16:00" },
+        { date: "2026-10-14", time: "17:30" },
+        { date: "2026-10-15", time: "16:00" },
+      ],
+      requestedDate: "2026-10-14",
+      preferredTimes: ["18:00", "13:00"],
+    },
+    "Aucun je travaille et la semaine d’après ?",
+    { now, centerId: CENTER_ID },
+  );
+  assert.equal(next.searchFrom, "2026-10-19");
+  assert.equal(next.requestedDate, null);
+
+  const guarded = guardSlots(
+    [
+      { date: "2026-10-15", time: "13:00", label: "jeu. 15/10 à 13h00" },
+      { date: "2026-10-19", time: "13:00", label: "lun. 19/10 à 13h00" },
+    ],
+    next,
+  );
+  assert.deepEqual(
+    guarded.slots.map((slot) => slot.date),
+    ["2026-10-19"],
+  );
+});
+
 test("un créneau Seya à plus de 48h est confirmé, laser comme cryo", () => {
   const when = new Date();
   when.setDate(when.getDate() + 5);

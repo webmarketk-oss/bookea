@@ -904,6 +904,16 @@ function matchProposedSlot(text, slots, options = {}) {
       ? slots.filter((slot) => slot.date === options.date)
       : slots;
     const pool = dated.length ? dated : slots;
+    if (clocks.length >= 2 && !options.date && !options.confirmYes) {
+      return null;
+    }
+    const lastMatch = [...clocks]
+      .reverse()
+      .map((clock) => pool.find((slot) => timeToMinutes(slot.time) === clock))
+      .find(Boolean);
+    if (lastMatch) {
+      return lastMatch;
+    }
     const exact = pool.find((slot) => clocks.includes(timeToMinutes(slot.time)));
     if (exact) {
       return exact;
@@ -1145,18 +1155,16 @@ function parseDayRequest(text, conversation) {
 }
 
 function pickSlotsForState(appointments, hours, state, now) {
-  const today = todayIso(now);
-  const untilRequested = state.requestedDate
-    ? Math.round(
-        (new Date(`${state.requestedDate}T12:00:00`).getTime() -
-          new Date(`${today}T12:00:00`).getTime()) /
-          86400000,
-      )
-    : 0;
+  const preferredTimes = Array.isArray(state.preferredTimes)
+    ? state.preferredTimes.filter(Boolean)
+    : state.preferredTime
+      ? [state.preferredTime]
+      : [];
   const options = {
     count: 3,
-    days: Math.max(45, untilRequested + 2),
+    days: 30,
     date: state.requestedDate || "",
+    fromDate: state.searchFrom || "",
     weekdays: state.requestedDate
       ? []
       : state.requestedWeekday != null
@@ -1171,7 +1179,8 @@ function pickSlotsForState(appointments, hours, state, now) {
     excludeSlots: state.rejectedSlots,
     duration: BILAN_DURATION_MINUTES,
     dayPart: state.dayPart,
-    preferredTime: state.preferredTime || "",
+    preferredTime: preferredTimes[0] || "",
+    preferredTimes,
     now,
   };
   return suggestAvailableSlots(appointments, hours, options);
@@ -1193,7 +1202,7 @@ function suggestAvailableSlots(appointments, hours, countOrOptions = 3, duration
       : { count: countOrOptions, duration };
   const count = options.count || 3;
   const slotDuration = options.duration || duration || BILAN_DURATION_MINUTES;
-  const maxDays = options.days || 14;
+  const maxDays = Math.min(options.days || 30, 30);
   const onlyWeekdays = Array.isArray(options.weekdays) ? options.weekdays : [];
   const onlyDate = String(options.date || "");
   const excludeWeekdays = Array.isArray(options.excludeWeekdays)
@@ -1210,11 +1219,23 @@ function suggestAvailableSlots(appointments, hours, countOrOptions = 3, duration
   const today = todayIso(clock);
   const nowMinutes = currentMinutes(clock);
   const week = Array.isArray(hours) && hours.length ? hours : defaultHours();
-  const preferred = options.preferredTime ? timeToMinutes(options.preferredTime) : null;
-  const wantAllDay = preferred != null && Boolean(onlyDate);
+  const preferredList = (
+    Array.isArray(options.preferredTimes) && options.preferredTimes.length
+      ? options.preferredTimes
+      : options.preferredTime
+        ? [options.preferredTime]
+        : []
+  )
+    .map((item) => timeToMinutes(item))
+    .filter((item) => Number.isFinite(item));
+  const fromDate = String(options.fromDate || "");
+  const wantAllDay = preferredList.length > 0 || Boolean(onlyDate);
 
   for (let offset = 0; offset < maxDays && (wantAllDay || slots.length < count); offset += 1) {
     const date = addDaysIso(today, offset);
+    if (fromDate && date < fromDate) {
+      continue;
+    }
     const weekday = new Date(`${date}T12:00:00`).getDay();
     if (onlyDate && date !== onlyDate) {
       continue;
@@ -1259,13 +1280,27 @@ function suggestAvailableSlots(appointments, hours, countOrOptions = 3, duration
       }
     }
   }
-  if (preferred != null && slots.length) {
+  if (preferredList.length && slots.length) {
     return [...slots]
-      .sort(
-        (left, right) =>
-          Math.abs(timeToMinutes(left.time) - preferred) -
-          Math.abs(timeToMinutes(right.time) - preferred),
-      )
+      .sort((left, right) => {
+        const leftGap = Math.min(
+          ...preferredList.map((preferred) =>
+            Math.abs(timeToMinutes(left.time) - preferred),
+          ),
+        );
+        const rightGap = Math.min(
+          ...preferredList.map((preferred) =>
+            Math.abs(timeToMinutes(right.time) - preferred),
+          ),
+        );
+        if (leftGap !== rightGap) {
+          return leftGap - rightGap;
+        }
+        return (
+          String(left.date).localeCompare(String(right.date)) ||
+          String(left.time).localeCompare(String(right.time))
+        );
+      })
       .slice(0, count);
   }
   return slots;
