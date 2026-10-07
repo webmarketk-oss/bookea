@@ -30,7 +30,8 @@ test("la source Systeme.io / Bookea est lue dans l’URL", () => {
   assert.equal(canonicalLeadSource({ source: "systeme.io" }), "systeme.io");
   assert.equal(canonicalLeadSource({ source: "Systeme" }), "systeme.io");
   assert.equal(canonicalLeadSource({ source: "bookea" }), "bookea");
-  assert.equal(canonicalLeadSource({ source: "vercel" }), "bookea");
+  assert.equal(canonicalLeadSource({ source: "landing" }), "landing");
+  assert.equal(canonicalLeadSource({ source: "vercel" }), "landing");
   assert.equal(canonicalLeadSource({ source: "facebook" }), "facebook");
   assert.equal(canonicalLeadSource({}), "");
 });
@@ -41,6 +42,7 @@ test("GET /api/leads donne les 3 portes", async () => {
   assert.equal(res.statusCode, 200);
   assert.match(res.body.systeme_io.url, /center=gap-institut/);
   assert.match(res.body.systeme_io.url, /source=systeme.io/);
+  assert.match(res.body.landing.url, /source=landing/);
   assert.match(res.body.bookea.url, /source=bookea/);
   assert.match(res.body.facebook.url, /\/api\/meta\/leads$/);
   assert.deepEqual(res.body.fields, [

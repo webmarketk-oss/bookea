@@ -928,7 +928,10 @@ function resolveIncomingSource(payload, query, fallback = "Facebook", req) {
   if (/systeme/.test(needle)) {
     return "Systeme.io";
   }
-  if (/bookea|vercel/.test(needle)) {
+  if (/landing|vercel/.test(needle)) {
+    return "Landing";
+  }
+  if (/bookea/.test(needle)) {
     return "Bookea";
   }
   if (/make/.test(needle)) {

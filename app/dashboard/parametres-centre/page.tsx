@@ -3120,6 +3120,7 @@ function inboundLeadUrls(slug: string) {
   return {
     facebook: "https://www.bookeai.fr/api/meta/leads",
     systeme: `https://www.bookeai.fr/api/leads?center=${center}&source=systeme.io`,
+    landing: `https://www.bookeai.fr/api/leads?center=${center}&source=landing`,
     bookea: `https://www.bookeai.fr/api/leads?center=${center}&source=bookea`,
   };
 }
@@ -3145,8 +3146,13 @@ function InboundLeadsCard({ slug }: { slug: string }) {
           url={urls.systeme}
         />
         <CopyLeadUrl
-          label="Site Bookea (Vercel)"
-          hint="Formulaire ou outil Bookea."
+          label="Landing Vercel"
+          hint="POST json du formulaire : first_name, last_name, email, phone, offre."
+          url={urls.landing}
+        />
+        <CopyLeadUrl
+          label="Site Bookea"
+          hint="Réservation sur la fiche publique."
           url={urls.bookea}
         />
       </div>

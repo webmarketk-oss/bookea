@@ -13,8 +13,9 @@ const SOURCE_ALIASES = {
   "systeme.io": "systeme.io",
   systeme: "systeme.io",
   bookea: "bookea",
-  vercel: "bookea",
   site: "bookea",
+  landing: "landing",
+  vercel: "landing",
   savemyleads: "savemyleads",
   facebook: "facebook",
   meta: "facebook",
@@ -34,6 +35,7 @@ function leadUrls(center) {
   return {
     facebook: `${PUBLIC_BASE}/api/meta/leads`,
     systeme_io: `${PUBLIC_BASE}/api/leads?center=${slug}&source=systeme.io`,
+    landing: `${PUBLIC_BASE}/api/leads?center=${slug}&source=landing`,
     bookea: `${PUBLIC_BASE}/api/leads?center=${slug}&source=bookea`,
   };
 }
@@ -71,10 +73,18 @@ module.exports = async function handler(req, res) {
           "Mapper prénom, nom, email, téléphone, offre du contact — jamais l’affilié ni payload_member_email.",
         ],
       },
+      landing: {
+        url: urls.landing,
+        source: "Landing",
+        notes: [
+          "Dans la landing Vercel : fetch POST json vers cette URL au submit du formulaire.",
+          "Champs : first_name, last_name, email, phone, offre.",
+        ],
+      },
       bookea: {
         url: urls.bookea,
         source: "Bookea",
-        notes: ["Formulaire ou outil Bookea hébergé sur Vercel."],
+        notes: ["Réservation sur la fiche publique Bookea."],
       },
     });
   }
@@ -89,7 +99,7 @@ module.exports = async function handler(req, res) {
     return res.status(400).json({
       ok: false,
       error: "missing_source",
-      hint: "Ajoute ?center=SLUG&source=systeme.io ou source=bookea",
+      hint: "Ajoute ?center=SLUG&source=landing ou source=systeme.io",
     });
   }
 
