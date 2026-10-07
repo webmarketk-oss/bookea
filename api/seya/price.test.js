@@ -87,6 +87,11 @@ test("« continuer ensuite les séances » n’est pas le prix du bilan", () => 
     "next_session",
   );
   assert.equal(classifyPriceQuestion("C’est combien ?"), "generic");
+  assert.equal(
+    classifyPriceQuestion("Je voudrais savoir le prix pour 6 séances aisselles"),
+    "next_session",
+  );
+  assert.equal(classifyPriceQuestion("Je voudrais le prix avant"), "next_session");
   assert.equal(classifyPriceQuestion("Pourquoi tu répètes la même chose ?"), "repeat_complaint");
 });
 

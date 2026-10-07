@@ -79,7 +79,9 @@ function classifyPriceQuestion(text) {
   }
   if (
     (/continuer|ensuite|apres|suivant|poursuiv/.test(value) ||
-      /les seances|seances suivantes|autre seance/.test(value)) &&
+      /les seances|seances suivantes|autre seance/.test(value) ||
+      /\d+\s*seances?/.test(value) ||
+      /prix avant|tarif avant|avant toute/.test(value)) &&
     asks
   ) {
     return "next_session";
@@ -304,8 +306,17 @@ function discoveryReply(policy) {
   return `La séance découverte est à ${policy.discovery}.`;
 }
 
+function alreadyGaveSessionPrice(conversation) {
+  return /prix fiable|fourchette|seances suivantes|apres la decouverte|tarif des seances/.test(
+    normalize(lastSeyaText(conversation)),
+  );
+}
+
 function nextSessionReply(policy, options = {}) {
   const analysis = analysisPhrase(options.family);
+  if (options.alreadyAnsweredSessions) {
+    return "Je comprends, vous voulez le tarif avant de venir. Je n’ai pas de montant à vous donner ici : je peux demander au centre une fourchette pour ces séances, ou qu’une conseillère vous rappelle. Qu’est-ce que vous préférez ?";
+  }
   if (policy.session && ["fixed", "from", "range"].includes(policy.sessionPolicy)) {
     return `${announceSession(policy)} Le protocole exact se précise après ${analysis}.`;
   }
@@ -471,6 +482,7 @@ function buildPriceReply(text, seya, conversation) {
   const options = {
     previousIntent,
     family: activeCareFamily(conversation),
+    alreadyAnsweredSessions: alreadyGaveSessionPrice(conversation),
   };
   if (intent === "repeat_complaint") {
     if (previousIntent === "next_session" || !previousIntent) {

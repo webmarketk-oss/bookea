@@ -37,3 +37,15 @@ test("si le créneau est pris, WhatsApp n’envoie pas le brouillon « je vérif
   assert.match(sent[0], /plus disponible/i);
   assert.doesNotMatch(sent[0], /je vérifie/i);
 });
+
+test("WhatsApp n’envoie pas deux fois le même tarif bilan, mais envoie le tarif séances", () => {
+  const bilan =
+    "Le bilan et la séance découverte sont offerts, c’est gratuit. Le bilan permet de réaliser une analyse corporelle et de vous établir un devis personnalisé en fonction de vos objectifs.";
+  const dropped = outgoingWhatsAppTexts([], bilan, bilan);
+  assert.deepEqual(dropped, []);
+  const sessions =
+    "Je n’ai pas de prix fiable à vous donner avant ce bilan, mais je peux demander au centre s’il peut vous communiquer une fourchette.";
+  const sent = outgoingWhatsAppTexts([], sessions, bilan);
+  assert.equal(sent.length, 1);
+  assert.match(sent[0], /fourchette/i);
+});

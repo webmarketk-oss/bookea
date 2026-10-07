@@ -1156,6 +1156,74 @@ test("j’ai réfléchi, je veux le prix : elle répond, même après un message
   assert.notEqual(conversation.status, "Pas intéressé");
 });
 
+test("prix pour 6 séances puis « le prix avant » : elle ne se tait pas", async () => {
+  const laser = {
+    ...seya,
+    treatmentBriefs: [
+      {
+        name: "Épilation laser",
+        brief: "Réceptionniste.",
+        pricing: {
+          bilan: "offert",
+          discovery: "offerte",
+          session: "",
+          package: "",
+          sessionPolicy: "after_bilan",
+        },
+      },
+    ],
+  };
+  let conversation = startConversation(
+    {
+      leadId: "lead-prix-avant",
+      centerId: "depil-tech-vichy",
+      firstName: "Réseau",
+      lastName: "Beauté Exclusive",
+      phone: "0613277582",
+      treatment: "Épilation laser",
+      campaign: "Bilan laser offert + test offert",
+    },
+    "Dépil Tech Vichy",
+    laser,
+  );
+  conversation.qualification = {
+    need: "Épilation laser",
+    zone: "aisselles",
+    delay: "",
+    availability: "",
+  };
+  const first = await generateSeyaReply({
+    conversation,
+    text: "Je voudrais savoir le prix pour 6 séances aisselles",
+    seya: laser,
+    appointments: [],
+    hours: hours(),
+    centerName: "Dépil Tech Vichy",
+    centerId: "depil-tech-vichy",
+    now: NOW,
+  });
+  conversation = first.conversation;
+  const firstAnswer = lastSeya(conversation);
+  assert.match(firstAnswer, /fourchette|prix fiable|séances après|rappeler/i);
+  assert.doesNotMatch(firstAnswer, /Le bilan et la séance découverte sont offerts/i);
+
+  const second = await generateSeyaReply({
+    conversation,
+    text: "Je voudrais le prix avant",
+    seya: laser,
+    appointments: [],
+    hours: hours(),
+    centerName: "Dépil Tech Vichy",
+    centerId: "depil-tech-vichy",
+    now: NOW,
+  });
+  conversation = second.conversation;
+  const secondAnswer = lastSeya(conversation);
+  assert.ok(secondAnswer);
+  assert.notEqual(secondAnswer, firstAnswer);
+  assert.match(secondAnswer, /avant de venir|fourchette|rappeler/i);
+});
+
 test("le 1er WhatsApp reprend le texte d’offre du centre, pas l’intitulé campagne", () => {
   const conversation = startConversation(
     {
