@@ -16,7 +16,11 @@ function inferCareFamily(text) {
   ) {
     return "epilation";
   }
-  if (/visage|hydrafacial|peau|acne|glow/.test(needle)) {
+  if (
+    /visage|hydrafacial|peau|acne|glow|fermete|rides?|taches?|cernes?|pores?|relachement/.test(
+      needle,
+    )
+  ) {
     return "visage";
   }
   if (/minceur|mincir|maigrir|cryo|ventre|poids|graisse|cellulite/.test(needle)) {
@@ -215,7 +219,11 @@ function welcomeTemplateNames(family) {
     return ["seya_accueil_laser", "seya_accueil_epilation", "seya_accueil_epil"];
   }
   if (family === "visage") {
-    return ["seya_accueil_visage", "seya_accueil_hydrafacial"];
+    return [
+      "seya_visage_accueil",
+      "seya_accueil_visage",
+      "seya_accueil_hydrafacial",
+    ];
   }
   return [];
 }

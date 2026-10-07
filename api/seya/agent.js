@@ -36,6 +36,8 @@ const {
   alreadyBookedReply,
   alreadyTold,
   conversationalReply,
+  firstNeedReply,
+  spokenVisitDuration,
   isAlreadyBookedElsewhere,
   isBookingThread,
   isHesitation,
@@ -84,6 +86,31 @@ const { sanitizePersonName } = require("../../lib/seya-person-name");
 const { resolveGeneralBrief } = require("./general-brief");
 
 const BILAN_DURATION_MINUTES = 75;
+const FAMILY_VISIT_MINUTES = {
+  minceur: 60,
+  epilation: 45,
+  visage: 60,
+};
+
+function visitDurationMinutes(seya, conversation, extraText) {
+  const family = inferFamily(
+    seya,
+    conversation?.campaign,
+    `${conversation?.qualification?.need || ""} ${conversation?.treatment || ""} ${extraText || ""}`,
+  );
+  const brief =
+    findTreatmentBrief(
+      seya,
+      `${conversation?.qualification?.need || ""} ${conversation?.treatment || ""} ${family || ""}`,
+    ) || findTreatmentBrief(seya, conversation?.treatment);
+  const fromBrief = Number(
+    brief?.durationMinutes ?? brief?.duration ?? brief?.duration_minutes,
+  );
+  if (Number.isFinite(fromBrief) && fromBrief > 0) {
+    return fromBrief;
+  }
+  return FAMILY_VISIT_MINUTES[family] || BILAN_DURATION_MINUTES;
+}
 
 const weekdayNames = [
   "dimanche",
@@ -209,7 +236,7 @@ function asksPrice(text) {
   );
 }
 
-function faqReply(text) {
+function faqReply(text, extras = {}) {
   const value = normalize(text);
   if (/^\?+$/.test(String(text || "").trim())) {
     return "Dites-moi ce que vous voulez savoir : le prix, un créneau, ou autre chose ?";
@@ -221,7 +248,11 @@ function faqReply(text) {
     return "Les résultats dépendent de la zone et du protocole. On vous les explique au bilan.";
   }
   if (/combien de temps|ca dure|duree|dure (le )?(rdv|bilan|rendez-vous)/.test(value)) {
-    return "Le bilan dure environ 30 à 45 minutes.";
+    const minutes = visitDurationMinutes(extras.seya, extras.conversation, text);
+    const spoken = spokenVisitDuration(minutes);
+    return spoken
+      ? `Le rendez-vous dure environ ${spoken}.`
+      : "Le bilan dure environ 30 à 45 minutes.";
   }
   if (/fait mal|douloureux|douleur/.test(value)) {
     return "Le bilan est indolore. Pour une séance, ça dépend de la zone, on vous l’explique sur place.";
@@ -787,6 +818,9 @@ function extractNeed(text) {
     ["graisse", "Soin minceur"],
     ["cellulite", "Soin minceur"],
     ["visage", "Soin visage"],
+    ["fermete", "Soin visage"],
+    ["rides", "Soin visage"],
+    ["acne", "Soin visage"],
     ["bilan", "Bilan"],
   ];
   for (const [needle, label] of matches) {
@@ -825,6 +859,27 @@ function extractZone(text) {
       return value.includes(zone);
     })
     .join(", ");
+}
+
+function extractConcern(text) {
+  const value = normalize(text);
+  const concerns = [
+    ["fermete", "fermeté"],
+    ["rides", "rides"],
+    ["acne", "acné"],
+    ["taches", "taches"],
+    ["cernes", "cernes"],
+    ["pores", "pores"],
+    ["eclat", "éclat"],
+    ["hydrat", "hydratation"],
+    ["relachement", "relâchement"],
+  ];
+  for (const [needle, label] of concerns) {
+    if (value.includes(needle)) {
+      return label;
+    }
+  }
+  return "";
 }
 
 function applyCareSwitch(conversation, qualification) {
@@ -875,7 +930,7 @@ function mergeQualification(current, text, fallbackTreatment) {
     availability: current?.availability || "",
   };
   const need = extractNeed(text);
-  const zone = extractZone(text);
+  const zone = extractZone(text) || extractConcern(text);
   const delay = extractDelay(text);
   const availability = extractAvailability(text);
   if (need) next.need = need;
@@ -958,6 +1013,7 @@ function nextQualificationQuestion(qualification, seya, fallbackTreatment, conve
       need: qualification.need || fallbackTreatment,
     },
     now,
+    { durationMinutes: visitDurationMinutes(seya, conversation, text) },
   );
 }
 
@@ -1157,7 +1213,7 @@ function parseDayRequest(text, conversation) {
   };
 }
 
-function pickSlotsForState(appointments, hours, state, now) {
+function pickSlotsForState(appointments, hours, state, now, duration) {
   const preferredTimes = Array.isArray(state.preferredTimes)
     ? state.preferredTimes.filter(Boolean)
     : state.preferredTime
@@ -1180,7 +1236,12 @@ function pickSlotsForState(appointments, hours, state, now) {
     excludeWeekdays: state.rejectedWeekdays,
     excludeDates: state.rejectedDates,
     excludeSlots: state.rejectedSlots,
-    duration: BILAN_DURATION_MINUTES,
+    duration:
+      Number(duration) > 0
+        ? Number(duration)
+        : Number(state.visitDuration) > 0
+          ? Number(state.visitDuration)
+          : BILAN_DURATION_MINUTES,
     dayPart: state.dayPart,
     preferredTime: preferredTimes[0] || "",
     preferredTimes,
@@ -1189,13 +1250,19 @@ function pickSlotsForState(appointments, hours, state, now) {
   return suggestAvailableSlots(appointments, hours, options);
 }
 
-function pickSlotsForMessage(appointments, hours, conversation, text, now) {
+function pickSlotsForMessage(appointments, hours, conversation, text, now, seya) {
   const state = applyBookingMessage(conversation.bookingState, text, {
     centerId: conversation.centerId,
     now,
     conversation,
   });
-  return pickSlotsForState(appointments, hours, state, now);
+  return pickSlotsForState(
+    appointments,
+    hours,
+    state,
+    now,
+    visitDurationMinutes(seya, conversation, text),
+  );
 }
 
 function suggestAvailableSlots(appointments, hours, countOrOptions = 3, duration = BILAN_DURATION_MINUTES) {
@@ -1375,6 +1442,11 @@ function applyLeadReply(conversation, text, seya, slots, extras = {}) {
     conversation.treatment,
   );
   const pool = offeredSlots(conversation, slots);
+  const durationMinutes = visitDurationMinutes(
+    seya,
+    { ...conversation, qualification },
+    intentText,
+  );
   if (isAlreadyBookedElsewhere(intentText) || isAlreadyBookedElsewhere(text)) {
     return finishLeadReply(
       conversation,
@@ -1413,7 +1485,9 @@ function applyLeadReply(conversation, text, seya, slots, extras = {}) {
           confirmYes,
           date: bookingState.requestedDate,
         }) ||
-        matchProposedSlot(intentText, pool, { date: bookingState.requestedDate });
+        matchProposedSlot(intentText, offeredSlots(conversation), {
+          date: bookingState.requestedDate,
+        });
   if (reschedule && (wantsNoon(intentText) || threadWantsNoon(conversation, intentText))) {
     const date =
       conversation.bookedSlot?.date ||
@@ -1450,7 +1524,9 @@ function applyLeadReply(conversation, text, seya, slots, extras = {}) {
       qualification,
       crmIntent.conversationStatus,
       text,
-      conversationalReply(text, conversation, qualification, extras.now),
+      conversationalReply(text, conversation, qualification, extras.now, {
+        durationMinutes,
+      }),
       {
         ...bookingState,
         pendingQuestion: "no_slots",
@@ -1492,7 +1568,9 @@ function applyLeadReply(conversation, text, seya, slots, extras = {}) {
       qualification,
       qualification.need ? "Qualifié" : "En cours",
       text,
-      conversationalReply(text, conversation, qualification, extras.now),
+      conversationalReply(text, conversation, qualification, extras.now, {
+        durationMinutes,
+      }),
       bookingState,
     );
   }
@@ -1515,7 +1593,9 @@ function applyLeadReply(conversation, text, seya, slots, extras = {}) {
           ? "Qualifié"
           : conversation.status || "En cours",
       text,
-      conversationalReply(text, conversation, qualification, extras.now),
+      conversationalReply(text, conversation, qualification, extras.now, {
+        durationMinutes,
+      }),
       {
         ...bookingState,
         pendingQuestion: pause ? "no_slots" : bookingState.pendingQuestion,
@@ -1582,9 +1662,9 @@ function applyLeadReply(conversation, text, seya, slots, extras = {}) {
         },
       );
     }
-    if (asksLocation(text) || asksAccess(text) || asksPrice(text) || classifyPriceQuestion(text) || faqReply(text)) {
+    if (asksLocation(text) || asksAccess(text) || asksPrice(text) || classifyPriceQuestion(text) || faqReply(text, { seya, conversation: { ...conversation, qualification } })) {
       const admin =
-        faqReply(text) ||
+        faqReply(text, { seya, conversation: { ...conversation, qualification } }) ||
         (asksLocation(text) || asksAccess(text)
           ? centerPlaceReply(text, extras, seya)
           : priceReply(seya, qualification, conversation, text));
@@ -1639,7 +1719,7 @@ function applyLeadReply(conversation, text, seya, slots, extras = {}) {
     );
   }
 
-  const faq = faqReply(text);
+  const faq = faqReply(text, { seya, conversation: { ...conversation, qualification } });
   if (faq) {
     return finishLeadReply(
       conversation,
@@ -1754,7 +1834,7 @@ function applyLeadReply(conversation, text, seya, slots, extras = {}) {
       { ...bookingState, appointmentStatus: "proposed" },
       {
         bookedSlot: chosenSlot,
-        shouldBook: chosenSlot,
+        shouldBook: { ...chosenSlot, duration: durationMinutes },
         staffOwned: staffOwned || reschedule,
       },
     );
@@ -1790,7 +1870,7 @@ function applyLeadReply(conversation, text, seya, slots, extras = {}) {
     !bookingState.unansweredPriceIntent &&
     !asksLocation(text) &&
     !asksAccess(text) &&
-    !faqReply(text) &&
+    !faqReply(text, { seya, conversation: { ...conversation, qualification } }) &&
     !threadHasMedical(conversation, text) &&
     Boolean(qualification.need || conversation.treatment) &&
     !isJunkTreatment(qualification.need || conversation.treatment);
@@ -1820,12 +1900,25 @@ function applyLeadReply(conversation, text, seya, slots, extras = {}) {
   }
 
   if (readyToPropose && safeSlots.length > 0) {
+    const ack = firstNeedReply(intentText, conversation, qualification, {
+      durationMinutes,
+      skipBookingCta: true,
+    });
+    const slotsText = humanSlotReply(safeSlots);
+    const body =
+      ack &&
+      !alreadyTold(
+        conversation,
+        "quand seriez-vous disponible|protocole à votre peau|solutions qui peuvent|diagnostic permettra",
+      )
+        ? `${ack} ${slotsText}`
+        : slotsText;
     return finishLeadReply(
       conversation,
       qualification,
       "RDV proposé",
       text,
-      withRereadPrefix(reread, humanSlotReply(safeSlots)),
+      withRereadPrefix(reread, body),
       {
         ...bookingState,
         lastOfferedSlots: safeSlots,
@@ -1958,12 +2051,12 @@ function fallbackAfterNote(qualification, conversation, text) {
     return "Parfait. Vous êtes plutôt disponible en début de semaine, ou plutôt en fin de semaine ?";
   }
   if (qualification?.zone) {
-    const zone = qualification.zone;
-    const label = /cuisse/.test(zone) ? "les cuisses" : `le ${zone}`;
-    if (alreadyTold(conversation, "c['’]est note pour")) {
+    if (alreadyTold(conversation, "quand seriez-vous disponible|c['’]est note pour|solutions qui peuvent")) {
       return "Dites-moi un jour qui vous irait, je vous propose un horaire.";
     }
-    return `C’est noté pour ${label}. Vous voulez que je vous propose un créneau ?`;
+    return firstNeedReply(text, conversation, qualification, {
+      durationMinutes: visitDurationMinutes(conversation?._seya, conversation, text),
+    });
   }
   if (qualification?.need) {
     return "Vous voulez que je vous propose un créneau, ou vous avez une autre question ?";
@@ -2031,7 +2124,7 @@ function markOfferPending(bookingState, reply) {
   const value = normalize(reply);
   if (
     bookingState.pendingQuestion !== "no_slots" &&
-    /propose un creneau|souhaitez[- ]vous que je|vous voulez que je|quel jour vous irait/.test(value) &&
+    /propose un creneau|souhaitez[- ]vous que je|vous voulez que je|quel jour vous irait|quand seriez-vous disponible|premier rendez-vous/.test(value) &&
     !/\d{1,2}\s*h/.test(value)
   ) {
     return { ...bookingState, pendingQuestion: "offer_slots" };
@@ -2280,6 +2373,7 @@ module.exports = {
   isSlotBusy,
   remainingOfferedSlots,
   BILAN_DURATION_MINUTES,
+  visitDurationMinutes,
   lastLeadAt,
   lastSeyaAt,
   persistableConversation,

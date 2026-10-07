@@ -8,7 +8,7 @@ const { startConversation } = require("./agent");
 
 const NOW = new Date("2026-09-27T12:00:00");
 const SLOT_PUSH =
-  /jeu\.|lun\.|09h00|lequel vous irait|début ou fin de semaine|je regarde le planning|quand seriez-vous disponible/i;
+  /jeu\.|lun\.|09h00|lequel vous irait|début ou fin de semaine|je regarde le planning/i;
 
 const seya = {
   qualifyOnSignup: true,
@@ -77,7 +77,7 @@ test("20 questions imprévues : répondre à chacune sans ramener aux créneaux"
   );
 
   const unexpected = [
-    ["Bonjour perdre du poids sur le ventre", /ventre|minceur|noté/i],
+    ["Bonjour perdre du poids sur le ventre", /ventre|solutions|bilan/i],
     ["Tu es une IA ?", /assistante virtuelle/i],
     ["Le bilan est-il gratuit ?", /bilan.*offert|offert/i],
     [
@@ -86,7 +86,7 @@ test("20 questions imprévues : répondre à chacune sans ramener aux créneaux"
     ],
     ["Pourquoi tu répètes la même chose ?", /vous avez raison/i],
     ["Tu es situé où ?", /12 rue de la République/i],
-    ["Ça dure combien de temps ?", /30 à 45|minutes/i],
+    ["Ça dure combien de temps ?", /1 heure|heure|minutes|45/i],
     ["Est-ce que ça fait mal ?", /indolore/i],
     ["Quels résultats on peut attendre ?", /résultats|protocole/i],
     ["Je réfléchis, je ne réserve pas maintenant", /temps|d’accord|pas.*rendez-vous/i],
@@ -1294,6 +1294,143 @@ test("aisselles laser : bilan pilaire, pas d’analyse corporelle", async () => 
   answer = lastSeya(conversation);
   assert.match(answer, /forfait|fourchette|bilan pilaire/i);
   assert.doesNotMatch(answer, /analyse corporelle|séance découverte/i);
+});
+
+test("après l’accueil minceur : elle reconnaît la zone puis propose 1 h", async () => {
+  let conversation = startConversation(
+    {
+      leadId: "lead-accueil-minceur",
+      centerId: "jfg-clinique-clermont",
+      firstName: "Nathalie",
+      lastName: "Test",
+      phone: "0611223344",
+      treatment: "Soin minceur",
+    },
+    "JFG Clinique Clermont",
+    seya,
+  );
+  conversation = await reply(conversation, "Bonjour. Ventres/hanches");
+  const answer = lastSeya(conversation);
+  assert.match(answer, /ventre|hanches/i);
+  assert.match(answer, /solutions|bilan/i);
+  assert.match(answer, /1 heure/i);
+  assert.match(answer, /quand seriez-vous disponible/i);
+  assert.doesNotMatch(answer, /09h00|lun\.|résultat garanti/i);
+});
+
+test("après l’accueil laser : protocole peau/pilosité puis 45 min", async () => {
+  const laser = {
+    ...seya,
+    treatmentBriefs: [
+      {
+        name: "Épilation laser",
+        brief: "Réceptionniste.",
+        pricing: {
+          bilan: "offert",
+          discovery: "offert",
+          session: "",
+          package: "",
+          sessionPolicy: "after_bilan",
+        },
+      },
+    ],
+  };
+  let conversation = startConversation(
+    {
+      leadId: "lead-accueil-laser",
+      centerId: "jfg-clinique-clermont",
+      firstName: "Léa",
+      lastName: "Test",
+      phone: "0611223344",
+      treatment: "Épilation laser",
+      campaign: "Bilan laser offert + test offert",
+    },
+    "JFG Clinique Clermont",
+    laser,
+  );
+  const first = await generateSeyaReply({
+    conversation,
+    text: "Aisselles et maillot",
+    seya: laser,
+    appointments: [],
+    hours: hours(),
+    centerName: "JFG Clinique Clermont",
+    centerId: "jfg-clinique-clermont",
+    now: NOW,
+  });
+  const answer = lastSeya(first.conversation);
+  assert.match(answer, /aisselles|maillot/i);
+  assert.match(answer, /peau|pilosité|protocole/i);
+  assert.match(answer, /45 minutes/i);
+  assert.match(answer, /quand seriez-vous disponible/i);
+  assert.doesNotMatch(answer, /analyse corporelle|ventre|1 heure/i);
+});
+
+test("après l’accueil visage : diagnostic peau, durée du centre", async () => {
+  const visage = {
+    ...seya,
+    treatmentBriefs: [
+      {
+        name: "Soin visage",
+        brief: "Réceptionniste.",
+        durationMinutes: 50,
+        pricing: {
+          bilan: "149€",
+          discovery: "",
+          session: "",
+          package: "",
+          sessionPolicy: "after_bilan",
+        },
+      },
+    ],
+  };
+  let conversation = startConversation(
+    {
+      leadId: "lead-accueil-visage",
+      centerId: "jfg-clinique-clermont",
+      firstName: "Sam",
+      lastName: "Test",
+      phone: "0611223344",
+      treatment: "Soin visage",
+    },
+    "JFG Clinique Clermont",
+    visage,
+  );
+  const first = await generateSeyaReply({
+    conversation,
+    text: "J’ai un manque de fermeté",
+    seya: visage,
+    appointments: [],
+    hours: hours(),
+    centerName: "JFG Clinique Clermont",
+    centerId: "jfg-clinique-clermont",
+    now: NOW,
+  });
+  const answer = lastSeya(first.conversation);
+  assert.match(answer, /fermeté|peau|diagnostic/i);
+  assert.match(answer, /50 minutes/i);
+  assert.match(answer, /quand seriez-vous disponible/i);
+  assert.doesNotMatch(answer, /analyse corporelle|pilosité/i);
+});
+
+test("zone + jour déjà donnés : elle cherche les créneaux, elle ne redemande pas", async () => {
+  let conversation = startConversation(
+    {
+      leadId: "lead-zone-jour",
+      centerId: "jfg-clinique-clermont",
+      firstName: "Nathalie",
+      lastName: "Test",
+      phone: "0611223344",
+      treatment: "Soin minceur",
+    },
+    "JFG Clinique Clermont",
+    seya,
+  );
+  conversation = await reply(conversation, "Ventre, jeudi à 18h si possible");
+  const answer = lastSeya(conversation);
+  assert.match(answer, /jeu\.|jeudi|18h|17h/i);
+  assert.doesNotMatch(answer, /quand seriez-vous disponible/i);
+  assert.ok((conversation.proposedSlots || []).length > 0);
 });
 
 test("13h ou 18h : elle propose ces horaires, pas 16h", async () => {

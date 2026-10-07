@@ -6,6 +6,7 @@ const { isNearDuplicate } = require("./price");
 const { sanitizePersonName } = require("../../lib/seya-person-name");
 const {
   BILAN_DURATION_MINUTES,
+  visitDurationMinutes,
   confirmedAppointmentReply,
   humanSlotReply,
   isSlotBusy,
@@ -324,7 +325,14 @@ async function handleIncoming(supabase, incoming) {
     conversation: existing,
     text: incoming.text,
     seya,
-    slots: pickSlotsForMessage(appointments, hours, existing, incoming.text),
+    slots: pickSlotsForMessage(
+      appointments,
+      hours,
+      existing,
+      incoming.text,
+      undefined,
+      seya,
+    ),
     appointments,
     hours,
     centerName: center.name,
@@ -391,6 +399,7 @@ async function handleIncoming(supabase, incoming) {
               ],
             },
             new Date(),
+            visitDurationMinutes(seya, next, ""),
           );
       if (next.bookingState) {
         next.bookingState.appointmentStatus = "proposed";
@@ -688,9 +697,11 @@ async function bookSeyaAppointment(supabase, centerId, context, conversation, sl
 
   const start = slotTime(slot.time);
   const duration =
-    Number(conversation?.bookedSlot && conversation.bookedSlot.duration) > 0
-      ? Number(conversation.bookedSlot.duration)
-      : BILAN_DURATION_MINUTES;
+    Number(slot?.duration) > 0
+      ? Number(slot.duration)
+      : Number(conversation?.bookedSlot && conversation.bookedSlot.duration) > 0
+        ? Number(conversation.bookedSlot.duration)
+        : visitDurationMinutes(null, conversation, "");
   const [hours, minutes] = start.split(":").map(Number);
   const startMinutes = hours * 60 + minutes;
   const endMinutes = startMinutes + duration;

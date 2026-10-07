@@ -14,6 +14,7 @@ const {
 const templates = [
   { name: "seya_accueil_minceur", status: "APPROVED" },
   { name: "seya_accueil_laser", status: "APPROVED" },
+  { name: "seya_visage_accueil", status: "APPROVED" },
   { name: "seya_accueil_visage", status: "APPROVED" },
   { name: "seya_accueil_", status: "APPROVED" },
   { name: "hello_world", status: "APPROVED" },
@@ -60,7 +61,7 @@ test("un lead minceur prend le template minceur", () => {
 
 test("un lead visage prend le template visage", () => {
   const picked = pickApprovedTemplate(templates, inferCareFamily("Hydrafacial"));
-  assert.equal(picked.name, "seya_accueil_visage");
+  assert.equal(picked.name, "seya_visage_accueil");
 });
 
 test("elle relit tout le fil : minceur puis visage, le soin actuel est visage", () => {

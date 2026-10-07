@@ -1,4 +1,5 @@
 const { classifyPriceQuestion, isNearDuplicate, isPriceRepeatComplaint } = require("./price");
+const { inferCareFamily } = require("./care-family");
 
 function normalize(value) {
   return String(value || "")
@@ -1103,7 +1104,162 @@ function alreadyTold(conversation, needle) {
   );
 }
 
-function conversationalReply(text, conversation, qualification, now) {
+function speakZoneList(zone) {
+  const parts = String(zone || "")
+    .split(/\s*(?:,|\/| et )\s*/i)
+    .map((item) => normalize(item))
+    .filter(Boolean);
+  const labels = parts.map((part) => {
+    if (/cuisse/.test(part)) return "les cuisses";
+    if (/hanche/.test(part)) return "les hanches";
+    if (/jambe/.test(part)) return "les jambes";
+    if (/aisselle/.test(part)) return "les aisselles";
+    if (/maillot|bikini/.test(part)) return "le maillot";
+    if (/bras/.test(part)) return "les bras";
+    if (/dos/.test(part)) return "le dos";
+    if (/ventre/.test(part)) return "le ventre";
+    if (/fermete/.test(part)) return "le manque de fermeté";
+    if (/ride/.test(part)) return "les rides";
+    if (/acne/.test(part)) return "l’acné";
+    if (/tache/.test(part)) return "les taches";
+    if (/cerne/.test(part)) return "les cernes";
+    if (/pore/.test(part)) return "les pores";
+    if (/eclat/.test(part)) return "l’éclat";
+    if (/hydrat/.test(part)) return "l’hydratation";
+    if (/relachement/.test(part)) return "le relâchement";
+    return /^les? |^l['’]/.test(part) ? part : `le ${part}`;
+  });
+  if (!labels.length) {
+    return "";
+  }
+  if (labels.length === 1) {
+    return labels[0];
+  }
+  return `${labels.slice(0, -1).join(", ")} et ${labels.at(-1)}`;
+}
+
+function spokenVisitDuration(minutes) {
+  const value = Number(minutes);
+  if (!Number.isFinite(value) || value <= 0) {
+    return "";
+  }
+  if (value === 60) {
+    return "1 heure";
+  }
+  if (value % 60 === 0) {
+    return `${value / 60} heures`;
+  }
+  if (value > 60) {
+    const hours = Math.floor(value / 60);
+    const rest = value % 60;
+    return `${hours} h ${String(rest).padStart(2, "0")}`;
+  }
+  return `${value} minutes`;
+}
+
+function bookingOfferCta(conversation, durationMinutes) {
+  const spoken = spokenVisitDuration(durationMinutes);
+  const offer = String(conversation?.offerLabel || "").trim();
+  const offerBit = offer ? " pour bénéficier de notre offre" : "";
+  const durationBit = spoken ? ` Il dure environ ${spoken}.` : "";
+  return `Je peux vous proposer un premier rendez-vous${offerBit}.${durationBit} Quand seriez-vous disponible ?`;
+}
+
+function firstNeedAck(family, zoneLabel, conversation) {
+  if (family === "epilation") {
+    return pickFresh(
+      zoneLabel
+        ? [
+            `Pour ${zoneLabel}, nous adaptons le protocole à votre peau et à votre pilosité pour obtenir les meilleurs résultats possibles.`,
+            `C’est noté pour ${zoneLabel}. Le protocole se personnalise selon la peau et la pilosité.`,
+          ]
+        : [
+            "Pour l’épilation laser, le protocole se personnalise selon la peau et la pilosité.",
+          ],
+      conversation,
+    );
+  }
+  if (family === "visage") {
+    return pickFresh(
+      zoneLabel
+        ? [
+            `Pour ${zoneLabel} que vous décrivez, nous avons des soins adaptés. Le diagnostic permettra de déterminer celui qui correspond le mieux à votre peau.`,
+            `Je note ${zoneLabel}. Le diagnostic permettra de choisir le soin le plus adapté à votre peau.`,
+          ]
+        : [
+            "Nous avons des soins visage adaptés. Le diagnostic permettra de déterminer celui qui correspond le mieux à votre peau.",
+          ],
+      conversation,
+    );
+  }
+  return pickFresh(
+    zoneLabel
+      ? [
+          `Pour ${zoneLabel}, nous avons des solutions qui peuvent vous accompagner dans votre objectif. Le bilan permettra de faire le point et de définir l’accompagnement adapté.`,
+          `C’est noté pour ${zoneLabel}. Nous avons des solutions adaptées à cet objectif. Le bilan permettra de préciser l’accompagnement.`,
+        ]
+      : [
+          "Nous avons des solutions minceur adaptées. Le bilan permettra de faire le point et de définir l’accompagnement.",
+        ],
+    conversation,
+  );
+}
+
+function firstNeedReply(text, conversation, qualification, extras = {}) {
+  const family =
+    inferCareFamily(
+      `${qualification?.need || ""} ${qualification?.zone || ""} ${text || ""} ${conversation?.treatment || ""} ${conversation?.campaign || ""}`,
+    ) || "";
+  const zoneLabel = speakZoneList(qualification?.zone);
+  const needKnown = Boolean(qualification?.need || family);
+  const detailKnown = Boolean(
+    zoneLabel ||
+      (family === "visage" && /peau|visage|fermete|ride|acne/.test(normalize(text))),
+  );
+
+  if (!needKnown) {
+    if (alreadyTold(conversation, "soin minceur, un soin visage")) {
+      return "";
+    }
+    return "Vous cherchez plutôt un soin minceur, un soin visage ou une épilation ?";
+  }
+
+  if (!detailKnown && (family === "minceur" || family === "epilation")) {
+    if (alreadyTold(conversation, "quelle zone")) {
+      return "";
+    }
+    return family === "epilation"
+      ? "C’est noté. Quelle zone souhaitez-vous traiter ?"
+      : "C’est noté. Quelle zone souhaitez-vous que l’on regarde ?";
+  }
+
+  if (!detailKnown && family === "visage") {
+    if (alreadyTold(conversation, "objectif pour la peau")) {
+      return "";
+    }
+    return "C’est noté. Quel est votre objectif pour la peau ?";
+  }
+
+  if (
+    alreadyTold(
+      conversation,
+      "quand seriez-vous disponible|protocole à votre peau|solutions qui peuvent vous accompagner|diagnostic permettra",
+    )
+  ) {
+    return "";
+  }
+
+  const ack = firstNeedAck(family, zoneLabel, conversation);
+  if (extras.skipBookingCta) {
+    return ack;
+  }
+  return `${ack} ${bookingOfferCta(conversation, extras.durationMinutes)}`.replace(
+    /\s+/g,
+    " ",
+  ).trim();
+}
+
+function conversationalReply(text, conversation, qualification, now, extras = {}) {
   if (isIdentityQuestion(text)) {
     return identityReply();
   }
@@ -1201,30 +1357,7 @@ function conversationalReply(text, conversation, qualification, now) {
     return "";
   }
 
-  const zone = qualification?.zone;
-  const need = qualification?.need;
-  if (!need) {
-    return "Vous cherchez plutôt un soin minceur, un soin visage ou une épilation ?";
-  }
-  if (zone && /cuisse|ventre|jambe|bras|dos|maillot|aisselle|hanche/.test(value)) {
-    if (alreadyTold(conversation, "c['’]est note pour")) {
-      return "";
-    }
-    const label = zone.startsWith("cuisse") ? "les cuisses" : `le ${zone}`;
-    return `C’est noté pour ${label}. Vous voulez que je vous propose un créneau ?`;
-  }
-  if (!zone && /minceur|cryo|epilation|laser/i.test(need)) {
-    if (alreadyTold(conversation, "quelle zone")) {
-      return "";
-    }
-    return "C’est noté. Quelle zone souhaitez-vous travailler ?";
-  }
-  if (/bonjour|hello|salut/.test(value) && /ventre|poids|minceur|mincir/.test(value)) {
-    return zone
-      ? `C’est noté pour le ${zone}.`
-      : "C’est noté pour le ventre.";
-  }
-  return "";
+  return firstNeedReply(text, conversation, qualification, extras);
 }
 
 function composeReplies(parts) {
@@ -1242,6 +1375,8 @@ module.exports = {
   isConfirmingOfferedTime,
   composeReplies,
   conversationalReply,
+  firstNeedReply,
+  spokenVisitDuration,
   identityReply,
   isAwayForNow,
   isBookingThread,
