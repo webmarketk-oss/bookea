@@ -30,9 +30,8 @@ module.exports = async function handler(req, res) {
     });
   }
 
-  req.query = {
-    ...(req.query || {}),
-    source: req.query?.source || req.query?.origin || "facebook",
-  };
+  if (req.query?.origin && !req.query?.source) {
+    req.query = { ...(req.query || {}), source: req.query.origin };
+  }
   return saveleads(req, res);
 };

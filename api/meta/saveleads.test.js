@@ -234,12 +234,49 @@ test("Make : le full_name Facebook est enregistré tel quel", () => {
   assert.match(mapped.campaign, /Bilan laser/);
 });
 
-test("Make / Systeme.io : la source n’est pas Facebook", () => {
+test("Make / Systeme.io / SaveMyLeads : la source n’est pas Facebook", () => {
   const { resolveIncomingSource } = require("./saveleads");
   assert.equal(resolveIncomingSource({}, { source: "make" }, "Facebook"), "Make");
   assert.equal(
     resolveIncomingSource({ source: "systeme.io" }, {}, "Facebook"),
     "Systeme.io",
   );
+  assert.equal(
+    resolveIncomingSource({}, { source: "savemyleads" }, "Facebook"),
+    "SaveMyLeads",
+  );
+  assert.equal(
+    resolveIncomingSource({}, { source: "facebook" }, "Facebook", {
+      headers: { "user-agent": "SaveMyLeads" },
+    }),
+    "SaveMyLeads",
+  );
   assert.equal(resolveIncomingSource({}, {}, "Facebook"), "Facebook");
+});
+
+test("SaveMyLeads : le mail du compte n’est pas collé sur le prospect", () => {
+  const mapped = mapIncomingLead({
+    user: { email: "webmarket.k@gmail.com", name: "Bookea" },
+    account: { email: "webmarket.k@gmail.com" },
+    full_name: "NATHALIE RAMOS",
+    phone: "33679836461",
+    form_name: "Soin minceur",
+  });
+  assert.equal(mapped.email, "");
+  assert.equal(mapped.firstName, "NATHALIE");
+  assert.equal(mapped.lastName, "RAMOS");
+});
+
+test("SaveMyLeads : Options Name/Value sans email Facebook", () => {
+  const mapped = mapIncomingLead({
+    options: [
+      { name: "prénom", value: "Mohammed" },
+      { name: "nom", value: "DERGHAL" },
+      { name: "téléphone", value: "33611111111" },
+      { name: "offre", value: "Soin minceur" },
+    ],
+  });
+  assert.equal(mapped.email, "");
+  assert.equal(mapped.firstName, "Mohammed");
+  assert.equal(mapped.lastName, "DERGHAL");
 });

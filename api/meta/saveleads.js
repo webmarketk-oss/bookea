@@ -19,6 +19,20 @@ module.exports = async function handler(req, res) {
       ok: true,
       endpoint: "saveleads",
       method: "POST",
+      url: "https://www.bookeai.fr/api/meta/saveleads?center=SLUG_DU_CENTRE&source=savemyleads",
+      body: {
+        first_name: "Marie",
+        last_name: "Dupont",
+        email: "marie@cliente.fr",
+        phone: "0612345678",
+        offre: "Soin minceur",
+      },
+      notes: [
+        "Dans SaveMyLeads : Facebook Lead Ads → Webhooks → POST json vers cette URL.",
+        "Name = champ Bookea, Value = champ Facebook (First name, Last name, Phone number, Email, Form name).",
+        "Ne mapper Email que si le formulaire Facebook demande un mail. Sinon, supprimer la ligne email.",
+        "Ne pas envoyer payload_member_email ni le mail du compte Facebook.",
+      ],
     });
   }
 
@@ -44,7 +58,7 @@ module.exports = async function handler(req, res) {
       mapIncomingLead(payload, req.query),
       { ...payload, ...queryFields(req.query) },
     );
-    const sourceName = resolveIncomingSource(payload, req.query, "Facebook");
+    const sourceName = resolveIncomingSource(payload, req.query, "Facebook", req);
     const phone = isPlaceholderValue(mapped.phone) ? "" : mapped.phone;
     let email = isPlaceholderValue(mapped.email) ? "" : mapped.email;
     const firstName = isJunkLeadName(mapped.firstName) ? "" : mapped.firstName;
@@ -894,7 +908,17 @@ function flattenFields(raw, prefix = "") {
   return result;
 }
 
-function resolveIncomingSource(payload, query, fallback = "Facebook") {
+function resolveIncomingSource(payload, query, fallback = "Facebook", req) {
+  const ua = String(
+    req?.headers?.["user-agent"] ||
+      req?.headers?.["User-Agent"] ||
+      payload?.user_agent ||
+      "",
+  );
+  if (/savemyleads|save.?my.?leads/i.test(ua)) {
+    return "SaveMyLeads";
+  }
+
   const raw = firstValue(
     query?.source,
     query?.origin,
@@ -1077,6 +1101,9 @@ function pickLeadValue(fields, names) {
           key === name || key.endsWith(`_${name}`) || key.endsWith(`.${name}`),
       );
       for (const match of matches) {
+        if (isAccountEmailLookup(name) && isOwnerEmailField(match)) {
+          continue;
+        }
         const value = skipPlaceholder(fields[match]);
         if (value && !blockedNames.has(normalizeNameValue(value))) {
           return value;
@@ -1178,7 +1205,17 @@ function queryFields(query) {
   return result;
 }
 
+function isAccountEmailLookup(name) {
+  return /^(email|email_address|mail)$/.test(String(name || ""));
+}
+
 function shouldPromoteNestedField(prefix, short) {
+  const root = String(prefix || "")
+    .split(/[._]/)
+    .filter(Boolean)[0];
+  if (/^(user|account|owner|affiliate|workspace|sml)$/i.test(root || "")) {
+    return false;
+  }
   if (short !== "name") {
     return true;
   }
