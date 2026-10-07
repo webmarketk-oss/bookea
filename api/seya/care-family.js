@@ -11,7 +11,9 @@ function inferCareFamily(text) {
   if (!needle) {
     return "";
   }
-  if (/epilation|laser|definitive/.test(needle)) {
+  if (
+    /epilation|laser|definitive|aisselle|maillot|bikini|pilosit/.test(needle)
+  ) {
     return "epilation";
   }
   if (/visage|hydrafacial|peau|acne|glow/.test(needle)) {

@@ -115,9 +115,9 @@ function asksPrice(text) {
   );
 }
 
-function resolvePricePolicy(seya, conversation) {
+function resolvePricePolicy(seya, conversation, extraText) {
   const briefs = Array.isArray(seya?.treatmentBriefs) ? seya.treatmentBriefs : [];
-  const family = activeCareFamily(conversation);
+  const family = activeCareFamily(conversation, extraText);
   const need = normalize(conversation?.qualification?.need || "");
   const treatment = normalize(conversation?.treatment || "");
   const byNeed = need
@@ -137,7 +137,8 @@ function resolvePricePolicy(seya, conversation) {
     byFamily ||
     briefs.find((item) => needle && normalize(item?.name).includes(needle)) ||
     briefs.find((item) => needle && needle.includes(normalize(item?.name))) ||
-    (family === "minceur" || /minceur|cryo|ventre|poids/.test(treatment)
+    (family === "minceur" ||
+    (!family && /minceur|cryo|ventre|poids/.test(treatment))
       ? briefs.find((item) => /minceur|cryo/i.test(item?.name || ""))
       : null);
   const policy = overlayOfferPricing(
@@ -269,7 +270,7 @@ function priceReplyForIntent(intent, policy, options = {}) {
     return nextSessionReply(policy, options);
   }
   if (target === "package") {
-    return packageReply(policy);
+    return packageReply(policy, options);
   }
   if (target === "discovery") {
     return discoveryReply(policy);
@@ -281,9 +282,13 @@ function priceReplyForIntent(intent, policy, options = {}) {
 }
 
 function analysisPhrase(family) {
-  return family === "visage"
-    ? "un diagnostic de la peau"
-    : "une analyse corporelle";
+  if (family === "visage") {
+    return "un diagnostic de la peau";
+  }
+  if (family === "epilation") {
+    return "un bilan pilaire";
+  }
+  return "une analyse corporelle";
 }
 
 function bilanReply(policy, options = {}) {
@@ -321,17 +326,21 @@ function nextSessionReply(policy, options = {}) {
     return `${announceSession(policy)} Le protocole exact se précise après ${analysis}.`;
   }
   if (policy.sessionPolicy === "callback") {
-    return "Je comprends, vous souhaitez connaître le prix des séances si vous poursuivez après la découverte. Je n’ai pas de tarif à annoncer ici : une conseillère du centre peut vous donner une fourchette. Je peux lui demander de vous rappeler.";
+    return `Je comprends, vous souhaitez connaître le prix des séances si vous poursuivez après ${analysis}. Je n’ai pas de tarif à annoncer ici : une conseillère du centre peut vous donner une fourchette. Je peux lui demander de vous rappeler.`;
   }
   if (policy.package) {
     return `Je n’ai pas de tarif fixe à la séance. ${packageSentence(policy.package)} Le détail dépend du protocole proposé après ${analysis}.`;
   }
-  return `Vous parlez du tarif des séances après la découverte, c’est bien ça. Il dépend du protocole conseillé après ${analysis}. Je n’ai pas de prix fiable à vous donner avant ce bilan, mais je peux demander au centre s’il peut vous communiquer une fourchette.`;
+  return `Vous parlez du tarif des séances après ${analysis}, c’est bien ça. Il dépend du protocole conseillé après ${analysis}. Je n’ai pas de prix fiable à vous donner avant ce bilan, mais je peux demander au centre s’il peut vous communiquer une fourchette.`;
 }
 
-function packageReply(policy) {
+function packageReply(policy, options = {}) {
+  const after = analysisPhrase(options.family);
   if (policy.package) {
-    return `${packageSentence(policy.package)} Le devis précis se fait après le bilan.`;
+    return `${packageSentence(policy.package)} Le devis précis se fait après ${after}.`;
+  }
+  if (options.family === "epilation") {
+    return "Je n’ai pas le tarif du forfait en fiche pour cette zone. Il se précise après le bilan pilaire. Je peux demander au centre une fourchette.";
   }
   return "Je n’ai pas de tarif de cure renseigné. Je peux demander au centre de vous donner une fourchette.";
 }
@@ -339,6 +348,23 @@ function packageReply(policy) {
 function genericPriceReply(policy, options = {}) {
   const family = options.family || "";
   const parts = [];
+  if (family === "epilation") {
+    if (isFree(policy.bilan) || isFree(policy.discovery)) {
+      parts.push("Le bilan pilaire est offert, c’est gratuit.");
+    } else if (policy.bilan) {
+      parts.push(`Le bilan pilaire : ${policy.bilan}.`);
+    } else if (!policy.session && !policy.package) {
+      return "Pour l’épilation laser, le tarif de la zone se précise après le bilan pilaire. Je n’ai pas ce montant en fiche, je peux demander au centre.";
+    }
+    if (policy.session && ["fixed", "from", "range"].includes(policy.sessionPolicy)) {
+      parts.push(announceSession(policy));
+    } else {
+      parts.push(
+        "On y analyse la pilosité et on vous établit un devis personnalisé pour la zone.",
+      );
+    }
+    return parts.join(" ").replace(/\s+/g, " ").trim();
+  }
   if (isFree(policy.bilan) || isFree(policy.discovery)) {
     parts.push(
       family === "visage"
@@ -446,7 +472,7 @@ function draftMissesCurrentQuestion(draft, text, conversation) {
         normalize(draft),
       );
     const answersSessions =
-      /seances suivantes|apres la decouverte|tarif fixe|prix fiable|fourchette|a partir|à partir|rappeler/.test(
+      /seances suivantes|apres la decouverte|bilan pilaire|tarif fixe|prix fiable|fourchette|a partir|à partir|rappeler/.test(
         normalize(draft),
       );
     if (repeatsBilan && !answersSessions) {
@@ -457,6 +483,13 @@ function draftMissesCurrentQuestion(draft, text, conversation) {
     }
   }
   if (intent === "package" && !/cure|forfait|500|fourchette/.test(normalize(draft))) {
+    return true;
+  }
+  const family = activeCareFamily(conversation, text);
+  if (
+    family === "epilation" &&
+    /analyse corporelle|seance decouverte sont offerts/.test(normalize(draft))
+  ) {
     return true;
   }
   return false;
@@ -478,10 +511,10 @@ function buildPriceReply(text, seya, conversation) {
     conversation?.bookingState?.unansweredPriceIntent ||
     conversation?.bookingState?.lastPriceIntent ||
     "next_session";
-  const policy = resolvePricePolicy(seya, conversation);
+  const policy = resolvePricePolicy(seya, conversation, text);
   const options = {
     previousIntent,
-    family: activeCareFamily(conversation),
+    family: activeCareFamily(conversation, text),
     alreadyAnsweredSessions: alreadyGaveSessionPrice(conversation),
   };
   if (intent === "repeat_complaint") {

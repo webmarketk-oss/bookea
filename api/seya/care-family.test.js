@@ -110,6 +110,19 @@ test("bilan laser reste du laser", () => {
   assert.equal(inferCareFamily("Bilan laser offert FERRAND JFG"), "epilation");
 });
 
+test("aisselles, c’est du laser, pas de la minceur", () => {
+  assert.equal(inferCareFamily("C’est combien pour les aisselles"), "epilation");
+  assert.equal(
+    activeCareFamily({
+      treatment: "Soin minceur",
+      campaign: "offre découverte minceur",
+      qualification: { need: "Soin minceur" },
+      messages: [{ author: "lead", text: "C’est combien pour les aisselles" }],
+    }),
+    "epilation",
+  );
+});
+
 test("l’offre se dit naturellement, jamais « le minceur »", () => {
   const { humanizeOfferTitle, naturalOfferPhrase } = require("./care-family");
   assert.equal(naturalOfferPhrase("minceur", ""), "un soin minceur");

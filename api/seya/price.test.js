@@ -232,6 +232,58 @@ test("le contrôle rejette une copie de la dernière réponse", () => {
   assert.match(checked.text, /prix fiable|fourchette|après la découverte/i);
 });
 
+test("aisselles / forfait laser : bilan pilaire, jamais d’analyse corporelle", () => {
+  const { buildPriceReply } = require("./price");
+  const laser = {
+    treatmentBriefs: [
+      {
+        name: "Soin minceur",
+        pricing: {
+          bilan: "offert",
+          discovery: "offerte",
+          session: "",
+          package: "",
+          sessionPolicy: "after_bilan",
+        },
+      },
+      {
+        name: "Épilation laser",
+        pricing: {
+          bilan: "offert",
+          discovery: "offert",
+          session: "",
+          package: "",
+          sessionPolicy: "after_bilan",
+        },
+      },
+    ],
+  };
+  const conversation = {
+    treatment: "Épilation laser",
+    campaign: "Bilan laser offert + test offert",
+    qualification: { need: "Épilation laser", zone: "aisselles" },
+    messages: [{ author: "lead", text: "C’est combien pour les aisselles" }],
+  };
+  const first = buildPriceReply("C’est combien pour les aisselles", laser, conversation);
+  assert.match(first, /bilan pilaire/i);
+  assert.doesNotMatch(first, /corporelle|séance découverte/i);
+
+  const pack = buildPriceReply(
+    "Non les aisselles combien coûte le forfait",
+    laser,
+    {
+      ...conversation,
+      messages: [
+        ...conversation.messages,
+        { author: "seya", text: first },
+        { author: "lead", text: "Non les aisselles combien coûte le forfait" },
+      ],
+    },
+  );
+  assert.match(pack, /forfait|fourchette|bilan pilaire/i);
+  assert.doesNotMatch(pack, /corporelle|séance découverte/i);
+});
+
 test("après « non pour le visage », le prix ne revient pas au bilan minceur", async () => {
   const seya = {
     qualifyOnSignup: true,

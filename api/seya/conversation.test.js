@@ -1224,6 +1224,78 @@ test("prix pour 6 séances puis « le prix avant » : elle ne se tait pas", asyn
   assert.match(secondAnswer, /avant de venir|fourchette|rappeler/i);
 });
 
+test("aisselles laser : bilan pilaire, pas d’analyse corporelle", async () => {
+  const laser = {
+    ...seya,
+    treatmentBriefs: [
+      {
+        name: "Soin minceur",
+        brief: "Réceptionniste.",
+        pricing: {
+          bilan: "offert",
+          discovery: "offerte",
+          session: "",
+          package: "",
+          sessionPolicy: "after_bilan",
+        },
+      },
+      {
+        name: "Épilation laser",
+        brief: "Réceptionniste.",
+        pricing: {
+          bilan: "offert",
+          discovery: "offert",
+          session: "",
+          package: "",
+          sessionPolicy: "after_bilan",
+        },
+      },
+    ],
+  };
+  let conversation = startConversation(
+    {
+      leadId: "lead-aisselles-laser",
+      centerId: "jfg-clinique-clermont",
+      firstName: "Léa",
+      lastName: "Test",
+      phone: "0611223344",
+      treatment: "Épilation laser",
+      campaign: "Bilan laser offert + test offert",
+    },
+    "JFG Clinique Clermont",
+    laser,
+  );
+  const first = await generateSeyaReply({
+    conversation,
+    text: "C’est combien pour les aisselles",
+    seya: laser,
+    appointments: [],
+    hours: hours(),
+    centerName: "JFG Clinique Clermont",
+    centerId: "jfg-clinique-clermont",
+    now: NOW,
+  });
+  conversation = first.conversation;
+  let answer = lastSeya(conversation);
+  assert.match(answer, /bilan pilaire|pilosité|épilation/i);
+  assert.doesNotMatch(answer, /analyse corporelle|séance découverte/i);
+
+  const second = await generateSeyaReply({
+    conversation,
+    text: "Non les aisselles combien coûte le forfait",
+    seya: laser,
+    appointments: [],
+    hours: hours(),
+    centerName: "JFG Clinique Clermont",
+    centerId: "jfg-clinique-clermont",
+    now: NOW,
+  });
+  conversation = second.conversation;
+  answer = lastSeya(conversation);
+  assert.match(answer, /forfait|fourchette|bilan pilaire/i);
+  assert.doesNotMatch(answer, /analyse corporelle|séance découverte/i);
+});
+
 test("13h ou 18h : elle propose ces horaires, pas 16h", async () => {
   const now = new Date("2026-10-06T10:00:00");
   let conversation = startConversation(
