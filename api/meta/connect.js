@@ -41,7 +41,15 @@ module.exports = async function handler(req, res) {
   url.searchParams.set("redirect_uri", redirectUri);
   url.searchParams.set("state", state);
   url.searchParams.set("response_type", "code");
-  url.searchParams.set("scope", process.env.META_OAUTH_SCOPES || OAUTH_SCOPES.join(","));
+  const configId = String(process.env.META_LOGIN_CONFIG_ID || "").trim();
+  if (configId) {
+    url.searchParams.set("config_id", configId);
+  } else {
+    url.searchParams.set(
+      "scope",
+      process.env.META_OAUTH_SCOPES || OAUTH_SCOPES.join(","),
+    );
+  }
 
   return res.redirect(302, url.toString());
 };

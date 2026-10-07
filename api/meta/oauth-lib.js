@@ -1,12 +1,6 @@
 const GRAPH_VERSION = "v26.0";
 const META_PUBLIC_BASE = "https://www.bookeai.fr";
-const OAUTH_SCOPES = [
-  "pages_show_list",
-  "pages_read_engagement",
-  "pages_manage_metadata",
-  "pages_manage_ads",
-  "leads_retrieval",
-];
+const OAUTH_SCOPES = ["pages_show_list", "leads_retrieval"];
 
 function getMetaPublicBaseUrl() {
   return META_PUBLIC_BASE;
