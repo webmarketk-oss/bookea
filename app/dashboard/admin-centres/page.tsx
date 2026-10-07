@@ -125,6 +125,7 @@ type CenterCardData = Omit<CenterRow, "settings" | "phone"> & {
   whatsappOffer: ReturnType<typeof seyaOfferFromQuota>;
   bookeaPlan: BookeaPlan | null;
   offerHistory: OfferHistoryItem[];
+  facebookPage: { pageId: string; pageName: string } | null;
 };
 
 const defaultSources = [
@@ -190,6 +191,21 @@ export default function AdminCentresPage() {
 
         if (membersError) throw new Error(membersError.message);
         memberRows = (members ?? []) as unknown as CenterMemberRow[];
+      }
+
+      const facebookByCenter = new Map<string, { pageId: string; pageName: string }>();
+      if (centerIds.length > 0) {
+        const { data: facebookRows } = await supabase
+          .from("facebook_page_connections")
+          .select("center_id,page_id,page_name,is_active")
+          .in("center_id", centerIds)
+          .eq("is_active", true);
+        for (const row of facebookRows ?? []) {
+          facebookByCenter.set(String(row.center_id), {
+            pageId: String(row.page_id || ""),
+            pageName: String(row.page_name || "Page Facebook"),
+          });
+        }
       }
 
       setCenters(
@@ -269,6 +285,7 @@ export default function AdminCentresPage() {
             whatsappOffer,
             bookeaPlan,
             offerHistory,
+            facebookPage: facebookByCenter.get(center.id) || null,
           };
         }),
       );
@@ -1056,10 +1073,13 @@ function CenterCard({
       email: center.email || "",
     });
   }, [center.address, center.email, center.legalName, center.phone]);
-  const facebookConnectUrl =
-    center.slug && facebookPageId.trim()
-      ? `/api/meta/connect?center_slug=${encodeURIComponent(center.slug)}&page_id=${encodeURIComponent(facebookPageId.trim())}`
-      : "";
+  const facebookConnectUrl = center.slug
+    ? `/api/meta/connect?center_slug=${encodeURIComponent(center.slug)}${
+        facebookPageId.trim()
+          ? `&page_id=${encodeURIComponent(facebookPageId.trim())}`
+          : ""
+      }`
+    : "";
 
   async function submitOwner(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -1468,13 +1488,17 @@ function CenterCard({
             <label className="block text-sm font-medium text-slate-500">
               Connecter les leads Facebook
             </label>
+            {center.facebookPage ? (
+              <p className="mt-2 rounded-xl bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-700">
+                Connecté : {center.facebookPage.pageName}
+              </p>
+            ) : null}
             <div className="mt-2 flex flex-col gap-2 sm:flex-row">
               <input
                 type="text"
                 value={facebookPageId}
-                onChange={(event) => setFacebookPageId(event.target.value.replace(/\D/g, ""))}
-                placeholder="ID de page Meta"
-                inputMode="numeric"
+                onChange={(event) => setFacebookPageId(event.target.value)}
+                placeholder="Facultatif : lien facebook.com/… ou ID"
                 className="h-12 min-w-0 flex-1 rounded-xl border border-slate-200 bg-white px-3 font-bold text-slate-950 outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-100"
               />
               <a
@@ -1487,16 +1511,13 @@ function CenterCard({
                 }`}
               >
                 <ExternalLink className="h-4 w-4" />
-                Connecter
+                {center.facebookPage ? "Changer de page" : "Connecter Facebook"}
               </a>
             </div>
             <p className="mt-2 text-xs font-semibold text-slate-400">
-              Collez l&apos;ID de la Page, connectez-vous avec le compte Meta
-              admin, puis dans Meta : webhook{" "}
-              <span className="font-mono text-slate-600">
-                https://www.bookeai.fr/api/meta/leads
-              </span>
-              . Systeme.io se colle dans Paramètres → Sources.
+              Clique Connecter Facebook, accepte Meta, puis choisis la page du
+              centre. Pas besoin de l&apos;ID. Systeme.io se colle dans
+              Paramètres → Sources.
             </p>
           </div>
         </div>
