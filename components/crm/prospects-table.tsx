@@ -190,7 +190,7 @@ export default function ProspectsTable({
               <TableCell className="w-[5.5rem] max-w-[5.5rem] overflow-hidden">
                 <span
                   title={lead.treatment || lead.campaign || undefined}
-                  className="block max-w-[5.5rem] truncate rounded-full bg-blue-600 px-1.5 py-0.5 text-[11px] font-semibold text-white"
+                  className="block max-w-[5.5rem] truncate rounded-full border border-blue-300/80 bg-blue-100/50 px-1.5 py-0.5 text-[11px] font-semibold text-blue-700"
                 >
                   {lead.treatment || lead.campaign || "—"}
                 </span>
@@ -353,8 +353,8 @@ function SourceBadge({ source }: { source: Lead["source"] }) {
     google: "border-slate-200 bg-white text-slate-700",
     "site web": "border-slate-200 bg-slate-50 text-slate-700",
     organique: "border-emerald-100 bg-emerald-50 text-emerald-700",
-    "systeme.io": "border-yellow-500 bg-yellow-400 text-yellow-950",
-    systeme: "border-yellow-500 bg-yellow-400 text-yellow-950",
+    "systeme.io": "border-amber-300/80 bg-amber-100/50 text-amber-800",
+    systeme: "border-amber-300/80 bg-amber-100/50 text-amber-800",
     landing: "border-violet-100 bg-violet-50 text-violet-700",
   };
 
@@ -403,7 +403,7 @@ function SourceIcon({ source }: { source: Lead["source"] }) {
   }
 
   if (key === "systeme.io" || key === "systeme") {
-    return <Globe className="h-4 w-4 text-yellow-950" />;
+    return <Globe className="h-4 w-4 text-amber-700" />;
   }
 
   return <Globe className="h-4 w-4 text-slate-500" />;
