@@ -71,7 +71,7 @@ export default function ProspectsTable({
         <TableHeader>
           <TableRow>
             <TableHead className="min-w-[12rem]">Prospect</TableHead>
-            <TableHead className="w-[18rem] min-w-[18rem] max-w-[18rem]">Offre</TableHead>
+            <TableHead className="w-[9rem] min-w-[9rem] max-w-[9rem]">Offre</TableHead>
             <TableHead>
               <button
                 type="button"
@@ -187,7 +187,7 @@ export default function ProspectsTable({
                 </div>
               </TableCell>
 
-              <TableCell className="w-[18rem] min-w-[18rem] max-w-[18rem] overflow-hidden">
+              <TableCell className="w-[9rem] min-w-[9rem] max-w-[9rem] overflow-hidden">
                 <span
                   title={lead.treatment || lead.campaign || undefined}
                   className="block max-w-full truncate rounded-full border border-blue-300/80 bg-blue-100/50 px-2.5 py-0.5 text-[11px] font-semibold text-blue-700"
