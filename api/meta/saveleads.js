@@ -186,8 +186,41 @@ function firstNonEmpty(...values) {
   return "";
 }
 
+function looksLikeJsonBlob(value) {
+  const text = String(value || "").trim();
+  return (
+    text.startsWith("{") ||
+    text.startsWith("[") ||
+    /[{}\[\]]/.test(text)
+  );
+}
+
 function extractLooseContact(text) {
   const raw = String(text || "").replace(/\u00a0/g, " ");
+  if (looksLikeJsonBlob(raw) && (raw.startsWith("{") || raw.startsWith("["))) {
+    try {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === "object") {
+        return extractLooseContact(
+          [
+            parsed.full_name,
+            parsed.fullname,
+            parsed.first_name,
+            parsed.last_name,
+            parsed.phone,
+            parsed.number,
+            parsed.email,
+            parsed.offre,
+            parsed.commentaire,
+          ]
+            .filter(Boolean)
+            .join("\n"),
+        );
+      }
+    } catch {
+      // fall through and read emails/phones in the blob
+    }
+  }
   const emailMatch = extractEmailFromBlob(raw);
   const phoneMatch = raw.match(
     /(?:\+33|0033|0)\s*[1-9](?:[\s.-]*\d{2}){4}/,
@@ -206,11 +239,14 @@ function extractLooseContact(text) {
   const names = [];
   const offers = [];
   for (const line of lines) {
+    if (looksLikeJsonBlob(line)) {
+      continue;
+    }
     const split = splitNameAndOffer(line);
-    if (split.name) {
+    if (split.name && !looksLikeJsonBlob(split.name)) {
       names.push(split.name);
     }
-    if (split.offer) {
+    if (split.offer && !looksLikeJsonBlob(split.offer)) {
       offers.push(split.offer);
     }
   }
@@ -278,20 +314,23 @@ function payloadFromBody(body) {
     ...parsed,
     full_name: firstNonEmpty(
       skipPlaceholder(parsed.full_name),
+      skipPlaceholder(parsed.fullname),
       skipPlaceholder(parsed.name),
-      loose.full_name,
+      looksLikeJsonBlob(loose.full_name) ? "" : skipPlaceholder(loose.full_name),
     ),
     phone: firstNonEmpty(
       skipPlaceholder(parsed.phone),
       skipPlaceholder(parsed.phone_number),
       skipPlaceholder(parsed.telephone),
+      skipPlaceholder(parsed.number),
+      skipPlaceholder(parsed.tel),
       loose.phone,
     ),
     email: firstNonEmpty(skipPlaceholder(parsed.email), loose.email),
     offre: firstNonEmpty(
       skipPlaceholder(parsed.offre),
       skipPlaceholder(parsed.offer),
-      loose.offre,
+      looksLikeJsonBlob(loose.offre) ? "" : loose.offre,
     ),
   };
 }
@@ -386,7 +425,11 @@ function skipPlaceholder(value) {
 function pickExact(fields, names) {
   for (const name of names) {
     if (fields[name]) {
-      return String(fields[name]).trim();
+      const text = String(fields[name]).trim();
+      if (!text || looksLikeJsonBlob(text) || isPlaceholderValue(text)) {
+        continue;
+      }
+      return text;
     }
   }
   return "";
@@ -504,7 +547,8 @@ function isPlaceholderValue(value) {
 }
 
 function isJunkLeadName(value) {
-  return isPlaceholderValue(value);
+  const text = String(value || "").trim();
+  return isPlaceholderValue(value) || looksLikeJsonBlob(text);
 }
 
 function stripPlaceholderTokens(text) {
@@ -1144,7 +1188,11 @@ function pickLeadValue(fields, names) {
     for (const group of [preferred, keys]) {
       if (fields[name] && group.includes(name)) {
         const value = skipPlaceholder(fields[name]);
-        if (value && !blockedNames.has(normalizeNameValue(value))) {
+        if (
+          value &&
+          !looksLikeJsonBlob(value) &&
+          !blockedNames.has(normalizeNameValue(value))
+        ) {
           return value;
         }
       }
@@ -1157,7 +1205,11 @@ function pickLeadValue(fields, names) {
           continue;
         }
         const value = skipPlaceholder(fields[match]);
-        if (value && !blockedNames.has(normalizeNameValue(value))) {
+        if (
+          value &&
+          !looksLikeJsonBlob(value) &&
+          !blockedNames.has(normalizeNameValue(value))
+        ) {
           return value;
         }
       }

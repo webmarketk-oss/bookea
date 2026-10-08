@@ -346,6 +346,21 @@ test("SaveMyLeads : fullname + number + commentaire (zone et CP)", () => {
   assert.match(mapped.comment, /64320/);
 });
 
+test("SaveMyLeads JSON : le nom n’est pas le blob {\"email\"", () => {
+  const { payloadFromBody, mapIncomingLead } = require("./saveleads");
+  const payload = payloadFromBody({
+    email: "virg.socopi@gmail.com",
+    fullname: "Virginie Berthoumieu",
+    number: "+33663465714",
+    commentaire: "ventre_et_poignees_d_amour",
+  });
+  const mapped = mapIncomingLead(payload);
+  assert.equal(mapped.firstName, "Virginie");
+  assert.equal(mapped.lastName, "Berthoumieu");
+  assert.doesNotMatch(mapped.firstName, /email|\{/);
+  assert.match(mapped.phone.replace(/\D/g, ""), /33663465714|663465714/);
+});
+
 test("SaveMyLeads : code postal et zone remplissent le commentaire", () => {
   const mapped = mapIncomingLead({
     options: [
