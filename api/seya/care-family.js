@@ -12,7 +12,9 @@ function inferCareFamily(text) {
     return "";
   }
   if (
-    /epilation|laser|definitive|aisselle|maillot|bikini|pilosit/.test(needle)
+    /epilation|laser|definitive|depil|aisselle|maillot|bikini|pilosit/.test(
+      needle,
+    )
   ) {
     return "epilation";
   }
@@ -27,6 +29,12 @@ function inferCareFamily(text) {
     return "minceur";
   }
   if (/bilan|decouverte/.test(needle)) {
+    if (/laser|epil|pilaire|depil/.test(needle)) {
+      return "epilation";
+    }
+    if (/visage|peau|hydra/.test(needle)) {
+      return "visage";
+    }
     return "minceur";
   }
   return "";
@@ -71,6 +79,17 @@ function understandThread(conversation, extraText) {
   const lastLead = leadTexts[leadTexts.length - 1] || latest;
   const asked = [];
   const needle = normalizeCare(lastLead);
+  const openAsked = [];
+  const askedPrice = leadTexts.some((text) => {
+    const value = normalizeCare(text);
+    return (
+      /prix|tarif|coute|cout|combien/.test(value) &&
+      !/combien de (temps|seance)/.test(value)
+    );
+  });
+  if (askedPrice) {
+    openAsked.push("prix");
+  }
   if (/prix|tarif|coute|cout|combien|gratuit|offert/.test(needle) && !/combien de (temps|seance)/.test(needle)) {
     asked.push("prix");
   }
@@ -88,6 +107,9 @@ function understandThread(conversation, extraText) {
   const summary = [
     family ? `Soin actuel, d’après tout le fil : ${need || family}.` : "Soin actuel encore flou.",
     asked.length ? `Elle demande maintenant : ${asked.join(", ")}.` : "",
+    openAsked.includes("prix")
+      ? "Le prospect a demandé un tarif dans le fil : tu y réponds, tu ne clôtures pas."
+      : "",
     staffTexts.length
       ? `Messages de l’équipe (prioritaires sur l’agenda automatique) : ${staffTexts
           .slice(-6)
@@ -104,14 +126,15 @@ function understandThread(conversation, extraText) {
     .filter(Boolean)
     .join(" ");
 
-  return { family, need, asked, summary };
+  return { family, need, asked, openAsked, summary };
 }
 
 function activeCareFamily(conversation, extraText) {
   return (
     understandThread(conversation, extraText).family ||
+    lockedCenterFamily(conversation?._seya, conversation) ||
     inferCareFamily(
-      `${conversation?.treatment || ""} ${conversation?.campaign || ""} ${conversation?.offerLabel || ""}`,
+      `${conversation?.treatment || ""} ${conversation?.campaign || ""} ${conversation?.offerLabel || ""} ${conversation?.centerId || ""} ${conversation?.centerName || ""}`,
     )
   );
 }
@@ -327,6 +350,54 @@ function findOfferMap(seya, ...parts) {
   return best;
 }
 
+function lockedCenterFamily(seya, conversation) {
+  const blob = normalizeCare(
+    [
+      conversation?.centerName,
+      conversation?.centerId,
+      seya?.centerName,
+      seya?.centerProfile?.activity,
+      seya?.centerProfile?.positioning,
+      seya?.centerProfile?.promise,
+    ]
+      .filter(Boolean)
+      .join(" "),
+  );
+  if (!blob) {
+    return "";
+  }
+  if (
+    inferCareFamily(blob) === "epilation" &&
+    !/minceur|cryo|maigrir/.test(blob)
+  ) {
+    return "epilation";
+  }
+  if (
+    inferCareFamily(blob) === "minceur" &&
+    !/laser|epil|depil/.test(blob)
+  ) {
+    return "minceur";
+  }
+  return "";
+}
+
+function briefsForFamily(seya, family) {
+  const briefs = Array.isArray(seya?.treatmentBriefs) ? seya.treatmentBriefs : [];
+  if (!family) {
+    return briefs;
+  }
+  const matched = briefs.filter(
+    (item) => inferCareFamily(item?.name) === family,
+  );
+  if (matched.length) {
+    return matched;
+  }
+  if (family === "epilation" || family === "visage") {
+    return [];
+  }
+  return briefs;
+}
+
 function offeredTreatmentNames(seya) {
   const briefs = Array.isArray(seya?.treatmentBriefs) ? seya.treatmentBriefs : [];
   const maps = Array.isArray(seya?.offerMaps) ? seya.offerMaps : [];
@@ -405,6 +476,8 @@ function phraseConfiguredOffer(value) {
 
 module.exports = {
   activeCareFamily,
+  briefsForFamily,
+  lockedCenterFamily,
   understandThread,
   careLabelForFamily,
   findOfferMap,

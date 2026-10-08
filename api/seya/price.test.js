@@ -343,3 +343,57 @@ test("après « non pour le visage », le prix ne revient pas au bilan minceur",
   assert.doesNotMatch(answer, /corporelle/i);
   assert.doesNotMatch(answer, /offerts, c’est gratuit/i);
 });
+
+test("Vichy laser : les briefs minceur 500€ ne fuient pas sur les aisselles", () => {
+  const { buildPriceReply } = require("./price");
+  const seya = {
+    treatmentBriefs: [
+      {
+        name: "Soin minceur",
+        pricing: {
+          bilan: "offert",
+          discovery: "offerte",
+          session: "",
+          package: "à partir de 500€, payable jusqu’en 10 fois",
+          sessionPolicy: "after_bilan",
+        },
+      },
+      {
+        name: "Épilation laser",
+        pricing: {
+          bilan: "offert",
+          discovery: "offert",
+          session: "",
+          package: "",
+          sessionPolicy: "after_bilan",
+        },
+      },
+    ],
+  };
+  const conversation = {
+    centerId: "depil-tech-vichy",
+    centerName: "Dépil Tech Vichy",
+    treatment: "Épilation laser",
+    campaign: "offre laser (jusqu’à -40%)",
+    qualification: { need: "Épilation laser", zone: "aisselles" },
+    messages: [
+      { author: "lead", text: "Je voudrais savoir le prix pour 6 séances aisselles" },
+    ],
+  };
+  const first = buildPriceReply(
+    "Je voudrais savoir le prix pour 6 séances aisselles",
+    seya,
+    conversation,
+  );
+  assert.doesNotMatch(first, /500|cures|analyse corporelle|séance découverte sont offerts/i);
+  const before = buildPriceReply("Je voudrais le prix avant", seya, {
+    ...conversation,
+    messages: [
+      ...conversation.messages,
+      { author: "seya", text: first },
+      { author: "lead", text: "Je voudrais le prix avant" },
+    ],
+  });
+  assert.doesNotMatch(before, /500|cures|analyse corporelle|minceur/i);
+  assert.match(before, /fourchette|avant de venir|rappeler|bilan pilaire/i);
+});

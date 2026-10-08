@@ -40,7 +40,18 @@ function isOffTopicComplaint(text) {
   return (
     isRereadAsk(text) ||
     isRobotComplaint(text) ||
-    /c[' ]est quoi le rapport|hors sujet|rien a voir/.test(value)
+    /c[' ]est quoi le rapport|hors sujet|rien a voir|tu parle[s]? de quoi|vous parlez de quoi/.test(
+      value,
+    )
+  );
+}
+
+function isCenterAffirmation(text) {
+  const value = normalize(text);
+  return (
+    /je suis bien (a|au|chez)/.test(value) ||
+    /c[' ]est (bien )?(depil|vichy|le bon (centre|institut|numero))/.test(value) ||
+    /je (suis|reste) (bien )?(au|dans le) bon centre/.test(value)
   );
 }
 
@@ -1260,6 +1271,9 @@ function firstNeedReply(text, conversation, qualification, extras = {}) {
 }
 
 function conversationalReply(text, conversation, qualification, now, extras = {}) {
+  if (isCenterAffirmation(text)) {
+    return "";
+  }
   if (isIdentityQuestion(text)) {
     return identityReply();
   }
@@ -1382,6 +1396,7 @@ module.exports = {
   isBookingThread,
   isWillCallBack,
   isOffTopicComplaint,
+  isCenterAffirmation,
   isRereadAsk,
   greetingForTime,
   weekHalfFromText,

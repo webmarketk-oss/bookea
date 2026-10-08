@@ -47,6 +47,7 @@ const {
   crmUpdateFromLeadMessage,
   isLeadRefusal,
   isOffTopicComplaint,
+  isCenterAffirmation,
   isRereadAsk,
   isAppointmentConfirmed,
   isConfirmingOfferedTime,
@@ -446,7 +447,13 @@ function priceReply(seya, qualification, conversation, text) {
     seya,
     `${qualification?.need || ""} ${qualification?.zone || ""} ${conversation?.treatment || ""}`,
   );
-  if (price && /analyse corporelle|devis personnalise|devis personnalisé/i.test(price)) {
+  if (
+    price &&
+    /analyse corporelle|devis personnalise|devis personnalisé/i.test(price) &&
+    inferCareFamily(
+      `${qualification?.need || ""} ${conversation?.treatment || ""} ${text || ""}`,
+    ) === "minceur"
+  ) {
     return price;
   }
   return unknownPriceReply();
@@ -806,6 +813,7 @@ function extractNeed(text) {
     ["laser", "Épilation laser"],
     ["epilation", "Épilation laser"],
     ["definitive", "Épilation laser"],
+    ["depil", "Épilation laser"],
     ["aisselle", "Épilation laser"],
     ["maillot", "Épilation laser"],
     ["bikini", "Épilation laser"],
@@ -1388,10 +1396,14 @@ function defaultHours() {
 function applyLeadReply(conversation, text, seya, slots, extras = {}) {
   const settings = agentSettings(seya);
   conversation = withStaffOfferedSlots(conversation, extras.now);
-  const previousLead = lastOtherLeadText(conversation, text);
+  const previousLead = lastSubstantiveLeadText(conversation, text);
   const reread =
     isRereadAsk(text) ||
-    (isOffTopicComplaint(text) && isBookingThread(conversation));
+    isCenterAffirmation(text) ||
+    (isOffTopicComplaint(text) &&
+      (isBookingThread(conversation) ||
+        classifyPriceQuestion(previousLead) ||
+        asksPrice(previousLead)));
   const intentText = reread && previousLead ? previousLead : text;
   let bookingState =
     extras.bookingState && !reread
@@ -1577,6 +1589,9 @@ function applyLeadReply(conversation, text, seya, slots, extras = {}) {
 
   if (
     !reschedule &&
+    !isCenterAffirmation(text) &&
+    !classifyPriceQuestion(intentText) &&
+    !asksPrice(intentText) &&
     (isThanks(text, conversation) ||
       isHesitation(text) ||
       refusesSlots(text) ||
@@ -1695,14 +1710,24 @@ function applyLeadReply(conversation, text, seya, slots, extras = {}) {
     );
   }
 
-  if (asksPrice(text) || classifyPriceQuestion(text) || isPriceRepeatComplaint(text)) {
-    const reply = priceReply(seya, qualification, conversation, text);
+  if (
+    asksPrice(text) ||
+    classifyPriceQuestion(text) ||
+    isPriceRepeatComplaint(text) ||
+    asksPrice(intentText) ||
+    classifyPriceQuestion(intentText) ||
+    isPriceRepeatComplaint(intentText)
+  ) {
+    const reply = priceReply(seya, qualification, conversation, intentText);
     return finishLeadReply(
       conversation,
       qualification,
       qualification.need ? "Qualifié" : "En cours",
       text,
-      reply,
+      withRereadPrefix(
+        isRereadAsk(text) || isOffTopicComplaint(text),
+        reply,
+      ),
       markPriceAnswered({ ...bookingState, pendingQuestion: "price" }),
     );
   }
@@ -1930,7 +1955,7 @@ function applyLeadReply(conversation, text, seya, slots, extras = {}) {
   }
 
   if (isOffTopicComplaint(text)) {
-    const previous = lastOtherLeadText(conversation, text);
+    const previous = lastSubstantiveLeadText(conversation, text);
     const previousHealth = classifyHealthMessage(previous);
     if (previousHealth.personal) {
       const resolved = resolveHealthSheet(seya, conversation, previous);
@@ -2007,6 +2032,29 @@ function lastOtherLeadText(conversation, current) {
   );
 }
 
+function lastSubstantiveLeadText(conversation, current) {
+  const leads = [...(conversation?.messages || [])]
+    .reverse()
+    .filter(
+      (item) =>
+        item.author === "lead" &&
+        String(item.text || "").trim() &&
+        String(item.text || "").trim() !== String(current || "").trim(),
+    )
+    .map((item) => String(item.text || "").trim());
+  return (
+    leads.find(
+      (text) =>
+        classifyPriceQuestion(text) ||
+        asksPrice(text) ||
+        wantsSlots(text, conversation) ||
+        Boolean(extractNeed(text)),
+    ) ||
+    leads[0] ||
+    ""
+  );
+}
+
 function withRereadPrefix(reread, text) {
   const reply = String(text || "").trim();
   if (!reread || !reply) {
@@ -2030,7 +2078,9 @@ function fallbackAfterNote(qualification, conversation, text) {
     if (isRescheduleAsk(text) || wantsNoon(text)) {
       return "Dites-moi l’horaire qui vous convient, je décale le rendez-vous.";
     }
-    return "Avec plaisir, à bientôt.";
+    if (isThanks(text, conversation) || isShortYes(text)) {
+      return "Avec plaisir, à bientôt.";
+    }
   }
   if (threadIsPaused(conversation) || isWaitUntilLater(text)) {
     return willCallBackReply();
@@ -2177,8 +2227,10 @@ function relanceCopy(conversation, round = 1, centerName = "", seya) {
   const about = relanceAbout(care);
   const crmOffer = crmOfferForRelance(conversation, seya);
   const lastLead = lastLeadText(conversation);
-  const candidates =
-    Number(round) >= 3
+  const wantsTarif = askedPriceInThread(conversation);
+  const candidates = wantsTarif
+    ? relancePriceCandidates(hello, about, centre, round, firstName)
+    : Number(round) >= 3
       ? relanceThirdCandidates(firstName, crmOffer)
       : Number(round) === 2
         ? relanceSecondCandidates(firstName, crmOffer)
@@ -2288,13 +2340,44 @@ function relanceThirdCandidates(firstName, crmOffer) {
   ];
 }
 
+function askedPriceInThread(conversation) {
+  const thread = understandThread(conversation);
+  if (thread.openAsked?.includes("prix") || thread.asked.includes("prix")) {
+    return true;
+  }
+  return (conversation?.messages || []).some(
+    (item) =>
+      item.author === "lead" &&
+      /prix|tarif|combien/i.test(String(item.text || "")) &&
+      !/combien de (temps|seance)/i.test(String(item.text || "")),
+  );
+}
+
+function relancePriceCandidates(hello, about, centre, round, firstName) {
+  const who = firstName ? `${firstName}, ` : "";
+  if (Number(round) >= 3) {
+    const greet = firstName ? `Bonjour ${firstName} 😊` : "Bonjour 😊";
+    return [
+      `${greet} Je relis notre échange : vous demandiez le tarif ${about}. Je peux vous le préciser, ou vous proposer un rendez-vous. Qu’est-ce qui vous arrangerait ?`,
+      `${greet} Je reviens vers vous : le prix ${about} était bien votre question. Je peux vous le détailler, ou vous proposer un créneau.`,
+    ];
+  }
+  if (Number(round) === 2) {
+    return [
+      `${who}je relis votre demande : vous vouliez le tarif ${about}. Je peux vous le donner, ou vous proposer un créneau. Dites-moi ce que vous préférez.`,
+      `${who}vous aviez demandé le prix. Je peux vous le préciser tout de suite, ou vous proposer un rendez-vous.`,
+    ];
+  }
+  return [
+    `${hello}, je me permets de revenir vers vous au sujet ${about} à ${centre}. Souhaitez-vous que je vous précise le tarif, ou que je vous propose un rendez-vous ?`,
+    `${hello}, je reviens vers vous au sujet ${about}. Le tarif est noté ; je peux également vous proposer un créneau si vous le souhaitez.`,
+  ];
+}
+
 function relanceFirstCandidates(hello, about, centre, lastLead, conversation) {
   const lead = String(lastLead || "");
-  if (/prix|tarif|combien/i.test(lead)) {
-    return [
-      `${hello}, je me permets de revenir vers vous au sujet ${about} à ${centre}. Souhaitez-vous que je vous précise le tarif, ou que je vous propose un rendez-vous ?`,
-      `${hello}, je reviens vers vous au sujet ${about}. Le tarif est noté ; je peux également vous proposer un créneau si vous le souhaitez.`,
-    ];
+  if (/prix|tarif|combien/i.test(lead) || askedPriceInThread(conversation)) {
+    return relancePriceCandidates(hello, about, centre, 1, "");
   }
   if (
     Array.isArray(conversation.proposedSlots) &&
@@ -2312,9 +2395,11 @@ function relanceFirstCandidates(hello, about, centre, lastLead, conversation) {
 }
 
 function relanceCareLabel(conversation) {
-  const family = familyFromTreatment(
-    `${conversation.treatment || ""} ${conversation.campaign || ""} ${conversation.qualification?.need || ""} ${conversation.offerLabel || ""}`,
-  );
+  const family =
+    understandThread(conversation).family ||
+    familyFromTreatment(
+      `${conversation.treatment || ""} ${conversation.campaign || ""} ${conversation.qualification?.need || ""} ${conversation.offerLabel || ""}`,
+    );
   const phrase = naturalOfferPhrase(
     family,
     conversation.offerLabel ||

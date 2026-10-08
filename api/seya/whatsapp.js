@@ -2,7 +2,7 @@
 const { createClient } = require("@supabase/supabase-js");
 const { generateSeyaReply, hasAiKey } = require("./ai");
 const { inferCareFamily, pickApprovedTemplate } = require("./care-family");
-const { isNearDuplicate } = require("./price");
+const { classifyPriceQuestion, isNearDuplicate } = require("./price");
 const { sanitizePersonName } = require("../../lib/seya-person-name");
 const {
   BILAN_DURATION_MINUTES,
@@ -211,8 +211,12 @@ function alreadyHandledInbound(conversation, incoming) {
   return Number.isFinite(at) && Date.now() - at < 120000;
 }
 
-function outgoingWhatsAppTexts(followUps, draftedReply, previousSeya) {
+function outgoingWhatsAppTexts(followUps, draftedReply, previousSeya, inboundText) {
   const outgoing = followUps.length ? [...followUps] : draftedReply ? [draftedReply] : [];
+  const inboundNeedsAnswer = Boolean(
+    classifyPriceQuestion(inboundText) ||
+      /prix|tarif|combien/i.test(String(inboundText || "")),
+  );
   return outgoing.filter((text, index) => {
     if (!text) {
       return false;
@@ -221,14 +225,18 @@ function outgoingWhatsAppTexts(followUps, draftedReply, previousSeya) {
       return outgoing.findIndex((item) => item === text) === index;
     }
     const sameAsPrevious = String(text).trim() === String(previousSeya || "").trim();
-    return (
-      !sameAsPrevious &&
-      outgoing.findIndex((item) => isNearDuplicate(item, text)) === index
-    );
+    if (sameAsPrevious && !inboundNeedsAnswer) {
+      return false;
+    }
+    return outgoing.findIndex((item) => isNearDuplicate(item, text)) === index;
   });
 }
 
 function replaceDraftWithSent(conversation, sentTexts) {
+  const outgoing = (sentTexts || []).filter(Boolean);
+  if (!outgoing.length) {
+    return conversation;
+  }
   const messages = [...(conversation?.messages || [])];
   const lastSeyaIndex = [...messages].map((item) => item.author).lastIndexOf("seya");
   if (lastSeyaIndex >= 0) {
@@ -238,7 +246,7 @@ function replaceDraftWithSent(conversation, sentTexts) {
     ...conversation,
     messages: [
       ...messages,
-      ...sentTexts.filter(Boolean).map((text) => message("seya", text)),
+      ...outgoing.map((text) => message("seya", text)),
     ],
   };
 }
@@ -426,6 +434,7 @@ async function handleIncoming(supabase, incoming) {
     followUps,
     draftedReply,
     previousSeya,
+    incoming.text,
   );
   Object.assign(next, replaceDraftWithSent(next, uniqueOutgoing));
 

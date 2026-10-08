@@ -2123,3 +2123,162 @@ test("midi après un 11h30 posé : elle décale vraiment à 12h", async () => {
   assert.doesNotMatch(lastSeya(second.conversation), /à bientôt au centre|je vais m['’]occuper/i);
 });
 
+const vichyMixed = {
+  ...seya,
+  treatmentBriefs: [
+    {
+      name: "Soin minceur",
+      brief: "Réceptionniste minceur.",
+      pricing: {
+        bilan: "offert",
+        discovery: "offerte",
+        session: "",
+        package: "à partir de 500€, payable jusqu’en 10 fois",
+        sessionPolicy: "after_bilan",
+      },
+    },
+    {
+      name: "Épilation laser",
+      brief: "Réceptionniste laser.",
+      pricing: {
+        bilan: "offert",
+        discovery: "offert",
+        session: "",
+        package: "",
+        sessionPolicy: "after_bilan",
+      },
+    },
+  ],
+};
+
+test("Vichy aisselles : jamais le bilan minceur, même si le centre a aussi ces briefs", async () => {
+  let conversation = startConversation(
+    {
+      leadId: "lead-vichy-aisselles",
+      centerId: "depil-tech-vichy",
+      firstName: "Réseau",
+      lastName: "Beauté Exclusive",
+      phone: "0613277582",
+      treatment: "Épilation laser",
+      campaign: "offre laser (jusqu’à -40% de remise sur nos forfaits)",
+    },
+    "Dépil Tech Vichy",
+    vichyMixed,
+  );
+  const first = await generateSeyaReply({
+    conversation,
+    text: "Je voudrais savoir le prix pour 6 séances aisselles",
+    seya: vichyMixed,
+    appointments: [],
+    hours: hours(),
+    centerName: "Dépil Tech Vichy",
+    centerId: "depil-tech-vichy",
+    now: NOW,
+  });
+  conversation = first.conversation;
+  let answer = lastSeya(conversation);
+  assert.ok(answer);
+  assert.doesNotMatch(answer, /analyse corporelle|séance découverte sont offerts|500\s*€|cures/i);
+  assert.match(answer, /fourchette|prix fiable|bilan pilaire|séances/i);
+
+  const second = await generateSeyaReply({
+    conversation,
+    text: "Je voudrais le prix avant",
+    seya: vichyMixed,
+    appointments: [],
+    hours: hours(),
+    centerName: "Dépil Tech Vichy",
+    centerId: "depil-tech-vichy",
+    now: NOW,
+  });
+  conversation = second.conversation;
+  answer = lastSeya(conversation);
+  assert.ok(answer);
+  assert.doesNotMatch(answer, /analyse corporelle|500\s*€|cures|minceur/i);
+
+  const third = await generateSeyaReply({
+    conversation,
+    text: "Tu parle de quoi la",
+    seya: vichyMixed,
+    appointments: [],
+    hours: hours(),
+    centerName: "Dépil Tech Vichy",
+    centerId: "depil-tech-vichy",
+    now: NOW,
+  });
+  conversation = third.conversation;
+  answer = lastSeya(conversation);
+  assert.doesNotMatch(answer, /minceur|analyse corporelle|500\s*€/i);
+
+  const fourth = await generateSeyaReply({
+    conversation,
+    text: "Je suis bien à Depil Tech Vichy",
+    seya: vichyMixed,
+    appointments: [],
+    hours: hours(),
+    centerName: "Dépil Tech Vichy",
+    centerId: "depil-tech-vichy",
+    now: NOW,
+  });
+  conversation = fourth.conversation;
+  answer = lastSeya(conversation);
+  assert.ok(answer);
+  assert.doesNotMatch(answer, /à bientôt|minceur|analyse corporelle|500\s*€/i);
+  assert.match(answer, /prix|tarif|fourchette|bilan pilaire|€/i);
+  assert.notEqual(conversation.status, "Terminé");
+});
+
+test("prix maillot après le bilan pilaire : elle répond encore", async () => {
+  let conversation = startConversation(
+    {
+      leadId: "lead-cynthia-maillot",
+      centerId: "depil-tech-vichy",
+      firstName: "cynthia",
+      lastName: "jouffrais",
+      phone: "0755334383",
+      treatment: "Épilation laser",
+      campaign: "offre laser (jusqu’à -40% de remise sur nos forfaits)",
+    },
+    "Dépil Tech Vichy",
+    vichyMixed,
+  );
+  conversation.qualification = {
+    need: "Épilation laser",
+    zone: "maillot",
+    delay: "",
+    availability: "",
+  };
+  const first = await generateSeyaReply({
+    conversation,
+    text: "Ok mais c'est combien le maillot",
+    seya: vichyMixed,
+    appointments: [],
+    hours: hours(),
+    centerName: "Dépil Tech Vichy",
+    centerId: "depil-tech-vichy",
+    now: NOW,
+  });
+  conversation = first.conversation;
+  const firstAnswer = lastSeya(conversation);
+  assert.ok(firstAnswer);
+  assert.match(firstAnswer, /bilan pilaire|pilosité|fourchette|maillot|zone/i);
+  assert.doesNotMatch(firstAnswer, /analyse corporelle|minceur/i);
+
+  const second = await generateSeyaReply({
+    conversation,
+    text: "Je veux le prix de la séance maillot",
+    seya: vichyMixed,
+    appointments: [],
+    hours: hours(),
+    centerName: "Dépil Tech Vichy",
+    centerId: "depil-tech-vichy",
+    now: NOW,
+  });
+  conversation = second.conversation;
+  const secondAnswer = lastSeya(conversation);
+  assert.ok(secondAnswer);
+  assert.notEqual(secondAnswer, firstAnswer);
+  assert.match(secondAnswer, /prix|tarif|fourchette|maillot|séance|bilan pilaire/i);
+  assert.doesNotMatch(secondAnswer, /analyse corporelle|à bientôt/i);
+});
+

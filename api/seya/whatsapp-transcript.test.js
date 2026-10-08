@@ -49,3 +49,30 @@ test("WhatsApp n’envoie pas deux fois le même tarif bilan, mais envoie le tar
   assert.equal(sent.length, 1);
   assert.match(sent[0], /fourchette/i);
 });
+
+test("si WhatsApp n’envoie rien, le brouillon Seya reste dans le fil", () => {
+  const conversation = {
+    leadId: "lead-silent",
+    messages: [
+      { author: "lead", text: "Je veux le prix de la séance maillot" },
+      {
+        author: "seya",
+        text: "Pour l’épilation laser, le tarif de la zone se précise après le bilan pilaire.",
+      },
+    ],
+  };
+  const kept = replaceDraftWithSent(conversation, []);
+  assert.equal(
+    kept.messages.filter((item) => item.author === "seya").length,
+    1,
+  );
+  assert.match(kept.messages.at(-1).text, /bilan pilaire/i);
+});
+
+test("une nouvelle question tarif s’envoie même si le brouillon ressemble au précédent", () => {
+  const previous =
+    "Le bilan pilaire est offert, c’est gratuit. On y analyse la pilosité et on vous établit un devis personnalisé pour la zone.";
+  const sent = outgoingWhatsAppTexts([], previous, previous, "Je veux le prix de la séance maillot");
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0], previous);
+});

@@ -496,3 +496,45 @@ test("relance bloquée après je reviendrai, plus rien, centre et plainte robot"
     true,
   );
 });
+
+test("relance J+15 : elle relit le fil et reprend le tarif demandé", () => {
+  const thread = conversation({
+    firstName: "Réseau",
+    treatment: "Épilation laser",
+    campaign: "offre laser (jusqu’à -40%)",
+    offerLabel: "",
+    qualification: { need: "Épilation laser", zone: "aisselles" },
+    relanceCount: 2,
+    lastRelanceAt: hoursAgo(120),
+    messages: [
+      {
+        id: "m1",
+        author: "lead",
+        text: "Je voudrais savoir le prix pour 6 séances aisselles",
+        at: hoursAgo(200),
+      },
+      {
+        id: "m2",
+        author: "seya",
+        text: "Le bilan pilaire est offert.",
+        at: hoursAgo(199),
+      },
+      {
+        id: "m3",
+        author: "lead",
+        text: "Je voudrais le prix avant",
+        at: hoursAgo(198),
+      },
+      {
+        id: "m4",
+        author: "seya",
+        text: "Je peux vous proposer un premier rendez-vous.",
+        at: hoursAgo(120),
+      },
+    ],
+  });
+  const copy = relanceCopy(thread, 3, "Dépil Tech Vichy");
+  assert.match(copy, /tarif|prix/i);
+  assert.match(copy, /épilation|laser/i);
+  assert.doesNotMatch(copy, /minceur|en rester là|à bientôt/i);
+});

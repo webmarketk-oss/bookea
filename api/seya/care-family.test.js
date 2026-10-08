@@ -49,6 +49,13 @@ test("le champ nom du centre ne devient pas le nom du lead", () => {
   assert.equal(person.lastName, "");
 });
 
+test("Depil / aisselles / maillot sont de l’épilation, pas du minceur", () => {
+  assert.equal(inferCareFamily("Je suis bien à Depil Tech Vichy"), "epilation");
+  assert.equal(inferCareFamily("6 séances aisselles"), "epilation");
+  assert.equal(inferCareFamily("prix de la séance maillot"), "epilation");
+  assert.equal(inferCareFamily("bilan laser"), "epilation");
+});
+
 test("un lead laser ne prend pas le template minceur", () => {
   const picked = pickApprovedTemplate(templates, inferCareFamily("Épilation laser JFG"));
   assert.equal(picked.name, "seya_accueil_laser");

@@ -1,4 +1,9 @@
-const { activeCareFamily, inferCareFamily } = require("./care-family");
+const {
+  activeCareFamily,
+  briefsForFamily,
+  inferCareFamily,
+  lockedCenterFamily,
+} = require("./care-family");
 
 const SESSION_POLICIES = ["fixed", "from", "range", "after_bilan", "callback"];
 
@@ -12,7 +17,7 @@ function emptyPricePolicy() {
   };
 }
 
-function normalizePricePolicy(value, fallbackPrice = "") {
+function normalizePricePolicy(value, fallbackPrice = "", family = "") {
   const current = value && typeof value === "object" ? value : {};
   const legacy = String(fallbackPrice || current.price || "").trim();
   const policy = {
@@ -30,7 +35,7 @@ function normalizePricePolicy(value, fallbackPrice = "") {
   if (!policy.discovery && /decouverte|découverte/.test(legacy) && /gratuit|offert/i.test(legacy)) {
     policy.discovery = "offerte";
   }
-  if (!policy.package && /500/.test(legacy)) {
+  if (!policy.package && /500/.test(legacy) && family === "minceur") {
     policy.package = "à partir de 500€, payable jusqu’en 10 fois";
   }
   if (!policy.session && looksLikeSessionTariff(legacy)) {
@@ -116,16 +121,20 @@ function asksPrice(text) {
 }
 
 function resolvePricePolicy(seya, conversation, extraText) {
-  const briefs = Array.isArray(seya?.treatmentBriefs) ? seya.treatmentBriefs : [];
-  const family = activeCareFamily(conversation, extraText);
+  const family =
+    activeCareFamily(conversation, extraText) ||
+    lockedCenterFamily(seya, conversation);
+  const briefs = briefsForFamily(seya, family);
   const need = normalize(conversation?.qualification?.need || "");
   const treatment = normalize(conversation?.treatment || "");
-  const byNeed = need
-    ? briefs.find((item) => {
-        const name = normalize(item?.name);
-        return name && (name === need || name.includes(need) || need.includes(name));
-      })
-    : null;
+  const needFamily = inferCareFamily(need);
+  const byNeed =
+    need && (!family || !needFamily || needFamily === family)
+      ? briefs.find((item) => {
+          const name = normalize(item?.name);
+          return name && (name === need || name.includes(need) || need.includes(name));
+        })
+      : null;
   const byFamily = family
     ? briefs.find((item) => inferCareFamily(item?.name) === family)
     : null;
@@ -142,7 +151,7 @@ function resolvePricePolicy(seya, conversation, extraText) {
       ? briefs.find((item) => /minceur|cryo/i.test(item?.name || ""))
       : null);
   const policy = overlayOfferPricing(
-    normalizePricePolicy(brief?.pricing, brief?.price),
+    normalizePricePolicy(brief?.pricing, brief?.price, family),
     seya,
     conversation,
   );
@@ -217,12 +226,19 @@ function priceFromOfferText(text) {
 }
 
 function overlayOfferPricing(policy, seya, conversation) {
+  const family = activeCareFamily(conversation);
   const matched = matchOfferMap(seya, conversation);
+  const offerLabelFamily = inferCareFamily(conversation?.offerLabel);
   const offer =
     priceFromOfferText(matched?.label) ||
-    priceFromOfferText(conversation?.offerLabel) ||
+    (family && offerLabelFamily && offerLabelFamily !== family
+      ? null
+      : priceFromOfferText(conversation?.offerLabel)) ||
     priceFromOfferText(conversation?.campaign);
   if (!offer) {
+    return policy;
+  }
+  if (family === "epilation" && /minceur|corporelle|cryo/.test(normalize(`${matched?.label || ""} ${conversation?.offerLabel || ""}`))) {
     return policy;
   }
   if (offer.free) {
@@ -285,10 +301,10 @@ function analysisPhrase(family) {
   if (family === "visage") {
     return "un diagnostic de la peau";
   }
-  if (family === "epilation") {
-    return "un bilan pilaire";
+  if (family === "minceur") {
+    return "une analyse corporelle";
   }
-  return "une analyse corporelle";
+  return "un bilan pilaire";
 }
 
 function bilanReply(policy, options = {}) {
@@ -313,6 +329,12 @@ function discoveryReply(policy) {
 
 function alreadyGaveSessionPrice(conversation) {
   return /prix fiable|fourchette|seances suivantes|apres la decouverte|tarif des seances/.test(
+    normalize(lastSeyaText(conversation)),
+  );
+}
+
+function alreadyGaveBilanPrice(conversation) {
+  return /bilan pilaire|bilan et la seance decouverte sont offerts|analyse corporelle|devis personnalise/.test(
     normalize(lastSeyaText(conversation)),
   );
 }
@@ -347,6 +369,9 @@ function packageReply(policy, options = {}) {
 
 function genericPriceReply(policy, options = {}) {
   const family = options.family || "";
+  if (options.alreadyAnsweredBilan && (family === "epilation" || !family)) {
+    return nextSessionReply(policy, options);
+  }
   const parts = [];
   if (family === "epilation") {
     if (isFree(policy.bilan) || isFree(policy.discovery)) {
@@ -364,6 +389,9 @@ function genericPriceReply(policy, options = {}) {
       );
     }
     return parts.join(" ").replace(/\s+/g, " ").trim();
+  }
+  if (family && family !== "minceur" && family !== "visage") {
+    return unknownPriceReply();
   }
   if (isFree(policy.bilan) || isFree(policy.discovery)) {
     parts.push(
@@ -514,8 +542,11 @@ function buildPriceReply(text, seya, conversation) {
   const policy = resolvePricePolicy(seya, conversation, text);
   const options = {
     previousIntent,
-    family: activeCareFamily(conversation, text),
+    family:
+      activeCareFamily(conversation, text) ||
+      lockedCenterFamily(seya, conversation),
     alreadyAnsweredSessions: alreadyGaveSessionPrice(conversation),
+    alreadyAnsweredBilan: alreadyGaveBilanPrice(conversation),
   };
   if (intent === "repeat_complaint") {
     if (previousIntent === "next_session" || !previousIntent) {
