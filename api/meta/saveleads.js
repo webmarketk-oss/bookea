@@ -517,15 +517,26 @@ function mapIncomingLead(payload, query) {
       "number",
       "numero_de_telephone",
     ]),
-    postalCode: pickUseful(fields, [
-      "postal_code",
-      "post_code",
-      "postcode",
-      "code_postal",
-      "zip",
-      "zipcode",
-      "cp",
-    ]),
+    postalCode:
+      pickUseful(fields, [
+        "postal_code",
+        "post_code",
+        "postcode",
+        "code_postal",
+        "zip",
+        "zipcode",
+        "cp",
+      ]) ||
+      peelPostalCode(
+        pickUseful(fields, [
+          "commentaire",
+          "comment",
+          "note",
+          "notes",
+          "message",
+          "infos",
+        ]),
+      ).postalCode,
     comment: pickLeadComment(fields),
     treatment,
     campaign:
@@ -1263,6 +1274,22 @@ function pickUseful(fields, names) {
   return "";
 }
 
+function peelPostalCode(value) {
+  const raw = String(value || "").trim();
+  const match = raw.match(/^(.*?)[\s,_-]*(\d{5})$/);
+  if (!match || !String(match[1] || "").trim()) {
+    return { text: raw, postalCode: "" };
+  }
+  return { text: String(match[1]).trim(), postalCode: match[2] };
+}
+
+function humanizeLeadText(value) {
+  return String(value || "")
+    .replace(/_/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function pickLeadComment(fields) {
   const direct = pickUseful(fields, [
     "commentaire",
@@ -1288,18 +1315,15 @@ function pickLeadComment(fields) {
     "zipcode",
     "cp",
   ]);
+  const peeled = peelPostalCode(direct);
+  const zoneText = humanizeLeadText(zone || peeled.text);
+  const code = postalCode || peeled.postalCode;
   const parts = [];
-  if (direct) {
-    parts.push(direct);
+  if (zoneText) {
+    parts.push(/^zone\s*:/i.test(zoneText) ? zoneText : `Zone : ${zoneText}`);
   }
-  if (zone && !String(direct).toLowerCase().includes(zone.toLowerCase())) {
-    parts.push(`Zone : ${zone}`);
-  }
-  if (
-    postalCode &&
-    !String(direct).includes(postalCode)
-  ) {
-    parts.push(`Code postal : ${postalCode}`);
+  if (code && !parts.join(" ").includes(code)) {
+    parts.push(`Code postal : ${code}`);
   }
   return parts.join("\n").trim();
 }
