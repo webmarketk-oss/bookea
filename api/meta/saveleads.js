@@ -422,6 +422,7 @@ function mapIncomingLead(payload, query) {
         "member_name",
         "contact_name",
         "full_name",
+        "fullname",
         "nom_complet",
         "prenom_nom",
         "name",
@@ -470,8 +471,19 @@ function mapIncomingLead(payload, query) {
       "tel",
       "mobile",
       "numero",
+      "number",
       "numero_de_telephone",
     ]),
+    postalCode: pickUseful(fields, [
+      "postal_code",
+      "post_code",
+      "postcode",
+      "code_postal",
+      "zip",
+      "zipcode",
+      "cp",
+    ]),
+    comment: pickLeadComment(fields),
     treatment,
     campaign:
       offer ||
@@ -602,9 +614,10 @@ async function importPostedLead(supabase, centerId, mapped, options = {}) {
     campaignId,
   );
   const now = new Date().toISOString();
-  const comment = mapped.pageName
+  const importComment = mapped.pageName
     ? `Lead importé depuis ${mapped.pageName}.`
     : `Lead importé depuis ${mapped.formName || sourceName}.`;
+  const comment = String(mapped.comment || "").trim() || importComment;
 
   const { data: crmLead, error: leadError } = await supabase
     .from("leads")
@@ -631,14 +644,25 @@ async function importPostedLead(supabase, centerId, mapped, options = {}) {
     throw new Error(leadError.message);
   }
 
-  await supabase.from("lead_events").insert({
-    center_id: centerId,
-    lead_id: crmLead.id,
-    event_type: "system",
-    note: options.possibleDuplicate
-      ? `${buildLeadNote(mapped)} Possible doublon : un prospect avec le même téléphone existe déjà.`
-      : buildLeadNote(mapped),
-  });
+  const events = [
+    {
+      center_id: centerId,
+      lead_id: crmLead.id,
+      event_type: "system",
+      note: options.possibleDuplicate
+        ? `${buildLeadNote(mapped)} Possible doublon : un prospect avec le même téléphone existe déjà.`
+        : buildLeadNote(mapped),
+    },
+  ];
+  if (String(mapped.comment || "").trim()) {
+    events.push({
+      center_id: centerId,
+      lead_id: crmLead.id,
+      event_type: "comment",
+      note: String(mapped.comment).trim(),
+    });
+  }
+  await supabase.from("lead_events").insert(events);
 
   return crmLead.id;
 }
@@ -718,6 +742,7 @@ async function createClientRecord(supabase, centerId, lead, sourceId, campaignId
       last_name: lead.lastName || "",
       phone: lead.phone || null,
       email: lead.email || null,
+      postal_code: lead.postalCode || null,
       source_id: sourceId,
       campaign_id: campaignId,
       status: "prospect",
@@ -1184,6 +1209,47 @@ function pickUseful(fields, names) {
   }
 
   return "";
+}
+
+function pickLeadComment(fields) {
+  const direct = pickUseful(fields, [
+    "commentaire",
+    "comment",
+    "note",
+    "notes",
+    "message",
+    "infos",
+    "information",
+    "details",
+  ]);
+  const zone = pickUseful(fields, [
+    "zone",
+    "zone_prioritaire",
+    "quelle_zone",
+  ]);
+  const postalCode = pickUseful(fields, [
+    "postal_code",
+    "post_code",
+    "postcode",
+    "code_postal",
+    "zip",
+    "zipcode",
+    "cp",
+  ]);
+  const parts = [];
+  if (direct) {
+    parts.push(direct);
+  }
+  if (zone && !String(direct).toLowerCase().includes(zone.toLowerCase())) {
+    parts.push(`Zone : ${zone}`);
+  }
+  if (
+    postalCode &&
+    !String(direct).includes(postalCode)
+  ) {
+    parts.push(`Code postal : ${postalCode}`);
+  }
+  return parts.join("\n").trim();
 }
 
 function pickOffer(fields) {

@@ -330,3 +330,33 @@ test("SaveMyLeads : Options Name/Value sans email Facebook", () => {
   assert.equal(mapped.firstName, "Mohammed");
   assert.equal(mapped.lastName, "DERGHAL");
 });
+
+test("SaveMyLeads : fullname + number + commentaire (zone et CP)", () => {
+  const mapped = mapIncomingLead({
+    email: "virg.socopi@gmail.com",
+    fullname: "Virginie Berthoumieu",
+    number: "+33663465714",
+    commentaire:
+      "Zone : ventre et poignées d'amour. Code postal : 64320",
+  });
+  assert.equal(mapped.firstName, "Virginie");
+  assert.equal(mapped.lastName, "Berthoumieu");
+  assert.match(mapped.phone.replace(/\D/g, ""), /33663465714|663465714/);
+  assert.match(mapped.comment, /ventre/i);
+  assert.match(mapped.comment, /64320/);
+});
+
+test("SaveMyLeads : code postal et zone remplissent le commentaire", () => {
+  const mapped = mapIncomingLead({
+    options: [
+      { name: "email", value: "lea@test.fr" },
+      { name: "first_name", value: "Léa" },
+      { name: "phone", value: "0611111111" },
+      { name: "zone", value: "ventre_et_poignees_d_amour" },
+      { name: "code_postal", value: "64320" },
+    ],
+  });
+  assert.match(mapped.comment, /ventre/i);
+  assert.match(mapped.comment, /64320/);
+  assert.equal(mapped.postalCode, "64320");
+});
