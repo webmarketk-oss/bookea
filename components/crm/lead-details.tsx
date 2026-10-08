@@ -69,7 +69,10 @@ interface LeadDetailsProps {
   lead: Lead;
   onAddActivity: (leadId: string, text: string) => void;
   onDeleteActivity: (leadId: string, activityId: string) => void;
-  onUpdateLead: (leadId: string, patch: LeadInfoForm) => void;
+  onUpdateLead: (
+    leadId: string,
+    patch: LeadInfoForm,
+  ) => void | Promise<void>;
   onClose: () => void;
 }
 
@@ -125,6 +128,8 @@ export default function LeadDetails({
   const [infoForm, setInfoForm] = useState<LeadInfoForm>(() => leadToInfoForm(lead));
   const infoFormRef = useRef(infoForm);
   const [infoSaving, setInfoSaving] = useState(false);
+  const [infoError, setInfoError] = useState("");
+  const infoSavingRef = useRef(false);
   const [activeTab, setActiveTab] = useState<LeadDetailsTab>("information");
   const [isMoreOpen, setIsMoreOpen] = useState(false);
   const [depositLinks, setDepositLinks] =
@@ -263,14 +268,26 @@ export default function LeadDetails({
     setCommentDraft("");
   }
 
-  function saveLeadInfo() {
+  async function saveLeadInfo() {
     const form = infoFormRef.current;
     const firstName = form.firstName.trim();
     const lastName = form.lastName.trim();
 
-    if (!firstName || !lastName) {
+    if (!firstName) {
+      setInfoError("Indique au moins un prénom pour enregistrer.");
       return;
     }
+
+    const nextTreatment = form.treatment.trim() || lead.treatment;
+    const campaignEdited =
+      form.campaign.trim() !== (lead.campaign || "").trim();
+    const treatmentEdited =
+      nextTreatment !== (lead.treatment || "").trim();
+    const nextCampaign = campaignEdited
+      ? form.campaign.trim() || lead.campaign
+      : treatmentEdited
+        ? nextTreatment
+        : form.campaign.trim() || lead.campaign;
 
     const nextForm: LeadInfoForm = {
       ...form,
@@ -278,8 +295,8 @@ export default function LeadDetails({
       lastName,
       phone: form.phone.trim(),
       email: form.email.trim(),
-      campaign: form.campaign.trim() || lead.campaign,
-      treatment: form.treatment.trim() || lead.treatment,
+      campaign: nextCampaign,
+      treatment: nextTreatment,
       nextAction: form.nextAction.trim() || "À contacter",
       reminderDate:
         form.status !== lead.status
@@ -292,10 +309,26 @@ export default function LeadDetails({
       return;
     }
 
+    if (infoSavingRef.current) {
+      return;
+    }
+
+    setInfoError("");
     setInfoForm(nextForm);
+    infoSavingRef.current = true;
     setInfoSaving(true);
-    onUpdateLead(lead.id, nextForm);
-    window.setTimeout(() => setInfoSaving(false), 400);
+    try {
+      await Promise.resolve(onUpdateLead(lead.id, nextForm));
+    } catch (error) {
+      setInfoError(
+        error instanceof Error
+          ? error.message
+          : "L'offre n'a pas pu être enregistrée.",
+      );
+    } finally {
+      infoSavingRef.current = false;
+      setInfoSaving(false);
+    }
   }
 
   function openRdvInAgenda() {
@@ -757,18 +790,18 @@ export default function LeadDetails({
                 }
               />
               <InfoField
-                label="Campagne"
-                value={infoForm.campaign}
-                onChange={(value) =>
-                  setInfoForm((form) => ({ ...form, campaign: value }))
-                }
-              />
-              <InfoField
-                label="Soin demandé"
+                label="Offre / soin demandé"
                 value={infoForm.treatment}
                 list="lead-treatment-options"
                 onChange={(value) =>
                   setInfoForm((form) => ({ ...form, treatment: value }))
+                }
+              />
+              <InfoField
+                label="Campagne pub"
+                value={infoForm.campaign}
+                onChange={(value) =>
+                  setInfoForm((form) => ({ ...form, campaign: value }))
                 }
               />
               <datalist id="lead-treatment-options">
@@ -846,11 +879,18 @@ export default function LeadDetails({
                   {lead.createdAt}
                 </span>
               </div>
+              {infoError ? (
+                <p className="rounded-xl border border-rose-100 bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-700">
+                  {infoError}
+                </p>
+              ) : null}
               <Button
                 type="button"
                 className="w-full"
                 disabled={infoSaving}
-                onClick={saveLeadInfo}
+                onClick={() => {
+                  void saveLeadInfo();
+                }}
               >
                 {infoSaving ? "Enregistrement..." : "Enregistrer les infos"}
               </Button>

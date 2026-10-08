@@ -835,6 +835,7 @@ export default function CRMLeadsPage() {
           : "La fiche n'a pas pu être enregistrée."
       );
       await refreshCrmLeads();
+      throw error;
     }
   }
 

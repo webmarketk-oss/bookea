@@ -605,7 +605,7 @@ export async function updateCrmLeadDetails(lead: Lead, input: NewCrmLeadInput) {
       .from("clients")
       .update({
         first_name: input.firstName.trim() || "Prospect",
-        last_name: input.lastName.trim(),
+        last_name: input.lastName.trim() || lead.lastName.trim() || "",
         phone: input.phone.trim() || null,
         email: input.email.trim() || null,
         birthdate: toIsoDate(input.birthDate || ""),
@@ -1306,25 +1306,36 @@ async function ensureCampaign(
   return data.id as string;
 }
 
+async function findServiceId(
+  supabase: SupabaseClient,
+  centerId: string,
+  name: string,
+) {
+  const { data, error } = await supabase
+    .from("services")
+    .select("id")
+    .eq("center_id", centerId)
+    .eq("name", name)
+    .limit(1);
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  const row = Array.isArray(data) ? data[0] : data;
+  return (row?.id as string | undefined) ?? null;
+}
+
 async function ensureService(
   supabase: SupabaseClient,
   centerId: string,
   name: string,
 ) {
   const normalizedName = name.trim() || "Soin à préciser";
-  const { data: existing, error: existingError } = await supabase
-    .from("services")
-    .select("id")
-    .eq("center_id", centerId)
-    .eq("name", normalizedName)
-    .maybeSingle();
+  const existingId = await findServiceId(supabase, centerId, normalizedName);
 
-  if (existingError) {
-    throw new Error(existingError.message);
-  }
-
-  if (existing?.id) {
-    return existing.id as string;
+  if (existingId) {
+    return existingId;
   }
 
   const { data, error } = await supabase
@@ -1340,11 +1351,24 @@ async function ensureService(
     .select("id")
     .single();
 
-  if (error) {
-    throw new Error(error.message);
+  if (!error && data?.id) {
+    return data.id as string;
   }
 
-  return data.id as string;
+  const retryId = await findServiceId(supabase, centerId, normalizedName);
+
+  if (retryId) {
+    return retryId;
+  }
+
+  const message = error?.message || "Le soin n'a pas pu être enregistré.";
+  if (/row-level security|rls/i.test(message)) {
+    throw new Error(
+      "Ce soin n'existe pas encore dans le catalogue. Choisis un soin déjà proposé, ou demande à un responsable de l'ajouter.",
+    );
+  }
+
+  throw new Error(message);
 }
 
 function toLead(row: LeadRow): Lead {
