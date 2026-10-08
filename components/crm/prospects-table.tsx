@@ -190,7 +190,7 @@ export default function ProspectsTable({
               <TableCell className="w-[5.5rem] max-w-[5.5rem] overflow-hidden">
                 <span
                   title={lead.treatment || lead.campaign || undefined}
-                  className="block max-w-[5.5rem] truncate rounded-full bg-slate-100 px-1.5 py-0.5 text-[11px] font-semibold text-slate-600"
+                  className="block max-w-[5.5rem] truncate rounded-full border border-blue-100 bg-blue-50 px-1.5 py-0.5 text-[11px] font-semibold text-blue-700"
                 >
                   {lead.treatment || lead.campaign || "—"}
                 </span>
@@ -346,19 +346,23 @@ function leadUpdatedStamp(lead: Lead) {
 }
 
 function SourceBadge({ source }: { source: Lead["source"] }) {
+  const key = sourceKey(source);
   const styles: Record<string, string> = {
-    Facebook: "border-blue-100 bg-blue-50 text-blue-700",
-    Instagram: "border-pink-100 bg-pink-50 text-pink-700",
-    Google: "border-slate-200 bg-white text-slate-700",
-    "Site Web": "border-slate-200 bg-slate-50 text-slate-700",
-    Organique: "border-emerald-100 bg-emerald-50 text-emerald-700",
+    facebook: "border-blue-100 bg-blue-50 text-blue-700",
+    instagram: "border-pink-100 bg-pink-50 text-pink-700",
+    google: "border-slate-200 bg-white text-slate-700",
+    "site web": "border-slate-200 bg-slate-50 text-slate-700",
+    organique: "border-emerald-100 bg-emerald-50 text-emerald-700",
+    "systeme.io": "border-amber-200 bg-amber-50 text-amber-800",
+    systeme: "border-amber-200 bg-amber-50 text-amber-800",
+    landing: "border-violet-100 bg-violet-50 text-violet-700",
   };
 
   return (
     <span
       className={cn(
         "inline-flex h-7 items-center gap-2 rounded-full border px-2.5 text-xs font-semibold",
-        styles[source] ?? "border-slate-200 bg-slate-50 text-slate-700",
+        styles[key] ?? "border-slate-200 bg-slate-50 text-slate-700",
       )}
     >
       <SourceIcon source={source} />
@@ -368,7 +372,9 @@ function SourceBadge({ source }: { source: Lead["source"] }) {
 }
 
 function SourceIcon({ source }: { source: Lead["source"] }) {
-  if (source === "Facebook") {
+  const key = sourceKey(source);
+
+  if (key === "facebook") {
     return (
       <span className="flex h-4 w-4 items-center justify-center rounded bg-[#1877F2] text-[11px] font-bold text-white">
         f
@@ -376,7 +382,7 @@ function SourceIcon({ source }: { source: Lead["source"] }) {
     );
   }
 
-  if (source === "Instagram") {
+  if (key === "instagram") {
     return (
       <span className="flex h-4 w-4 items-center justify-center rounded bg-gradient-to-tr from-[#FEDA75] via-[#D62976] to-[#4F5BD5]">
         <span className="h-2 w-2 rounded-full border border-white" />
@@ -384,7 +390,7 @@ function SourceIcon({ source }: { source: Lead["source"] }) {
     );
   }
 
-  if (source === "Google") {
+  if (key === "google") {
     return (
       <span className="text-sm font-bold">
         <span className="text-blue-600">G</span>
@@ -392,11 +398,21 @@ function SourceIcon({ source }: { source: Lead["source"] }) {
     );
   }
 
-  if (source === "Organique") {
+  if (key === "organique") {
     return <Globe className="h-4 w-4 text-emerald-600" />;
   }
 
+  if (key === "systeme.io" || key === "systeme") {
+    return <Globe className="h-4 w-4 text-amber-600" />;
+  }
+
   return <Globe className="h-4 w-4 text-slate-500" />;
+}
+
+function sourceKey(source: Lead["source"]) {
+  return String(source || "")
+    .trim()
+    .toLowerCase();
 }
 
 function getLatestLeadComment(lead: Lead) {
