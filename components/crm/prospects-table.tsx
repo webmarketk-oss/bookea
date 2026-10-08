@@ -71,7 +71,7 @@ export default function ProspectsTable({
         <TableHeader>
           <TableRow>
             <TableHead className="min-w-[12rem]">Prospect</TableHead>
-            <TableHead className="w-[8.5rem] max-w-[8.5rem]">Offre</TableHead>
+            <TableHead className="w-[5.5rem] max-w-[5.5rem]">Offre</TableHead>
             <TableHead>Source</TableHead>
             <TableHead>
               <button
@@ -110,12 +110,12 @@ export default function ProspectsTable({
             </TableHead>
             <TableHead>Rappel</TableHead>
             <TableHead>Commercial</TableHead>
-            <TableHead className="min-w-[12rem]">Statut</TableHead>
+            <TableHead className="w-[9.25rem] min-w-[9.25rem]">Statut</TableHead>
             <TableHead>Montant</TableHead>
             <TableHead
               className={cn(
                 "sticky right-0 z-20 border-l border-slate-200 bg-white shadow-[-8px_0_12px_rgba(15,23,42,0.06)]",
-                commentsOpen ? "min-w-[19rem] w-[19rem]" : "w-10 min-w-10"
+                commentsOpen ? "min-w-[14rem] w-[14rem]" : "w-10 min-w-10"
               )}
             >
               <div className="flex items-center justify-between gap-1">
@@ -187,25 +187,13 @@ export default function ProspectsTable({
                 </div>
               </TableCell>
 
-              <TableCell className="w-[8.5rem] max-w-[8.5rem]">
-                <div className="flex max-w-[8.5rem] flex-col gap-0.5">
-                  <span
-                    title={lead.treatment || lead.campaign || undefined}
-                    className="truncate rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-600"
-                  >
-                    {lead.treatment || lead.campaign || "—"}
-                  </span>
-                  {lead.campaign &&
-                  lead.treatment &&
-                  lead.campaign.trim() !== lead.treatment.trim() ? (
-                    <span
-                      title={lead.campaign}
-                      className="truncate px-1 text-[10px] leading-tight text-slate-400"
-                    >
-                      {lead.campaign}
-                    </span>
-                  ) : null}
-                </div>
+              <TableCell className="w-[5.5rem] max-w-[5.5rem] overflow-hidden">
+                <span
+                  title={lead.treatment || lead.campaign || undefined}
+                  className="block max-w-[5.5rem] truncate rounded-full bg-slate-100 px-1.5 py-0.5 text-[11px] font-semibold text-slate-600"
+                >
+                  {lead.treatment || lead.campaign || "—"}
+                </span>
               </TableCell>
 
               <TableCell>
@@ -223,7 +211,7 @@ export default function ProspectsTable({
                     onReminderDateChange(lead.id, event.target.value)
                   }
                   className={cn(
-                    "h-8 w-[11rem] shrink-0 rounded-lg border border-slate-200 bg-white px-2 text-xs font-semibold outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100",
+                    "h-8 w-[8.5rem] shrink-0 rounded-lg border border-slate-200 bg-white px-2 text-xs font-semibold outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100",
                     isOpenReminderDue(lead) &&
                       "border-amber-200 bg-amber-100 text-amber-800"
                   )}
@@ -257,7 +245,7 @@ export default function ProspectsTable({
                     onStatusChange(lead.id, event.target.value as LeadStatus)
                   }
                   className={cn(
-                    "h-7 min-w-[11rem] rounded-full border-0 px-3 text-xs font-semibold outline-none ring-1 transition-colors",
+                    "h-7 w-full min-w-[8.75rem] max-w-[9.25rem] rounded-full border-0 px-2.5 text-xs font-semibold outline-none ring-1 transition-colors",
                     "focus:ring-2 focus:ring-blue-400",
                     leadStatusClassName(lead.status)
                   )}
@@ -295,7 +283,7 @@ export default function ProspectsTable({
                     !isInactive &&
                     "bg-amber-50",
                   selectedLead.id === lead.id && "bg-blue-50",
-                  commentsOpen ? "min-w-[19rem] w-[19rem]" : "w-10 min-w-10"
+                  commentsOpen ? "min-w-[14rem] w-[14rem]" : "w-10 min-w-10"
                 )}
               >
                 {commentsOpen ? (
