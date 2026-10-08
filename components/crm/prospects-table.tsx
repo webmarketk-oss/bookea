@@ -72,7 +72,6 @@ export default function ProspectsTable({
           <TableRow>
             <TableHead className="min-w-[12rem]">Prospect</TableHead>
             <TableHead className="w-[5.5rem] max-w-[5.5rem]">Offre</TableHead>
-            <TableHead>Source</TableHead>
             <TableHead>
               <button
                 type="button"
@@ -109,9 +108,10 @@ export default function ProspectsTable({
               </button>
             </TableHead>
             <TableHead>Rappel</TableHead>
-            <TableHead>Commercial</TableHead>
             <TableHead className="w-[9.25rem] min-w-[9.25rem]">Statut</TableHead>
+            <TableHead>Commercial</TableHead>
             <TableHead>Montant</TableHead>
+            <TableHead>Source</TableHead>
             <TableHead
               className={cn(
                 "sticky right-0 z-20 border-l border-slate-200 bg-white shadow-[-8px_0_12px_rgba(15,23,42,0.06)]",
@@ -196,10 +196,6 @@ export default function ProspectsTable({
                 </span>
               </TableCell>
 
-              <TableCell>
-                <SourceBadge source={lead.source} />
-              </TableCell>
-
               <TableCell>{lead.createdAt}</TableCell>
 
               <TableCell>
@@ -216,25 +212,6 @@ export default function ProspectsTable({
                       "border-amber-200 bg-amber-100 text-amber-800"
                   )}
                 />
-              </TableCell>
-
-              <TableCell>
-                <select
-                  value={lead.commercial}
-                  onClick={(event) => event.stopPropagation()}
-                  onChange={(event) =>
-                    onCommercialChange(lead.id, event.target.value)
-                  }
-                  className="h-8 rounded-lg border border-slate-200 bg-white px-2 text-sm font-semibold outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
-                >
-                  {["Samantha", "Thomas", "Camille", "Marie L.", "Aurélie"].map(
-                    (commercial) => (
-                      <option key={commercial} value={commercial}>
-                        {commercial}
-                      </option>
-                    )
-                  )}
-                </select>
               </TableCell>
 
               <TableCell>
@@ -259,6 +236,25 @@ export default function ProspectsTable({
               </TableCell>
 
               <TableCell>
+                <select
+                  value={lead.commercial}
+                  onClick={(event) => event.stopPropagation()}
+                  onChange={(event) =>
+                    onCommercialChange(lead.id, event.target.value)
+                  }
+                  className="h-8 rounded-lg border border-slate-200 bg-white px-2 text-sm font-semibold outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                >
+                  {["Samantha", "Thomas", "Camille", "Marie L.", "Aurélie"].map(
+                    (commercial) => (
+                      <option key={commercial} value={commercial}>
+                        {commercial}
+                      </option>
+                    )
+                  )}
+                </select>
+              </TableCell>
+
+              <TableCell>
                 <div className="flex items-center gap-1">
                   <input
                     type="number"
@@ -273,6 +269,10 @@ export default function ProspectsTable({
                   />
                   <span className="text-sm text-slate-400">€</span>
                 </div>
+              </TableCell>
+
+              <TableCell>
+                <SourceBadge source={lead.source} />
               </TableCell>
 
               <TableCell
