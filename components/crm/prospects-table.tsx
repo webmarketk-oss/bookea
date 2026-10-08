@@ -71,7 +71,7 @@ export default function ProspectsTable({
         <TableHeader>
           <TableRow>
             <TableHead className="min-w-[12rem]">Prospect</TableHead>
-            <TableHead>Offre</TableHead>
+            <TableHead className="w-[8.5rem] max-w-[8.5rem]">Offre</TableHead>
             <TableHead>Source</TableHead>
             <TableHead>
               <button
@@ -187,15 +187,21 @@ export default function ProspectsTable({
                 </div>
               </TableCell>
 
-              <TableCell>
-                <div className="flex min-w-[8rem] max-w-[16rem] flex-col gap-1">
-                  <span className="truncate rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-600">
+              <TableCell className="w-[8.5rem] max-w-[8.5rem]">
+                <div className="flex max-w-[8.5rem] flex-col gap-0.5">
+                  <span
+                    title={lead.treatment || lead.campaign || undefined}
+                    className="truncate rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-600"
+                  >
                     {lead.treatment || lead.campaign || "—"}
                   </span>
                   {lead.campaign &&
                   lead.treatment &&
                   lead.campaign.trim() !== lead.treatment.trim() ? (
-                    <span className="truncate px-1 text-[11px] text-slate-400">
+                    <span
+                      title={lead.campaign}
+                      className="truncate px-1 text-[10px] leading-tight text-slate-400"
+                    >
                       {lead.campaign}
                     </span>
                   ) : null}
