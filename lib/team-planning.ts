@@ -604,3 +604,28 @@ export async function saveTeamPlanning(input: {
 
   return { practitioners, schedules };
 }
+
+export function commercialNamesFromTeam(practitioners: Practitioner[]) {
+  return Array.from(
+    new Set(
+      (Array.isArray(practitioners) ? practitioners : [])
+        .map((item) => String(item?.name || "").trim())
+        .filter(Boolean),
+    ),
+  );
+}
+
+export function commercialSelectOptions(names: string[], current?: string) {
+  const list = [...names];
+  const value = String(current || "").trim();
+  if (
+    value &&
+    !list.some((name) => name.toLowerCase() === value.toLowerCase())
+  ) {
+    list.unshift(value);
+  }
+  if (!list.some((name) => name.toLowerCase() === "équipe")) {
+    list.push("Équipe");
+  }
+  return list;
+}

@@ -10,7 +10,6 @@ import {
   leadStatusClasses,
   leadStatusSelectOptions,
 } from "@/lib/lead-statuses";
-import { practitioners } from "@/lib/agenda-data";
 import {
   defaultCenterDepositLinks,
   getCenterServices,
@@ -74,6 +73,7 @@ interface LeadDetailsProps {
     patch: LeadInfoForm,
   ) => void | Promise<void>;
   onClose: () => void;
+  commercialOptions?: string[];
 }
 
 const leadSources: Lead["source"][] = [
@@ -83,14 +83,6 @@ const leadSources: Lead["source"][] = [
   "Site Web",
   "Organique",
 ];
-
-const commercialOptions = Array.from(
-  new Set([
-    "Équipe",
-    ...practitioners.map((practitioner) => practitioner.name),
-    "Thomas",
-  ]),
-);
 
 const genderOptions = ["À compléter", "Femme", "Homme", "Non renseigné"];
 
@@ -122,6 +114,7 @@ export default function LeadDetails({
   onDeleteActivity,
   onUpdateLead,
   onClose,
+  commercialOptions = [],
 }: LeadDetailsProps) {
   const fullName = `${lead.firstName} ${lead.lastName}`;
   const [commentDraft, setCommentDraft] = useState("");
@@ -815,7 +808,7 @@ export default function LeadDetails({
                 options={
                   commercialOptions.includes(infoForm.commercial)
                     ? commercialOptions
-                    : [infoForm.commercial, ...commercialOptions]
+                    : [infoForm.commercial, ...commercialOptions].filter(Boolean)
                 }
                 onChange={(value) =>
                   setInfoForm((form) => ({ ...form, commercial: value }))

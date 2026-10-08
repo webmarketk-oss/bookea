@@ -38,6 +38,7 @@ type FiltersProps = {
   ) => void;
   onReset?: () => void;
   onNewLead: () => void;
+  commercialOptions?: string[];
 };
 
 const sourceOptions: ProspectFilters["source"][] = [
@@ -57,8 +58,6 @@ const campaignOptions = [
   "Hydrafacial",
 ];
 
-const commercialOptions = ["Tous", "Samantha", "Thomas", "Camille"];
-
 const statusOptions: ProspectFilters["status"][] = [
   "Tous",
   ...leadStatuses,
@@ -69,6 +68,7 @@ export default function Filters({
   onFiltersChange,
   onReset,
   onNewLead,
+  commercialOptions = [],
 }: FiltersProps) {
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
   const [draft, setDraft] = useState<ProspectFilters>(filters);
@@ -168,7 +168,7 @@ export default function Filters({
           <FilterSelect
             label="Commercial"
             value={draft.commercial}
-            options={commercialOptions}
+            options={["Tous", ...commercialOptions]}
             onChange={(value) => updateDraft("commercial", value)}
           />
 

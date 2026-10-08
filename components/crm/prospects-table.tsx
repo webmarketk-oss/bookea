@@ -31,6 +31,7 @@ interface ProspectsTableProps {
   onDealAmountChange: (leadId: string, amount: number) => void;
   onReminderDateChange: (leadId: string, date: string) => void;
   onCommercialChange: (leadId: string, commercial: string) => void;
+  commercialOptions?: string[];
 }
 
 export default function ProspectsTable({
@@ -45,6 +46,7 @@ export default function ProspectsTable({
   onDealAmountChange,
   onReminderDateChange,
   onCommercialChange,
+  commercialOptions = [],
 }: ProspectsTableProps) {
   const [commentsOpen, setCommentsOpen] = useState(true);
   const [dateSort, setDateSort] = useState<"desc" | "asc">("desc");
@@ -244,13 +246,14 @@ export default function ProspectsTable({
                   }
                   className="h-8 rounded-lg border border-slate-200 bg-white px-2 text-sm font-semibold outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
                 >
-                  {["Samantha", "Thomas", "Camille", "Marie L.", "Aurélie"].map(
-                    (commercial) => (
-                      <option key={commercial} value={commercial}>
-                        {commercial}
-                      </option>
-                    )
-                  )}
+                  {(commercialOptions.includes(lead.commercial)
+                    ? commercialOptions
+                    : [lead.commercial, ...commercialOptions].filter(Boolean)
+                  ).map((commercial) => (
+                    <option key={commercial} value={commercial}>
+                      {commercial}
+                    </option>
+                  ))}
                 </select>
               </TableCell>
 

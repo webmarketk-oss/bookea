@@ -53,6 +53,11 @@ import {
   getSourceNames,
   readCenterSettings,
 } from "@/lib/center-settings";
+import {
+  commercialNamesFromTeam,
+  commercialSelectOptions,
+  loadTeamPlanning,
+} from "@/lib/team-planning";
 import { Lead, LeadStatus } from "@/types/lead";
 
 const emptyLeadForm = {
@@ -63,7 +68,7 @@ const emptyLeadForm = {
   treatment: "",
   source: "Facebook" as Lead["source"],
   campaign: "",
-  commercial: "Samantha",
+  commercial: "Équipe",
   status: "Nouveau" as LeadStatus,
   dealAmount: 0,
   nextAction: "À contacter",
@@ -172,6 +177,11 @@ export default function CRMLeadsPage() {
   const [ficheBox, setFicheBox] = useState<FicheBox | null>(null);
   const openedLeadFromQuery = useRef(false);
   const [filters, setFilters] = useState<ProspectFilters>(defaultProspectFilters);
+  const [commercialNames, setCommercialNames] = useState<string[]>([]);
+  const commercialOptions = useMemo(
+    () => commercialSelectOptions(commercialNames),
+    [commercialNames],
+  );
   const duplicateLeadGroups = useMemo(
     () => findDuplicateLeadGroups(leadList),
     [leadList]
@@ -233,6 +243,21 @@ export default function CRMLeadsPage() {
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     refreshCrmLeads();
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    void loadTeamPlanning()
+      .then((team) => {
+        if (cancelled || !team?.practitioners?.length) {
+          return;
+        }
+        setCommercialNames(commercialNamesFromTeam(team.practitioners));
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -708,13 +733,37 @@ export default function CRMLeadsPage() {
   }
 
   function handleCommercialChange(leadId: string, commercial: string) {
+    const lead = leadList.find((item) => item.id === leadId);
     setLeadList((currentLeads) =>
-      currentLeads.map((lead) =>
-        lead.id === leadId
-          ? { ...lead, commercial, updatedDate: todayIso() }
-          : lead
+      currentLeads.map((item) =>
+        item.id === leadId
+          ? { ...item, commercial, updatedDate: todayIso() }
+          : item
       )
     );
+    if (!lead) {
+      return;
+    }
+    void updateCrmLeadDetails(lead, {
+      firstName: lead.firstName,
+      lastName: lead.lastName,
+      phone: lead.phone,
+      email: lead.email,
+      treatment: lead.treatment,
+      source: lead.source,
+      campaign: lead.campaign,
+      commercial,
+      status: lead.status,
+      dealAmount: lead.dealAmount,
+      nextAction: lead.nextAction,
+      reminderDate: lead.reminderDate,
+    }).catch((error) => {
+      setCrmError(
+        error instanceof Error
+          ? error.message
+          : "Le commercial n'a pas pu être enregistré.",
+      );
+    });
   }
 
   async function handleUpdateLead(
@@ -912,7 +961,10 @@ export default function CRMLeadsPage() {
   }
 
   function openNewLeadModal() {
-    setNewLeadForm(emptyLeadForm);
+    setNewLeadForm({
+      ...emptyLeadForm,
+      commercial: commercialNames[0] || "Équipe",
+    });
     setIsNewLeadOpen(true);
   }
 
@@ -1074,6 +1126,7 @@ export default function CRMLeadsPage() {
 
             <Filters
               filters={filters}
+              commercialOptions={commercialNames}
               onFiltersChange={(nextFilters) => {
                 setFilters((currentFilters) => {
                   const resolved =
@@ -1193,6 +1246,7 @@ export default function CRMLeadsPage() {
                   onDealAmountChange={handleDealAmountChange}
                   onReminderDateChange={handleReminderDateChange}
                   onCommercialChange={handleCommercialChange}
+                  commercialOptions={commercialOptions}
                 />
               </section>
 
@@ -1220,6 +1274,7 @@ export default function CRMLeadsPage() {
                     onDeleteActivity={handleDeleteActivity}
                     onUpdateLead={handleUpdateLead}
                     onClose={() => setIsLeadDetailsOpen(false)}
+                    commercialOptions={commercialOptions}
                   />
                 </aside>
               </div>
@@ -1381,7 +1436,10 @@ export default function CRMLeadsPage() {
                   onChange={(value) =>
                     setNewLeadForm((form) => ({ ...form, commercial: value }))
                   }
-                  options={["Samantha", "Thomas", "Camille"]}
+                  options={commercialSelectOptions(
+                    commercialNames,
+                    newLeadForm.commercial,
+                  )}
                 />
               </FormField>
 
