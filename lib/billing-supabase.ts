@@ -38,6 +38,8 @@ export type BillingInvoice = {
   discountType?: BillingDiscountType;
   discountValue?: number;
   paymentMethod: BillingPaymentMethod;
+  emailedAt?: string;
+  emailedTo?: string;
 };
 
 type InvoiceRow = {
@@ -110,7 +112,32 @@ export async function loadBillingInvoices() {
     throw new Error(error.message);
   }
 
-  return ((data ?? []) as unknown as InvoiceRow[]).map(toBillingInvoice);
+  const receipts = await loadInvoiceMailReceipts(supabase, centerId);
+  return ((data ?? []) as unknown as InvoiceRow[]).map((row) => {
+    const invoice = toBillingInvoice(row);
+    const receipt = receipts[invoice.id];
+    return receipt ? { ...invoice, ...receipt } : invoice;
+  });
+}
+
+async function loadInvoiceMailReceipts(
+  supabase: SupabaseClient,
+  centerId: string,
+) {
+  const { data } = await supabase
+    .from("centers")
+    .select("settings")
+    .eq("id", centerId)
+    .maybeSingle();
+  const billing =
+    data?.settings &&
+    typeof data.settings === "object" &&
+    !Array.isArray(data.settings)
+      ? (data.settings as { billing?: { invoiceMails?: Record<string, { emailedAt?: string; emailedTo?: string }> } }).billing
+      : undefined;
+  return billing?.invoiceMails && typeof billing.invoiceMails === "object"
+    ? billing.invoiceMails
+    : {};
 }
 
 export async function createBillingInvoice(invoice: BillingInvoice) {

@@ -3,6 +3,7 @@
 import { ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
+  ArrowLeft,
   BadgeEuro,
   CheckCircle2,
   ChevronDown,
@@ -43,10 +44,20 @@ import {
   type BillingInvoice,
 } from "@/lib/billing-supabase";
 import { loadCrmClients } from "@/lib/crm-supabase";
+import { getActiveCenterContext } from "@/lib/center-access";
+import { SendInvoiceDialog } from "@/components/billing/send-invoice-dialog";
+import { BillingMailboxCard } from "@/components/billing/billing-mailbox-card";
+import { loadBillingMailbox } from "@/lib/billing-invoice-mail";
 
 type InvoiceType = "Devis" | "Acompte" | "Facture finale" | "Avoir";
 type InvoiceStatus = "Payée" | "En attente de paiement" | "Envoyée" | "Annulée";
 type DiscountType = "Aucune" | "€" | "%";
+
+type BillingClientOption = {
+  name: string;
+  email: string;
+  phone: string;
+};
 
 type InvoiceLine = {
   id: string;
@@ -106,6 +117,8 @@ type Invoice = {
   discountType?: DiscountType;
   discountValue?: number;
   paymentMethod: "Stripe" | "CB centre" | "Espèces" | "Virement";
+  emailedAt?: string;
+  emailedTo?: string;
 };
 
 const initialBillingServices: BillingService[] = [
@@ -204,7 +217,9 @@ const emptyInvoice: Invoice = {
 
 export default function BillingPage() {
   const [invoices, setInvoices] = useState<Invoice[]>([]);
-  const [billingClients, setBillingClients] = useState<string[]>([]);
+  const [billingClients, setBillingClients] = useState<BillingClientOption[]>(
+    [],
+  );
   const [selectedInvoiceId, setSelectedInvoiceId] = useState("");
   const [previewInvoiceId, setPreviewInvoiceId] = useState<string | null>(null);
   const [isLoadingBilling, setIsLoadingBilling] = useState(true);
@@ -215,6 +230,9 @@ export default function BillingPage() {
   );
   const [editingQuoteId, setEditingQuoteId] = useState<string | null>(null);
   const [isInvoiceDetailOpen, setIsInvoiceDetailOpen] = useState(true);
+  const [isComposerOpen, setIsComposerOpen] = useState(false);
+  const [clientSearch, setClientSearch] = useState("");
+  const [isClientPickerOpen, setIsClientPickerOpen] = useState(false);
   const creationRef = useRef<HTMLDivElement | null>(null);
   const [activeTab, setActiveTab] = useState<"factures" | "reglages">(
     "factures",
@@ -250,6 +268,13 @@ export default function BillingPage() {
   });
   const [settingsLoaded, setSettingsLoaded] = useState(false);
   const persistCatalogTimer = useRef(0);
+  const [mailInvoice, setMailInvoice] = useState<Invoice | null>(null);
+  const [mailbox, setMailbox] = useState({
+    connected: false,
+    email: "",
+    centerId: "",
+    centerName: "",
+  });
 
   async function refreshInvoices() {
     setBillingError("");
@@ -263,8 +288,12 @@ export default function BillingPage() {
 
       setBillingClients(
         clientData.clients
-          .map((client) => `${client.firstName} ${client.lastName}`.trim())
-          .filter(Boolean),
+          .map((client) => ({
+            name: `${client.firstName} ${client.lastName}`.trim(),
+            email: (client.email ?? "").trim(),
+            phone: (client.phone ?? "").trim(),
+          }))
+          .filter((client) => client.name),
       );
       setInvoices(nextInvoices);
       setSelectedInvoiceId((currentId) =>
@@ -288,6 +317,22 @@ export default function BillingPage() {
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void refreshInvoices();
+    void loadBillingMailbox().then((box) => {
+      setMailbox((current) => ({
+        ...current,
+        connected: box.connected,
+        email: box.email,
+        centerId: box.centerId,
+      }));
+    });
+    void getActiveCenterContext()
+      .then((context) => {
+        setMailbox((current) => ({
+          ...current,
+          centerName: context.centerName,
+        }));
+      })
+      .catch(() => null);
   }, []);
 
   useEffect(() => {
@@ -435,13 +480,26 @@ export default function BillingPage() {
   });
 
   const invoiceClientOptions = useMemo(() => {
-    const names = new Set(billingClients);
-    invoices.forEach((invoice) => {
-      if (invoice.client.trim()) {
-        names.add(invoice.client.trim());
+    const byName = new Map<string, BillingClientOption>();
+    billingClients.forEach((client) => {
+      if (client.name) {
+        byName.set(client.name, client);
       }
     });
-    return [...names].sort((left, right) => left.localeCompare(right));
+    invoices.forEach((invoice) => {
+      const name = invoice.client.trim();
+      if (!name || byName.has(name)) {
+        return;
+      }
+      byName.set(name, {
+        name,
+        email: invoice.email.trim(),
+        phone: "",
+      });
+    });
+    return [...byName.values()].sort((left, right) =>
+      left.name.localeCompare(right.name, "fr"),
+    );
   }, [billingClients, invoices]);
   const invoiceCareOptions = useMemo(() => {
     const names = new Set(billingServices.map((service) => service.name));
@@ -575,6 +633,7 @@ export default function BillingPage() {
       setSelectedInvoiceId(editingQuoteId);
       setPreviewInvoiceId(editingQuoteId);
       setEditingQuoteId(null);
+      setIsComposerOpen(false);
       setPaymentAmount(0);
       return;
     }
@@ -604,6 +663,7 @@ export default function BillingPage() {
       setPreviewInvoiceId(invoice.id);
       setIsInvoiceDetailOpen(true);
       setEditingQuoteId(null);
+      setIsComposerOpen(false);
       setPaymentAmount(0);
       return;
     }
@@ -614,6 +674,7 @@ export default function BillingPage() {
       setInvoices((current) => [savedInvoice as Invoice, ...current]);
       setSelectedInvoiceId(savedInvoice.id);
       setPreviewInvoiceId(savedInvoice.id);
+      setMailInvoice(savedInvoice as Invoice);
       setBillingNotice("Document enregistré.");
     } catch (error) {
       setBillingError(
@@ -626,6 +687,7 @@ export default function BillingPage() {
 
     setIsInvoiceDetailOpen(true);
     setEditingQuoteId(null);
+    setIsComposerOpen(false);
     setPaymentAmount(0);
   }
 
@@ -653,6 +715,7 @@ export default function BillingPage() {
     setIsInvoiceDetailOpen(true);
     setPendingFinalInvoice(null);
     setPaymentAmount(0);
+    setMailInvoice(savedInvoice as Invoice);
     setBillingNotice("Facture finale enregistrée.");
   }
 
@@ -741,6 +804,9 @@ export default function BillingPage() {
   function openInvoiceCreation(type: InvoiceType) {
     setActiveTab("factures");
     setEditingQuoteId(null);
+    setIsComposerOpen(true);
+    setIsClientPickerOpen(false);
+    setClientSearch((current) => current || draft.client);
     setDraft((current) => ({
       ...current,
       type,
@@ -753,12 +819,6 @@ export default function BillingPage() {
               : 30
             : current.paid,
     }));
-    window.setTimeout(() => {
-      creationRef.current?.scrollIntoView({
-        behavior: "smooth",
-        block: "center",
-      });
-    }, 40);
   }
 
   function editQuote(invoice: Invoice) {
@@ -766,6 +826,9 @@ export default function BillingPage() {
     setEditingQuoteId(invoice.id);
     setSelectedInvoiceId(invoice.id);
     setIsInvoiceDetailOpen(true);
+    setIsComposerOpen(true);
+    setIsClientPickerOpen(false);
+    setClientSearch(invoice.client);
     setPreviewInvoiceId(null);
     setDraft({
       client: invoice.client,
@@ -783,47 +846,6 @@ export default function BillingPage() {
       paid: 0,
       paymentMethod: invoice.paymentMethod,
     });
-    window.setTimeout(() => {
-      creationRef.current?.scrollIntoView({
-        behavior: "smooth",
-        block: "center",
-      });
-    }, 40);
-  }
-
-  function fillMariePaymentExample() {
-    setEditingQuoteId(null);
-    setDraft((current) => ({
-      ...current,
-      client: "Marie Dubois",
-      email: "marie@email.com",
-      care: "Cure cryolipolyse + pressothérapie",
-      type: "Facture finale",
-      lines: [
-        {
-          id: `draft-cryo-${Date.now()}`,
-          label: "Cure 5 séances cryolipolyse",
-          quantity: 1,
-          unitPrice: 900,
-          vatRate: 20,
-          discountType: "Aucune",
-          discountValue: 0,
-        },
-        {
-          id: `draft-presso-${Date.now()}`,
-          label: "Cure 5 séances pressothérapie",
-          quantity: 1,
-          unitPrice: 500,
-          vatRate: 20,
-          discountType: "Aucune",
-          discountValue: 0,
-        },
-      ],
-      discountType: "Aucune",
-      discountValue: 0,
-      paid: 500,
-      paymentMethod: "CB centre",
-    }));
   }
 
   function updateDraftLine(
@@ -1118,11 +1140,30 @@ export default function BillingPage() {
   }
 
   function sendInvoiceByEmail(invoice: Invoice) {
-    const subject = encodeURIComponent(`Votre facture Bookea ${invoice.number}`);
-    const body = encodeURIComponent(
-      `Bonjour ${invoice.client},\n\nVoici le détail de votre facture.\n\n${buildInvoiceText(invoice)}\n\nCordialement,\nBookea`,
+    setMailInvoice(invoice);
+  }
+
+  function markInvoiceEmailed(
+    invoiceId: string,
+    receipt: { emailedAt: string; emailedTo: string },
+  ) {
+    setInvoices((current) =>
+      current.map((invoice) =>
+        invoice.id === invoiceId
+          ? {
+              ...invoice,
+              emailedAt: receipt.emailedAt,
+              emailedTo: receipt.emailedTo,
+              status:
+                invoice.status === "En attente de paiement"
+                  ? "Envoyée"
+                  : invoice.status,
+            }
+          : invoice,
+      ),
     );
-    window.location.href = `mailto:${invoice.email}?subject=${subject}&body=${body}`;
+    setMailInvoice(null);
+    setBillingNotice(`Facture envoyée à ${receipt.emailedTo}.`);
   }
 
   return (
@@ -1130,19 +1171,22 @@ export default function BillingPage() {
       <div className="mx-auto max-w-[1800px] space-y-5 p-6">
         <header className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
           <div>
-            <p className="text-xs font-medium text-violet-600">
-              Bookea Pro
-            </p>
-            <h1 className="mt-1 text-2xl font-semibold tracking-tight text-slate-950">
+            <h1 className="text-2xl font-semibold tracking-tight text-slate-950">
               Facturation
             </h1>
-            <p className="mt-2 max-w-3xl text-sm text-slate-500">
-              Factures d&apos;acompte, factures finales, avoirs et suivi des
-              encaissements du centre.
-            </p>
           </div>
 
           <div className="flex flex-wrap gap-2">
+            {isComposerOpen ? (
+              <button
+                type="button"
+                onClick={() => setIsComposerOpen(false)}
+                className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 shadow-sm"
+              >
+                <ArrowLeft className="h-4 w-4" />
+                Retour au journal
+              </button>
+            ) : null}
             <button
               type="button"
               onClick={() => void refreshInvoices()}
@@ -1197,10 +1241,14 @@ export default function BillingPage() {
           </div>
         )}
 
+        {isComposerOpen ? null : (
         <div className="flex flex-wrap gap-3 border-b border-slate-200">
           <button
             type="button"
-            onClick={() => setActiveTab("factures")}
+            onClick={() => {
+              setActiveTab("factures");
+              setIsComposerOpen(false);
+            }}
             className={`border-b-2 px-3 py-3 text-sm font-medium transition ${
               activeTab === "factures"
                 ? "border-violet-600 text-violet-600"
@@ -1211,7 +1259,10 @@ export default function BillingPage() {
           </button>
           <button
             type="button"
-            onClick={() => setActiveTab("reglages")}
+            onClick={() => {
+              setActiveTab("reglages");
+              setIsComposerOpen(false);
+            }}
             className={`inline-flex items-center gap-2 border-b-2 px-3 py-3 text-sm font-medium transition ${
               activeTab === "reglages"
                 ? "border-violet-600 text-violet-600"
@@ -1222,8 +1273,366 @@ export default function BillingPage() {
             Réglages
           </button>
         </div>
+        )}
 
         {activeTab === "factures" ? (
+          isComposerOpen ? (
+            <section
+              ref={creationRef}
+              className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm"
+            >
+              <div className="mb-6 flex flex-wrap items-start justify-between gap-4 border-b border-slate-100 pb-6">
+                <div>
+                  <h2 className="text-2xl font-semibold tracking-tight">
+                    {creationTitle}
+                  </h2>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => createInvoice()}
+                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-slate-950 px-4 py-2.5 text-sm font-medium text-white"
+                >
+                  <ReceiptText className="h-5 w-5" />
+                  {creationAction}
+                </button>
+              </div>
+
+              <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
+                <div className="grid gap-4">
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <ClientSearchField
+                      value={draft.client}
+                      query={clientSearch}
+                      options={invoiceClientOptions}
+                      open={isClientPickerOpen}
+                      onOpenChange={setIsClientPickerOpen}
+                      onQueryChange={setClientSearch}
+                      onSelect={(client) => {
+                        setClientSearch(client.name);
+                        setDraft((current) => ({
+                          ...current,
+                          client: client.name,
+                          email: client.email,
+                        }));
+                      }}
+                      onCommitQuery={(query) => {
+                        const match = invoiceClientOptions.find(
+                          (option) =>
+                            normalizeSearch(option.name) ===
+                            normalizeSearch(query),
+                        );
+                        if (match) {
+                          setClientSearch(match.name);
+                          setDraft((current) => ({
+                            ...current,
+                            client: match.name,
+                            email: match.email,
+                          }));
+                          return;
+                        }
+                        setDraft((current) => ({
+                          ...current,
+                          client: query,
+                          email:
+                            current.client === query ? current.email : "",
+                        }));
+                      }}
+                    />
+                    <FormSelect
+                      label="Type"
+                      value={draft.type}
+                      options={["Devis", "Acompte", "Facture finale", "Avoir"]}
+                      onChange={(type) => {
+                        const nextType = type as InvoiceType;
+                        if (nextType !== "Devis") {
+                          setEditingQuoteId(null);
+                        }
+                        setDraft((current) => ({ ...current, type: nextType }));
+                      }}
+                    />
+                  </div>
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                    <div className="mb-4 flex items-center justify-between gap-3">
+                      <p className="text-sm font-medium text-slate-700">
+                        Prestations
+                      </p>
+                      <button
+                        type="button"
+                        onClick={addDraftLine}
+                        className="rounded-xl bg-blue-600 px-3 py-2 text-sm font-medium text-white"
+                      >
+                        + Ajouter
+                      </button>
+                    </div>
+                    <div className="space-y-3">
+                      {draft.lines.map((line) => (
+                        <div
+                          key={line.id}
+                          className="grid gap-3 rounded-2xl bg-white p-4"
+                        >
+                          <div className="grid gap-3 lg:grid-cols-[1.2fr_1fr]">
+                            <select
+                              value={line.label}
+                              onChange={(event) => {
+                                const label = event.target.value;
+                                const service = billingServices.find(
+                                  (item) => item.name === label,
+                                );
+                                updateDraftLine(line.id, "label", label);
+                                if (service) {
+                                  updateDraftLine(
+                                    line.id,
+                                    "unitPrice",
+                                    service.price,
+                                  );
+                                  updateDraftLine(
+                                    line.id,
+                                    "vatRate",
+                                    service.vatRate,
+                                  );
+                                }
+                              }}
+                              className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm font-medium outline-none focus:border-blue-500"
+                            >
+                              {billingServices.map((care) => (
+                                <option key={care.id}>{care.name}</option>
+                              ))}
+                              {invoiceCareOptions
+                                .filter(
+                                  (care) =>
+                                    !billingServices.some(
+                                      (service) => service.name === care,
+                                    ),
+                                )
+                                .map((care) => (
+                                  <option key={care}>{care}</option>
+                                ))}
+                              <option>Nouvelle prestation</option>
+                            </select>
+                            <input
+                              value={line.label}
+                              onChange={(event) =>
+                                updateDraftLine(
+                                  line.id,
+                                  "label",
+                                  event.target.value,
+                                )
+                              }
+                              className="h-10 rounded-xl border border-slate-200 px-3 text-sm font-medium outline-none focus:border-blue-500"
+                              placeholder="Nom affiché sur la facture"
+                            />
+                          </div>
+                          <div className="grid grid-cols-2 gap-3 lg:grid-cols-[1fr_1fr_0.8fr_auto]">
+                            <label className="space-y-1">
+                              <span className="text-xs font-medium text-slate-400">
+                                Qté
+                              </span>
+                              <input
+                                type="number"
+                                min={1}
+                                value={line.quantity}
+                                onChange={(event) =>
+                                  updateDraftLine(
+                                    line.id,
+                                    "quantity",
+                                    Number(event.target.value),
+                                  )
+                                }
+                                className="h-10 w-full rounded-xl border border-slate-200 px-3 text-sm font-medium outline-none focus:border-blue-500"
+                              />
+                            </label>
+                            <label className="space-y-1">
+                              <span className="text-xs font-medium text-slate-400">
+                                Prix TTC
+                              </span>
+                              <input
+                                type="number"
+                                min={0}
+                                value={line.unitPrice}
+                                onChange={(event) =>
+                                  updateDraftLine(
+                                    line.id,
+                                    "unitPrice",
+                                    Number(event.target.value),
+                                  )
+                                }
+                                className="h-10 w-full rounded-xl border border-slate-200 px-3 text-sm font-medium outline-none focus:border-blue-500"
+                              />
+                            </label>
+                            <label className="space-y-1">
+                              <span className="text-xs font-medium text-slate-400">
+                                TVA
+                              </span>
+                              <input
+                                type="number"
+                                min={0}
+                                value={line.vatRate}
+                                onChange={(event) =>
+                                  updateDraftLine(
+                                    line.id,
+                                    "vatRate",
+                                    Number(event.target.value),
+                                  )
+                                }
+                                className="h-10 w-full rounded-xl border border-slate-200 px-3 text-sm font-medium outline-none focus:border-blue-500"
+                              />
+                            </label>
+                            <button
+                              type="button"
+                              onClick={() => removeDraftLine(line.id)}
+                              className="mt-5 h-10 rounded-xl border border-rose-100 px-3 text-sm font-medium text-rose-500 hover:bg-rose-50"
+                            >
+                              Suppr.
+                            </button>
+                          </div>
+                          <div className="grid gap-3 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
+                            <label className="space-y-1">
+                              <span className="text-xs font-medium text-slate-400">
+                                Remise prestation
+                              </span>
+                              <select
+                                value={line.discountType ?? "Aucune"}
+                                onChange={(event) =>
+                                  updateDraftLine(
+                                    line.id,
+                                    "discountType",
+                                    event.target.value as DiscountType,
+                                  )
+                                }
+                                className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-medium outline-none focus:border-blue-500"
+                              >
+                                <option>Aucune</option>
+                                <option>€</option>
+                                <option>%</option>
+                              </select>
+                            </label>
+                            <label className="space-y-1">
+                              <span className="text-xs font-medium text-slate-400">
+                                Valeur remise
+                              </span>
+                              <input
+                                type="number"
+                                min={0}
+                                disabled={
+                                  (line.discountType ?? "Aucune") === "Aucune"
+                                }
+                                value={line.discountValue ?? 0}
+                                onChange={(event) =>
+                                  updateDraftLine(
+                                    line.id,
+                                    "discountValue",
+                                    Number(event.target.value),
+                                  )
+                                }
+                                className="h-10 w-full rounded-xl border border-slate-200 px-3 text-sm font-medium outline-none focus:border-blue-500 disabled:bg-slate-100 disabled:text-slate-400"
+                              />
+                            </label>
+                            <p className="rounded-xl bg-slate-50 px-3 py-3 text-sm font-medium text-slate-600">
+                              Net ligne :{" "}
+                              {formatCurrency(calculateLineTotal(line))}
+                            </p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                <aside className="grid h-fit gap-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                  <div className="grid gap-3">
+                    <FormSelect
+                      label="Remise globale"
+                      value={draft.discountType}
+                      options={["Aucune", "€", "%"]}
+                      onChange={(discountType) =>
+                        setDraft((current) => ({
+                          ...current,
+                          discountType: discountType as DiscountType,
+                        }))
+                      }
+                    />
+                    <label className="space-y-2">
+                      <span className="text-xs font-medium text-slate-500">
+                        Valeur remise globale
+                      </span>
+                      <input
+                        type="number"
+                        min={0}
+                        value={draft.discountValue}
+                        onChange={(event) =>
+                          setDraft((current) => ({
+                            ...current,
+                            discountValue: Number(event.target.value),
+                          }))
+                        }
+                        className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-medium outline-none focus:border-blue-500"
+                      />
+                    </label>
+                    <label className="space-y-2">
+                      <span className="text-xs font-medium text-slate-500">
+                        Déjà payé
+                      </span>
+                      <input
+                        type="number"
+                        min={0}
+                        value={draft.paid}
+                        onChange={(event) =>
+                          setDraft((current) => ({
+                            ...current,
+                            paid: Number(event.target.value),
+                          }))
+                        }
+                        className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-medium outline-none focus:border-blue-500"
+                      />
+                    </label>
+                    <FormSelect
+                      label="Mode de paiement"
+                      value={draft.paymentMethod}
+                      options={["CB centre", "Espèces", "Virement", "Stripe"]}
+                      onChange={(paymentMethod) =>
+                        setDraft((current) => ({
+                          ...current,
+                          paymentMethod:
+                            paymentMethod as Invoice["paymentMethod"],
+                        }))
+                      }
+                    />
+                  </div>
+
+                  <div className="grid gap-2 rounded-xl bg-white p-3">
+                    <DetailLine
+                      label="Sous-total TTC"
+                      value={formatCurrency(draftSubtotal)}
+                    />
+                    <DetailLine
+                      label="Remise globale"
+                      value={formatCurrency(draftDiscount)}
+                    />
+                    <DetailLine
+                      label="Total HT"
+                      value={formatCurrency(draftHt)}
+                    />
+                    <DetailLine
+                      label="TVA"
+                      value={formatCurrency(draftVat)}
+                    />
+                    <DetailLine
+                      label="Total TTC"
+                      value={formatCurrency(draftTotal)}
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => createInvoice()}
+                    className="inline-flex items-center justify-center gap-2 rounded-xl bg-slate-950 px-3 py-2.5 text-sm font-medium text-white"
+                  >
+                    <ReceiptText className="h-5 w-5" />
+                    {creationAction}
+                  </button>
+                </aside>
+              </div>
+            </section>
+          ) : (
           <>
         <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           <BillingMetric
@@ -1269,9 +1678,6 @@ export default function BillingPage() {
                 <h2 className="text-lg font-semibold tracking-tight">
                   Journal des factures
                 </h2>
-                <p className="mt-1 text-sm text-slate-500">
-                  Numérotation, acompte, solde et statut.
-                </p>
               </div>
               <div className="flex flex-wrap gap-2">
                 <div className="flex h-10 min-w-72 items-center rounded-xl border border-slate-200 px-3">
@@ -1459,6 +1865,12 @@ export default function BillingPage() {
                   <div className="mt-4 grid gap-2 rounded-xl bg-slate-50 p-3">
                     <DetailLine label="Cliente" value={selectedInvoice.client} />
                     <DetailLine label="Email" value={selectedInvoice.email} />
+                    {selectedInvoice.emailedAt ? (
+                      <DetailLine
+                        label="Envoyée par mail"
+                        value={`${selectedInvoice.emailedTo || selectedInvoice.email} · ${new Date(selectedInvoice.emailedAt).toLocaleString("fr-FR")}`}
+                      />
+                    ) : null}
                     <DetailLine label="Prestation" value={selectedInvoice.care} />
                     <DetailLine label="Type" value={selectedInvoice.type} />
                     <DetailLine
@@ -1592,345 +2004,21 @@ export default function BillingPage() {
                       className="col-span-2 inline-flex items-center justify-center gap-2 rounded-xl border border-violet-200 bg-violet-50 px-3 py-2 text-sm font-medium text-violet-700"
                     >
                       <Mail className="h-4 w-4" />
-                      Envoyer
+                      Envoyer la facture par mail
                     </button>
                   </div>
                 </>
               )}
             </div>
-
-            <div
-              ref={creationRef}
-              className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"
-            >
-              <div className="mb-4">
-                <p className="text-xs font-medium text-blue-600">
-                  Nouvelle pièce
-                </p>
-                <h2 className="mt-1 text-lg font-semibold">{creationTitle}</h2>
-                <p className="mt-1 text-sm text-slate-500">
-                  {editingQuoteId
-                    ? "Modifiez les prestations, remises et informations du devis."
-                    : "Ajoutez les prestations, un acompte ou un paiement partiel."}
-                </p>
-              </div>
-
-              <div className="grid gap-3">
-                <button
-                  type="button"
-                  onClick={fillMariePaymentExample}
-                  className="text-left text-xs font-medium text-slate-500 underline-offset-2 hover:text-blue-600 hover:underline"
-                >
-                  Préremplir un exemple
-                </button>
-                <FormSelect
-                  label="Cliente"
-                  value={draft.client}
-                  options={invoiceClientOptions}
-                  onChange={(client) =>
-                    setDraft((current) => ({
-                      ...current,
-                      client,
-                    }))
-                  }
-                />
-                <FormSelect
-                  label="Type"
-                  value={draft.type}
-                  options={["Devis", "Acompte", "Facture finale", "Avoir"]}
-                  onChange={(type) => {
-                    const nextType = type as InvoiceType;
-                    if (nextType !== "Devis") {
-                      setEditingQuoteId(null);
-                    }
-                    setDraft((current) => ({ ...current, type: nextType }));
-                  }}
-                />
-                <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-                  <div className="mb-3 flex items-center justify-between gap-3">
-                    <p className="text-xs font-medium text-slate-500">
-                      Prestations
-                    </p>
-                    <button
-                      type="button"
-                      onClick={addDraftLine}
-                      className="rounded-xl bg-blue-600 px-3 py-2 text-sm font-medium text-white"
-                    >
-                      + Ajouter
-                    </button>
-                  </div>
-                  <div className="space-y-3">
-                    {draft.lines.map((line) => (
-                      <div
-                        key={line.id}
-                        className="grid gap-2 rounded-2xl bg-white p-3"
-                      >
-                        <select
-                          value={line.label}
-                          onChange={(event) => {
-                            const label = event.target.value;
-                            const service = billingServices.find(
-                              (item) => item.name === label,
-                            );
-                            updateDraftLine(line.id, "label", label);
-                            if (service) {
-                              updateDraftLine(line.id, "unitPrice", service.price);
-                              updateDraftLine(line.id, "vatRate", service.vatRate);
-                            }
-                          }}
-                          className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm font-medium outline-none focus:border-blue-500"
-                        >
-                          {billingServices.map((care) => (
-                            <option key={care.id}>{care.name}</option>
-                          ))}
-                          {invoiceCareOptions
-                            .filter(
-                              (care) =>
-                                !billingServices.some(
-                                  (service) => service.name === care,
-                                ),
-                            )
-                            .map((care) => (
-                              <option key={care}>{care}</option>
-                            ))}
-                          <option>Nouvelle prestation</option>
-                        </select>
-                        <input
-                          value={line.label}
-                          onChange={(event) =>
-                            updateDraftLine(line.id, "label", event.target.value)
-                          }
-                          className="h-10 rounded-xl border border-slate-200 px-3 text-sm font-medium outline-none focus:border-blue-500"
-                          placeholder="Nom affiché sur la facture"
-                        />
-                        <div className="grid grid-cols-[1fr_1fr_0.8fr_auto] gap-2">
-                          <label className="space-y-1">
-                            <span className="text-xs font-medium text-slate-400">
-                              Qté
-                            </span>
-                            <input
-                              type="number"
-                              min={1}
-                              value={line.quantity}
-                              onChange={(event) =>
-                                updateDraftLine(
-                                  line.id,
-                                  "quantity",
-                                  Number(event.target.value),
-                                )
-                              }
-                              className="h-10 w-full rounded-xl border border-slate-200 px-3 text-sm font-medium outline-none focus:border-blue-500"
-                            />
-                          </label>
-                          <label className="space-y-1">
-                            <span className="text-xs font-medium text-slate-400">
-                              Prix TTC
-                            </span>
-                            <input
-                              type="number"
-                              min={0}
-                              value={line.unitPrice}
-                              onChange={(event) =>
-                                updateDraftLine(
-                                  line.id,
-                                  "unitPrice",
-                                  Number(event.target.value),
-                                )
-                              }
-                              className="h-10 w-full rounded-xl border border-slate-200 px-3 text-sm font-medium outline-none focus:border-blue-500"
-                            />
-                          </label>
-                          <label className="space-y-1">
-                            <span className="text-xs font-medium text-slate-400">
-                              TVA
-                            </span>
-                            <input
-                              type="number"
-                              min={0}
-                              value={line.vatRate}
-                              onChange={(event) =>
-                                updateDraftLine(
-                                  line.id,
-                                  "vatRate",
-                                  Number(event.target.value),
-                                )
-                              }
-                              className="h-10 w-full rounded-xl border border-slate-200 px-3 text-sm font-medium outline-none focus:border-blue-500"
-                            />
-                          </label>
-                          <button
-                            type="button"
-                            onClick={() => removeDraftLine(line.id)}
-                            className="mt-5 h-10 rounded-xl border border-rose-100 px-3 text-sm font-medium text-rose-500 hover:bg-rose-50"
-                          >
-                            Suppr.
-                          </button>
-                        </div>
-                        <div className="grid gap-2 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
-                          <label className="space-y-1">
-                            <span className="text-xs font-medium text-slate-400">
-                              Remise prestation
-                            </span>
-                            <select
-                              value={line.discountType ?? "Aucune"}
-                              onChange={(event) =>
-                                updateDraftLine(
-                                  line.id,
-                                  "discountType",
-                                  event.target.value as DiscountType,
-                                )
-                              }
-                              className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-medium outline-none focus:border-blue-500"
-                            >
-                              <option>Aucune</option>
-                              <option>€</option>
-                              <option>%</option>
-                            </select>
-                          </label>
-                          <label className="space-y-1">
-                            <span className="text-xs font-medium text-slate-400">
-                              Valeur remise
-                            </span>
-                            <input
-                              type="number"
-                              min={0}
-                              disabled={(line.discountType ?? "Aucune") === "Aucune"}
-                              value={line.discountValue ?? 0}
-                              onChange={(event) =>
-                                updateDraftLine(
-                                  line.id,
-                                  "discountValue",
-                                  Number(event.target.value),
-                                )
-                              }
-                              className="h-10 w-full rounded-xl border border-slate-200 px-3 text-sm font-medium outline-none focus:border-blue-500 disabled:bg-slate-100 disabled:text-slate-400"
-                            />
-                          </label>
-                          <p className="rounded-xl bg-white px-3 py-3 text-sm font-medium text-slate-600">
-                            Net ligne : {formatCurrency(calculateLineTotal(line))}
-                          </p>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <FormSelect
-                    label="Remise globale"
-                    value={draft.discountType}
-                    options={["Aucune", "€", "%"]}
-                    onChange={(discountType) =>
-                      setDraft((current) => ({
-                        ...current,
-                        discountType: discountType as DiscountType,
-                      }))
-                    }
-                  />
-                  <label className="space-y-2">
-                    <span className="text-xs font-medium text-slate-500">
-                      Valeur remise globale
-                    </span>
-                    <input
-                      type="number"
-                      min={0}
-                      value={draft.discountValue}
-                      onChange={(event) =>
-                        setDraft((current) => ({
-                          ...current,
-                          discountValue: Number(event.target.value),
-                        }))
-                      }
-                      className="h-10 w-full rounded-xl border border-slate-200 px-3 text-sm font-medium outline-none focus:border-blue-500"
-                    />
-                  </label>
-                </div>
-
-                <label className="space-y-2">
-                  <span className="text-xs font-medium text-slate-500">
-                    Déjà payé
-                  </span>
-                  <input
-                    type="number"
-                    min={0}
-                    value={draft.paid}
-                    onChange={(event) =>
-                      setDraft((current) => ({
-                        ...current,
-                        paid: Number(event.target.value),
-                      }))
-                    }
-                    className="h-10 w-full rounded-xl border border-slate-200 px-3 text-sm font-medium outline-none focus:border-blue-500"
-                  />
-                </label>
-
-                <FormSelect
-                  label="Mode de paiement"
-                  value={draft.paymentMethod}
-                  options={["CB centre", "Espèces", "Virement", "Stripe"]}
-                  onChange={(paymentMethod) =>
-                    setDraft((current) => ({
-                      ...current,
-                      paymentMethod: paymentMethod as Invoice["paymentMethod"],
-                    }))
-                  }
-                />
-
-                <div className="grid gap-2 rounded-xl bg-blue-50 p-3">
-                  <DetailLine
-                    label="Sous-total TTC"
-                    value={formatCurrency(draftSubtotal)}
-                  />
-                  <DetailLine
-                    label="Remise globale"
-                    value={formatCurrency(draftDiscount)}
-                  />
-                  <DetailLine label="Total HT" value={formatCurrency(draftHt)} />
-                  <DetailLine label="TVA" value={formatCurrency(draftVat)} />
-                  <DetailLine label="Total TTC" value={formatCurrency(draftTotal)} />
-                </div>
-                <button
-                  type="button"
-                  onClick={() => createInvoice()}
-                  className="mt-1 inline-flex items-center justify-center gap-2 rounded-xl bg-slate-950 px-3 py-2 text-sm font-medium text-white"
-                >
-                  <ReceiptText className="h-5 w-5" />
-                  {creationAction}
-                </button>
-              </div>
-            </div>
           </aside>
         </section>
-
-        <section className="grid gap-3 xl:grid-cols-3">
-          {[
-            {
-              title: "Acompte Stripe",
-              text: "Le paiement en ligne crée automatiquement la facture d'acompte.",
-            },
-            {
-              title: "Facture finale",
-              text: "Après le rendez-vous, encaissez le solde depuis la fiche cliente.",
-            },
-            {
-              title: "Conformité",
-              text: "Numéros chronologiques, PDF conservés et avoirs pour les remboursements.",
-            },
-          ].map((item) => (
-            <div
-              key={item.title}
-              className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"
-            >
-              <h3 className="text-sm font-semibold">{item.title}</h3>
-              <p className="mt-1 text-sm leading-6 text-slate-500">
-                {item.text}
-              </p>
-            </div>
-          ))}
-        </section>
           </>
+          )
         ) : (
           <BillingSettings
+            onMailboxStatus={(status) =>
+              setMailbox((current) => ({ ...current, ...status }))
+            }
             categories={billingCategories}
             services={sortServicesByCategory(billingServices, billingCategories)}
             products={sortServicesByCategory(billingProducts, billingCategories)}
@@ -1971,11 +2059,23 @@ export default function BillingPage() {
           onSend={sendInvoiceByEmail}
         />
       )}
+      {mailInvoice ? (
+        <SendInvoiceDialog
+          invoice={mailInvoice}
+          centerName={mailbox.centerName}
+          mailboxConnected={mailbox.connected}
+          mailboxEmail={mailbox.email}
+          buildHtml={() => buildInvoiceHtml(mailInvoice)}
+          onClose={() => setMailInvoice(null)}
+          onSent={(receipt) => markInvoiceEmailed(mailInvoice.id, receipt)}
+        />
+      ) : null}
     </main>
   );
 }
 
 function BillingSettings({
+  onMailboxStatus,
   categories,
   services,
   products,
@@ -2007,9 +2107,15 @@ function BillingSettings({
     value: string | number,
   ) => void;
   onRemoveProduct: (productId: string) => void;
+  onMailboxStatus?: (status: {
+    connected: boolean;
+    email: string;
+    centerId: string;
+  }) => void;
 }) {
   return (
     <section className="space-y-6">
+      <BillingMailboxCard onStatus={onMailboxStatus} />
       <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div>
@@ -2580,7 +2686,7 @@ function InvoicePreview({
               className="inline-flex items-center justify-center gap-2 rounded-xl bg-violet-600 px-3 py-2 text-sm font-medium text-white"
             >
               <Mail className="h-5 w-5" />
-              Envoyer par mail
+              Envoyer la facture par mail
             </button>
           </div>
         )}
@@ -2639,6 +2745,130 @@ function DetailLine({ label, value }: { label: string; value: string }) {
     <div className="flex items-center justify-between gap-4">
       <span className="text-xs font-medium text-slate-500">{label}</span>
       <span className="text-right font-semibold text-slate-950">{value}</span>
+    </div>
+  );
+}
+
+function normalizeSearch(value: string) {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
+}
+
+function ClientSearchField({
+  value,
+  query,
+  options,
+  open,
+  onOpenChange,
+  onQueryChange,
+  onSelect,
+  onCommitQuery,
+}: {
+  value: string;
+  query: string;
+  options: BillingClientOption[];
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onQueryChange: (query: string) => void;
+  onSelect: (client: BillingClientOption) => void;
+  onCommitQuery: (query: string) => void;
+}) {
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const normalized = normalizeSearch(query);
+  const filtered = options
+    .filter((option) => {
+      if (!normalized) {
+        return true;
+      }
+      return (
+        normalizeSearch(option.name).includes(normalized) ||
+        normalizeSearch(option.email).includes(normalized) ||
+        normalizeSearch(option.phone).includes(normalized)
+      );
+    })
+    .slice(0, 20);
+
+  useEffect(() => {
+    function handlePointerDown(event: PointerEvent) {
+      if (!rootRef.current?.contains(event.target as Node)) {
+        onOpenChange(false);
+        onCommitQuery(query.trim());
+      }
+    }
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    return () => document.removeEventListener("pointerdown", handlePointerDown);
+  }, [onCommitQuery, onOpenChange, query]);
+
+  return (
+    <div ref={rootRef} className="relative space-y-1.5">
+      <span className="text-xs font-medium text-slate-500">Cliente</span>
+      <div className="flex h-10 items-center rounded-xl border border-slate-200 bg-white px-3 focus-within:border-blue-500">
+        <Search className="h-4 w-4 shrink-0 text-slate-400" />
+        <input
+          value={query}
+          onChange={(event) => {
+            onQueryChange(event.target.value);
+            onOpenChange(true);
+          }}
+          onFocus={() => onOpenChange(true)}
+          onKeyDown={(event) => {
+            if (event.key === "Escape") {
+              onOpenChange(false);
+              return;
+            }
+            if (event.key === "Enter") {
+              event.preventDefault();
+              if (filtered[0]) {
+                onSelect(filtered[0]);
+                onOpenChange(false);
+                return;
+              }
+              onCommitQuery(query.trim());
+              onOpenChange(false);
+            }
+          }}
+          placeholder="Rechercher une cliente..."
+          className="ml-2 w-full bg-transparent text-sm font-medium outline-none"
+          autoComplete="off"
+        />
+      </div>
+      {open ? (
+        <div className="absolute z-30 mt-1 max-h-64 w-full overflow-auto rounded-xl border border-slate-200 bg-white p-1 shadow-lg">
+          {filtered.length === 0 ? (
+            <p className="px-3 py-2 text-sm font-medium text-slate-500">
+              Aucune cliente
+            </p>
+          ) : (
+            filtered.map((option) => (
+              <button
+                key={`${option.name}-${option.email}-${option.phone}`}
+                type="button"
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => {
+                  onSelect(option);
+                  onOpenChange(false);
+                }}
+                className={`flex w-full flex-col rounded-lg px-3 py-2 text-left transition hover:bg-slate-50 ${
+                  option.name === value ? "bg-blue-50" : ""
+                }`}
+              >
+                <span className="text-sm font-medium text-slate-950">
+                  {option.name}
+                </span>
+                {option.email || option.phone ? (
+                  <span className="text-xs font-medium text-slate-500">
+                    {[option.email, option.phone].filter(Boolean).join(" · ")}
+                  </span>
+                ) : null}
+              </button>
+            ))
+          )}
+        </div>
+      ) : null}
     </div>
   );
 }
