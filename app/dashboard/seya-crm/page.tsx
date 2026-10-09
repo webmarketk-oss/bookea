@@ -401,6 +401,11 @@ export default function SeyaCrmPage() {
 
     async function loadInbox() {
       try {
+        await fetch("/api/seya/rehome", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: "{}",
+        }).catch(() => null);
         const seya = await loadSeyaAgentSettings();
         if (cancelled) {
           return;
@@ -475,14 +480,9 @@ export default function SeyaCrmPage() {
         if (cancelled || !seya.centerId) {
           return;
         }
-        setConversations((current) => {
-          const merged = mergeSeyaConversations(
-            seya.conversations || [],
-            current,
-          );
-          writeLocalSeyaConversations(seya.centerId, merged, { notify: false });
-          return merged;
-        });
+        const next = seya.conversations || [];
+        writeLocalSeyaConversations(seya.centerId, next, { notify: false });
+        setConversations(next);
       } catch {
         return;
       } finally {

@@ -2,6 +2,7 @@ const {
   mergeSeyaConversationLists,
   persistableConversations,
 } = require("./conversation-key");
+const { conversationsForCenter } = require("./center-route");
 const { missionForcesWelcome } = require("./mission");
 
 function asRecord(value) {
@@ -97,7 +98,10 @@ async function writeSeyaConversations(supabase, centerId, conversations) {
   const { settings, seya } = await readCenterSeya(supabase, centerId);
   const existing = Array.isArray(seya.conversations) ? seya.conversations : [];
   const next = persistableConversations(
-    mergeSeyaConversationLists(existing, conversations),
+    mergeSeyaConversationLists(
+      conversationsForCenter(existing, centerId),
+      conversationsForCenter(conversations, centerId),
+    ),
   );
   const { error } = await supabase
     .from("centers")

@@ -44,6 +44,11 @@ function isSameSeyaConversation(item, other) {
   if (!item || !other) {
     return false;
   }
+  const centerA = String(item.centerId || "").trim();
+  const centerB = String(other.centerId || "").trim();
+  if (centerA && centerB && centerA !== centerB) {
+    return false;
+  }
   const leadA = String(item.leadId || "").trim();
   const leadB = String(other.leadId || "").trim();
   if (leadA && leadB && leadA === leadB) {
@@ -157,17 +162,18 @@ function mergeMessageLists(left, right) {
 
 function identityKeys(item) {
   const keys = [];
+  const center = String(item?.centerId || "").trim();
   const leadId = String(item?.leadId || "").trim();
   if (leadId) {
     keys.push(`lead:${leadId}`);
   }
   const phone = last9Phone(item?.phone);
   if (phone.length >= 9) {
-    keys.push(`phone:${phone}`);
+    keys.push(center ? `center:${center}:phone:${phone}` : `phone:${phone}`);
   }
   const id = String(item?.id || "").trim();
   if (id) {
-    keys.push(`id:${id}`);
+    keys.push(center ? `center:${center}:id:${id}` : `id:${id}`);
   }
   return keys;
 }

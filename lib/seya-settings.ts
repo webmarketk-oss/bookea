@@ -4,9 +4,15 @@ import {
   resolveGeneralBrief,
 } from "@/api/seya/general-brief";
 import {
+  isSameSeyaConversation,
   mergeSeyaConversationLists,
   persistableConversations,
 } from "@/api/seya/conversation-key";
+import {
+  conversationsForCenter,
+  filterOwnedConversations,
+  loadOwnedPhones,
+} from "@/api/seya/center-route";
 import {
   applySeyaMissionFlags,
   normalizeSeyaRelances,
@@ -975,6 +981,9 @@ export async function loadSeyaAgentSettings() {
 
   const remote = asRecord(asRecord(data?.settings).seya);
   const hasRemote = Boolean(asRecord(data?.settings).seya);
+  const ownedPhones = await loadOwnedPhones(supabase, context.centerId).catch(
+    () => new Set<string>(),
+  );
   const settings = bindSeyaSettingsToCenter(
     hasRemote ? (remote as Partial<SeyaAgentSettings>) : null,
     localSettings,
@@ -982,13 +991,23 @@ export async function loadSeyaAgentSettings() {
 
   writeLocalSeyaSettings(context.centerId, settings);
 
-  const remoteConversations = Array.isArray(remote.conversations)
-    ? (remote.conversations as SeyaConversation[])
-    : [];
-  const merged = mergeSeyaConversations(
-    remoteConversations,
-    readLocalSeyaConversations(context.centerId),
+  const remoteConversations = filterOwnedConversations(
+    Array.isArray(remote.conversations)
+      ? (remote.conversations as SeyaConversation[])
+      : [],
+    context.centerId,
+    ownedPhones,
   );
+  const localOwned = filterOwnedConversations(
+    readLocalSeyaConversations(context.centerId),
+    context.centerId,
+    ownedPhones,
+  ).filter((item) =>
+    remoteConversations.some((remoteItem) =>
+      isSameSeyaConversation(remoteItem, item),
+    ),
+  );
+  const merged = mergeSeyaConversations(remoteConversations, localOwned);
   const conversations = merged.length > 0 ? merged : remoteConversations;
   writeLocalSeyaConversations(context.centerId, conversations, { notify: false });
 
@@ -1043,8 +1062,15 @@ export async function saveSeyaConversations(
   const remoteConversations = Array.isArray(currentSeya.conversations)
     ? (currentSeya.conversations as SeyaConversation[])
     : [];
-  const next = mergeSeyaConversations(remoteConversations, conversations);
-  if (next.length === 0 && remoteConversations.length > 0) {
+  const ownedPhones = await loadOwnedPhones(supabase, context.centerId).catch(
+    () => new Set<string>(),
+  );
+  const next = filterOwnedConversations(
+    mergeSeyaConversations(remoteConversations, conversations),
+    context.centerId,
+    ownedPhones,
+  );
+  if (next.length === 0 && remoteConversations.length > 0 && ownedPhones.size === 0) {
     writeLocalSeyaConversations(context.centerId, remoteConversations, {
       notify: false,
     });

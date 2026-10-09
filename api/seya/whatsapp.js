@@ -5,7 +5,6 @@ const { inferCareFamily, pickApprovedTemplate, resolveActiveFamily } = require("
 const { pickBookingResources } = require("./axis-resources");
 const { notifyCenterSeyaAction } = require("./center-notify");
 const { isNearDuplicate } = require("./price");
-const { sanitizePersonName } = require("../../lib/seya-person-name");
 const {
   BILAN_DURATION_MINUTES,
   visitDurationMinutes,
@@ -22,6 +21,10 @@ const {
 } = require("./agent");
 const { dbStatusWhenSlotPositioned } = require("./booking-state");
 const { isSameSeyaConversation } = require("./conversation-key");
+const {
+  resolveCenterFromPhone,
+  rehomePhoneThread,
+} = require("./center-route");
 const { findOwnSeyaAppointment, slotDate, slotTime } = require("./own-appointment");
 const { appointmentSlot } = require("../appointments/token-utils");
 const {
@@ -444,6 +447,11 @@ async function handleIncoming(supabase, incoming) {
   if (!context) {
     return { phone: incoming.phone, routed: false, reason: "unknown_contact" };
   }
+  await rehomePhoneThread(supabase, incoming.phone, context.centerId).catch(
+    (error) => {
+      console.error("[seya/whatsapp] rehome", error);
+    },
+  );
 
   const { data: center, error } = await supabase
     .from("centers")
@@ -823,156 +831,6 @@ async function handleIncoming(supabase, incoming) {
     booked: Boolean(result.shouldBook),
     sent: sendResults.length ? sendResults.every((item) => item?.sent) : false,
     error: next.sendError || null,
-  };
-}
-
-async function resolveCenterFromLeadPhone(supabase, phone, last9) {
-  const { data: leads, error } = await supabase
-    .from("leads")
-    .select(
-      "id,center_id,client_id,status,next_action,recall_date,service_id,updated_at,last_activity_at,phone,campaigns(name)",
-    )
-    .or(`phone.eq.${phone},phone.eq.0${last9},phone.ilike.%${last9}%`)
-    .order("last_activity_at", { ascending: false })
-    .limit(12);
-
-  if (error || !leads?.length) {
-    return null;
-  }
-
-  const matched = leads.filter((row) => last9Phone(row.phone) === last9);
-  const lead = matched[0] || leads[0];
-  if (!lead?.id || !lead.center_id) {
-    return null;
-  }
-
-  let firstName = "bonjour";
-  let lastName = "";
-  let clientPhone = lead.phone || phone;
-  if (lead.client_id) {
-    const { data: client } = await supabase
-      .from("clients")
-      .select("first_name,last_name,phone")
-      .eq("id", lead.client_id)
-      .maybeSingle();
-    if (client) {
-      const person = sanitizePersonName(client.first_name, client.last_name);
-      firstName = person.firstName || firstName;
-      lastName = person.lastName;
-      clientPhone = client.phone || clientPhone;
-    }
-  }
-
-  const { data: service } = lead.service_id
-    ? await supabase
-        .from("services")
-        .select("name")
-        .eq("id", lead.service_id)
-        .maybeSingle()
-    : { data: null };
-
-  return {
-    centerId: lead.center_id,
-    clientId: lead.client_id,
-    leadId: lead.id,
-    firstName,
-    lastName,
-    phone: clientPhone,
-    treatment: service?.name || "",
-    campaign: Array.isArray(lead.campaigns)
-      ? lead.campaigns[0]?.name || ""
-      : lead.campaigns?.name || "",
-    status: lead.status || "Nouveau",
-    recall_date: lead.recall_date || "",
-  };
-}
-
-async function resolveCenterFromPhone(supabase, phone) {
-  const last9 = last9Phone(phone);
-  if (last9.length < 9) {
-    return null;
-  }
-
-  const { data: clients, error } = await supabase
-    .from("clients")
-    .select("id,center_id,first_name,last_name,phone,updated_at")
-    .or(`phone.eq.${phone},phone.eq.0${last9},phone.ilike.%${last9}%`)
-    .order("updated_at", { ascending: false })
-    .limit(12);
-
-  if (error) {
-    throw new Error(error.message);
-  }
-
-  const matched = (clients ?? []).filter(
-    (row) => last9Phone(row.phone) === last9,
-  );
-  if (matched.length === 0) {
-    const fromLead = await resolveCenterFromLeadPhone(supabase, phone, last9);
-    if (fromLead) {
-      return fromLead;
-    }
-    return null;
-  }
-
-  const ranked = [];
-  for (const client of matched) {
-    const { data: lead } = await supabase
-      .from("leads")
-      .select("id,status,next_action,recall_date,latest_comment,service_id,updated_at,last_activity_at,campaigns(name)")
-      .eq("center_id", client.center_id)
-      .eq("client_id", client.id)
-      .order("last_activity_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    ranked.push({
-      client,
-      lead,
-      at: lead?.last_activity_at || lead?.updated_at || client.updated_at || "",
-    });
-  }
-  ranked.sort((a, b) => String(b.at).localeCompare(String(a.at)));
-
-  const chosen = ranked.find((item) => item.lead?.id) || ranked[0];
-  if (chosen?.lead?.id) {
-    const client = chosen.client;
-    const lead = chosen.lead;
-    const { data: service } = lead.service_id
-      ? await supabase
-          .from("services")
-          .select("name")
-          .eq("id", lead.service_id)
-          .maybeSingle()
-      : { data: null };
-
-    const person = sanitizePersonName(client.first_name, client.last_name);
-    return {
-      centerId: client.center_id,
-      clientId: client.id,
-      leadId: lead.id,
-      firstName: person.firstName || "bonjour",
-      lastName: person.lastName,
-      phone: client.phone || phone,
-      treatment: service?.name || "",
-      campaign: Array.isArray(lead.campaigns)
-        ? lead.campaigns[0]?.name || ""
-        : lead.campaigns?.name || "",
-      status: lead.status || "Nouveau",
-      recall_date: lead.recall_date || "",
-    };
-  }
-
-  const client = chosen?.client || matched[0];
-  const person = sanitizePersonName(client.first_name, client.last_name);
-  return {
-    centerId: client.center_id,
-    clientId: client.id,
-    leadId: client.id,
-    firstName: person.firstName || "bonjour",
-    lastName: person.lastName,
-    phone: client.phone || phone,
-    treatment: "",
-    status: "Nouveau",
   };
 }
 

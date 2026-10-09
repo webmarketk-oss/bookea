@@ -28,12 +28,12 @@ test("un fil slug et un fil UUID du même numéro ne font qu’une conversation"
     id: "lead-1",
     leadId: "lead-1",
     phone: "0611223344",
-    centerId: "jfg-clinique-clermont",
+    centerId: "center-clermont",
     messages: [{ author: "seya", text: "hello", at: "2026-09-20T10:00:00.000Z" }],
   };
   const byPhone = {
     phone: "33611223344",
-    centerId: "uuid-clermont",
+    centerId: "center-clermont",
     messages: [
       { author: "seya", text: "hello", at: "2026-09-20T10:00:00.000Z" },
       { author: "lead", text: "prix", at: "2026-09-21T10:00:00.000Z" },
@@ -44,6 +44,23 @@ test("un fil slug et un fil UUID du même numéro ne font qu’une conversation"
   assert.equal(merged[0].leadId, "lead-1");
   assert.equal(merged[0].messages.length, 2);
   assert.equal(isSameSeyaConversation(bySlug, byPhone), true);
+});
+
+test("le même numéro chez deux centres ne fusionne pas", () => {
+  const clermont = {
+    phone: "0612455675",
+    centerId: "center-clermont",
+    firstName: "Claudine",
+    messages: [{ author: "lead", text: "bonjour", at: "2026-10-09T10:00:00.000Z" }],
+  };
+  const gaillard = {
+    phone: "33612455675",
+    centerId: "center-gaillard",
+    firstName: "Claudine",
+    messages: [{ author: "seya", text: "Gaillard", at: "2026-10-09T11:00:00.000Z" }],
+  };
+  const merged = mergeSeyaConversationLists([clermont], [gaillard]);
+  assert.equal(merged.length, 2);
 });
 
 test("les ouvertures auto n’évincient pas un WhatsApp en attente de réponse", () => {
