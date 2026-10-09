@@ -86,6 +86,51 @@ function mailboxPublicStatus(center) {
   };
 }
 
+const BOOKEA_SENDER_EMAIL = "info@bookeai.fr";
+const BOOKEA_SENDER_NAME = "Bookea";
+
+function parseBookeaSenderMailbox(payload) {
+  return parseMailingMailbox({
+    mailing: { mailbox: asRecord(asRecord(payload).mailbox) },
+  });
+}
+
+function mergeBookeaSenderPayload(payload, mailbox) {
+  const current = asRecord(payload);
+  const box = mailingMailboxRecord({
+    ...mailbox,
+    name: mailbox?.name || BOOKEA_SENDER_NAME,
+  });
+  return {
+    ...current,
+    mailbox: box,
+  };
+}
+
+async function loadBookeaSenderMailbox(supabase) {
+  try {
+    const { data } = await supabase
+      .from("admin_agency_billing")
+      .select("payload")
+      .eq("company", "bookea")
+      .maybeSingle();
+    return parseBookeaSenderMailbox(data?.payload);
+  } catch {
+    return parseBookeaSenderMailbox({});
+  }
+}
+
+function bookeaSenderPublicStatus(payload) {
+  const mailbox = parseBookeaSenderMailbox(payload);
+  return {
+    brevoReady: Boolean(process.env.BREVO_API_KEY),
+    connected: mailbox.verified && isValidEmail(mailbox.email),
+    pending: Boolean(mailbox.email && mailbox.senderId && !mailbox.verified),
+    email: mailbox.email || BOOKEA_SENDER_EMAIL,
+    name: mailbox.name || BOOKEA_SENDER_NAME,
+  };
+}
+
 function findBrevoSender(senders, email) {
   const needle = String(email || "").trim().toLowerCase();
   if (!needle) {
@@ -99,10 +144,16 @@ function findBrevoSender(senders, email) {
 }
 
 module.exports = {
+  BOOKEA_SENDER_EMAIL,
+  BOOKEA_SENDER_NAME,
+  bookeaSenderPublicStatus,
   findBrevoSender,
+  loadBookeaSenderMailbox,
   isValidEmail,
   mailboxPublicStatus,
+  mergeBookeaSenderPayload,
   mergeMailingMailbox,
+  parseBookeaSenderMailbox,
   parseMailingMailbox,
   resolveCenterSender,
 };

@@ -1,4 +1,5 @@
 const {
+  loadBookeaSenderMailbox,
   parseMailingMailbox,
   resolveCenterSender,
 } = require("../mailing/mailbox-lib");
@@ -118,21 +119,24 @@ function defaultSenderEmail() {
     .toLowerCase();
 }
 
-function centerNotifySender(center, seya) {
-  const mailing = resolveCenterSender(center);
-  if (mailing.mailboxConnected && isValidEmail(mailing.email)) {
-    return mailing.email;
+function centerNotifySender(center, seya, bookeaMailbox) {
+  if (bookeaMailbox?.verified && isValidEmail(bookeaMailbox.email)) {
+    return bookeaMailbox.email;
   }
   const fromEnv = defaultSenderEmail();
   if (isValidEmail(fromEnv)) {
     return fromEnv;
   }
+  const mailing = resolveCenterSender(center);
+  if (mailing.mailboxConnected && isValidEmail(mailing.email)) {
+    return mailing.email;
+  }
   return centerNotifyEmails(center, seya)[0] || "";
 }
 
-function notifyMailStatus(center, seya) {
+function notifyMailStatus(center, seya, bookeaMailbox) {
   const recipients = centerNotifyEmails(center, seya);
-  const sender = centerNotifySender(center, seya);
+  const sender = centerNotifySender(center, seya, bookeaMailbox);
   const missingBrevo = !process.env.BREVO_API_KEY;
   const missingRecipient = recipients.length === 0;
   const missingSender = !isValidEmail(sender);
@@ -156,7 +160,34 @@ function toHtml(text) {
   return `<div style="font-family:Arial,sans-serif;font-size:15px;line-height:1.6;color:#0f172a;max-width:560px"><p style="margin:0">${body}</p></div>`;
 }
 
-async function sendBrevoToCenter({ to, subject, text, centerName, senderEmail }) {
+function createNotifyClient() {
+  const { createClient } = require("@supabase/supabase-js");
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) {
+    return null;
+  }
+  return createClient(url, key, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+}
+
+async function resolveNotifySender(center, seya) {
+  const supabase = createNotifyClient();
+  const bookeaMailbox = supabase
+    ? await loadBookeaSenderMailbox(supabase)
+    : parseMailingMailbox({});
+  return {
+    senderEmail: centerNotifySender(center, seya, bookeaMailbox),
+    senderName:
+      bookeaMailbox.verified && bookeaMailbox.email
+        ? bookeaMailbox.name || "Bookea"
+        : String(center?.name || "").trim() || "Bookea Seya",
+    bookeaMailbox,
+  };
+}
+
+async function sendBrevoToCenter({ to, subject, text, centerName, senderEmail, senderName }) {
   const apiKey = process.env.BREVO_API_KEY;
   const from = isValidEmail(senderEmail) ? senderEmail : defaultSenderEmail();
   if (!apiKey) {
@@ -176,7 +207,7 @@ async function sendBrevoToCenter({ to, subject, text, centerName, senderEmail })
     body: JSON.stringify({
       sender: {
         email: from,
-        name: String(centerName || "Bookea Seya").slice(0, 70),
+        name: String(senderName || centerName || "Bookea").slice(0, 70),
       },
       to: [{ email: to }],
       subject: String(subject || "").slice(0, 200),
@@ -211,7 +242,8 @@ async function notifyCenterSeyaAction({
     console.error("[seya/notify] no center email", center?.id);
     return { sent: false, reason: "no_email", conversation };
   }
-  const senderEmail = centerNotifySender(center, seya);
+  const resolved = await resolveNotifySender(center, seya);
+  const senderEmail = resolved.senderEmail;
   if (!process.env.BREVO_API_KEY) {
     return { sent: false, reason: "missing_brevo", conversation };
   }
@@ -233,6 +265,7 @@ async function notifyCenterSeyaAction({
         text: copy.text,
         centerName: center?.name,
         senderEmail,
+        senderName: resolved.senderName,
       }));
     } catch (error) {
       console.error("[seya/notify]", email, error);
@@ -253,7 +286,8 @@ async function sendCenterNotifyTest({ center, seya } = {}) {
   if (!emails.length) {
     return { sent: false, reason: "no_email", recipients: [] };
   }
-  const senderEmail = centerNotifySender(center, seya);
+  const resolved = await resolveNotifySender(center, seya);
+  const senderEmail = resolved.senderEmail;
   if (!process.env.BREVO_API_KEY) {
     return { sent: false, reason: "missing_brevo", recipients: emails, sender: senderEmail };
   }
@@ -280,6 +314,7 @@ async function sendCenterNotifyTest({ center, seya } = {}) {
         text: copy.text,
         centerName: center?.name,
         senderEmail,
+        senderName: resolved.senderName,
       }));
     } catch (error) {
       console.error("[seya/notify] test", email, error);

@@ -106,6 +106,23 @@ test("l’expéditeur Brevo passe avant l’email du centre", () => {
   }
 });
 
+test("info@bookeai.fr connecté en admin envoie à la place du centre", () => {
+  assert.equal(
+    centerNotifySender(
+      {
+        settings: {
+          mailing: {
+            mailbox: { email: "boite@centre.fr", verified: true },
+          },
+        },
+      },
+      {},
+      { email: "info@bookeai.fr", verified: true, name: "Bookea" },
+    ),
+    "info@bookeai.fr",
+  );
+});
+
 test("la boîte Mailing connectée sert d’expéditeur", () => {
   const previousSender = process.env.BREVO_EMAIL_SENDER;
   const previousFrom = process.env.BREVO_FROM_EMAIL;

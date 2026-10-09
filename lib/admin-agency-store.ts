@@ -78,10 +78,21 @@ export async function saveAgencyBilling(state: AgencyBillingState) {
   }
   try {
     const supabase = createClient();
+    const { data: existing } = await supabase
+      .from("admin_agency_billing")
+      .select("payload")
+      .eq("company", next.company)
+      .maybeSingle();
+    const mailbox =
+      existing?.payload &&
+      typeof existing.payload === "object" &&
+      "mailbox" in existing.payload
+        ? (existing.payload as { mailbox?: unknown }).mailbox
+        : undefined;
     const { error } = await supabase.from("admin_agency_billing").upsert(
       {
         company: next.company,
-        payload: next,
+        payload: mailbox ? { ...next, mailbox } : next,
         updated_at: next.updatedAt,
       },
       { onConflict: "company" },

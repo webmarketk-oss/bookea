@@ -4,6 +4,7 @@ import {
   Bell,
   CheckCircle2,
   Loader2,
+  Mail,
   MessageCircle,
   Smartphone,
   Users,
@@ -23,6 +24,7 @@ import {
   type AdminInboxItem,
 } from "@/lib/center-billing";
 import { loadIsBookeaAdmin } from "@/lib/center-access";
+import { createClient } from "@/lib/supabase";
 import { formatEuro } from "@/lib/bookea-tarifs";
 
 function toLocalIsoDate(value: string) {
@@ -61,6 +63,17 @@ export default function AdminNotificationsPage() {
   const [centerFilter, setCenterFilter] = useState("tous");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
+  const [senderEmail, setSenderEmail] = useState("info@bookeai.fr");
+  const [senderOtp, setSenderOtp] = useState("");
+  const [senderBusy, setSenderBusy] = useState(false);
+  const [senderNotice, setSenderNotice] = useState("");
+  const [senderError, setSenderError] = useState("");
+  const [sender, setSender] = useState({
+    connected: false,
+    pending: false,
+    brevoReady: false,
+    email: "info@bookeai.fr",
+  });
 
   async function refresh() {
     const [inbox, webk, bookea] = await Promise.all([
@@ -78,6 +91,95 @@ export default function AdminNotificationsPage() {
         })),
       ),
     );
+    await loadBookeaSender();
+  }
+
+  async function senderAuthHeaders() {
+    const supabase = createClient();
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+    return {
+      "Content-Type": "application/json",
+      Authorization: session?.access_token
+        ? `Bearer ${session.access_token}`
+        : "",
+    };
+  }
+
+  async function loadBookeaSender() {
+    const response = await fetch("/api/mailing/bookea-sender", {
+      headers: await senderAuthHeaders(),
+    });
+    const result = (await response.json().catch(() => ({}))) as {
+      connected?: boolean;
+      pending?: boolean;
+      brevoReady?: boolean;
+      email?: string;
+      error?: string;
+    };
+    if (!response.ok) {
+      setSenderError(result.error || "Impossible de lire la boîte Bookea.");
+      return;
+    }
+    setSender({
+      connected: Boolean(result.connected),
+      pending: Boolean(result.pending),
+      brevoReady: Boolean(result.brevoReady),
+      email: result.email || "info@bookeai.fr",
+    });
+    if (result.email) {
+      setSenderEmail(result.email);
+    }
+  }
+
+  async function postBookeaSender(body: {
+    action: "connect" | "validate" | "disconnect";
+    email?: string;
+    otp?: string;
+  }) {
+    setSenderBusy(true);
+    setSenderError("");
+    setSenderNotice("");
+    try {
+      const response = await fetch("/api/mailing/bookea-sender", {
+        method: "POST",
+        headers: await senderAuthHeaders(),
+        body: JSON.stringify({
+          ...body,
+          name: "Bookea",
+        }),
+      });
+      const result = (await response.json().catch(() => ({}))) as {
+        connected?: boolean;
+        pending?: boolean;
+        brevoReady?: boolean;
+        email?: string;
+        error?: string;
+        notice?: string;
+      };
+      setSender({
+        connected: Boolean(result.connected),
+        pending: Boolean(result.pending),
+        brevoReady: Boolean(result.brevoReady),
+        email: result.email || senderEmail,
+      });
+      if (result.email) {
+        setSenderEmail(result.email);
+      }
+      if (!response.ok) {
+        setSenderError(result.error || "Impossible de connecter la boîte.");
+        return;
+      }
+      setSenderNotice(result.notice || "");
+      if (result.connected) {
+        setSenderOtp("");
+      }
+    } catch {
+      setSenderError("Impossible de connecter la boîte Bookea.");
+    } finally {
+      setSenderBusy(false);
+    }
   }
 
   useEffect(() => {
@@ -213,6 +315,102 @@ export default function AdminNotificationsPage() {
                 {error}
               </p>
             ) : null}
+
+            <section className="rounded-2xl border border-violet-200 bg-white p-5 shadow-sm">
+              <div className="flex items-start gap-3">
+                <span className="grid h-9 w-9 place-items-center rounded-xl bg-violet-50 text-violet-600">
+                  <Mail className="h-4 w-4" />
+                </span>
+                <div className="min-w-0 flex-1">
+                  <h2 className="text-base font-semibold">
+                    Boîte mail Bookea
+                  </h2>
+                  <p className="mt-1 text-sm text-slate-500">
+                    Connectez info@bookeai.fr. C’est cette adresse qui envoie
+                    les mails quand Seya pose un RDV ou qu’un prospect doit
+                    être rappelé. Les centres reçoivent dans leur boîte.
+                  </p>
+                </div>
+              </div>
+              {sender.connected ? (
+                <div className="mt-4 flex flex-wrap items-center gap-3">
+                  <p className="rounded-xl bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-700">
+                    Connectée · {sender.email}
+                  </p>
+                  <button
+                    type="button"
+                    disabled={senderBusy}
+                    onClick={() =>
+                      void postBookeaSender({ action: "disconnect" })
+                    }
+                    className="h-10 rounded-xl border border-slate-200 bg-white px-4 text-sm font-medium text-slate-600 disabled:opacity-60"
+                  >
+                    Changer
+                  </button>
+                </div>
+              ) : (
+                <div className="mt-4 grid gap-3 md:grid-cols-[1fr_auto]">
+                  <input
+                    value={senderEmail}
+                    onChange={(event) => setSenderEmail(event.target.value)}
+                    placeholder="info@bookeai.fr"
+                    className="h-11 rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm font-medium outline-none focus:border-violet-500"
+                  />
+                  <button
+                    type="button"
+                    disabled={senderBusy}
+                    onClick={() =>
+                      void postBookeaSender({
+                        action: "connect",
+                        email: senderEmail || "info@bookeai.fr",
+                      })
+                    }
+                    className="h-11 rounded-xl bg-violet-700 px-4 text-sm font-semibold text-white disabled:opacity-60"
+                  >
+                    {senderBusy ? "Envoi…" : "Recevoir le code"}
+                  </button>
+                  {sender.pending ? (
+                    <>
+                      <input
+                        value={senderOtp}
+                        onChange={(event) => setSenderOtp(event.target.value)}
+                        placeholder="Code à 6 chiffres"
+                        inputMode="numeric"
+                        className="h-11 rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm font-medium outline-none focus:border-violet-500"
+                      />
+                      <button
+                        type="button"
+                        disabled={senderBusy}
+                        onClick={() =>
+                          void postBookeaSender({
+                            action: "validate",
+                            otp: senderOtp,
+                          })
+                        }
+                        className="h-11 rounded-xl bg-slate-950 px-4 text-sm font-semibold text-white disabled:opacity-60"
+                      >
+                        Valider
+                      </button>
+                    </>
+                  ) : null}
+                </div>
+              )}
+              {senderNotice ? (
+                <p className="mt-3 text-xs font-medium text-emerald-700">
+                  {senderNotice}
+                </p>
+              ) : null}
+              {senderError ? (
+                <p className="mt-3 text-xs font-medium text-rose-700">
+                  {senderError}
+                </p>
+              ) : null}
+              {!sender.brevoReady ? (
+                <p className="mt-3 text-xs font-medium text-amber-700">
+                  L’envoi n’est pas encore branché côté Bookea.
+                </p>
+              ) : null}
+            </section>
 
             <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:flex-row sm:flex-wrap sm:items-end">
               <label className="min-w-[12rem] flex-1">

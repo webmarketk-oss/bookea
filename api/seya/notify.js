@@ -1,4 +1,5 @@
 const { createClient } = require("@supabase/supabase-js");
+const { loadBookeaSenderMailbox } = require("../mailing/mailbox-lib");
 const { readCenterSeya } = require("./store");
 const {
   notifyMailStatus,
@@ -46,7 +47,7 @@ function notifyErrorMessage(reason, extra) {
     return "L’envoi n’est pas encore branché : la clé Brevo (la même que pour les SMS) manque.";
   }
   if (reason === "missing_sender") {
-    return "Il manque un expéditeur. Renseignez l’email du centre.";
+    return "Connectez info@bookeai.fr dans Admin → Centre de notifications.";
   }
   if (reason === "send_failed") {
     return extra || "Brevo a refusé l’envoi. L’expéditeur doit être un email vérifié dans Brevo.";
@@ -73,7 +74,8 @@ async function loadCenterNotify(centerId, typedEmail) {
       supportEmail: String(typedEmail || "").trim() || profile.supportEmail,
     },
   };
-  return { center, seya };
+  const bookeaMailbox = await loadBookeaSenderMailbox(supabase);
+  return { center, seya, bookeaMailbox };
 }
 
 module.exports = async function handler(req, res) {
@@ -100,7 +102,11 @@ module.exports = async function handler(req, res) {
       return res.status(404).json({ ok: false, error: loaded.error });
     }
 
-    const status = notifyMailStatus(loaded.center, loaded.seya);
+    const status = notifyMailStatus(
+      loaded.center,
+      loaded.seya,
+      loaded.bookeaMailbox,
+    );
     if (req.method === "GET") {
       return res.status(200).json({ ok: true, ...status });
     }

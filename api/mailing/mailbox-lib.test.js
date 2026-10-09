@@ -1,8 +1,10 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const {
+  bookeaSenderPublicStatus,
   findBrevoSender,
   mailboxPublicStatus,
+  mergeBookeaSenderPayload,
   mergeMailingMailbox,
   parseMailingMailbox,
   resolveCenterSender,
@@ -58,6 +60,18 @@ test("fusionner la boîte ne casse pas les modèles déjà enregistrés", () => 
   assert.equal(next.mailing.mailbox.email, "new@centre.fr");
   assert.equal(next.mailing.mailbox.verified, false);
   assert.equal(next.mailing.mailbox.senderId, 9);
+});
+
+test("connecter info@bookeai.fr ne casse pas la facturation admin", () => {
+  const next = mergeBookeaSenderPayload(
+    { invoices: [{ id: "inv-1" }], identity: { name: "Bookea" } },
+    { email: "info@bookeai.fr", name: "Bookea", senderId: 7, verified: true },
+  );
+  assert.equal(next.invoices[0].id, "inv-1");
+  assert.equal(next.mailbox.email, "info@bookeai.fr");
+  assert.equal(next.mailbox.verified, true);
+  assert.equal(bookeaSenderPublicStatus(next).connected, true);
+  assert.equal(bookeaSenderPublicStatus(next).email, "info@bookeai.fr");
 });
 
 test("retrouver l’expéditeur Brevo par email", () => {
