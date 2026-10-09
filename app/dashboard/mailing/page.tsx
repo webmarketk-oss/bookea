@@ -23,7 +23,11 @@ import {
   type MailingCampaign,
   type MailingTemplate,
 } from "@/lib/mailing-settings";
-import { loadMailingProvider, sendBookeaMailing } from "@/lib/send-mailing";
+import {
+  loadMailingMailbox,
+  postMailingMailbox,
+  sendBookeaMailing,
+} from "@/lib/send-mailing";
 import type { CrmClientStatus } from "@/lib/crm-supabase";
 
 type ContactKindFilter = "tous" | "lead" | "client";
@@ -66,8 +70,16 @@ export default function MailingPage() {
     null,
   );
   const [sending, setSending] = useState(false);
-  const [providerReady, setProviderReady] = useState(false);
-  const [senderEmail, setSenderEmail] = useState("");
+  const [centerName, setCenterName] = useState("");
+  const [mailboxEmail, setMailboxEmail] = useState("");
+  const [mailboxOtp, setMailboxOtp] = useState("");
+  const [mailboxBusy, setMailboxBusy] = useState(false);
+  const [mailbox, setMailbox] = useState({
+    connected: false,
+    pending: false,
+    brevoReady: false,
+    email: "",
+  });
 
   useEffect(() => {
     let cancelled = false;
@@ -82,14 +94,25 @@ export default function MailingPage() {
         }
 
         setCenterId(loaded.centerId);
+        setCenterName(loaded.centerName);
         setTemplates(loaded.templates);
         setCampaigns(loaded.campaigns);
         setContacts(loaded.contacts);
+        if (loaded.centerEmail) {
+          setMailboxEmail(loaded.centerEmail);
+        }
 
-        const provider = await loadMailingProvider(loaded.centerId);
+        const box = await loadMailingMailbox(loaded.centerId);
         if (!cancelled) {
-          setProviderReady(provider.configured);
-          setSenderEmail(provider.senderEmail);
+          setMailbox({
+            connected: box.connected,
+            pending: box.pending,
+            brevoReady: box.brevoReady,
+            email: box.email || loaded.centerEmail || "",
+          });
+          if (box.email || loaded.centerEmail) {
+            setMailboxEmail(box.email || loaded.centerEmail);
+          }
         }
       } catch {
         if (!cancelled) {
@@ -287,6 +310,108 @@ export default function MailingPage() {
     setSelectedIds([]);
   }
 
+  function applyMailbox(next: {
+    connected: boolean;
+    pending: boolean;
+    brevoReady: boolean;
+    email: string;
+    error?: string;
+    notice?: string;
+  }) {
+    setMailbox({
+      connected: next.connected,
+      pending: next.pending,
+      brevoReady: next.brevoReady,
+      email: next.email,
+    });
+    if (next.email) {
+      setMailboxEmail(next.email);
+    }
+    if (next.error) {
+      setIsError(true);
+      setNotice(next.error);
+      return;
+    }
+    if (next.notice) {
+      setIsError(false);
+      setNotice(next.notice);
+    }
+  }
+
+  async function connectCenterMailbox() {
+    if (!centerId) {
+      setIsError(true);
+      setNotice("Centre introuvable.");
+      return;
+    }
+    setMailboxBusy(true);
+    try {
+      const result = await postMailingMailbox({
+        action: "connect",
+        centerId,
+        email: mailboxEmail,
+        name: centerName,
+      });
+      applyMailbox(result);
+      if (result.pending) {
+        setMailboxOtp("");
+      }
+    } catch {
+      setIsError(true);
+      setNotice("Impossible d’envoyer le code.");
+    } finally {
+      setMailboxBusy(false);
+    }
+  }
+
+  async function validateCenterMailbox() {
+    if (!centerId) {
+      return;
+    }
+    setMailboxBusy(true);
+    try {
+      const result = await postMailingMailbox({
+        action: "validate",
+        centerId,
+        otp: mailboxOtp,
+      });
+      applyMailbox(result);
+      if (result.connected) {
+        setMailboxOtp("");
+        setIsError(false);
+        setNotice(`Boîte connectée : ${result.email}. Les mailings partiront de cette adresse.`);
+      }
+    } catch {
+      setIsError(true);
+      setNotice("Code invalide.");
+    } finally {
+      setMailboxBusy(false);
+    }
+  }
+
+  async function disconnectCenterMailbox() {
+    if (!centerId) {
+      return;
+    }
+    setMailboxBusy(true);
+    try {
+      applyMailbox(
+        await postMailingMailbox({
+          action: "disconnect",
+          centerId,
+        }),
+      );
+      setMailboxOtp("");
+      setIsError(false);
+      setNotice("Boîte déconnectée.");
+    } catch {
+      setIsError(true);
+      setNotice("Impossible de déconnecter la boîte.");
+    } finally {
+      setMailboxBusy(false);
+    }
+  }
+
   async function sendCampaign(status: MailingCampaign["status"]) {
     if (selectedContacts.length === 0) {
       setIsError(true);
@@ -304,6 +429,12 @@ export default function MailingPage() {
       statusFilters.length > 0
         ? `${kindLabel(kindFilter)} · ${statusFilters.join(", ")}`
         : kindLabel(kindFilter);
+
+    if (status !== "Brouillon" && !mailbox.connected) {
+      setIsError(true);
+      setNotice("Connectez d’abord la boîte mail du centre.");
+      return;
+    }
 
     if (status === "Brouillon") {
       const nextCampaign: MailingCampaign = {
@@ -328,6 +459,7 @@ export default function MailingPage() {
     try {
       const result = await sendBookeaMailing({
         centerId,
+        requireMailbox: true,
         subject: subject.trim(),
         message: message.trim(),
         imageDataUrl,
@@ -379,9 +511,9 @@ export default function MailingPage() {
             l’ouvrir et choisir les leads ou les clients.
           </p>
           <p className="mt-2 text-xs text-slate-400">
-            {providerReady
-              ? `Envoi réel via Brevo${senderEmail ? ` · ${senderEmail}` : ""}.`
-              : "Brevo n’est pas encore prêt : ajoutez BREVO_API_KEY et BREVO_EMAIL_SENDER."}
+            {mailbox.connected
+              ? `Les envois partent de ${mailbox.email}.`
+              : "Connectez la boîte mail du centre pour écrire à vos leads et clients."}
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -394,16 +526,88 @@ export default function MailingPage() {
             <Save className="h-4 w-4" />
             Brouillon
           </button>
-          <button
-            type="button"
-            disabled={sending}
+        <button
+          type="button"
+            disabled={sending || !mailbox.connected}
             onClick={() => void sendCampaign("Envoyée")}
             className="inline-flex h-10 items-center gap-2 rounded-xl bg-slate-950 px-4 text-sm font-medium text-white disabled:opacity-60"
-          >
+        >
             <Send className="h-4 w-4" />
             {sending ? "Envoi…" : "Envoyer"}
-          </button>
+        </button>
         </div>
+      </section>
+
+      <section className="mb-6 rounded-2xl border border-violet-200 bg-white p-5 shadow-sm">
+        <div className="flex items-start gap-3">
+          <span className="grid h-9 w-9 place-items-center rounded-xl bg-violet-50 text-violet-600">
+            <Mail className="h-4 w-4" />
+          </span>
+          <div className="min-w-0 flex-1">
+            <h2 className="text-base font-semibold">Boîte mail du centre</h2>
+            <p className="mt-1 text-sm text-slate-500">
+              {mailbox.connected
+                ? "Les campagnes partent depuis cette adresse, uniquement vers le fichier de ce centre."
+                : "Indiquez l’email du centre. Un code arrive dans cette boîte pour la connecter."}
+            </p>
+          </div>
+        </div>
+        {mailbox.connected ? (
+          <div className="mt-4 flex flex-wrap items-center gap-3">
+            <p className="rounded-xl bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-700">
+              Connectée · {mailbox.email}
+            </p>
+            <button
+              type="button"
+              disabled={mailboxBusy}
+              onClick={() => void disconnectCenterMailbox()}
+              className="h-10 rounded-xl border border-slate-200 bg-white px-4 text-sm font-medium text-slate-600 disabled:opacity-60"
+            >
+              Changer
+            </button>
+          </div>
+        ) : (
+          <div className="mt-4 grid gap-3 md:grid-cols-[1fr_auto]">
+            <input
+              value={mailboxEmail}
+              onChange={(event) => setMailboxEmail(event.target.value)}
+              placeholder="contact@centre.fr"
+              className="h-11 rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm font-medium outline-none focus:border-violet-500"
+            />
+            <button
+              type="button"
+              disabled={mailboxBusy}
+              onClick={() => void connectCenterMailbox()}
+              className="h-11 rounded-xl bg-violet-700 px-4 text-sm font-semibold text-white disabled:opacity-60"
+            >
+              {mailboxBusy ? "Envoi…" : "Recevoir le code"}
+            </button>
+            {mailbox.pending ? (
+              <>
+                <input
+                  value={mailboxOtp}
+                  onChange={(event) => setMailboxOtp(event.target.value)}
+                  placeholder="Code à 6 chiffres"
+                  inputMode="numeric"
+                  className="h-11 rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm font-medium outline-none focus:border-violet-500"
+                />
+                <button
+                  type="button"
+                  disabled={mailboxBusy}
+                  onClick={() => void validateCenterMailbox()}
+                  className="h-11 rounded-xl bg-slate-950 px-4 text-sm font-semibold text-white disabled:opacity-60"
+                >
+                  Valider
+                </button>
+              </>
+            ) : null}
+          </div>
+        )}
+        {!mailbox.brevoReady ? (
+          <p className="mt-3 text-xs font-medium text-amber-700">
+            L’envoi n’est pas encore branché côté Bookea.
+          </p>
+        ) : null}
       </section>
 
       <section className="mb-6 grid gap-4 md:grid-cols-3">
@@ -491,14 +695,14 @@ export default function MailingPage() {
                         }
                       />
                     </label>
-                    <button
-                      type="button"
+            <button
+              type="button"
                       onClick={() => setImageDataUrl("")}
                       className="inline-flex items-center gap-1 text-sm font-medium text-slate-500"
                     >
                       <X className="h-3.5 w-3.5" />
                       Retirer
-                    </button>
+            </button>
                   </div>
                 </div>
               ) : (
@@ -530,7 +734,7 @@ export default function MailingPage() {
 
         <aside className="space-y-5">
           <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <h2 className="text-base font-semibold">Aperçu</h2>
+              <h2 className="text-base font-semibold">Aperçu</h2>
             <p className="mt-1 text-sm text-slate-500">
               Tel que vu par {previewName}.
             </p>
@@ -766,30 +970,30 @@ export default function MailingPage() {
         <section className="mt-5 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <h2 className="text-base font-semibold">Historique</h2>
           <div className="mt-4 grid gap-2">
-            {campaigns.map((campaign) => (
-              <article
-                key={campaign.id}
+          {campaigns.map((campaign) => (
+            <article
+              key={campaign.id}
                 className="grid gap-2 rounded-xl border border-slate-200 px-4 py-3 md:grid-cols-[1fr_1fr_auto_auto]"
-              >
-                <div>
-                  <p className="text-sm font-medium">{campaign.name}</p>
+            >
+              <div>
+                <p className="text-sm font-medium">{campaign.name}</p>
                   <p className="text-xs text-slate-500">{campaign.subject}</p>
-                </div>
+              </div>
                 <p className="self-center text-sm text-slate-600">
-                  {campaign.audience}
-                </p>
+                {campaign.audience}
+              </p>
                 <p className="self-center text-sm text-slate-600">
-                  {campaign.recipients} contacts
-                </p>
+                {campaign.recipients} contacts
+              </p>
                 <span
                   className={`self-center rounded-full px-2.5 py-1 text-center text-xs font-medium ${statusStyles[campaign.status]}`}
                 >
-                  {campaign.status}
-                </span>
-              </article>
-            ))}
-          </div>
-        </section>
+                {campaign.status}
+              </span>
+            </article>
+          ))}
+        </div>
+      </section>
       ) : null}
     </main>
   );

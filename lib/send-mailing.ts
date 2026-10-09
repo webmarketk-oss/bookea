@@ -20,6 +20,7 @@ export type SendMailingInput = {
   imageDataUrl?: string;
   message: string;
   recipients: MailingRecipient[];
+  requireMailbox?: boolean;
   subject: string;
 };
 
@@ -49,22 +50,101 @@ export async function loadMailingProvider(centerId?: string) {
     const response = await fetch(`/api/mailing/send${query}`);
     const result = (await response.json().catch(() => ({}))) as {
       configured?: boolean;
+      mailboxConnected?: boolean;
+      mailboxPending?: boolean;
+      mailboxEmail?: string;
       senderEmail?: string;
       senderName?: string;
     };
 
     return {
       configured: Boolean(result.configured),
+      mailboxConnected: Boolean(result.mailboxConnected),
+      mailboxPending: Boolean(result.mailboxPending),
+      mailboxEmail: result.mailboxEmail || "",
       senderEmail: result.senderEmail || "",
       senderName: result.senderName || "",
     };
   } catch {
     return {
       configured: false,
+      mailboxConnected: false,
+      mailboxPending: false,
+      mailboxEmail: "",
       senderEmail: "",
       senderName: "",
     };
   }
+}
+
+export type MailingMailboxStatus = {
+  brevoReady: boolean;
+  connected: boolean;
+  email: string;
+  error?: string;
+  notice?: string;
+  pending: boolean;
+};
+
+export async function loadMailingMailbox(
+  centerId: string,
+): Promise<MailingMailboxStatus> {
+  try {
+    const response = await fetch(
+      `/api/mailing/mailbox?centerId=${encodeURIComponent(centerId)}`,
+    );
+    const result = (await response.json().catch(() => ({}))) as MailingMailboxStatus & {
+      ok?: boolean;
+    };
+    return {
+      brevoReady: Boolean(result.brevoReady),
+      connected: Boolean(result.connected),
+      pending: Boolean(result.pending),
+      email: result.email || "",
+      error: result.error,
+    };
+  } catch {
+    return {
+      brevoReady: false,
+      connected: false,
+      pending: false,
+      email: "",
+      error: "Impossible de lire la boîte mail.",
+    };
+  }
+}
+
+export async function postMailingMailbox(input: {
+  action: "connect" | "validate" | "refresh" | "disconnect";
+  centerId: string;
+  email?: string;
+  name?: string;
+  otp?: string;
+}): Promise<MailingMailboxStatus> {
+  const response = await fetch("/api/mailing/mailbox", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  const result = (await response.json().catch(() => ({}))) as MailingMailboxStatus & {
+    ok?: boolean;
+  };
+  if (!response.ok || result.ok === false) {
+    return {
+      brevoReady: Boolean(result.brevoReady),
+      connected: Boolean(result.connected),
+      pending: Boolean(result.pending),
+      email: result.email || input.email || "",
+      error: result.error || "Impossible de connecter la boîte mail.",
+    };
+  }
+  return {
+    brevoReady: Boolean(result.brevoReady),
+    connected: Boolean(result.connected),
+    pending: Boolean(result.pending),
+    email: result.email || "",
+    notice: result.notice,
+  };
 }
 
 export async function sendBookeaMailing(
@@ -86,6 +166,7 @@ export async function sendBookeaMailing(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       centerId,
+      requireMailbox: input.requireMailbox === true,
       subject: input.subject,
       message: input.message,
       imageDataUrl: input.imageDataUrl || "",

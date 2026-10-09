@@ -1,4 +1,5 @@
 const { createServiceClient, parseCenterSmsSettings, clientAllowsEmail } = require("../sms/brevo");
+const { mailboxPublicStatus, resolveCenterSender } = require("./mailbox-lib");
 
 const MAX_RECIPIENTS = 80;
 
@@ -144,6 +145,10 @@ async function sendBrevoEmail({
         name: toName.slice(0, 70) || undefined,
       },
     ],
+    replyTo: {
+      email: senderEmail,
+      name: senderName.slice(0, 70),
+    },
     subject: subject.slice(0, 200),
     textContent,
     htmlContent,
@@ -189,16 +194,27 @@ module.exports = async function handler(req, res) {
     let senderEmail = defaultSenderEmail();
     let senderName = defaultSenderName();
 
+    let mailbox = {
+      brevoReady: Boolean(process.env.BREVO_API_KEY),
+      connected: false,
+      pending: false,
+      email: senderEmail,
+      name: senderName,
+      senderEmail,
+    };
+
     if (centerId) {
       try {
         const supabase = createServiceClient();
         const { data } = await supabase
           .from("centers")
-          .select("name,email")
+          .select("name,email,settings")
           .eq("id", centerId)
           .maybeSingle();
-        senderEmail = senderEmail || String(data?.email || "").trim().toLowerCase();
-        senderName = defaultSenderName(data?.name || "Bookea");
+        const sender = resolveCenterSender(data || {});
+        senderEmail = sender.email;
+        senderName = sender.name;
+        mailbox = mailboxPublicStatus(data || {});
       } catch {
         senderEmail = defaultSenderEmail();
       }
@@ -208,6 +224,9 @@ module.exports = async function handler(req, res) {
       ok: true,
       endpoint: "mailing/send",
       configured: Boolean(process.env.BREVO_API_KEY) && isValidEmail(senderEmail),
+      mailboxConnected: mailbox.connected,
+      mailboxPending: mailbox.pending,
+      mailboxEmail: mailbox.email,
       senderEmail,
       senderName,
     });
@@ -271,15 +290,24 @@ module.exports = async function handler(req, res) {
       return res.status(400).json({ ok: false, error: "center_not_found" });
     }
 
-    const senderEmail =
-      defaultSenderEmail() || String(center.email || "").trim().toLowerCase();
-    const senderName = defaultSenderName(center.name || "Bookea");
+    const requireMailbox =
+      payload.requireMailbox === true || payload.requireMailbox === "true";
+    const sender = resolveCenterSender(center);
+    const senderEmail = sender.email;
+    const senderName = sender.name;
+
+    if (requireMailbox && !sender.mailboxConnected) {
+      return res.status(409).json({
+        ok: false,
+        error: "Connectez d’abord la boîte mail du centre.",
+        senderEmail,
+      });
+    }
 
     if (!isValidEmail(senderEmail)) {
       return res.status(500).json({
         ok: false,
-        error:
-          "Aucun email d’expéditeur. Renseignez BREVO_EMAIL_SENDER ou l’email du centre.",
+        error: "Connectez d’abord la boîte mail du centre.",
       });
     }
 
