@@ -330,7 +330,6 @@ export default function SeyaCrmPage() {
     formatSharedWhatsAppNumber(BOOKEA_SHARED_WHATSAPP_NUMBER),
   );
   const [whatsappConnected, setWhatsappConnected] = useState(false);
-  const [aiEnabled, setAiEnabled] = useState(false);
   const [replying, setReplying] = useState(false);
   const [view, setView] = useState<"inbox" | "settings">("inbox");
 
@@ -519,7 +518,6 @@ export default function SeyaCrmPage() {
             : "Numéro Bookea unique",
         );
         setWhatsappConnected(Boolean(payload?.connected));
-        setAiEnabled(Boolean(payload?.ai));
       })
       .catch(() => null);
 
@@ -852,7 +850,6 @@ export default function SeyaCrmPage() {
           conversation: payload.conversation,
           shouldBook: payload.shouldBook ?? null,
         };
-        setAiEnabled(Boolean(payload.ai));
         setAgentFeedback(
           payload.via === "ai" ? "Réponse IA Seya." : "Réponse Seya (règles).",
         );
@@ -1088,12 +1085,7 @@ export default function SeyaCrmPage() {
         <div className="mt-5 rounded-2xl border border-violet-100 bg-violet-50 px-4 py-3">
           <p className="text-sm font-semibold text-violet-800">{sharedNumber}</p>
           <p className="mt-1 text-xs font-medium text-violet-700">
-            {whatsappConnected
-              ? "Numéro partagé connecté. Chaque centre garde son CRM, son planning et ses automatisations."
-              : "Même numéro pour tout le monde. On le connecte ensemble ; en attendant, Envoyer sur WhatsApp ouvre le message de ce centre."}{" "}
-            {aiEnabled
-              ? "IA OpenAI branchée."
-              : "IA en attente : ajoute OPENAI_API_KEY sur Vercel."}
+            Numéro partagé connecté.
           </p>
         </div>
 
