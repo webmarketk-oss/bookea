@@ -5,8 +5,9 @@ const {
   bookeaSenderPublicStatus,
   findBrevoSender,
   isValidEmail,
-  mergeBookeaSenderPayload,
+  loadBookeaSenderMailbox,
   parseBookeaSenderMailbox,
+  saveBookeaSenderMailbox,
 } = require("./mailbox-lib");
 
 function firstValue(value) {
@@ -110,31 +111,12 @@ async function requireBookeaAdmin(supabase, req) {
 }
 
 async function readBookeaPayload(supabase) {
-  const { data, error } = await supabase
-    .from("admin_agency_billing")
-    .select("payload")
-    .eq("company", "bookea")
-    .maybeSingle();
-  if (error) {
-    throw new Error(error.message);
-  }
-  return data?.payload && typeof data.payload === "object" ? data.payload : {};
+  const mailbox = await loadBookeaSenderMailbox(supabase);
+  return { mailbox };
 }
 
 async function saveBookeaMailbox(supabase, mailbox) {
-  const payload = mergeBookeaSenderPayload(await readBookeaPayload(supabase), mailbox);
-  const { error } = await supabase.from("admin_agency_billing").upsert(
-    {
-      company: "bookea",
-      payload,
-      updated_at: new Date().toISOString(),
-    },
-    { onConflict: "company" },
-  );
-  if (error) {
-    throw new Error(error.message);
-  }
-  return payload;
+  return saveBookeaSenderMailbox(supabase, mailbox);
 }
 
 async function syncBookeaMailbox(supabase) {

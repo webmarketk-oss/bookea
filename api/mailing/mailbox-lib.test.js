@@ -62,6 +62,15 @@ test("fusionner la boîte ne casse pas les modèles déjà enregistrés", () => 
   assert.equal(next.mailing.mailbox.senderId, 9);
 });
 
+test("la boîte Bookea se relit depuis la fiche plateforme", () => {
+  const stored = mergeBookeaSenderPayload(
+    {},
+    { email: "info@bookeai.fr", name: "Bookea", senderId: 3, verified: true },
+  );
+  assert.equal(stored.mailbox.email, "info@bookeai.fr");
+  assert.equal(bookeaSenderPublicStatus(stored).connected, true);
+});
+
 test("connecter info@bookeai.fr ne casse pas la facturation admin", () => {
   const next = mergeBookeaSenderPayload(
     { invoices: [{ id: "inv-1" }], identity: { name: "Bookea" } },

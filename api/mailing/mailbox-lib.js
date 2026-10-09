@@ -88,6 +88,7 @@ function mailboxPublicStatus(center) {
 
 const BOOKEA_SENDER_EMAIL = "info@bookeai.fr";
 const BOOKEA_SENDER_NAME = "Bookea";
+const BOOKEA_SENDER_FEATURE_KEY = "bookea_mail_sender";
 
 function parseBookeaSenderMailbox(payload) {
   return parseMailingMailbox({
@@ -107,17 +108,50 @@ function mergeBookeaSenderPayload(payload, mailbox) {
   };
 }
 
+function mailboxFromFeatureRow(row) {
+  try {
+    const parsed = JSON.parse(String(row?.description || ""));
+    return parseMailingMailbox({ mailing: { mailbox: parsed } });
+  } catch {
+    return parseMailingMailbox({});
+  }
+}
+
 async function loadBookeaSenderMailbox(supabase) {
   try {
-    const { data } = await supabase
-      .from("admin_agency_billing")
-      .select("payload")
-      .eq("company", "bookea")
+    const { data, error } = await supabase
+      .from("bookea_features")
+      .select("description")
+      .eq("key", BOOKEA_SENDER_FEATURE_KEY)
       .maybeSingle();
-    return parseBookeaSenderMailbox(data?.payload);
+    if (error) {
+      return parseMailingMailbox({});
+    }
+    return mailboxFromFeatureRow(data);
   } catch {
-    return parseBookeaSenderMailbox({});
+    return parseMailingMailbox({});
   }
+}
+
+async function saveBookeaSenderMailbox(supabase, mailbox) {
+  const box = mailingMailboxRecord({
+    ...mailbox,
+    name: mailbox?.name || BOOKEA_SENDER_NAME,
+  });
+  const { error } = await supabase.from("bookea_features").upsert(
+    {
+      key: BOOKEA_SENDER_FEATURE_KEY,
+      label: "Boîte mail Bookea",
+      area: "admin",
+      description: JSON.stringify(box),
+      default_enabled: true,
+    },
+    { onConflict: "key" },
+  );
+  if (error) {
+    throw new Error(error.message);
+  }
+  return { mailbox: box };
 }
 
 function bookeaSenderPublicStatus(payload) {
@@ -149,6 +183,7 @@ module.exports = {
   bookeaSenderPublicStatus,
   findBrevoSender,
   loadBookeaSenderMailbox,
+  saveBookeaSenderMailbox,
   isValidEmail,
   mailboxPublicStatus,
   mergeBookeaSenderPayload,
