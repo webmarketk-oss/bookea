@@ -77,14 +77,19 @@ const {
   hasDayOfMonthRequest,
 } = require("./conversation");
 const {
+  axisClarifyQuestion,
+  briefsForFamily,
+  careLabelForFamily,
   findOfferMap,
   inferCareFamily,
+  resolveActiveFamily,
   understandThread,
   naturalOfferPhrase,
   phraseConfiguredOffer,
   phraseFromCareTitle,
   serviceOfferReply,
 } = require("./care-family");
+const { pickBookingResources, pickCatalogService } = require("./axis-resources");
 const { isCenterResidueName, sanitizePersonName } = require("../../lib/seya-person-name");
 const { resolveGeneralBrief } = require("./general-brief");
 const {
@@ -106,23 +111,33 @@ const FAMILY_VISIT_MINUTES = {
 };
 
 function visitDurationMinutes(seya, conversation, extraText) {
-  const family = inferFamily(
-    seya,
-    conversation?.campaign,
-    `${conversation?.qualification?.need || ""} ${conversation?.treatment || ""} ${extraText || ""}`,
-  );
+  const family = resolveActiveFamily(seya, conversation, extraText);
   const brief =
     findTreatmentBrief(
       seya,
-      `${conversation?.qualification?.need || ""} ${conversation?.treatment || ""} ${family || ""}`,
-    ) || findTreatmentBrief(seya, conversation?.treatment);
+      `${conversation?.qualification?.need || ""} ${conversation?.treatment || ""}`,
+      family,
+    ) || findTreatmentBrief(seya, conversation?.treatment, family);
   const fromBrief = Number(
     brief?.durationMinutes ?? brief?.duration ?? brief?.duration_minutes,
   );
   if (Number.isFinite(fromBrief) && fromBrief > 0) {
     return fromBrief;
   }
+  const fromCatalog = Number(pickCatalogService(seya, family)?.duration);
+  if (Number.isFinite(fromCatalog) && fromCatalog > 0) {
+    return fromCatalog;
+  }
   return FAMILY_VISIT_MINUTES[family] || BILAN_DURATION_MINUTES;
+}
+
+function conversationCabinId(seya, conversation, extraText) {
+  const family = resolveActiveFamily(seya, conversation, extraText);
+  return pickBookingResources({
+    rooms: seya?.agendaRooms,
+    seya,
+    family,
+  }).cabinId;
 }
 
 const weekdayNames = [
@@ -206,8 +221,7 @@ const aliases = [
       "cellulite",
       "ventre",
       "poids",
-      "bilan",
-      "decouverte",
+      "graisse",
     ],
     name: "Soin minceur",
   },
@@ -575,11 +589,16 @@ function isBlockingAppointment(appointment, date) {
   return true;
 }
 
-function isSlotBusy(appointments, date, time, duration = BILAN_DURATION_MINUTES) {
+function isSlotBusy(appointments, date, time, duration = BILAN_DURATION_MINUTES, cabinId = "") {
   const start = timeToMinutes(time);
   const end = start + (Number(duration) > 0 ? Number(duration) : BILAN_DURATION_MINUTES);
+  const targetCabin = String(cabinId || "").trim();
   return (appointments || []).some((appointment) => {
     if (!isBlockingAppointment(appointment, date)) {
+      return false;
+    }
+    const otherCabin = String(appointment.cabinId || appointment.room_id || "").trim();
+    if (targetCabin && otherCabin && otherCabin !== targetCabin) {
       return false;
     }
     const otherStart = timeToMinutes(appointment.start || appointment.starts_at);
@@ -708,42 +727,21 @@ function resolveOfferLabel(seya, campaign, treatment) {
 }
 
 function resolveTreatmentBrief(seya, treatment) {
-  const settings = agentSettings(seya);
-  const needle = normalize(treatment);
-  if (!needle) {
-    return "";
-  }
-
-  const exact = settings.treatmentBriefs.find(
-    (item) => normalize(item?.name) === needle,
-  );
-  if (exact?.brief) {
-    return String(exact.brief).trim();
-  }
-
-  const partial = settings.treatmentBriefs.find((item) => {
-    const name = normalize(item?.name);
-    return name && (needle.includes(name) || name.includes(needle));
-  });
-  if (partial?.brief) {
-    return String(partial.brief).trim();
-  }
-
-  const alias = aliases.find((item) =>
-    item.keys.some((key) => needle.includes(normalize(key))),
-  );
-  if (!alias) {
-    return "";
-  }
-  return (
-    settings.treatmentBriefs.find((item) => normalize(item?.name) === normalize(alias.name))
-      ?.brief || ""
-  ).trim();
+  const family = inferCareFamily(treatment);
+  return String(findTreatmentBrief(seya, treatment, family)?.brief || "").trim();
 }
 
 function inferFamily(seya, campaign, treatment) {
+  const fromCampaign = familyFromTreatment(campaign);
+  if (fromCampaign) {
+    return fromCampaign;
+  }
   const offer = resolveOfferLabel(seya, campaign, treatment);
-  return familyFromTreatment(`${campaign || ""} ${treatment || ""} ${offer}`);
+  const fromOffer = familyFromTreatment(offer);
+  if (fromOffer) {
+    return fromOffer;
+  }
+  return familyFromTreatment(treatment);
 }
 
 function resolveOpeningOffer(seya, campaign, treatment) {
@@ -753,7 +751,7 @@ function resolveOpeningOffer(seya, campaign, treatment) {
     return phraseConfiguredOffer(mapped);
   }
   const brief =
-    findTreatmentBrief(seya, `${campaign || ""} ${treatment || ""}`) ||
+    findTreatmentBrief(seya, `${campaign || ""} ${treatment || ""}`, family) ||
     findTreatmentBrief(
       seya,
       family === "minceur"
@@ -763,6 +761,7 @@ function resolveOpeningOffer(seya, campaign, treatment) {
           : family === "epilation"
             ? "Épilation définitive"
             : "",
+      family,
     );
   const fromTitle = phraseFromCareTitle(brief?.title);
   if (fromTitle) {
@@ -772,9 +771,10 @@ function resolveOpeningOffer(seya, campaign, treatment) {
 }
 
 function resolveTreatmentUrl(seya, campaign, treatment) {
+  const family = inferFamily(seya, campaign, treatment);
   const brief =
-    findTreatmentBrief(seya, `${campaign || ""} ${treatment || ""}`) ||
-    findTreatmentBrief(seya, treatment);
+    findTreatmentBrief(seya, `${campaign || ""} ${treatment || ""}`, family) ||
+    findTreatmentBrief(seya, treatment, family);
   return String(brief?.url || "").trim();
 }
 
@@ -818,23 +818,41 @@ function fillOpening(template, vars) {
     .trim();
 }
 
-function findTreatmentBrief(seya, treatment) {
+function findTreatmentBrief(seya, treatment, family) {
   const settings = agentSettings(seya);
   const needle = normalize(treatment);
+  const briefs = family
+    ? briefsForFamily(seya, family)
+    : settings.treatmentBriefs;
+  const pool = briefs.length ? briefs : settings.treatmentBriefs;
+  if (!needle && family) {
+    return (
+      pool.find((item) => inferCareFamily(item?.name) === family) || pool[0] || null
+    );
+  }
   if (!needle) {
     return null;
   }
-  const exact = settings.treatmentBriefs.find((item) => normalize(item?.name) === needle);
+  const exact = pool.find((item) => normalize(item?.name) === needle);
   if (exact) return exact;
-  const partial = settings.treatmentBriefs.find((item) => {
+  const partial = pool.find((item) => {
     const name = normalize(item?.name);
     return name && (needle.includes(name) || name.includes(needle));
   });
   if (partial) return partial;
-  const alias = aliases.find((item) => item.keys.some((key) => needle.includes(normalize(key))));
-  if (!alias) return null;
+  const alias = aliases.find((item) => {
+    if (family && inferCareFamily(item.name) !== family) {
+      return false;
+    }
+    return item.keys.some((key) => needle.includes(normalize(key)));
+  });
+  if (!alias) {
+    return family
+      ? pool.find((item) => inferCareFamily(item?.name) === family) || null
+      : null;
+  }
   return (
-    settings.treatmentBriefs.find((item) => normalize(item?.name) === normalize(alias.name)) ||
+    pool.find((item) => normalize(item?.name) === normalize(alias.name)) ||
     null
   );
 }
@@ -844,7 +862,7 @@ function buildOpeningMessage(context, centerName, seya) {
   const family = inferFamily(seya, context.campaign, context.treatment);
   const offer = resolveOpeningOffer(seya, context.campaign, context.treatment);
   const brief =
-    findTreatmentBrief(seya, hay) ||
+    findTreatmentBrief(seya, hay, family) ||
     findTreatmentBrief(
       seya,
       family === "minceur"
@@ -854,6 +872,7 @@ function buildOpeningMessage(context, centerName, seya) {
           : family === "epilation"
             ? "Épilation définitive"
             : "",
+      family,
     );
   const stored = String(brief?.opening || "").trim();
   const mission = resolveSeyaMission(seya);
@@ -872,33 +891,21 @@ function buildOpeningMessage(context, centerName, seya) {
 
 function extractNeed(text) {
   const value = normalize(text);
-  const matches = [
-    ["hydrafacial", "Hydrafacial"],
-    ["laser", "Épilation laser"],
-    ["epilation", "Épilation laser"],
-    ["definitive", "Épilation laser"],
-    ["depil", "Épilation laser"],
-    ["aisselle", "Épilation laser"],
-    ["maillot", "Épilation laser"],
-    ["bikini", "Épilation laser"],
-    ["minceur", "Soin minceur"],
-    ["mincir", "Soin minceur"],
-    ["maigrir", "Soin minceur"],
-    ["cryo", "Cryolipolyse"],
-    ["ventre", "Soin minceur"],
-    ["poids", "Soin minceur"],
-    ["graisse", "Soin minceur"],
-    ["cellulite", "Soin minceur"],
-    ["visage", "Soin visage"],
-    ["fermete", "Soin visage"],
-    ["rides", "Soin visage"],
-    ["acne", "Soin visage"],
-    ["bilan", "Bilan"],
-  ];
-  for (const [needle, label] of matches) {
-    if (value.includes(needle)) {
-      return label;
-    }
+  const family = inferCareFamily(text);
+  if (family === "visage" && value.includes("hydrafacial")) {
+    return "Hydrafacial";
+  }
+  if (family === "minceur" && /cryo/.test(value)) {
+    return "Cryolipolyse";
+  }
+  if (family === "epilation") {
+    return "Épilation laser";
+  }
+  if (family) {
+    return careLabelForFamily(family);
+  }
+  if (/\bbilan\b/.test(value) && !/laser|epil|visage|peau|hydra/.test(value)) {
+    return "Bilan";
   }
   return "";
 }
@@ -963,10 +970,20 @@ function applyCareSwitch(conversation, qualification) {
   if (!nextFamily || nextFamily === prevFamily) {
     return conversation;
   }
+  const nextState = conversation?.bookingState
+    ? {
+        ...conversation.bookingState,
+        lastOfferedSlots: [],
+        visitDuration: undefined,
+      }
+    : conversation?.bookingState;
   return {
     ...conversation,
-    treatment: qualification.need,
+    treatment: qualification.need || careLabelForFamily(nextFamily),
+    campaign: "",
     offerLabel: "",
+    proposedSlots: [],
+    bookingState: nextState,
   };
 }
 
@@ -1112,15 +1129,31 @@ function startConversation(context, centerName, seya) {
   const treatment =
     isJunkTreatment(context.treatment) ? "" : context.treatment || "";
   const family = inferFamily(seya, context.campaign, treatment || context.treatment);
+  const treatmentFamily = familyFromTreatment(treatment);
+  const alignedTreatment =
+    family && treatmentFamily && family !== treatmentFamily
+      ? careLabelForFamily(family)
+      : treatment ||
+        (family === "minceur"
+          ? "Soin minceur"
+          : family === "visage"
+            ? "Soin visage"
+            : family === "epilation"
+              ? "Épilation définitive"
+              : "");
   const mappedOffer = resolveOfferLabel(
     seya,
     context.campaign,
-    treatment || context.treatment,
+    alignedTreatment || context.treatment,
   );
   const offer = mappedOffer
     ? phraseConfiguredOffer(mappedOffer)
     : naturalOfferPhrase(family, context.campaign || treatment);
-  const opening = buildOpeningMessage(context, centerName, seya);
+  const opening = buildOpeningMessage(
+    { ...context, treatment: alignedTreatment },
+    centerName,
+    seya,
+  );
   const person = sanitizePersonName(context.firstName, context.lastName);
 
   return {
@@ -1129,28 +1162,12 @@ function startConversation(context, centerName, seya) {
     firstName: person.firstName,
     lastName: person.lastName,
     phone: context.phone,
-    treatment:
-      treatment ||
-      (family === "minceur"
-        ? "Soin minceur"
-        : family === "visage"
-          ? "Soin visage"
-          : family === "epilation"
-            ? "Épilation définitive"
-            : ""),
+    treatment: alignedTreatment,
     campaign: context.campaign || "",
     offerLabel: offer === "un soin" ? "" : offer,
     status: "À envoyer",
     qualification: {
-      need:
-        treatment ||
-        (family === "minceur"
-          ? "Soin minceur"
-          : family === "visage"
-            ? "Soin visage"
-            : family === "epilation"
-              ? "Épilation définitive"
-              : ""),
+      need: alignedTreatment,
       zone: "",
       delay: "",
       availability: "",
@@ -1332,6 +1349,7 @@ function pickSlotsForState(appointments, hours, state, now, duration) {
     dayPart: state.dayPart,
     preferredTime: preferredTimes[0] || "",
     preferredTimes,
+    cabinId: state.cabinId || "",
     now,
   };
   const search = (overrides) =>
@@ -1400,7 +1418,10 @@ function pickSlotsForMessage(appointments, hours, conversation, text, now, seya)
   return pickSlotsForState(
     appointments,
     hours,
-    state,
+    {
+      ...state,
+      cabinId: conversationCabinId(seya, conversation, text),
+    },
     now,
     visitDurationMinutes(seya, conversation, text),
   );
@@ -1495,7 +1516,7 @@ function suggestAvailableSlots(appointments, hours, countOrOptions = 2, duration
       if (excludeSlots.has(`${date}|${time}`)) {
         continue;
       }
-      if (isSlotBusy(appointments, date, time, slotDuration)) {
+      if (isSlotBusy(appointments, date, time, slotDuration, options.cabinId)) {
         continue;
       }
       slots.push({ date, time, label: formatSlotLabel(date, time) });
@@ -1960,6 +1981,7 @@ function applyLeadReply(conversation, text, seya, slots, extras = {}) {
           ...bookingState,
           pendingQuestion: "callback",
           appointmentStatus: "none",
+          callbackSlot,
         },
         { bookedSlot: null, shouldBook: null },
       );
@@ -2319,7 +2341,10 @@ function fallbackAfterNote(qualification, conversation, text) {
   if (qualification?.need) {
     return "Vous voulez que je vous propose un créneau, ou vous avez une autre question ?";
   }
-  return "Vous cherchez plutôt un soin minceur, un soin visage ou une épilation ?";
+  return (
+    axisClarifyQuestion(conversation?._seya) ||
+    "Vous cherchez plutôt un soin minceur, un soin visage ou une épilation ?"
+  );
 }
 
 function finishLeadReply(
@@ -2712,6 +2737,7 @@ module.exports = {
   remainingOfferedSlots,
   BILAN_DURATION_MINUTES,
   visitDurationMinutes,
+  conversationCabinId,
   lastLeadAt,
   lastSeyaAt,
   persistableConversation,

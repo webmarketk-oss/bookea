@@ -17,6 +17,7 @@ const {
   formatCenterProfilePrompt,
   pickSlotsForState,
   visitDurationMinutes,
+  conversationCabinId,
   matchProposedSlot,
   mergeQualification,
   extractNeed,
@@ -118,7 +119,10 @@ async function generateSeyaReply({
         ? pickSlotsForState(
             appointments,
             hours,
-            bookingState,
+            {
+              ...bookingState,
+              cabinId: conversationCabinId(seya, conversationWithState, intentText),
+            },
             now,
             visitDurationMinutes(seya, conversationWithState, intentText),
           )
@@ -297,7 +301,7 @@ function polishPrompt({
     resolveSeyaMission(settings) === "qualify_callback"
       ? "Tu restes sur cette mission. Interdit d’improviser une autre."
       : "Ton objectif est d’accompagner jusqu’à la prise de rendez-vous, sans insister et sans coller deux fois la même réponse.",
-    "Avant de répondre, tu relis tout le fil (prospect + équipe + toi), y compris une relance J+15, et tu t’y tiens. Les horaires écrits par l’équipe priment. Si elle a proposé 15h et que le prospect le choisit, tu confirmes 15h : interdit de dire que ce n’est pas disponible ou de proposer 11h30/12h. Si le prospect a dit qu’il reviendrait, qu’il n’a rien cette semaine, ou que l’info était claire, tu n’as plus à demander un jour. Si le prospect a corrigé le soin (visage, minceur, laser), tu restes sur CE soin. Interdit de revenir à la campagne d’origine. Interdit de parler minceur, analyse corporelle ou cures 500€ si le fil ou le centre est laser / Dépil.",
+    "Avant de répondre, tu relis tout le fil (prospect + équipe + toi), le centre concerné et l’axe du prospect (laser, minceur ou visage), y compris une relance J+15, et tu t’y tiens. Les horaires écrits par l’équipe priment. Si elle a proposé 15h et que le prospect le choisit, tu confirmes 15h : interdit de dire que ce n’est pas disponible ou de proposer 11h30/12h. Si le prospect a dit qu’il reviendrait, qu’il n’a rien cette semaine, ou que l’info était claire, tu n’as plus à demander un jour. Si le prospect a corrigé le soin (visage, minceur, laser), tu restes sur CE soin et tu n’utilises que les réglages de CE soin dans CE centre. Interdit de revenir à la campagne d’origine. Interdit de parler minceur, analyse corporelle ou cures 500€ si le fil ou le centre est laser / Dépil. Si l’axe est flou, tu poses une question courte pour le clarifier.",
     "Tu réponds au dernier message, dans ce contexte. Interdit de reposer une question déjà traitée. Interdit de recoller le dernier message Seya.",
     "Le texte Bookea est une fiche de faits autorisés, pas un script. Si Bookea propose un créneau ou pose une question alors que la cliente n’a pas demandé ça, tu ne le recopies pas.",
     resolveSeyaMission(settings) === "qualify_callback"

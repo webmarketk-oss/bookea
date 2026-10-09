@@ -1,16 +1,20 @@
+const { resolveActiveFamily, inferCareFamily } = require("./care-family");
+
 const HEALTH_NAMES = [
-  { keys: ["cryo", "cryolipolyse"], name: "Cryolipolyse", label: "la cryo" },
-  { keys: ["hydrafacial"], name: "Hydrafacial", label: "l’Hydrafacial" },
+  { keys: ["cryo", "cryolipolyse"], name: "Cryolipolyse", label: "la cryo", family: "minceur" },
+  { keys: ["hydrafacial"], name: "Hydrafacial", label: "l’Hydrafacial", family: "visage" },
   {
     keys: ["epilation", "laser", "definitive"],
     name: "Épilation définitive",
     label: "l’épilation",
+    family: "epilation",
   },
-  { keys: ["visage"], name: "Soin visage", label: "le soin visage" },
+  { keys: ["visage"], name: "Soin visage", label: "le soin visage", family: "visage" },
   {
-    keys: ["minceur", "ventre", "poids", "cellulite", "graisse", "bilan"],
+    keys: ["minceur", "ventre", "poids", "cellulite", "graisse"],
     name: "Soin minceur",
     label: "le soin minceur",
+    family: "minceur",
   },
 ];
 
@@ -125,7 +129,25 @@ function asksPrice(text) {
   );
 }
 
-function inferHealthTreatment(conversation, text) {
+function inferHealthTreatment(conversation, text, seya) {
+  const family = resolveActiveFamily(seya || conversation?._seya, conversation, text);
+  if (family) {
+    const byFamily = HEALTH_NAMES.filter((item) => item.family === family);
+    const hay = normalize(`${text || ""} ${conversation?.qualification?.need || ""}`);
+    const specific = byFamily.find((item) =>
+      item.keys.some((key) => hay.includes(key)),
+    );
+    if (specific) {
+      return specific;
+    }
+    if (family === "epilation") {
+      return HEALTH_NAMES.find((item) => item.family === "epilation");
+    }
+    if (family === "visage") {
+      return HEALTH_NAMES.find((item) => item.name === "Soin visage");
+    }
+    return HEALTH_NAMES.find((item) => item.name === "Soin minceur");
+  }
   const hay = normalize(
     `${text || ""} ${conversation?.qualification?.need || ""} ${conversation?.treatment || ""} ${conversation?.bookingState?.serviceIntent || ""}`,
   );
@@ -136,16 +158,19 @@ function inferHealthTreatment(conversation, text) {
 }
 
 function resolveHealthSheet(seya, conversation, text) {
-  const inferred = inferHealthTreatment(conversation, text);
+  const inferred = inferHealthTreatment(conversation, text, seya);
   const briefs = Array.isArray(seya?.treatmentBriefs)
     ? seya.treatmentBriefs
     : [];
   if (!inferred.name) {
     return { name: "", label: "ce soin", sheet: null, brief: null };
   }
-  const brief = briefs.find(
-    (item) => normalize(item?.name) === normalize(inferred.name),
-  );
+  const brief =
+    briefs.find((item) => normalize(item?.name) === normalize(inferred.name)) ||
+    briefs.find(
+      (item) =>
+        inferred.family && inferCareFamily(item?.name) === inferred.family,
+    );
   const sheet = normalizeHealthSheet(brief?.health);
   const usable = Boolean(
     brief &&

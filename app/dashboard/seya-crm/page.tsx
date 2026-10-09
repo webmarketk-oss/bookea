@@ -331,6 +331,8 @@ export default function SeyaCrmPage() {
   );
   const [whatsappConnected, setWhatsappConnected] = useState(false);
   const [replying, setReplying] = useState(false);
+  const [notifyTesting, setNotifyTesting] = useState(false);
+  const [notifyFeedback, setNotifyFeedback] = useState("");
   const [view, setView] = useState<"inbox" | "settings">("inbox");
 
   const stats = useMemo(
@@ -593,6 +595,45 @@ export default function SeyaCrmPage() {
 
   function persistCurrentAgentSettings() {
     void persistAgentSettings(agentSettingsRef.current);
+  }
+
+  async function sendCenterNotifyTest() {
+    const email = String(agentSettings.centerProfile?.supportEmail || "").trim();
+    if (!centerId) {
+      setNotifyFeedback("Centre introuvable.");
+      return;
+    }
+    if (!email) {
+      setNotifyFeedback("Indiquez l’email du centre, puis renvoyez un test.");
+      return;
+    }
+    setNotifyTesting(true);
+    setNotifyFeedback("Envoi du test…");
+    try {
+      await persistAgentSettings(agentSettingsRef.current);
+      const response = await fetch("/api/seya/notify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ centerId, email }),
+      });
+      const payload = (await response.json().catch(() => ({}))) as {
+        ok?: boolean;
+        error?: string;
+        recipients?: string[];
+      };
+      if (payload.ok) {
+        const to = payload.recipients?.join(", ") || email;
+        setNotifyFeedback(`Test envoyé à ${to}. Vérifiez la boîte mail.`);
+        return;
+      }
+      setNotifyFeedback(
+        payload.error || "Impossible d’envoyer le test.",
+      );
+    } catch {
+      setNotifyFeedback("Impossible d’envoyer le test.");
+    } finally {
+      setNotifyTesting(false);
+    }
   }
 
   function removeOfferMap(index: number) {
@@ -1146,7 +1187,10 @@ export default function SeyaCrmPage() {
                 Email du centre
               </span>
               <span className="text-[11px] font-medium leading-4 text-slate-400">
-                Uniquement si on lui demande un email.
+                Seya y envoie un mail quand elle pose un RDV, ou quand
+                une opératrice doit rappeler. Si vide, elle utilise la
+                boîte connectée dans Mailing. Envoyez un test pour
+                vérifier.
               </span>
               <input
                 value={agentSettings.centerProfile?.supportEmail || ""}
@@ -1159,6 +1203,19 @@ export default function SeyaCrmPage() {
                 placeholder="contact@centre.fr"
                 className="h-11 rounded-2xl border border-slate-200 bg-slate-50 px-3 text-sm font-medium outline-none focus:border-violet-500"
               />
+              <button
+                type="button"
+                disabled={notifyTesting}
+                onClick={() => void sendCenterNotifyTest()}
+                className="mt-1 h-11 cursor-pointer rounded-2xl border border-violet-200 bg-violet-50 px-3 text-sm font-semibold text-violet-800 disabled:opacity-60"
+              >
+                {notifyTesting ? "Envoi…" : "Envoyer un mail test"}
+              </button>
+              {notifyFeedback ? (
+                <span className="text-[11px] font-medium leading-4 text-slate-500">
+                  {notifyFeedback}
+                </span>
+              ) : null}
             </label>
           </div>
         </div>
@@ -1639,6 +1696,38 @@ export default function SeyaCrmPage() {
                     className="rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium leading-5 text-slate-700 outline-none focus:border-violet-500"
                   />
                 </label>
+                <label className="grid gap-1">
+                  <span className="text-xs font-medium text-slate-500">
+                    Durée du rendez-vous (minutes)
+                  </span>
+                  <span className="text-[11px] font-medium leading-4 text-slate-400">
+                    Seya cherche et pose le créneau avec cette durée, pour
+                    ce soin uniquement.
+                  </span>
+                  <input
+                    type="number"
+                    min={15}
+                    step={5}
+                    value={item.durationMinutes || ""}
+                    onChange={(event) =>
+                      setAgentSettings((current) => ({
+                        ...current,
+                        treatmentBriefs: current.treatmentBriefs.map(
+                          (brief, briefIndex) =>
+                            briefIndex === index
+                              ? {
+                                  ...brief,
+                                  durationMinutes: Number(event.target.value) || undefined,
+                                }
+                              : brief,
+                        ),
+                      }))
+                    }
+                    onBlur={persistCurrentAgentSettings}
+                    placeholder="45"
+                    className="h-11 rounded-2xl border border-slate-200 bg-white px-3 text-sm font-medium outline-none focus:border-violet-500"
+                  />
+                </label>
                 <div className="grid gap-3 rounded-2xl border border-amber-100 bg-white p-3">
                   <div className="flex items-center justify-between gap-3">
                     <p className="text-xs font-semibold text-amber-900">
@@ -1757,6 +1846,7 @@ export default function SeyaCrmPage() {
                     title: "",
                     url: "",
                     price: "",
+                    durationMinutes: 60,
                     brief:
                       "Prix seulement si on te le demande. Si on te le demande, tu dis le tarif comme au comptoir.",
                     opening:

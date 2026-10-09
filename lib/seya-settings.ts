@@ -88,6 +88,7 @@ export type SeyaTreatmentBrief = {
   opening?: string;
   price?: string;
   pricing?: SeyaPricePolicy;
+  durationMinutes?: number;
   health?: SeyaHealthSheet;
 };
 
@@ -245,6 +246,7 @@ export type SeyaConversation = {
 export const defaultTreatmentBriefs: SeyaTreatmentBrief[] = [
   {
     name: "Épilation définitive",
+    durationMinutes: 45,
     price: "",
     brief:
       "Tu accueilles pour l’épilation, comme au standard. Prix seulement si on te le demande. Pacemaker, grossesse ou doute santé : tu transmets à l’équipe, tu ne poses pas de rendez-vous.",
@@ -253,6 +255,7 @@ export const defaultTreatmentBriefs: SeyaTreatmentBrief[] = [
   },
   {
     name: "Soin minceur",
+    durationMinutes: 60,
     pricing: {
       bilan: "",
       discovery: "",
@@ -268,6 +271,7 @@ export const defaultTreatmentBriefs: SeyaTreatmentBrief[] = [
   },
   {
     name: "Soin visage",
+    durationMinutes: 60,
     price: "",
     brief:
       "Tu t’intéresses à l’objectif pour la peau. Prix seulement si on te le demande.",
@@ -276,6 +280,7 @@ export const defaultTreatmentBriefs: SeyaTreatmentBrief[] = [
   },
   {
     name: "Cryolipolyse",
+    durationMinutes: 75,
     pricing: {
       bilan: "",
       discovery: "",
@@ -291,6 +296,7 @@ export const defaultTreatmentBriefs: SeyaTreatmentBrief[] = [
   },
   {
     name: "Hydrafacial",
+    durationMinutes: 60,
     price: "",
     brief:
       "Tu t’intéresses à l’objectif pour la peau. Prix seulement si on te le demande.",
@@ -320,8 +326,6 @@ const treatmentAliases: Array<{ keys: string[]; name: string }> = [
       "ventre",
       "poids",
       "graisse",
-      "bilan",
-      "decouverte",
     ],
     name: "Soin minceur",
   },
@@ -534,8 +538,16 @@ export function inferFamilyFromSettings(
   campaign?: string | null,
   treatment?: string | null,
 ) {
+  const fromCampaign = familyFromTreatment(campaign);
+  if (fromCampaign) {
+    return fromCampaign;
+  }
   const offer = resolveOfferLabel(settings, campaign, treatment);
-  return familyFromTreatment(`${campaign || ""} ${treatment || ""} ${offer}`);
+  const fromOffer = familyFromTreatment(offer);
+  if (fromOffer) {
+    return fromOffer;
+  }
+  return familyFromTreatment(treatment);
 }
 
 function familyFromTreatment(treatment?: string | null) {
@@ -768,6 +780,9 @@ function normalizeTreatmentBriefs(value?: SeyaTreatmentBrief[] | null) {
       continue;
     }
     const previous = merged.get(normalizeTreatmentName(name));
+    const duration = Number(
+      item?.durationMinutes ?? previous?.durationMinutes ?? 0,
+    );
     merged.set(normalizeTreatmentName(name), {
       name,
       title: String(item?.title || previous?.title || "").trim(),
@@ -776,6 +791,7 @@ function normalizeTreatmentBriefs(value?: SeyaTreatmentBrief[] | null) {
       opening: String(item?.opening || previous?.opening || "").trim(),
       price: String(item?.price || previous?.price || "").trim(),
       pricing: normalizePricePolicy(item?.pricing || previous?.pricing, item?.price || previous?.price),
+      durationMinutes: Number.isFinite(duration) && duration > 0 ? duration : undefined,
       health: normalizeHealthSheet(item?.health || previous?.health),
     });
   }

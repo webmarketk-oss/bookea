@@ -6,11 +6,11 @@ function normalizeCare(value) {
     .replace(/[\u0300-\u036f]/g, "");
 }
 
-function inferCareFamily(text) {
-  const needle = normalizeCare(text);
-  if (!needle) {
-    return "";
-  }
+const FAMILY_TOKEN =
+  "epilation|laser|definitive|depil|aisselle|maillot|bikini|pilosit|visage|hydrafacial|acne|glow|fermete|rides?|taches?|cernes?|pores?|relachement|minceur|mincir|maigrir|cryo|ventre|poids|graisse|cellulite";
+
+function familyFromToken(value) {
+  const needle = normalizeCare(value);
   if (
     /epilation|laser|definitive|depil|aisselle|maillot|bikini|pilosit/.test(
       needle,
@@ -28,6 +28,39 @@ function inferCareFamily(text) {
   if (/minceur|mincir|maigrir|cryo|ventre|poids|graisse|cellulite/.test(needle)) {
     return "minceur";
   }
+  return "";
+}
+
+function inferCareFamily(text) {
+  const needle = normalizeCare(text);
+  if (!needle) {
+    return "";
+  }
+
+  const wanted = needle.match(
+    /(?:(?:^| )(?:plutot|cest pour|je (?:veux|voudrais|cherche))|(?:^| )non pour)(?:\s+\w+){0,4}?\s+(?:pour |du |de la |des |le |la |un |une )?(?:le |la |l[' ]|les )?(visage|hydrafacial|minceur|cryo|laser|epilation|aisselle|maillot|peau)/,
+  );
+  if (wanted) {
+    return familyFromToken(wanted[1]) || familyFromToken(needle);
+  }
+
+  const mention = new RegExp(
+    `(?:(pas|plus|sans)\\s+(?:du |de la |des |le |la |d[' ]?)?)?(${FAMILY_TOKEN})`,
+    "g",
+  );
+  const kept = [];
+  let hit = mention.exec(needle);
+  while (hit) {
+    const family = familyFromToken(hit[2]);
+    if (family && !hit[1]) {
+      kept.push(family);
+    }
+    hit = mention.exec(needle);
+  }
+  if (kept.length) {
+    return kept[kept.length - 1];
+  }
+
   if (/bilan|decouverte/.test(needle)) {
     if (/laser|epil|pilaire|depil/.test(needle)) {
       return "epilation";
@@ -36,6 +69,9 @@ function inferCareFamily(text) {
       return "visage";
     }
     return "minceur";
+  }
+  if (/peau/.test(needle)) {
+    return "visage";
   }
   return "";
 }
@@ -129,14 +165,25 @@ function understandThread(conversation, extraText) {
   return { family, need, asked, openAsked, summary };
 }
 
-function activeCareFamily(conversation, extraText) {
+function resolveActiveFamily(seya, conversation, extraText) {
+  const fromThread = understandThread(conversation, extraText).family;
+  if (fromThread) {
+    return fromThread;
+  }
+  const offered = offeredFamilies(seya);
+  if (offered.length === 1) {
+    return offered[0];
+  }
   return (
-    understandThread(conversation, extraText).family ||
-    lockedCenterFamily(conversation?._seya, conversation) ||
+    lockedCenterFamily(seya, conversation) ||
     inferCareFamily(
-      `${conversation?.treatment || ""} ${conversation?.campaign || ""} ${conversation?.offerLabel || ""} ${conversation?.centerId || ""} ${conversation?.centerName || ""}`,
+      `${conversation?.qualification?.need || ""} ${conversation?.treatment || ""} ${conversation?.campaign || ""} ${conversation?.offerLabel || ""} ${extraText || ""}`,
     )
   );
+}
+
+function activeCareFamily(conversation, extraText) {
+  return resolveActiveFamily(conversation?._seya, conversation, extraText);
 }
 
 function humanizeOfferTitle(value) {
@@ -304,11 +351,14 @@ function compactOfferKey(value) {
 function findOfferMap(seya, ...parts) {
   const maps = Array.isArray(seya?.offerMaps) ? seya.offerMaps : [];
   const campaign = parts[0];
+  const treatment = parts[parts.length - 1];
   const hay = parts.filter(Boolean).join(" ");
   const needle = normalizeCare(hay);
   const compactHay = compactOfferKey(hay);
   const campaignNeedle = normalizeCare(campaign);
   const compactCampaign = compactOfferKey(campaign);
+  const family =
+    inferCareFamily(campaign) || inferCareFamily(treatment) || inferCareFamily(hay);
   if (!needle) {
     return null;
   }
@@ -324,6 +374,14 @@ function findOfferMap(seya, ...parts) {
     const nMatch = normalizeCare(match);
     const cMatch = compactOfferKey(match);
     if (nMatch.length < 2) {
+      continue;
+    }
+    const campaignHit = Boolean(
+      campaignNeedle &&
+        (campaignNeedle === nMatch || compactCampaign === cMatch),
+    );
+    const itemFamily = inferCareFamily(`${match} ${label}`);
+    if (!campaignHit && family && itemFamily && itemFamily !== family) {
       continue;
     }
     let score = 0;
@@ -350,7 +408,40 @@ function findOfferMap(seya, ...parts) {
   return best;
 }
 
+function offeredFamilies(seya) {
+  const families = new Set(
+    offeredTreatmentNames(seya)
+      .map((name) => inferCareFamily(name))
+      .filter(Boolean),
+  );
+  return [...families];
+}
+
+function axisClarifyQuestion(seya) {
+  const offered = offeredFamilies(seya);
+  const labels = [];
+  if (!offered.length || offered.includes("minceur")) {
+    labels.push("un soin minceur");
+  }
+  if (!offered.length || offered.includes("visage")) {
+    labels.push("un soin visage");
+  }
+  if (!offered.length || offered.includes("epilation")) {
+    labels.push("une épilation");
+  }
+  if (labels.length <= 1) {
+    return "";
+  }
+  if (labels.length === 2) {
+    return `Vous cherchez plutôt ${labels[0]} ou ${labels[1]} ?`;
+  }
+  return `Vous cherchez plutôt ${labels[0]}, ${labels[1]} ou ${labels[2]} ?`;
+}
+
 function lockedCenterFamily(seya, conversation) {
+  if (offeredFamilies(seya).length > 1) {
+    return "";
+  }
   const blob = normalizeCare(
     [
       conversation?.centerName,
@@ -476,8 +567,11 @@ function phraseConfiguredOffer(value) {
 
 module.exports = {
   activeCareFamily,
+  axisClarifyQuestion,
   briefsForFamily,
   lockedCenterFamily,
+  offeredFamilies,
+  resolveActiveFamily,
   understandThread,
   careLabelForFamily,
   findOfferMap,

@@ -1,7 +1,9 @@
 /* eslint-disable @typescript-eslint/no-require-imports */
 const { createClient } = require("@supabase/supabase-js");
 const { generateSeyaReply, hasAiKey } = require("./ai");
-const { inferCareFamily, pickApprovedTemplate } = require("./care-family");
+const { inferCareFamily, pickApprovedTemplate, resolveActiveFamily } = require("./care-family");
+const { pickBookingResources } = require("./axis-resources");
+const { notifyCenterSeyaAction } = require("./center-notify");
 const { isNearDuplicate } = require("./price");
 const { sanitizePersonName } = require("../../lib/seya-person-name");
 const {
@@ -445,7 +447,7 @@ async function handleIncoming(supabase, incoming) {
 
   const { data: center, error } = await supabase
     .from("centers")
-    .select("id,name,settings,address_line1,city,postal_code")
+    .select("id,name,email,settings,address_line1,city,postal_code")
     .eq("id", context.centerId)
     .maybeSingle();
 
@@ -453,7 +455,14 @@ async function handleIncoming(supabase, incoming) {
     throw new Error(error?.message || "Center not found");
   }
 
-  const seya = asRecord(asRecord(center.settings).seya);
+  const publicSettings = asRecord(asRecord(center.settings).public);
+  const seya = {
+    ...asRecord(asRecord(center.settings).seya),
+    catalogServices: Array.isArray(publicSettings.services)
+      ? publicSettings.services
+      : [],
+    centerName: center.name,
+  };
   if (isSeyaOff(seya)) {
     return {
       phone: incoming.phone,
@@ -581,6 +590,10 @@ async function handleIncoming(supabase, incoming) {
   const hours = readHours(center.settings);
   let appointments = [];
   try {
+    const [{ data: rooms }] = await Promise.all([
+      supabase.from("rooms").select("id,name").eq("center_id", center.id),
+    ]);
+    seya.agendaRooms = rooms || [];
     appointments = await loadCenterAppointments(supabase, center.id);
   } catch (loadError) {
     console.error("[seya/whatsapp] appointments failed", loadError);
@@ -657,7 +670,7 @@ async function handleIncoming(supabase, incoming) {
   const wantedSlot = result.shouldBook;
   if (wantedSlot) {
     try {
-      await bookSeyaAppointment(supabase, center.id, context, next, wantedSlot);
+      await bookSeyaAppointment(supabase, center.id, context, next, wantedSlot, seya);
       next.status = "RDV confirmé";
       next.bookedSlot = wantedSlot;
       next.proposedSlots = [];
@@ -674,6 +687,19 @@ async function handleIncoming(supabase, incoming) {
           brief: seya.brief,
         }),
       );
+      const bookedMail = await notifyCenterSeyaAction({
+        center,
+        seya,
+        conversation: next,
+        kind: "booked",
+        slot: wantedSlot,
+      }).catch((error) => {
+        console.error("[seya/whatsapp] center notify booked", error);
+        return { conversation: next };
+      });
+      if (bookedMail?.conversation?.centerNotifyKey) {
+        next.centerNotifyKey = bookedMail.conversation.centerNotifyKey;
+      }
     } catch (bookError) {
       console.error("[seya/whatsapp] book failed", bookError);
       result.shouldBook = null;
@@ -722,6 +748,27 @@ async function handleIncoming(supabase, incoming) {
           ? `Ce créneau n’est plus disponible. ${humanSlotReply(alternatives, next.bookingState)}`
           : "Ce créneau n’est plus disponible. Souhaitez-vous que je regarde un autre horaire ?",
       );
+    }
+  }
+
+  if (
+    !wantedSlot &&
+    next.status === "À recontacter" &&
+    next.bookingState?.pendingQuestion === "callback" &&
+    existing.bookingState?.pendingQuestion !== "callback"
+  ) {
+    const callbackMail = await notifyCenterSeyaAction({
+      center,
+      seya,
+      conversation: next,
+      kind: "callback",
+      slot: next.bookingState?.callbackSlot || null,
+    }).catch((error) => {
+      console.error("[seya/whatsapp] center notify callback", error);
+      return { conversation: next };
+    });
+    if (callbackMail?.conversation?.centerNotifyKey) {
+      next.centerNotifyKey = callbackMail.conversation.centerNotifyKey;
     }
   }
 
@@ -932,7 +979,7 @@ async function resolveCenterFromPhone(supabase, phone) {
 async function loadCenterAppointments(supabase, centerId) {
   const { data, error } = await supabase
     .from("appointments")
-    .select("appointment_date,starts_at,duration_minutes,status")
+    .select("appointment_date,starts_at,duration_minutes,status,room_id")
     .eq("center_id", centerId)
     .gte("appointment_date", new Date().toISOString().slice(0, 10));
 
@@ -946,6 +993,8 @@ async function loadCenterAppointments(supabase, centerId) {
     start: row.starts_at,
     duration: row.duration_minutes,
     status: row.status || "",
+    cabinId: row.room_id || "",
+    room_id: row.room_id || "",
   }));
 }
 
@@ -1000,11 +1049,20 @@ async function syncCrmFromSeyaIntent(supabase, centerId, context, text) {
   });
 }
 
-async function bookSeyaAppointment(supabase, centerId, context, conversation, slot) {
-  const [{ data: rooms }, { data: practitioners }] = await Promise.all([
-    supabase.from("rooms").select("id").eq("center_id", centerId).limit(1),
-    supabase.from("practitioners").select("id").eq("center_id", centerId).limit(1),
+async function bookSeyaAppointment(supabase, centerId, context, conversation, slot, seya) {
+  const [{ data: rooms }, { data: practitioners }, { data: services }] = await Promise.all([
+    supabase.from("rooms").select("id,name").eq("center_id", centerId),
+    supabase.from("practitioners").select("id,first_name,last_name").eq("center_id", centerId),
+    supabase.from("services").select("id,name,duration_minutes").eq("center_id", centerId),
   ]);
+  const family = resolveActiveFamily(seya, conversation, "");
+  const resources = pickBookingResources({
+    rooms: rooms || [],
+    practitioners: practitioners || [],
+    services: services || [],
+    seya,
+    family,
+  });
 
   const start = slotTime(slot.time);
   const duration =
@@ -1012,7 +1070,9 @@ async function bookSeyaAppointment(supabase, centerId, context, conversation, sl
       ? Number(slot.duration)
       : Number(conversation?.bookedSlot && conversation.bookedSlot.duration) > 0
         ? Number(conversation.bookedSlot.duration)
-        : visitDurationMinutes(null, conversation, "");
+        : visitDurationMinutes(seya, conversation, "") ||
+          Number(resources.service?.duration_minutes) ||
+          resources.durationMinutes;
   const [hours, minutes] = start.split(":").map(Number);
   const startMinutes = hours * 60 + minutes;
   const endMinutes = startMinutes + duration;
@@ -1025,7 +1085,7 @@ async function bookSeyaAppointment(supabase, centerId, context, conversation, sl
   const { data: existing } = await supabase
     .from("appointments")
     .select(
-      "id,lead_id,client_id,starts_at,duration_minutes,status,appointment_date,notes,cancelled_at,status_history",
+      "id,lead_id,client_id,starts_at,duration_minutes,status,appointment_date,notes,cancelled_at,status_history,room_id",
     )
     .eq("center_id", centerId)
     .gte("appointment_date", fromDate);
@@ -1043,8 +1103,10 @@ async function bookSeyaAppointment(supabase, centerId, context, conversation, sl
       start: slotTime(row.starts_at),
       duration: row.duration_minutes,
       status: row.status || "",
+      cabinId: row.room_id || "",
+      room_id: row.room_id || "",
     }));
-  if (isSlotBusy(busy, slot.date, start, durationMinutes)) {
+  if (isSlotBusy(busy, slot.date, start, durationMinutes, resources.cabinId)) {
     throw new Error("slot_taken");
   }
 
@@ -1090,8 +1152,9 @@ async function bookSeyaAppointment(supabase, centerId, context, conversation, sl
       center_id: centerId,
       client_id: context.clientId || null,
       lead_id: context.leadId || null,
-      room_id: rooms?.[0]?.id || null,
-      practitioner_id: practitioners?.[0]?.id || null,
+      service_id: resources.service?.id || null,
+      room_id: resources.room?.id || rooms?.[0]?.id || null,
+      practitioner_id: resources.practitioner?.id || practitioners?.[0]?.id || null,
       appointment_date: slotDate(slot.date),
       starts_at: start,
       ends_at: endsAt,

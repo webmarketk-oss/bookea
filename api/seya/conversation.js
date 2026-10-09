@@ -1,5 +1,5 @@
 const { classifyPriceQuestion, isNearDuplicate, isPriceRepeatComplaint } = require("./price");
-const { inferCareFamily } = require("./care-family");
+const { axisClarifyQuestion, inferCareFamily, resolveActiveFamily } = require("./care-family");
 const { isWelcomeRelanceOnly, resolveSeyaMission } = require("./mission");
 
 function normalize(value) {
@@ -1332,9 +1332,15 @@ function firstNeedReply(text, conversation, qualification, extras = {}) {
     extras = { ...extras, skipBookingCta: true };
   }
   const family =
+    resolveActiveFamily(
+      extras.seya || conversation?._seya,
+      { ...conversation, qualification },
+      text,
+    ) ||
     inferCareFamily(
-      `${qualification?.need || ""} ${qualification?.zone || ""} ${text || ""} ${conversation?.treatment || ""} ${conversation?.campaign || ""}`,
-    ) || "";
+      `${qualification?.need || ""} ${qualification?.zone || ""} ${text || ""} ${conversation?.treatment || ""}`,
+    ) ||
+    "";
   const zoneLabel = speakZoneList(qualification?.zone);
   const needKnown = Boolean(qualification?.need || family);
   const detailKnown = Boolean(
@@ -1349,10 +1355,14 @@ function firstNeedReply(text, conversation, qualification, extras = {}) {
   };
 
   if (!needKnown) {
-    if (alreadyTold(conversation, "soin minceur, un soin visage")) {
+    const clarify = axisClarifyQuestion(extras.seya || conversation?._seya);
+    if (alreadyTold(conversation, "soin minceur|soin visage|une épilation")) {
       return "";
     }
-    return "Vous cherchez plutôt un soin minceur, un soin visage ou une épilation ?";
+    return (
+      clarify ||
+      "Vous cherchez plutôt un soin minceur, un soin visage ou une épilation ?"
+    );
   }
 
   if (!detailKnown && (family === "minceur" || family === "epilation")) {

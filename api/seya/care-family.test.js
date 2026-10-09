@@ -118,6 +118,26 @@ test("bilan laser reste du laser", () => {
   assert.equal(inferCareFamily("Bilan laser offert FERRAND JFG"), "epilation");
 });
 
+test("une correction d’axe gagne sur le mot laser resté dans la phrase", () => {
+  assert.equal(inferCareFamily("Non pas du laser, du minceur"), "minceur");
+  assert.equal(inferCareFamily("Je veux du minceur pas du laser"), "minceur");
+  assert.equal(inferCareFamily("Plutôt pour le visage"), "visage");
+});
+
+test("un centre multi-axes ne verrouille pas tous les prospects sur un seul soin", () => {
+  const { lockedCenterFamily, axisClarifyQuestion } = require("./care-family");
+  const seya = {
+    treatmentBriefs: [
+      { name: "Soin minceur" },
+      { name: "Épilation laser" },
+      { name: "Soin visage" },
+    ],
+    centerProfile: { activity: "technologies minceur et laser" },
+  };
+  assert.equal(lockedCenterFamily(seya, { centerName: "JFG Clermont" }), "");
+  assert.match(axisClarifyQuestion(seya), /minceur.*visage.*épilation/i);
+});
+
 test("aisselles, c’est du laser, pas de la minceur", () => {
   assert.equal(inferCareFamily("C’est combien pour les aisselles"), "epilation");
   assert.equal(
