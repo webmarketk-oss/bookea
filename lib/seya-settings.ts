@@ -35,7 +35,7 @@ export const SEYA_MISSION_OPTIONS: Array<{
   {
     id: "book",
     title: "Prise de rendez-vous",
-    hint: "Céa mène le prospect et pose le rendez-vous dans l’agenda, comme aujourd’hui.",
+    hint: "Seya mène le prospect et pose le rendez-vous dans l’agenda, comme aujourd’hui.",
   },
   {
     id: "welcome_relance",
@@ -45,12 +45,12 @@ export const SEYA_MISSION_OPTIONS: Array<{
   {
     id: "welcome_relance_book",
     title: "Accueil + relances + prise de rendez-vous",
-    hint: "Message d’accueil, relances, et Céa peut poser le rendez-vous dans l’agenda.",
+    hint: "Message d’accueil, relances, et Seya peut poser le rendez-vous dans l’agenda.",
   },
   {
     id: "qualify_callback",
     title: "Accueil + qualification + rappel opératrice",
-    hint: "Céa mène comme une prise de rendez-vous (soin, zone, jour, heure). Elle ne pose pas le RDV : elle dit qu’une opératrice les rappellera à la date et l’heure convenues.",
+    hint: "Seya mène comme une prise de rendez-vous (soin, zone, jour, heure). Elle ne pose pas le RDV : elle dit qu’une opératrice les rappellera à la date et l’heure convenues.",
   },
 ];
 

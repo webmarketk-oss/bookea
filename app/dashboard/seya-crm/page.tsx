@@ -1200,9 +1200,9 @@ export default function SeyaCrmPage() {
             }
           />
           <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-            <p className="font-semibold">Mission de Céa</p>
+            <p className="font-semibold">Mission de Seya</p>
             <p className="mt-1 text-xs font-medium leading-4 text-slate-500">
-              Une seule mission à la fois. Céa ne mélange pas prise de
+              Une seule mission à la fois. Seya ne mélange pas prise de
               rendez-vous, accueil, et rappel opératrice.
             </p>
             <div className="mt-3 grid gap-2">
