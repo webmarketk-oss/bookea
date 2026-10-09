@@ -101,9 +101,9 @@ export default function AdminNotificationsPage() {
     } = await supabase.auth.getSession();
     return {
       "Content-Type": "application/json",
-      Authorization: session?.access_token
-        ? `Bearer ${session.access_token}`
-        : "",
+      ...(session?.access_token
+        ? { Authorization: `Bearer ${session.access_token}` }
+        : {}),
     };
   }
 
@@ -168,7 +168,9 @@ export default function AdminNotificationsPage() {
         setSenderEmail(result.email);
       }
       if (!response.ok) {
-        setSenderError(result.error || "Impossible de connecter la boîte.");
+        setSenderError(
+          result.error || `Impossible de connecter la boîte (${response.status}).`,
+        );
         return;
       }
       setSenderNotice(result.notice || "");
