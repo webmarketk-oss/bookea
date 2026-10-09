@@ -31,6 +31,7 @@ import {
   invoicePeriod,
   periodRange,
   withSyncedCenterContacts,
+  keepInvoiceEdits,
   type AgencyBillingState,
   type AgencyClient,
   type AgencyCompany,
@@ -74,6 +75,9 @@ export function AgencyWorkspace() {
   const [period, setPeriod] = useState<AgencyPeriod>("mois");
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo] = useState("");
+  const persistChain = useRef(Promise.resolve());
+  const statesRef = useRef(states);
+  statesRef.current = states;
 
   useEffect(() => {
     let alive = true;
@@ -103,32 +107,51 @@ export function AgencyWorkspace() {
 
   async function persist(...updates: AgencyBillingState[]) {
     setSaving(true);
-    const savedList = await Promise.all(updates.map((item) => saveAgencyBilling(item)));
-    setStates((current) => {
-      if (!current) return current;
-      const next = { ...current };
-      for (const saved of savedList) {
-        next[saved.company] = saved;
-      }
-      return next;
-    });
-    setSaving(false);
-    setNotice("Enregistré.");
+    try {
+      const savedList = await Promise.all(updates.map((item) => saveAgencyBilling(item)));
+      setStates((current) => {
+        if (!current) return current;
+        const next = { ...current };
+        for (const saved of savedList) {
+          next[saved.company] = saved;
+        }
+        return next;
+      });
+      setNotice("Enregistré.");
+    } finally {
+      setSaving(false);
+    }
   }
 
   function update(patch: Partial<AgencyBillingState>) {
-    if (!state || !states) return;
-    const next = { ...state, ...patch };
+    if (!states) return;
+    setStates((current) => {
+      if (!current) return current;
+      const prev = current[company];
+      const resolved = { ...patch };
+      if (patch.invoices) {
+        resolved.invoices = keepInvoiceEdits(patch.invoices, prev.invoices);
+      }
+      return { ...current, [company]: { ...prev, ...resolved } };
+    });
     if (patch.bank) {
       const bank = patch.bank;
       const otherId = company === "webk" ? "bookea" : "webk";
-      void (async () => {
+      persistChain.current = persistChain.current.then(async () => {
+        await Promise.resolve();
+        const snapshot = statesRef.current?.[company];
+        if (!snapshot) return;
         const other = await loadAgencyBilling(otherId);
-        await persist(next, { ...other, bank });
-      })();
+        await persist(snapshot, { ...other, bank });
+      });
       return;
     }
-    void persist(next);
+    persistChain.current = persistChain.current.then(async () => {
+      await Promise.resolve();
+      const snapshot = statesRef.current?.[company];
+      if (!snapshot) return;
+      await persist(snapshot);
+    });
   }
 
   if (!state) {

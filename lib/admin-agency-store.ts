@@ -1,6 +1,7 @@
 import {
   billingCenterContactFromRow,
   emptyAgencyState,
+  mergeAgencyInvoices,
   normalizeAgencyState,
   protectInvoicesFromEmptyOverwrite,
   type AgencyBillingState,
@@ -57,7 +58,17 @@ export async function loadAgencyBilling(company: AgencyCompany) {
   if (remote === "error" || !remote) {
     return local;
   }
-  return remote;
+  const invoices = mergeAgencyInvoices(local.invoices, remote.invoices);
+  const next = {
+    ...remote,
+    invoices,
+    clients: local.clients.length > remote.clients.length ? local.clients : remote.clients,
+  };
+  writeLocal(next);
+  if (invoices.length > remote.invoices.length) {
+    await saveAgencyBilling(next);
+  }
+  return next;
 }
 
 export async function saveAgencyBilling(state: AgencyBillingState) {

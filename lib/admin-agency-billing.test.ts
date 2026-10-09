@@ -29,6 +29,8 @@ import {
   normalizeAgencyState,
   periodRange,
   protectInvoicesFromEmptyOverwrite,
+  mergeAgencyInvoices,
+  keepInvoiceEdits,
 } from "./admin-agency-billing.ts";
 
 test("les deux marques partagent la même société US et la mention d’autoliquidation", () => {
@@ -161,6 +163,63 @@ test("la facture reprend les coordonnées admin du centre", () => {
     city: "LYON",
   });
   assert.deepEqual(emptyLegal.lines, ["Lyon", "contact@heliaskininstitut.com"]);
+});
+
+test("le chargement garde les factures locales même si le serveur revient vide", () => {
+  const local = [
+    {
+      id: "wk-1",
+      number: "WK-2026-004",
+      clientId: "c1",
+      issuedOn: "2026-10-08",
+      nextCycleOn: "2026-11-07",
+      status: "En attente de paiement" as const,
+      lines: [],
+      comments: "",
+      invoiceNote: "",
+      createdAt: "2026-10-08T10:00:00.000Z",
+    },
+  ];
+  const merged = mergeAgencyInvoices(local, []);
+  assert.equal(merged.length, 1);
+  assert.equal(merged[0]?.number, "WK-2026-004");
+});
+
+test("une édition et une facture déjà en base ne s’écrasent pas", () => {
+  const current = [
+    {
+      id: "a",
+      number: "WK-2026-001",
+      clientId: "c1",
+      issuedOn: "2026-10-01",
+      nextCycleOn: "2026-10-31",
+      status: "Payée" as const,
+      lines: [],
+      comments: "",
+      invoiceNote: "",
+      createdAt: "2026-10-01T10:00:00.000Z",
+    },
+  ];
+  const created = [
+    {
+      id: "b",
+      number: "WK-2026-002",
+      clientId: "c1",
+      issuedOn: "2026-10-09",
+      nextCycleOn: "2026-11-08",
+      status: "En attente de paiement" as const,
+      lines: [],
+      comments: "",
+      invoiceNote: "",
+      createdAt: "2026-10-09T10:00:00.000Z",
+    },
+    ...current,
+  ];
+  const kept = keepInvoiceEdits(created, current);
+  assert.equal(kept.length, 2);
+  const deleted = keepInvoiceEdits(current, created);
+  assert.equal(deleted.length, 1);
+  assert.equal(deleted[0]?.id, "a");
 });
 
 test("une sauvegarde vide n’efface pas les factures déjà enregistrées", () => {

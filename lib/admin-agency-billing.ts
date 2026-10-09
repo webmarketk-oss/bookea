@@ -378,6 +378,37 @@ export function protectInvoicesFromEmptyOverwrite(
   return { ...next, invoices: remote.invoices };
 }
 
+export function mergeAgencyInvoices(
+  primary: AgencyInvoice[],
+  secondary: AgencyInvoice[] = [],
+) {
+  const byId = new Map<string, AgencyInvoice>();
+  for (const item of [...secondary, ...primary]) {
+    const id = String(item?.id || "").trim();
+    if (!id) {
+      continue;
+    }
+    byId.set(id, item);
+  }
+  return [...byId.values()].sort((left, right) => {
+    const byDate = String(right.issuedOn || "").localeCompare(String(left.issuedOn || ""));
+    if (byDate) {
+      return byDate;
+    }
+    return String(right.createdAt || "").localeCompare(String(left.createdAt || ""));
+  });
+}
+
+export function keepInvoiceEdits(
+  nextInvoices: AgencyInvoice[],
+  currentInvoices: AgencyInvoice[],
+) {
+  if (nextInvoices.length < currentInvoices.length) {
+    return nextInvoices;
+  }
+  return mergeAgencyInvoices(nextInvoices, currentInvoices);
+}
+
 export function emptyAgencyState(company: AgencyCompany): AgencyBillingState {
   return {
     company,
