@@ -37,6 +37,7 @@ const {
   alreadyTold,
   conversationalReply,
   firstNeedReply,
+  extractConsultativeFields,
   spokenVisitDuration,
   isAlreadyBookedElsewhere,
   isBookingThread,
@@ -867,6 +868,7 @@ function extractZone(text) {
     "bras",
     "visage",
     "ventre",
+    "fesses",
     "dos",
     "cuisse",
     "hanche",
@@ -946,14 +948,17 @@ function extractAvailability(text) {
     .join(" ");
 }
 
-function mergeQualification(current, text, fallbackTreatment) {
+function mergeQualification(current, text, fallbackTreatment, conversation) {
   const currentNeed = isJunkTreatment(current?.need) ? "" : current?.need || "";
   const fallback = isJunkTreatment(fallbackTreatment) ? "" : fallbackTreatment || "";
+  const consultative = extractConsultativeFields(current, text, conversation);
   const next = {
     need: currentNeed || fallback,
     zone: current?.zone || "",
     delay: current?.delay || "",
     availability: current?.availability || "",
+    distance: consultative.distance || current?.distance || "",
+    tried: consultative.tried || current?.tried || "",
   };
   const need = extractNeed(text);
   const zone = extractZone(text) || extractConcern(text);
@@ -1030,7 +1035,7 @@ function matchProposedSlot(text, slots, options = {}) {
   );
 }
 
-function nextQualificationQuestion(qualification, seya, fallbackTreatment, conversation, text, now) {
+function nextQualificationQuestion(qualification, seya, fallbackTreatment, conversation, text, now, extras = {}) {
   return conversationalReply(
     text,
     conversation,
@@ -1044,6 +1049,7 @@ function nextQualificationQuestion(qualification, seya, fallbackTreatment, conve
       skipBookingCta: isWelcomeRelanceOnly(seya),
       seyaMission: resolveSeyaMission(seya),
       seya,
+      centerName: extras.centerName,
     },
   );
 }
@@ -1475,6 +1481,7 @@ function applyLeadReply(conversation, text, seya, slots, extras = {}) {
     },
     intentText,
     conversation.treatment,
+    conversation,
   );
   const pool = offeredSlots(conversation, slots);
   const durationMinutes = visitDurationMinutes(
@@ -2000,6 +2007,10 @@ function applyLeadReply(conversation, text, seya, slots, extras = {}) {
     const ack = firstNeedReply(intentText, conversation, qualification, {
       durationMinutes,
       skipBookingCta: true,
+      skipConsultative: true,
+      seyaMission: resolveSeyaMission(seya),
+      seya,
+      centerName: extras.centerName,
     });
     const slotsText = humanSlotReply(safeSlots);
     const body =
@@ -2080,6 +2091,7 @@ function applyLeadReply(conversation, text, seya, slots, extras = {}) {
       conversation,
       text,
       extras.now,
+      extras,
     ) || fallbackAfterNote(qualification, conversation, text);
   return finishLeadReply(
     conversation,

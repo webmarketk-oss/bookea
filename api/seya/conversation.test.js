@@ -77,7 +77,7 @@ test("20 questions imprévues : répondre à chacune sans ramener aux créneaux"
   );
 
   const unexpected = [
-    ["Bonjour perdre du poids sur le ventre", /ventre|solutions|bilan/i],
+    ["Bonjour perdre du poids sur le ventre", /ventre|solutions|bilan|accompagnement|distance/i],
     ["Tu es une IA ?", /assistante virtuelle/i],
     ["Le bilan est-il gratuit ?", /bilan.*offert|offert/i],
     [
@@ -474,10 +474,12 @@ test("oui merci après proposition de créneau : elle propose des horaires, elle
     conversation,
     "Bonjour Je souhaiterais traiter le ventre et le bas du dos",
   );
-  assert.match(lastSeya(conversation), /ventre|dos|créneau|creneau/i);
+  assert.match(lastSeya(conversation), /ventre|dos/i);
   assert.doesNotMatch(lastSeya(conversation), /reprendre|écrivez-moi quand/i);
 
-  conversation = await reply(conversation, "Oui, merci");
+  conversation = await reply(conversation, "À 10 km");
+  conversation = await reply(conversation, "Aucune");
+  conversation = await reply(conversation, "Oui, jeudi matin");
   const answer = lastSeya(conversation);
   assert.match(answer, /09h00|10h00|lun\.|mar\.|mer\.|jeu\.|ven\.|sam\.|semaine/i);
   assert.doesNotMatch(
@@ -1296,7 +1298,7 @@ test("aisselles laser : bilan pilaire, pas d’analyse corporelle", async () => 
   assert.doesNotMatch(answer, /analyse corporelle|séance découverte/i);
 });
 
-test("après l’accueil minceur : elle reconnaît la zone puis propose 1 h", async () => {
+test("après l’accueil minceur : elle reconnaît la zone puis demande la distance", async () => {
   let conversation = startConversation(
     {
       leadId: "lead-accueil-minceur",
@@ -1311,14 +1313,12 @@ test("après l’accueil minceur : elle reconnaît la zone puis propose 1 h", as
   );
   conversation = await reply(conversation, "Bonjour. Ventres/hanches");
   const answer = lastSeya(conversation);
-  assert.match(answer, /ventre|hanches/i);
-  assert.match(answer, /solutions|bilan/i);
-  assert.match(answer, /1 heure/i);
-  assert.match(answer, /quand seriez-vous disponible/i);
-  assert.doesNotMatch(answer, /09h00|lun\.|résultat garanti/i);
+  assert.match(answer, /ventre|hanches|zones/i);
+  assert.match(answer, /distance/i);
+  assert.doesNotMatch(answer, /09h00|lun\.|résultat garanti|quand seriez-vous disponible/i);
 });
 
-test("après l’accueil laser : protocole peau/pilosité puis 45 min", async () => {
+test("après l’accueil laser : elle reconnaît les zones puis demande la distance", async () => {
   const laser = {
     ...seya,
     treatmentBriefs: [
@@ -1360,13 +1360,11 @@ test("après l’accueil laser : protocole peau/pilosité puis 45 min", async ()
   });
   const answer = lastSeya(first.conversation);
   assert.match(answer, /aisselles|maillot/i);
-  assert.match(answer, /peau|pilosité|protocole/i);
-  assert.match(answer, /45 minutes/i);
-  assert.match(answer, /quand seriez-vous disponible/i);
-  assert.doesNotMatch(answer, /analyse corporelle|ventre|1 heure/i);
+  assert.match(answer, /distance|programme|protocole|peau/i);
+  assert.doesNotMatch(answer, /analyse corporelle|ventre|quand seriez-vous disponible/i);
 });
 
-test("après l’accueil visage : diagnostic peau, durée du centre", async () => {
+test("après l’accueil visage : elle reconnaît l’objectif puis demande la distance", async () => {
   const visage = {
     ...seya,
     treatmentBriefs: [
@@ -1408,9 +1406,8 @@ test("après l’accueil visage : diagnostic peau, durée du centre", async () =
   });
   const answer = lastSeya(first.conversation);
   assert.match(answer, /fermeté|peau|diagnostic/i);
-  assert.match(answer, /50 minutes/i);
-  assert.match(answer, /quand seriez-vous disponible/i);
-  assert.doesNotMatch(answer, /analyse corporelle|pilosité/i);
+  assert.match(answer, /distance/i);
+  assert.doesNotMatch(answer, /analyse corporelle|pilosité|quand seriez-vous disponible/i);
 });
 
 test("zone + jour déjà donnés : elle cherche les créneaux, elle ne redemande pas", async () => {
@@ -2404,5 +2401,66 @@ test("accueil + relances + prise de rendez-vous : elle peut booker", async () =>
   ).conversation;
   const answer = lastSeya(conversation);
   assert.match(answer, /jeu\.|jeudi|15h|16h|17h|18h|créneau|creneau|horaire|semaine/i);
+});
+
+test("qualification : elle reprend les zones, la distance, puis ce qui a déjà été essayé", async () => {
+  const qualify = { ...seya, seyaMission: "qualify_callback", bookAppointment: false };
+  let conversation = startConversation(
+    {
+      leadId: "lead-paola-style",
+      centerId: "jfg-clinique-clermont",
+      firstName: "Josette",
+      lastName: "Test",
+      phone: "0611223344",
+      treatment: "Soin minceur",
+    },
+    "JFG Clinique Clermont",
+    qualify,
+  );
+  conversation = (
+    await generateSeyaReply({
+      conversation,
+      text: "Ventre fesses bras",
+      seya: qualify,
+      appointments: [],
+      hours: hours(),
+      centerName: "JFG Clinique Clermont",
+      centerId: "jfg-clinique-clermont",
+      now: NOW,
+    })
+  ).conversation;
+  assert.match(lastSeya(conversation), /ventre|fesses|bras|zones/i);
+  assert.match(lastSeya(conversation), /distance/i);
+  assert.doesNotMatch(lastSeya(conversation), /quand seriez-vous disponible|je vérifie le créneau/i);
+
+  conversation = (
+    await generateSeyaReply({
+      conversation,
+      text: "J’habite à Clermont",
+      seya: qualify,
+      appointments: [],
+      hours: hours(),
+      centerName: "JFG Clinique Clermont",
+      centerId: "jfg-clinique-clermont",
+      now: NOW,
+    })
+  ).conversation;
+  assert.match(lastSeya(conversation), /essayé|testé|technologies/i);
+  assert.equal(conversation.qualification.distance.includes("Clermont"), true);
+
+  conversation = (
+    await generateSeyaReply({
+      conversation,
+      text: "Non, que des régimes",
+      seya: qualify,
+      appointments: [],
+      hours: hours(),
+      centerName: "JFG Clinique Clermont",
+      centerId: "jfg-clinique-clermont",
+      now: NOW,
+    })
+  ).conversation;
+  assert.match(lastSeya(conversation), /régime|base pour/i);
+  assert.match(lastSeya(conversation), /disponibilités|expertes vous recontactera/i);
 });
 

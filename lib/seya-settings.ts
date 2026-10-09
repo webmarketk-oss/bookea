@@ -176,6 +176,8 @@ export type SeyaQualification = {
   zone: string;
   delay: string;
   availability: string;
+  distance?: string;
+  tried?: string;
 };
 
 export type SeyaBookingState = {

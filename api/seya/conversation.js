@@ -1130,6 +1130,7 @@ function speakZoneList(zone) {
     if (/bras/.test(part)) return "les bras";
     if (/dos/.test(part)) return "le dos";
     if (/ventre/.test(part)) return "le ventre";
+    if (/fess/.test(part)) return "les fesses";
     if (/fermete/.test(part)) return "le manque de fermeté";
     if (/ride/.test(part)) return "les rides";
     if (/acne/.test(part)) return "l’acné";
@@ -1178,12 +1179,13 @@ function bookingOfferCta(conversation, durationMinutes) {
 }
 
 function firstNeedAck(family, zoneLabel, conversation) {
+  const several = / et |, /.test(zoneLabel || "");
   if (family === "epilation") {
     return pickFresh(
       zoneLabel
         ? [
-            `Pour ${zoneLabel}, nous adaptons le protocole à votre peau et à votre pilosité pour obtenir les meilleurs résultats possibles.`,
-            `C’est noté pour ${zoneLabel}. Le protocole se personnalise selon la peau et la pilosité.`,
+            `C’est noté pour ${zoneLabel}, c’est justement le type de demande où on peut construire un programme assez cohérent.`,
+            `Pour ${zoneLabel}, on adapte le protocole à votre peau et à votre pilosité.`,
           ]
         : [
             "Pour l’épilation laser, le protocole se personnalise selon la peau et la pilosité.",
@@ -1195,8 +1197,8 @@ function firstNeedAck(family, zoneLabel, conversation) {
     return pickFresh(
       zoneLabel
         ? [
-            `Pour ${zoneLabel} que vous décrivez, nous avons des soins adaptés. Le diagnostic permettra de déterminer celui qui correspond le mieux à votre peau.`,
-            `Je note ${zoneLabel}. Le diagnostic permettra de choisir le soin le plus adapté à votre peau.`,
+            `${zoneLabel.charAt(0).toUpperCase()}${zoneLabel.slice(1)} est justement le genre d’objectif qu’on voit souvent. Le diagnostic permettra de choisir le soin le plus adapté à votre peau.`,
+            `Je note ${zoneLabel}. Le diagnostic permettra de déterminer le soin qui correspond le mieux à votre peau.`,
           ]
         : [
             "Nous avons des soins visage adaptés. Le diagnostic permettra de déterminer celui qui correspond le mieux à votre peau.",
@@ -1206,15 +1208,115 @@ function firstNeedAck(family, zoneLabel, conversation) {
   }
   return pickFresh(
     zoneLabel
-      ? [
-          `Pour ${zoneLabel}, nous avons des solutions qui peuvent vous accompagner dans votre objectif. Le bilan permettra de faire le point et de définir l’accompagnement adapté.`,
-          `C’est noté pour ${zoneLabel}. Nous avons des solutions adaptées à cet objectif. Le bilan permettra de préciser l’accompagnement.`,
-        ]
+      ? several
+        ? [
+            `Pour ${zoneLabel}, ces zones se travaillent justement assez bien dans un accompagnement global.`,
+            `Pour ${zoneLabel}, on cherche souvent à voir une vraie différence. Le bilan permet de définir l’accompagnement adapté.`,
+          ]
+        : [
+            `${zoneLabel.charAt(0).toUpperCase()}${zoneLabel.slice(1)}, c’est justement un objectif qu’on voit souvent au centre.`,
+            `Pour ${zoneLabel}, nous avons des solutions qui peuvent vous accompagner. Le bilan permettra de définir l’accompagnement adapté.`,
+          ]
       : [
           "Nous avons des solutions minceur adaptées. Le bilan permettra de faire le point et de définir l’accompagnement.",
         ],
     conversation,
   );
+}
+
+function lastSeyaAskedDistance(conversation) {
+  return /quelle distance|moins de \d+\s*km|situ[ée]e? à quelle/i.test(
+    lastSeyaText(conversation),
+  );
+}
+
+function lastSeyaAskedTried(conversation) {
+  return /technologies? (avez-vous )?(déjà )?(essay|test)|déjà (essayé|testé)|soins avec technologie|c['’]est une premi[eè]re/i.test(
+    lastSeyaText(conversation),
+  );
+}
+
+function extractConsultativeFields(current, text, conversation) {
+  const next = {
+    distance: String(current?.distance || "").trim(),
+    tried: String(current?.tried || "").trim(),
+  };
+  const raw = String(text || "").trim();
+  if (!raw || wantsSlots(text, conversation) || classifyPriceQuestion(text)) {
+    return next;
+  }
+  if (!next.distance) {
+    if (lastSeyaAskedDistance(conversation) || /\d+\s*km/i.test(raw) || /j['’]habite/i.test(raw)) {
+      next.distance = raw.slice(0, 80);
+    }
+  }
+  if (!next.tried && lastSeyaAskedTried(conversation)) {
+    next.tried = raw.slice(0, 80);
+  }
+  return next;
+}
+
+function distanceQuestion(centerName) {
+  const place = String(centerName || "").trim() || "le centre";
+  return `Vous êtes à quelle distance de ${place} ?`;
+}
+
+function distanceAck(distance, conversation) {
+  const value = normalize(distance);
+  const km = value.match(/(\d+)\s*km/);
+  if (km && Number(km[1]) <= 35) {
+    return pickFresh(
+      [
+        "À cette distance, c’est pratique pour un suivi en centre.",
+        "Parfait, c’est bien dans la zone.",
+      ],
+      conversation,
+    );
+  }
+  if (/j['’]habite|sur place|dans (la ville|le village)|croix de vie|meme ville|même ville/i.test(value)) {
+    return "Parfait, c’est bien dans la zone.";
+  }
+  return pickFresh(["C’est noté.", "Parfait, je note."], conversation);
+}
+
+function triedQuestion(family) {
+  if (family === "epilation") {
+    return "Vous avez déjà testé quelle technologie jusque-là ?";
+  }
+  if (family === "visage") {
+    return "Vous avez déjà fait des soins pour la peau, ou c’est une première ?";
+  }
+  return "Pour vous orienter sur la méthode la plus adaptée, quelles technologies avez-vous déjà essayé jusqu’ici ?";
+}
+
+function triedAck(tried, family, conversation) {
+  const value = normalize(tried);
+  if (/regime|régime/.test(value) && !/cryo|presso|laser|cavitation|techno/.test(value)) {
+    return pickFresh(
+      [
+        "Le régime seul ne suffit pas toujours à traiter ce type de zones, surtout quand on cherche aussi à raffermir.",
+        "C’est fréquent, le régime seul ne traite pas toujours ces zones comme on l’aimerait.",
+      ],
+      conversation,
+    );
+  }
+  if (/aucune|jamais|pas encore|non$|que des regime/.test(value)) {
+    return family === "epilation"
+      ? "C’est une bonne base pour avancer."
+      : "Ça peut tout à fait être une bonne base pour partir sur un bilan adapté.";
+  }
+  return pickFresh(
+    ["C’est noté, ça aide à voir ce qui a déjà été tenté.", "Parfait, je note."],
+    conversation,
+  );
+}
+
+function availabilityCta(conversation, extras = {}) {
+  const mission = extras.seyaMission || resolveSeyaMission(extras.seya || conversation?._seya);
+  if (mission === "qualify_callback" || extras.skipBookingCta) {
+    return "Parfait ! Envoyez-moi vos disponibilités et une de nos expertes vous recontactera pour répondre à vos questions et convenir d’un rendez-vous.";
+  }
+  return "Parfait. Dites-moi un ou deux jours où vous êtes disponible, je regarde un créneau.";
 }
 
 function firstNeedReply(text, conversation, qualification, extras = {}) {
@@ -1232,6 +1334,12 @@ function firstNeedReply(text, conversation, qualification, extras = {}) {
     zoneLabel ||
       (family === "visage" && /peau|visage|fermete|ride|acne/.test(normalize(text))),
   );
+  const extracted = extractConsultativeFields(qualification, text, conversation);
+  const consultative = {
+    ...qualification,
+    distance: qualification?.distance || extracted.distance,
+    tried: qualification?.tried || extracted.tried,
+  };
 
   if (!needKnown) {
     if (alreadyTold(conversation, "soin minceur, un soin visage")) {
@@ -1256,23 +1364,60 @@ function firstNeedReply(text, conversation, qualification, extras = {}) {
     return "C’est noté. Quel est votre objectif pour la peau ?";
   }
 
+  if (isWelcomeRelanceOnly(mission)) {
+    return firstNeedAck(family, zoneLabel, conversation);
+  }
+
+  if (extras.skipConsultative) {
+    return "";
+  }
+
+  if (
+    wantsSlots(text, conversation) ||
+    isBookingThread(conversation) ||
+    consultative.availability
+  ) {
+    if (
+      alreadyTold(
+        conversation,
+        "quand seriez-vous disponible|dites-moi un ou deux jours|envoyez-moi vos disponibilités",
+      )
+    ) {
+      return "";
+    }
+    return availabilityCta(conversation, extras);
+  }
+
+  if (
+    !consultative.distance &&
+    !alreadyTold(conversation, "quelle distance|moins de \\d+")
+  ) {
+    return `${firstNeedAck(family, zoneLabel, conversation)} ${distanceQuestion(extras.centerName)}`
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  if (
+    !consultative.tried &&
+    !alreadyTold(conversation, "déjà essayé|déjà testé|technologies|soins pour la peau")
+  ) {
+    return `${distanceAck(consultative.distance, conversation)} ${triedQuestion(family)}`
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
   if (
     alreadyTold(
       conversation,
-      "quand seriez-vous disponible|protocole à votre peau|solutions qui peuvent vous accompagner|diagnostic permettra",
+      "envoyez-moi vos disponibilités|dites-moi un ou deux jours|quand seriez-vous disponible",
     )
   ) {
     return "";
   }
 
-  const ack = firstNeedAck(family, zoneLabel, conversation);
-  if (extras.skipBookingCta) {
-    return ack;
-  }
-  return `${ack} ${bookingOfferCta(conversation, extras.durationMinutes)}`.replace(
-    /\s+/g,
-    " ",
-  ).trim();
+  return `${triedAck(consultative.tried, family, conversation)} ${availabilityCta(conversation, extras)}`
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function conversationalReply(text, conversation, qualification, now, extras = {}) {
@@ -1395,6 +1540,7 @@ module.exports = {
   composeReplies,
   conversationalReply,
   firstNeedReply,
+  extractConsultativeFields,
   spokenVisitDuration,
   identityReply,
   isAwayForNow,

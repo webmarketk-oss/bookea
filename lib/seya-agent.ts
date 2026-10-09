@@ -41,7 +41,7 @@ const weekdayNames = [
 const weekdayShort = ["dim.", "lun.", "mar.", "mer.", "jeu.", "ven.", "sam."];
 
 export function emptyQualification(): SeyaQualification {
-  return { need: "", zone: "", delay: "", availability: "" };
+  return { need: "", zone: "", delay: "", availability: "", distance: "", tried: "" };
 }
 
 export function createSeyaMessage(
@@ -485,8 +485,16 @@ function nextQualificationQuestion(
     return "C’est plutôt quelle zone ?";
   }
 
+  if (!qualification.distance) {
+    return "Vous êtes à quelle distance du centre ?";
+  }
+
+  if (!qualification.tried) {
+    return "Quelles technologies avez-vous déjà essayé jusqu’ici ?";
+  }
+
   if (canBookSeya(settings) && !qualification.availability && !qualification.delay) {
-    return "Vous êtes plutôt dispo en début ou fin de semaine ?";
+    return "Dites-moi un ou deux jours où vous êtes disponible, je regarde un créneau.";
   }
 
   if (canBookSeya(settings)) {
@@ -494,7 +502,7 @@ function nextQualificationQuestion(
   }
 
   if (isQualifyCallback(settings)) {
-    return "Parfait. Vous êtes plutôt disponible en début de semaine, ou plutôt en fin de semaine ?";
+    return "Parfait ! Envoyez-moi vos disponibilités et une de nos expertes vous recontactera pour répondre à vos questions et convenir d’un rendez-vous.";
   }
 
   if (settings.askForAppointment) {
@@ -674,6 +682,7 @@ function extractZone(text: string) {
     "bras",
     "visage",
     "ventre",
+    "fesses",
     "dos",
     "cuisses",
     "menton",
