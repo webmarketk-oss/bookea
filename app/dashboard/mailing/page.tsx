@@ -454,7 +454,7 @@ export default function MailingPage() {
 
     setSending(true);
     setIsError(false);
-    setNotice("Envoi du mailing via Brevo…");
+    setNotice("Envoi en cours…");
 
     try {
       const result = await sendBookeaMailing({
@@ -482,8 +482,10 @@ export default function MailingPage() {
       persistCampaigns([nextCampaign, ...campaigns]);
       setNotice(
         result.failed
-          ? `${result.sent} email(s) envoyés, ${result.failed} échec(s).`
-          : `${result.sent} email(s) envoyés via Brevo.`,
+          ? `${result.sent} email${result.sent > 1 ? "s" : ""} envoyé${result.sent > 1 ? "s" : ""}, ${result.failed} échec${result.failed > 1 ? "s" : ""}.`
+          : result.sent === 1
+            ? "1 email envoyé."
+            : `${result.sent} emails envoyés.`,
       );
     } catch (error) {
       setIsError(true);
