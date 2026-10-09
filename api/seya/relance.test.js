@@ -569,4 +569,29 @@ test("relance J+15 : elle relit le fil et reprend le tarif demandé", () => {
   assert.match(copy, /tarif|prix/i);
   assert.match(copy, /épilation|laser/i);
   assert.doesNotMatch(copy, /minceur|en rester là|à bientôt/i);
+  assert.doesNotMatch(copy, /relis|reprends votre demande/i);
+  assert.doesNotMatch(copy, /Réseau/i);
+});
+
+test("relance tarif : elle revient sur le prix, elle ne dit pas qu’elle relit", () => {
+  const thread = conversation({
+    firstName: "Réseau",
+    treatment: "Épilation laser",
+    campaign: "offre laser (jusqu’à -40%)",
+    qualification: { need: "Épilation laser" },
+    relanceCount: 1,
+    lastRelanceAt: hoursAgo(24),
+    messages: [
+      {
+        id: "m1",
+        author: "lead",
+        text: "Je voudrais le tarif de l’offre laser",
+        at: hoursAgo(80),
+      },
+    ],
+  });
+  const copy = relanceCopy(thread, 2, "Dépil Tech Vichy");
+  assert.match(copy, /tarif|prix/i);
+  assert.doesNotMatch(copy, /relis|reprends votre demande/i);
+  assert.doesNotMatch(copy, /Réseau/i);
 });

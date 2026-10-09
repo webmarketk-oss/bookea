@@ -85,7 +85,7 @@ const {
   phraseFromCareTitle,
   serviceOfferReply,
 } = require("./care-family");
-const { sanitizePersonName } = require("../../lib/seya-person-name");
+const { isCenterResidueName, sanitizePersonName } = require("../../lib/seya-person-name");
 const { resolveGeneralBrief } = require("./general-brief");
 const {
   applySeyaMissionFlags,
@@ -409,6 +409,16 @@ function humanSlotReply(slots, state) {
 function greetingName(value) {
   const name = String(value || "").trim();
   if (!name || /^(bonjour|hello|hi|bonsoir)$/i.test(name)) {
+    return "";
+  }
+  if (isCenterResidueName(name)) {
+    return "";
+  }
+  const needle = name
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+  if (/^(reseau|institut|spa|beaute|exclusive|depil)$/.test(needle)) {
     return "";
   }
   return name;
@@ -2230,15 +2240,8 @@ function lastSubstantiveLeadText(conversation, current) {
   );
 }
 
-function withRereadPrefix(reread, text) {
-  const reply = String(text || "").trim();
-  if (!reread || !reply) {
-    return reply;
-  }
-  if (/vous avez raison/i.test(reply)) {
-    return reply;
-  }
-  return `Vous avez raison, je reprends votre demande. ${reply}`;
+function withRereadPrefix(_reread, text) {
+  return String(text || "").trim();
 }
 
 function callbackSlotFromThread(conversation, text, bookingState, chosenSlot) {
@@ -2593,17 +2596,23 @@ function askedPriceInThread(conversation) {
 
 function relancePriceCandidates(hello, about, centre, round, firstName) {
   const who = firstName ? `${firstName}, ` : "";
+  const start = (text) =>
+    firstName ? text : text.replace(/^./, (letter) => letter.toUpperCase());
   if (Number(round) >= 3) {
     const greet = firstName ? `Bonjour ${firstName} 😊` : "Bonjour 😊";
     return [
-      `${greet} Je relis notre échange : vous demandiez le tarif ${about}. Je peux vous le préciser, ou vous proposer un rendez-vous. Qu’est-ce qui vous arrangerait ?`,
-      `${greet} Je reviens vers vous : le prix ${about} était bien votre question. Je peux vous le détailler, ou vous proposer un créneau.`,
+      `${greet} Vous aviez demandé le tarif ${about}. Je peux vous le préciser, ou vous proposer un rendez-vous. Qu’est-ce qui vous arrangerait ?`,
+      `${greet} Je reviens vers vous au sujet du prix ${about}. Je peux vous le détailler, ou vous proposer un créneau.`,
     ];
   }
   if (Number(round) === 2) {
     return [
-      `${who}je relis votre demande : vous vouliez le tarif ${about}. Je peux vous le donner, ou vous proposer un créneau. Dites-moi ce que vous préférez.`,
-      `${who}vous aviez demandé le prix. Je peux vous le préciser tout de suite, ou vous proposer un rendez-vous.`,
+      start(
+        `${who}vous aviez demandé le tarif ${about}. Je peux vous le donner, ou vous proposer un créneau. Dites-moi ce que vous préférez.`,
+      ),
+      start(
+        `${who}vous aviez demandé le prix. Je peux vous le préciser tout de suite, ou vous proposer un rendez-vous.`,
+      ),
     ];
   }
   return [
