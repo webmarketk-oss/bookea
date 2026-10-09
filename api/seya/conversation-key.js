@@ -165,7 +165,7 @@ function identityKeys(item) {
   const center = String(item?.centerId || "").trim();
   const leadId = String(item?.leadId || "").trim();
   if (leadId) {
-    keys.push(`lead:${leadId}`);
+    keys.push(center ? `center:${center}:lead:${leadId}` : `lead:${leadId}`);
   }
   const phone = last9Phone(item?.phone);
   if (phone.length >= 9) {

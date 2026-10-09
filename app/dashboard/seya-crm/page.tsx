@@ -40,6 +40,7 @@ import {
   resolveSeyaMission,
   SEYA_MISSION_OPTIONS,
   mergeSeyaConversations,
+  isSameSeyaConversation,
   readLocalSeyaConversations,
   saveSeyaAgentSettings,
   saveSeyaConversations,
@@ -552,7 +553,14 @@ export default function SeyaCrmPage() {
         if (seq !== persistConversationsSeqRef.current) {
           return;
         }
-        setConversations((current) => mergeSeyaConversations(saved, current));
+        setConversations((current) =>
+          mergeSeyaConversations(
+            saved,
+            current.filter((item) =>
+              saved.some((remoteItem) => isSameSeyaConversation(remoteItem, item)),
+            ),
+          ),
+        );
       })
       .catch(() => null);
   }

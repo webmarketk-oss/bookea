@@ -8,6 +8,8 @@ import {
   mergeSeyaConversationLists,
   persistableConversations,
 } from "@/api/seya/conversation-key";
+
+export { isSameSeyaConversation };
 import {
   conversationsForCenter,
   filterOwnedConversations,

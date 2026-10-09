@@ -500,7 +500,7 @@ async function handleIncoming(supabase, incoming) {
       seya,
     );
   }
-  existing.centerId = existing.centerId || center.id;
+  existing.centerId = center.id;
   const inboundIds = [
     ...(existing.lastInboundIds || []),
     incoming.messageId,

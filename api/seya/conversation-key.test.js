@@ -63,6 +63,47 @@ test("le même numéro chez deux centres ne fusionne pas", () => {
   assert.equal(merged.length, 2);
 });
 
+test("un fil retiré du centre ne revient pas au merge local", () => {
+  const corinne = {
+    phone: "0611223344",
+    centerId: "center-gaillard",
+    firstName: "Corinne",
+  };
+  const claudine = {
+    phone: "0612455675",
+    centerId: "center-gaillard",
+    firstName: "Claudine",
+  };
+  const saved = [corinne];
+  const current = [corinne, claudine];
+  const guarded = mergeSeyaConversationLists(
+    saved,
+    current.filter((item) =>
+      saved.some((remoteItem) => isSameSeyaConversation(remoteItem, item)),
+    ),
+  );
+  assert.equal(guarded.length, 1);
+  assert.equal(guarded[0].firstName, "Corinne");
+});
+
+test("le même leadId chez deux centres ne fusionne pas", () => {
+  const clermont = {
+    leadId: "lead-claudine",
+    phone: "0612455675",
+    centerId: "center-clermont",
+    firstName: "Claudine",
+  };
+  const gaillard = {
+    leadId: "lead-claudine",
+    phone: "0612455675",
+    centerId: "center-gaillard",
+    firstName: "Claudine",
+  };
+  const merged = mergeSeyaConversationLists([clermont], [gaillard]);
+  assert.equal(merged.length, 2);
+  assert.equal(isSameSeyaConversation(clermont, gaillard), false);
+});
+
 test("les ouvertures auto n’évincient pas un WhatsApp en attente de réponse", () => {
   const waiting = {
     phone: "0611223344",
