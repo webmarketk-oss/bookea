@@ -2343,8 +2343,11 @@ function finishLeadReply(
     qualification,
     bookingState,
   });
-  const reply = checked.text;
-  const blockedProposal = reply !== seyaText;
+  const reply =
+    String(checked.text || "").trim() ||
+    String(seyaText || "").trim() ||
+    "Je suis là. Dites-moi ce dont vous avez besoin, je vous réponds.";
+  const blockedProposal = Boolean(seyaText) && reply !== seyaText;
   const nextBookingState = blockedProposal
     ? { ...bookingState, lastOfferedSlots: [], appointmentStatus: "none" }
     : markOfferPending(bookingState, reply);

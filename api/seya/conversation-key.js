@@ -108,10 +108,10 @@ function mergeConversationPair(current, next) {
     lastName: newer.lastName || older.lastName,
     bookedSlot,
     status: preferredBookingStatus(newer.status, older.status),
-    messages:
-      (newer.messages || []).length >= (older.messages || []).length
-        ? newer.messages
-        : older.messages,
+    sendError: Object.prototype.hasOwnProperty.call(newer, "sendError")
+      ? newer.sendError
+      : older.sendError || null,
+    messages: mergeMessageLists(older.messages, newer.messages),
     bookingState: {
       ...(older.bookingState || {}),
       ...(newer.bookingState || {}),
@@ -129,6 +129,30 @@ function mergeConversationPair(current, next) {
           older.bookingState?.pendingQuestion,
     },
   };
+}
+
+function messageKey(item) {
+  if (item?.id) {
+    return `id:${item.id}`;
+  }
+  return `${item?.author || ""}|${item?.at || ""}|${String(item?.text || "").slice(0, 80)}`;
+}
+
+function mergeMessageLists(left, right) {
+  const seen = new Set();
+  const merged = [];
+  for (const item of [...(left || []), ...(right || [])]) {
+    if (!item || typeof item !== "object") {
+      continue;
+    }
+    const key = messageKey(item);
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    merged.push(item);
+  }
+  return merged.sort((a, b) => String(a.at || "").localeCompare(String(b.at || "")));
 }
 
 function identityKeys(item) {

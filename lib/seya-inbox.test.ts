@@ -215,3 +215,17 @@ test("les messages des 48 h, les fils en cours et les chauds restent en haut", (
     ["recent-hot", "recent-waiting", "older-live", "not-interested", "older-closed"],
   );
 });
+
+test("une erreur d’envoi Seya passe en à recontacter, pas en fil fermé", () => {
+  const failed = conversation({
+    id: "failed-send",
+    status: "En cours",
+    sendError: "Seya n’a pas pu envoyer sa réponse WhatsApp.",
+    messages: [
+      { author: "lead", text: "Jeudi", at: "2026-10-09T08:00:00.000Z" },
+      { author: "seya", text: "Je vous propose 18h.", at: "2026-10-09T08:00:01.000Z" },
+    ],
+  });
+  assert.equal(inboxTag(failed), "humain");
+  assert.equal(isOngoingSeyaThread(failed), false);
+});

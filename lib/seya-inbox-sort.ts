@@ -11,6 +11,7 @@ export type SeyaInboxTag =
 export type SeyaInboxItem = {
   status?: string;
   bookedSlot?: unknown;
+  sendError?: string | null;
   messages?: Array<{ author?: string; at?: string; text?: string }>;
   updatedAt?: string;
 };
@@ -145,6 +146,9 @@ export function inboxTag(conversation: SeyaInboxItem): SeyaInboxTag {
   }
 
   const status = conversation.status;
+  if (conversation.sendError) {
+    return "humain";
+  }
   if (hasBookedAppointment(conversation)) {
     return "rdv";
   }

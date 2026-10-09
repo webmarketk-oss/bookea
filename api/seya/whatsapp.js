@@ -2,7 +2,7 @@
 const { createClient } = require("@supabase/supabase-js");
 const { generateSeyaReply, hasAiKey } = require("./ai");
 const { inferCareFamily, pickApprovedTemplate } = require("./care-family");
-const { classifyPriceQuestion, isNearDuplicate } = require("./price");
+const { isNearDuplicate } = require("./price");
 const { sanitizePersonName } = require("../../lib/seya-person-name");
 const {
   BILAN_DURATION_MINUTES,
@@ -34,6 +34,11 @@ const {
 } = require("./store");
 
 const GRAPH_VERSION = "v21.0";
+const inboundLocks = new Map();
+const EMPTY_SEYA_REPLY =
+  "Je suis là. Dites-moi ce dont vous avez besoin, je vous réponds.";
+const UNREADABLE_MEDIA_REPLY =
+  "Je n’arrive pas à lire ce message. Pouvez-vous m’écrire en texte ce dont vous avez besoin ?";
 
 async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
@@ -97,7 +102,7 @@ async function handler(req, res) {
       return res.status(result.sent ? 200 : 409).json(result);
     }
 
-    const incoming = extractIncomingMessages(payload);
+    const incoming = coalesceIncoming(extractIncomingMessages(payload));
     if (incoming.length === 0) {
       return res.status(200).json({ received: true, handled: 0 });
     }
@@ -106,7 +111,7 @@ async function handler(req, res) {
     const results = [];
 
     for (const message of incoming) {
-      results.push(await handleIncoming(supabase, message));
+      results.push(await handleIncomingQueued(supabase, message));
     }
 
     return res.status(200).json({ received: true, handled: results.length, results });
@@ -198,25 +203,37 @@ function toWhatsAppIntl(phone) {
 
 function alreadyHandledInbound(conversation, incoming) {
   const ids = conversation?.lastInboundIds || [];
-  if (incoming.messageId && ids.includes(incoming.messageId)) {
-    return true;
-  }
-  const lastLead = [...(conversation?.messages || [])]
-    .reverse()
-    .find((item) => item.author === "lead");
-  if (!lastLead || String(lastLead.text || "").trim() !== String(incoming.text || "").trim()) {
+  const knownId = Boolean(incoming.messageId && ids.includes(incoming.messageId));
+  if (conversation?.sendError) {
     return false;
   }
-  const at = Date.parse(lastLead.at || "");
-  return Number.isFinite(at) && Date.now() - at < 120000;
+  if (knownId) {
+    return true;
+  }
+  const messages = conversation?.messages || [];
+  const lastLeadIndex = [...messages]
+    .map((item, index) => ({ item, index }))
+    .reverse()
+    .find(
+      ({ item }) =>
+        item.author === "lead" &&
+        String(item.text || "").trim() === String(incoming.text || "").trim(),
+    )?.index;
+  if (lastLeadIndex == null) {
+    return false;
+  }
+  const at = Date.parse(messages[lastLeadIndex].at || "");
+  if (!Number.isFinite(at) || Date.now() - at >= 120000) {
+    return false;
+  }
+  return messages
+    .slice(lastLeadIndex + 1)
+    .some((item) => item.author === "seya" && String(item.text || "").trim());
 }
 
 function outgoingWhatsAppTexts(followUps, draftedReply, previousSeya, inboundText) {
   const outgoing = followUps.length ? [...followUps] : draftedReply ? [draftedReply] : [];
-  const inboundNeedsAnswer = Boolean(
-    classifyPriceQuestion(inboundText) ||
-      /prix|tarif|combien/i.test(String(inboundText || "")),
-  );
+  const inboundNeedsAnswer = Boolean(String(inboundText || "").trim());
   return outgoing.filter((text, index) => {
     if (!text) {
       return false;
@@ -251,19 +268,173 @@ function replaceDraftWithSent(conversation, sentTexts) {
   };
 }
 
+function inboundTextFromWhatsApp(message) {
+  const text = String(message?.text?.body || "").trim();
+  if (text) {
+    return { text, kind: "text" };
+  }
+  const button = String(
+    message?.button?.text ||
+      message?.interactive?.button_reply?.title ||
+      message?.interactive?.list_reply?.title ||
+      "",
+  ).trim();
+  if (button) {
+    return { text: button, kind: "button" };
+  }
+  const caption = String(
+    message?.image?.caption ||
+      message?.video?.caption ||
+      message?.document?.caption ||
+      "",
+  ).trim();
+  if (caption) {
+    return { text: caption, kind: "caption" };
+  }
+  if (message?.image) {
+    return { text: "[photo]", kind: "image" };
+  }
+  if (message?.audio || message?.voice) {
+    return { text: "[message vocal]", kind: "audio" };
+  }
+  if (message?.video) {
+    return { text: "[vidéo]", kind: "video" };
+  }
+  if (message?.document) {
+    return { text: "[document]", kind: "document" };
+  }
+  if (message?.sticker) {
+    return { text: "[sticker]", kind: "sticker" };
+  }
+  if (message?.location) {
+    return { text: "[localisation]", kind: "location" };
+  }
+  return { text: "", kind: "" };
+}
+
 function extractIncomingMessages(body) {
   const entries = Array.isArray(body?.entry) ? body.entry : [];
   return entries.flatMap((entry) =>
     (Array.isArray(entry.changes) ? entry.changes : []).flatMap((change) =>
       (Array.isArray(change?.value?.messages) ? change.value.messages : [])
-        .filter((message) => message?.from && message?.text?.body)
-        .map((message) => ({
-          phone: message.from,
-          text: String(message.text.body || "").trim(),
-          messageId: message.id,
-        })),
+        .map((item) => {
+          const parsed = inboundTextFromWhatsApp(item);
+          if (!item?.from || !parsed.text) {
+            return null;
+          }
+          return {
+            phone: item.from,
+            text: parsed.text,
+            kind: parsed.kind,
+            messageId: item.id,
+          };
+        })
+        .filter(Boolean),
     ),
   );
+}
+
+function coalesceIncoming(messages) {
+  const groups = new Map();
+  for (const item of messages || []) {
+    const key = last9Phone(item.phone) || String(item.phone || "");
+    const current = groups.get(key) || [];
+    current.push(item);
+    groups.set(key, current);
+  }
+  return [...groups.values()].map((group) => {
+    const last = group[group.length - 1];
+    const texts = group.map((item) => String(item.text || "").trim()).filter(Boolean);
+    return {
+      ...last,
+      text: texts.join("\n"),
+      kind: group.every((item) => item.kind === last.kind) ? last.kind : "text",
+      messageIds: group.map((item) => item.messageId).filter(Boolean),
+    };
+  });
+}
+
+function isUnreadableMedia(kind) {
+  return Boolean(kind) && !["text", "button", "caption"].includes(kind);
+}
+
+function wait(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isRetryableSend(result) {
+  if (!result || result.sent) {
+    return false;
+  }
+  const reason = String(result.reason || "");
+  if (reason === "not_connected" || reason === "template_required") {
+    return false;
+  }
+  const code = Number(result.code);
+  if (code === 190 || code === 131026 || code === 131030) {
+    return false;
+  }
+  return true;
+}
+
+async function sendWithRetry(phone, text, extras, attempts = 3) {
+  let last = { sent: false, reason: "send_failed" };
+  for (let round = 0; round < attempts; round += 1) {
+    try {
+      last = await sendSharedWhatsApp(phone, text, extras);
+    } catch (error) {
+      last = {
+        sent: false,
+        reason: "send_failed",
+        error: error instanceof Error ? error.message : "send_failed",
+      };
+    }
+    if (last?.sent) {
+      return last;
+    }
+    if (!isRetryableSend(last) || round === attempts - 1) {
+      return last;
+    }
+    await wait(400 * (round + 1));
+  }
+  return last;
+}
+
+function deliveryAlert(stage, detail) {
+  const reason = String(detail || "").trim();
+  if (stage === "generate") {
+    return reason
+      ? `Seya n’a pas pu répondre (${reason}). Reprenez la conversation.`
+      : "Seya n’a pas pu répondre. Reprenez la conversation.";
+  }
+  return reason
+    ? `Seya n’a pas pu envoyer sa réponse WhatsApp : ${reason}. Reprenez la conversation.`
+    : "Seya n’a pas pu envoyer sa réponse WhatsApp. Reprenez la conversation.";
+}
+
+async function handleIncomingQueued(supabase, incoming) {
+  const key = last9Phone(incoming.phone) || String(incoming.phone || "");
+  const run = (inboundLocks.get(key) || Promise.resolve()).then(
+    () => handleIncoming(supabase, incoming),
+    () => handleIncoming(supabase, incoming),
+  );
+  inboundLocks.set(
+    key,
+    run.then(
+      () => undefined,
+      () => undefined,
+    ),
+  );
+  return run;
+}
+
+async function generateSeyaReplyWithRetry(args) {
+  try {
+    return await generateSeyaReply(args);
+  } catch (error) {
+    console.error("[seya/whatsapp] generate retry", error);
+    return generateSeyaReply(args);
+  }
 }
 
 async function handleIncoming(supabase, incoming) {
@@ -313,7 +484,19 @@ async function handleIncoming(supabase, incoming) {
     );
   }
   existing.centerId = existing.centerId || center.id;
-  if (alreadyHandledInbound(existing, incoming)) {
+  const inboundIds = [
+    ...(existing.lastInboundIds || []),
+    incoming.messageId,
+    ...((incoming.messageIds || [])),
+  ]
+    .filter(Boolean)
+    .filter((id, index, list) => list.indexOf(id) === index)
+    .slice(-40);
+
+  const knownInboundId = Boolean(
+    incoming.messageId && (existing.lastInboundIds || []).includes(incoming.messageId),
+  );
+  if (alreadyHandledInbound(existing, incoming) && !existing.sendError) {
     return {
       phone: incoming.phone,
       routed: true,
@@ -321,40 +504,155 @@ async function handleIncoming(supabase, incoming) {
       skipped: "duplicate",
     };
   }
-  existing.lastInboundIds = [
-    ...(existing.lastInboundIds || []),
-    incoming.messageId,
-  ]
-    .filter(Boolean)
-    .slice(-40);
-  const appointments = await loadCenterAppointments(supabase, center.id);
+
+  const sendExtras = {
+    firstName: context.firstName,
+    centerName: center.name,
+    treatment: existing.qualification?.need || context.treatment || "",
+  };
+
+  if (existing.sendError && knownInboundId) {
+    const lastSeya = [...(existing.messages || [])]
+      .reverse()
+      .find((item) => item.author === "seya" && String(item.text || "").trim());
+    if (lastSeya?.text) {
+      const retried = await sendWithRetry(incoming.phone, lastSeya.text, sendExtras);
+      if (retried.sent) {
+        existing.sendError = null;
+        existing.lastInboundIds = inboundIds;
+        await writeSeyaConversations(supabase, center.id, [
+          existing,
+          ...conversations.filter((item) => !isSameSeyaConversation(item, existing)),
+        ]);
+        return {
+          phone: incoming.phone,
+          routed: true,
+          centerId: center.id,
+          skipped: "retried_send",
+          sent: true,
+        };
+      }
+      return {
+        phone: incoming.phone,
+        routed: true,
+        centerId: center.id,
+        skipped: "send_failed",
+        sent: false,
+        error: existing.sendError,
+      };
+    }
+  }
+
+  existing.lastInboundIds = inboundIds;
+  const previousSeya = [...(existing.messages || [])]
+    .reverse()
+    .find((item) => item.author === "seya")?.text || "";
+
+  if (isUnreadableMedia(incoming.kind)) {
+    const next = {
+      ...existing,
+      relanceCount: 0,
+      welcomeSendAt: null,
+      sendError: null,
+      messages: [
+        ...(existing.messages || []),
+        message("lead", incoming.text),
+        message("seya", UNREADABLE_MEDIA_REPLY),
+      ],
+      updatedAt: new Date().toISOString(),
+    };
+    const sent = await sendWithRetry(incoming.phone, UNREADABLE_MEDIA_REPLY, sendExtras);
+    next.sendError = sent.sent ? null : deliveryAlert("send", sent.error || sent.reason);
+    await writeSeyaConversations(supabase, center.id, [
+      next,
+      ...conversations.filter((item) => !isSameSeyaConversation(item, next)),
+    ]);
+    return {
+      phone: incoming.phone,
+      routed: true,
+      centerId: center.id,
+      leadId: context.leadId,
+      status: next.status,
+      skipped: "unreadable_media",
+      sent: Boolean(sent.sent),
+    };
+  }
+
   const hours = readHours(center.settings);
-  const result = await generateSeyaReply({
-    conversation: existing,
-    text: incoming.text,
-    seya,
-    slots: pickSlotsForMessage(
+  let appointments = [];
+  try {
+    appointments = await loadCenterAppointments(supabase, center.id);
+  } catch (loadError) {
+    console.error("[seya/whatsapp] appointments failed", loadError);
+  }
+
+  let result;
+  try {
+    result = await generateSeyaReplyWithRetry({
+      conversation: existing,
+      text: incoming.text,
+      seya,
+      slots: pickSlotsForMessage(
+        appointments,
+        hours,
+        existing,
+        incoming.text,
+        undefined,
+        seya,
+      ),
       appointments,
       hours,
-      existing,
-      incoming.text,
-      undefined,
-      seya,
-    ),
-    appointments,
-    hours,
-    centerName: center.name,
-    centerAddress: readCenterAddress(center),
-    centerId: center.id,
-  });
+      centerName: center.name,
+      centerAddress: readCenterAddress(center),
+      centerId: center.id,
+    });
+  } catch (generateError) {
+    console.error("[seya/whatsapp] generate failed", generateError);
+    const next = {
+      ...existing,
+      relanceCount: 0,
+      welcomeSendAt: null,
+      sendError: deliveryAlert(
+        "generate",
+        generateError instanceof Error ? generateError.message : "erreur technique",
+      ),
+      messages: [...(existing.messages || []), message("lead", incoming.text)],
+      updatedAt: new Date().toISOString(),
+    };
+    const fallbackSent = await sendWithRetry(
+      incoming.phone,
+      EMPTY_SEYA_REPLY,
+      sendExtras,
+    );
+    if (fallbackSent.sent) {
+      next.messages = [...next.messages, message("seya", EMPTY_SEYA_REPLY)];
+      next.sendError = null;
+    }
+    await writeSeyaConversations(supabase, center.id, [
+      next,
+      ...conversations.filter((item) => !isSameSeyaConversation(item, next)),
+    ]);
+    return {
+      phone: incoming.phone,
+      routed: true,
+      centerId: center.id,
+      leadId: context.leadId,
+      status: next.status,
+      error: "generate_failed",
+      sent: Boolean(fallbackSent.sent),
+    };
+  }
+
   const next = result.conversation;
   next.lastRelanceAt = next.lastRelanceAt || existing.lastRelanceAt;
   next.relanceCount = 0;
   next.welcomeSendAt = null;
+  next.lastInboundIds = inboundIds;
 
-  const draftedReply = [...(result.conversation.messages || [])]
-    .reverse()
-    .find((item) => item.author === "seya")?.text || "";
+  const draftedReply =
+    [...(result.conversation.messages || [])]
+      .reverse()
+      .find((item) => item.author === "seya")?.text || "";
   const followUps = [];
   const wantedSlot = result.shouldBook;
   if (wantedSlot) {
@@ -393,7 +691,7 @@ async function handleIncoming(supabase, incoming) {
         wantedSlot,
       );
       const alternatives = remaining.length
-        ? remaining.slice(0, 3)
+        ? remaining.slice(0, 2)
         : pickSlotsForState(
             latestOccupancy,
             hours,
@@ -427,16 +725,28 @@ async function handleIncoming(supabase, incoming) {
     }
   }
 
-  const previousSeya = [...(existing.messages || [])]
-    .reverse()
-    .find((item) => item.author === "seya")?.text || "";
-  const uniqueOutgoing = outgoingWhatsAppTexts(
+  let uniqueOutgoing = outgoingWhatsAppTexts(
     followUps,
     draftedReply,
     previousSeya,
     incoming.text,
   );
+  if (!uniqueOutgoing.length && incoming.text) {
+    uniqueOutgoing = [String(draftedReply || "").trim() || EMPTY_SEYA_REPLY];
+  }
   Object.assign(next, replaceDraftWithSent(next, uniqueOutgoing));
+
+  const sendResults = [];
+  for (const text of uniqueOutgoing) {
+    sendResults.push(await sendWithRetry(incoming.phone, text, {
+      ...sendExtras,
+      treatment: next.qualification?.need || sendExtras.treatment,
+    }));
+  }
+  const failed = sendResults.find((item) => !item?.sent);
+  next.sendError = failed
+    ? deliveryAlert("send", failed.error || failed.reason)
+    : null;
 
   const saved = persistableConversations([
     next,
@@ -451,18 +761,8 @@ async function handleIncoming(supabase, incoming) {
       center.id,
       context,
       incoming.text,
-    ).catch((error) => {
-      console.error("[seya/whatsapp] crm intent failed", error);
-    });
-  }
-
-  for (const text of uniqueOutgoing) {
-    await sendSharedWhatsApp(incoming.phone, text, {
-      firstName: context.firstName,
-      centerName: center.name,
-      treatment: next.qualification?.need || context.treatment || "",
-    }).catch((sendError) => {
-      console.error("[seya/whatsapp] send failed", sendError);
+    ).catch((crmError) => {
+      console.error("[seya/whatsapp] crm intent failed", crmError);
     });
   }
 
@@ -474,6 +774,8 @@ async function handleIncoming(supabase, incoming) {
     leadId: context.leadId,
     status: next.status,
     booked: Boolean(result.shouldBook),
+    sent: sendResults.length ? sendResults.every((item) => item?.sent) : false,
+    error: next.sendError || null,
   };
 }
 
@@ -1314,4 +1616,10 @@ handler.outgoingWhatsAppTexts = outgoingWhatsAppTexts;
 handler.replaceDraftWithSent = replaceDraftWithSent;
 handler.isTemplateRequired = isTemplateRequired;
 handler.welcomeTemplateVars = welcomeTemplateVars;
+handler.extractIncomingMessages = extractIncomingMessages;
+handler.coalesceIncoming = coalesceIncoming;
+handler.alreadyHandledInbound = alreadyHandledInbound;
+handler.inboundTextFromWhatsApp = inboundTextFromWhatsApp;
+handler.sendWithRetry = sendWithRetry;
+handler.isRetryableSend = isRetryableSend;
 module.exports = handler;

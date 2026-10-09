@@ -111,6 +111,7 @@ const ConversationRow = memo(function ConversationRow({
             conversation.phone}
         </p>
         <span className="shrink-0 text-[11px] font-medium text-slate-400">
+          {conversation.sendError ? "⚠️ " : ""}
           {conversation.messages.length}
         </span>
       </div>
@@ -337,7 +338,8 @@ export function SeyaInbox({
               </div>
               {selected.sendError ? (
                 <p className="bg-rose-50 px-5 py-2 text-sm font-medium text-rose-800">
-                  WhatsApp pas parti : {selected.sendError}
+                  Seya n’a pas pu répondre sur WhatsApp. {selected.sendError}{" "}
+                  L’équipe peut reprendre le fil ici.
                 </p>
               ) : null}
               {feedback ? (

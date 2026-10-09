@@ -76,3 +76,10 @@ test("une nouvelle question tarif s’envoie même si le brouillon ressemble au 
   assert.equal(sent.length, 1);
   assert.equal(sent[0], previous);
 });
+
+test("une nouvelle question hors tarif s’envoie aussi, même si le texte ressemble", () => {
+  const previous = "Dites-moi un jour qui vous arrange, je regarde tout de suite.";
+  const sent = outgoingWhatsAppTexts([], previous, previous, "Jeudi matin");
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0], previous);
+});
