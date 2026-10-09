@@ -51,6 +51,7 @@ const {
   isWillComeBack,
   isThreadComplaint,
   withStaffOfferedSlots,
+  hasDayOfMonthRequest,
 } = require("./conversation");
 const { understandThread } = require("./care-family");
 const {
@@ -102,6 +103,7 @@ async function generateSeyaReply({
   };
   const allowRepeat =
     asksOtherDay(intentText) ||
+    hasDayOfMonthRequest(intentText) ||
     /lundi|mardi|mercredi|jeudi|vendredi|samedi|debut de semaine|fin de semaine|fin de journee|soir|apres.?midi|dispo|creneau|créneau|1er|octobre|\d{1,2}\/\d{1,2}/i.test(
       String(intentText || ""),
     );
@@ -122,9 +124,13 @@ async function generateSeyaReply({
           )
         : slots || []
       : [];
+  const allowDateFallback = rawSlots.some(
+    (slot) => bookingState.requestedDate && slot.date !== bookingState.requestedDate,
+  );
   const guarded = guardSlots(rawSlots, bookingState, {
     centerId: conversationWithState.centerId,
     allowRepeat,
+    allowDateFallback,
   });
   const resolvedSlots = guarded.slots;
   const extras = {
@@ -647,7 +653,7 @@ function applyAiDecision(conversation, text, seya, slots, decision, extras = {})
     }
     return sealAiResult(
       {
-        ...withMessages(conversation, qualification, "RDV proposé", text, humanSlotReply(safeSlots)),
+        ...withMessages(conversation, qualification, "RDV proposé", text, humanSlotReply(safeSlots, bookingState)),
         proposedSlots: safeSlots,
       },
       {

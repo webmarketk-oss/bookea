@@ -421,7 +421,7 @@ async function handleIncoming(supabase, incoming) {
       next.proposedSlots = alternatives;
       followUps.push(
         alternatives.length
-          ? `Ce créneau n’est plus disponible. ${humanSlotReply(alternatives)}`
+          ? `Ce créneau n’est plus disponible. ${humanSlotReply(alternatives, next.bookingState)}`
           : "Ce créneau n’est plus disponible. Souhaitez-vous que je regarde un autre horaire ?",
       );
     }

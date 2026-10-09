@@ -378,9 +378,9 @@ function parseClockMinutes(text) {
     const token = match[0];
     const looksLikeClock = /h|:/.test(token);
     const dayAfterWeekday = new RegExp(
-      `(lundi|mardi|mercredi|jeudi|vendredi|samedi|le)\\s+${hour}\\b`,
+      `(lundi|mardi|mercredi|jeudi|vendredi|samedi|le|du|a partir du|des le)\\s+${hour}\\b`,
     ).test(value);
-    if (!looksLikeClock && dayAfterWeekday) {
+    if (!looksLikeClock && (dayAfterWeekday || hasDayOfMonthRequest(text))) {
       match = pattern.exec(value);
       continue;
     }
@@ -1089,7 +1089,14 @@ function wantsSlots(text, conversation) {
     /dispo|creneau|horaire|rendez-vous|\brdv\b|de la place|voir les (heures|horaires)|quand (puis-je|je peux) (venir|passer)|un creneau|(tu|vous) (me )?(proposes? quoi|proposes? comme)|propose quoi|t[' ]as (quoi|comme)/.test(
       value,
     );
-  return asksAgenda || (namesDay && !refusedDay);
+  return asksAgenda || (namesDay && !refusedDay) || hasDayOfMonthRequest(text);
+}
+
+function hasDayOfMonthRequest(text) {
+  const value = ` ${normalize(text)} `;
+  return /(?:a partir du|des le|(?:^|[\s,;])(?:le|du))\s+\d{1,2}(?:er|e)?(?!\s*(?:h|:|\/))/.test(
+    value,
+  );
 }
 
 function identityReply() {
@@ -1592,4 +1599,5 @@ module.exports = {
   withStaffOfferedSlots,
   applyCentreMessage,
   threadIsPaused,
+  hasDayOfMonthRequest,
 };

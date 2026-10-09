@@ -22,6 +22,7 @@ const {
   wantsSlots,
   weekHalfFromText,
   asksNextWeek,
+  hasDayOfMonthRequest,
 } = require("./conversation");
 
 const WEEKDAYS = [
@@ -55,6 +56,9 @@ function emptyBookingState(centerId) {
     preferredTime: null,
     preferredTimes: [],
     searchFrom: null,
+    strictWeekday: false,
+    weekdayFromName: false,
+    dateFlexible: false,
   };
 }
 
@@ -83,6 +87,9 @@ function normalizeBookingState(value, centerId) {
         ? [current.preferredTime]
         : [],
     searchFrom: current.searchFrom || null,
+    strictWeekday: Boolean(current.strictWeekday),
+    weekdayFromName: Boolean(current.weekdayFromName),
+    dateFlexible: Boolean(current.dateFlexible),
   };
 }
 
@@ -126,20 +133,43 @@ function applyBookingMessage(state, text, extras = {}) {
     next.serviceIntent = "minceur_ventre";
   }
 
-  const explicitDate = parseExplicitDate(text, now);
+  const dateRequest = parseDateRequest(text, now);
+  const explicitDate = dateRequest.date;
   if (explicitDate) {
     next.lastOfferedSlots.forEach((slot) => {
       if (slot?.date && slot.date !== explicitDate) {
         next.rejectedDates = unique([...next.rejectedDates, slot.date]);
+        next.rejectedSlots = uniqueSlots([
+          ...(next.rejectedSlots || []),
+          slot,
+        ]);
       }
     });
     next.lastOfferedSlots = (next.lastOfferedSlots || []).filter(
       (slot) => slot?.date === explicitDate,
     );
-    next.requestedDate = explicitDate;
-    next.requestedWeekday = weekdayOf(explicitDate);
+    if (dateRequest.from) {
+      next.searchFrom = explicitDate;
+      next.requestedDate = null;
+      next.requestedWeekday = null;
+      next.dateFlexible = true;
+    } else {
+      next.requestedDate = explicitDate;
+      next.searchFrom = explicitDate;
+      next.requestedWeekday = weekdayOf(explicitDate);
+      next.dateFlexible = false;
+    }
     next.weekHalf = null;
     next.pendingQuestion = null;
+    const dayNum = Number(String(explicitDate).slice(-2));
+    if (
+      next.preferredTime &&
+      Number(String(next.preferredTime).slice(0, 2)) === dayNum &&
+      !/\d{1,2}\s*h/.test(value)
+    ) {
+      next.preferredTime = null;
+      next.preferredTimes = [];
+    }
   }
 
   const namedDays = WEEKDAYS.map((day, index) =>
@@ -172,11 +202,35 @@ function applyBookingMessage(state, text, extras = {}) {
     }
   }
 
-  if (!explicitDate && wantedDays.length === 1) {
-    next.requestedWeekday = wantedDays[0];
-    next.requestedDate = nextDateForWeekday(wantedDays[0], now);
-    next.weekHalf = null;
-    next.pendingQuestion = null;
+  if (wantedDays.length === 1) {
+    next.weekdayFromName = true;
+    if (/uniquement|seulement/.test(value)) {
+      next.strictWeekday = true;
+    }
+    if (!explicitDate) {
+      next.requestedWeekday = wantedDays[0];
+      next.requestedDate = nextDateForWeekday(wantedDays[0], now);
+      next.weekHalf = null;
+      next.pendingQuestion = null;
+    }
+  } else if (explicitDate) {
+    next.weekdayFromName = wantedDays.length > 0;
+    if (!wantedDays.length) {
+      next.strictWeekday = false;
+    }
+  }
+
+  if (
+    /^(non|pas)\b/.test(value) &&
+    next.lastOfferedSlots.length &&
+    (explicitDate || wantedDays.length || dayPartFromText(text))
+  ) {
+    next.rejectedSlots = uniqueSlots([
+      ...(next.rejectedSlots || []),
+      ...next.lastOfferedSlots.filter(
+        (slot) => !explicitDate || slot.date !== explicitDate,
+      ),
+    ]);
   }
 
   if (/\baujourd[' ]?hui\b/.test(value)) {
@@ -221,7 +275,7 @@ function applyBookingMessage(state, text, extras = {}) {
   }
 
   const weekHalf = weekHalfFromText(text);
-  if (weekHalf) {
+  if (weekHalf && !explicitDate) {
     next.weekHalf = weekHalf;
     next.requestedDate = null;
     next.requestedWeekday = null;
@@ -429,7 +483,8 @@ function asksForOtherSlots(text) {
     /propose quoi|suivant|prochain|debut de semaine|fin de semaine|aujourd[' ]?hui/.test(
       value,
     ) ||
-    /\b(lundi|mardi|mercredi|jeudi|vendredi|samedi|demain)\b/.test(value)
+    /\b(lundi|mardi|mercredi|jeudi|vendredi|samedi|demain)\b/.test(value) ||
+    hasDayOfMonthRequest(text)
   );
 }
 
@@ -478,11 +533,15 @@ function guardSlots(slots, state, extras = {}) {
     (state.lastOfferedSlots || []).map((slot) => `${slot.date}|${slot.time}`),
   );
 
+  const dateLocked = Boolean(state.requestedDate) && extras.allowDateFallback !== true;
+  const weekdayLocked =
+    (state.strictWeekday || state.weekdayFromName) && state.requestedWeekday != null;
+
   const leaked = list.filter((slot) => {
-    if (state.requestedDate && slot.date !== state.requestedDate) return true;
+    if (dateLocked && slot.date !== state.requestedDate) return true;
     if (
-      !state.requestedDate &&
-      state.requestedWeekday != null &&
+      !dateLocked &&
+      weekdayLocked &&
       weekdayOf(slot.date) !== state.requestedWeekday
     ) {
       return true;
@@ -508,12 +567,12 @@ function guardSlots(slots, state, extras = {}) {
     if (extras.centerId && state.centerId && extras.centerId !== state.centerId) {
       return false;
     }
-    if (state.requestedDate && slot.date !== state.requestedDate) {
+    if (dateLocked && slot.date !== state.requestedDate) {
       return false;
     }
     if (
-      !state.requestedDate &&
-      state.requestedWeekday != null &&
+      !dateLocked &&
+      weekdayLocked &&
       weekdayOf(slot.date) !== state.requestedWeekday
     ) {
       return false;
@@ -551,23 +610,22 @@ function guardSlots(slots, state, extras = {}) {
     };
   }
 
-  return { slots: kept.slice(0, 3), blocked: false, fallback: null };
+  return { slots: kept.slice(0, 2), blocked: false, fallback: null };
 }
 
 function emptySlotFallback(state) {
   if (state.requestedDate) {
     const label = formatHumanDate(state.requestedDate);
-    const day = WEEKDAYS[weekdayOf(state.requestedDate)];
-    return `Je n’ai pas de disponibilité ${label} pour ce bilan. Souhaitez-vous que je regarde le ${day} suivant ou une autre journée ?`;
+    return `Je n’ai pas de disponibilité ${label} qui corresponde à votre demande, y compris plus loin. Pouvez-vous être un peu flexible sur le jour ou l’horaire ?`;
   }
   if (state.requestedWeekday != null) {
-    return `Je n’ai pas de disponibilité ${WEEKDAYS[state.requestedWeekday]} pour ce bilan. Souhaitez-vous un autre jour ?`;
+    return `Je n’ai pas de disponibilité ${WEEKDAYS[state.requestedWeekday]} qui corresponde à votre demande dans les deux prochains mois. Pouvez-vous être un peu flexible sur le jour ou l’horaire ?`;
   }
   if ((state.preferredTimes || []).length) {
     const hours = state.preferredTimes
       .map((time) => String(time).replace(":", "h"))
       .join(" ou ");
-    return `Je n’ai pas de ${hours} dans les 30 prochains jours. Souhaitez-vous un horaire proche, ou une autre journée ?`;
+    return `Je n’ai pas de ${hours} dans les deux prochains mois. Pouvez-vous être un peu flexible sur le jour ou l’horaire ?`;
   }
   if (state.dayPart === "evening") {
     return "Je n’ai pas de créneau en fin de journée sur ces jours-là. Souhaitez-vous un autre horaire, ou une autre journée ?";
@@ -627,8 +685,23 @@ function replyHasForbiddenSlots(text, state) {
   return false;
 }
 
-function enforceOutgoingText(text, state) {
-  if (!replyHasForbiddenSlots(text, state)) {
+function relaxRequestedDate(state, slots) {
+  if (!state?.requestedDate || !Array.isArray(slots) || !slots.length) {
+    return state;
+  }
+  if (slots.every((slot) => !slot?.date || slot.date === state.requestedDate)) {
+    return state;
+  }
+  return {
+    ...state,
+    requestedDate: null,
+    searchFrom: state.searchFrom || state.requestedDate,
+  };
+}
+
+function enforceOutgoingText(text, state, slots) {
+  const checkState = relaxRequestedDate(state, slots);
+  if (!replyHasForbiddenSlots(text, checkState)) {
     return text;
   }
   console.error("[seya/booking] reply_mismatch", {
@@ -676,6 +749,57 @@ function faqKind(text) {
   }
   if (/fait mal|douloureux|douleur/.test(value)) return "pain";
   return "";
+}
+
+function parseDateRequest(text, now) {
+  const value = normalize(text);
+  const from = /(?:a partir du|des le)\s+\d{1,2}/.test(value);
+  const explicit = parseExplicitDate(text, now);
+  if (explicit) {
+    return { date: explicit, from };
+  }
+  const dayOnly = value.match(
+    /(?:a partir du|des le|(?:^|[\s,;:.!?])(?:le|du))\s+(\d{1,2})(?:er|e)?(?!\s*(?:h|:|\/))/,
+  );
+  if (dayOnly) {
+    const date = nextDateForMonthDay(Number(dayOnly[1]), now);
+    return { date: date || null, from };
+  }
+  return { date: null, from: false };
+}
+
+function nextDateForMonthDay(day, now) {
+  const dayNum = Number(day);
+  if (!Number.isInteger(dayNum) || dayNum < 1 || dayNum > 31) {
+    return null;
+  }
+  const start = now instanceof Date ? now : new Date();
+  const today = new Date(start.getFullYear(), start.getMonth(), start.getDate());
+  for (let add = 0; add < 4; add += 1) {
+    const candidate = new Date(today.getFullYear(), today.getMonth() + add, dayNum);
+    if (candidate.getDate() !== dayNum) {
+      continue;
+    }
+    if (candidate >= today) {
+      return toIso(candidate);
+    }
+  }
+  return null;
+}
+
+function uniqueSlots(list) {
+  const seen = new Set();
+  return (list || []).filter((slot) => {
+    if (!slot?.date || !slot?.time) {
+      return false;
+    }
+    const key = `${slot.date}|${String(slot.time).slice(0, 5)}`;
+    if (seen.has(key)) {
+      return false;
+    }
+    seen.add(key);
+    return true;
+  });
 }
 
 function parseExplicitDate(text, now) {
@@ -877,6 +1001,7 @@ module.exports = {
   guardSlots,
   markPriceAnswered,
   normalizeBookingState,
+  parseDateRequest,
   replyHasForbiddenSlots,
   shouldSearchSlots,
   slotAllowed,

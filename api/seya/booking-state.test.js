@@ -9,9 +9,10 @@ const {
   emptyBookingState,
   enforceOutgoingText,
   guardSlots,
+  parseDateRequest,
 } = require("./booking-state");
 const { generateSeyaReply, applyAiDecision, pickSafeReply } = require("./ai");
-const { startConversation, suggestAvailableSlots } = require("./agent");
+const { startConversation, suggestAvailableSlots, pickSlotsForState } = require("./agent");
 
 const NOW = new Date("2026-09-27T12:00:00");
 const CENTER_ID = "jfg-clinique-clermont";
@@ -508,5 +509,264 @@ test("pas ce lundi, jeudi 8 apm : elle lit le jeudi après-midi, pas le lundi", 
   assert.ok(
     conversation.proposedSlots.every((slot) => Number(slot.time.slice(0, 2)) >= 14),
   );
+});
+
+const OCT9 = new Date("2026-10-09T07:00:00");
+
+function dateRange(from, to) {
+  const dates = [];
+  let current = from;
+  while (current <= to) {
+    dates.push(current);
+    const next = new Date(`${current}T12:00:00`);
+    next.setDate(next.getDate() + 1);
+    current = [
+      next.getFullYear(),
+      String(next.getMonth() + 1).padStart(2, "0"),
+      String(next.getDate()).padStart(2, "0"),
+    ].join("-");
+  }
+  return dates;
+}
+
+function qualifiedConversation() {
+  const conversation = startConversation(
+    {
+      leadId: "lead-cynthia",
+      centerId: CENTER_ID,
+      firstName: "Cynthia",
+      lastName: "Test",
+      phone: "0612345678",
+      treatment: "Soin minceur",
+    },
+    "JFG Clinique Clermont",
+    seya,
+  );
+  return {
+    ...conversation,
+    qualification: {
+      ...(conversation.qualification || {}),
+      need: "Soin minceur",
+      zone: "ventre",
+    },
+  };
+}
+
+test("le 20 et à partir du 20 sont des dates, pas 20 h", () => {
+  assert.deepEqual(parseDateRequest("Je veux à partir du 20", OCT9), {
+    date: "2026-10-20",
+    from: true,
+  });
+  assert.deepEqual(parseDateRequest("Non je veux le 20", OCT9), {
+    date: "2026-10-20",
+    from: false,
+  });
+  assert.deepEqual(parseDateRequest("Le 20 au matin", OCT9), {
+    date: "2026-10-20",
+    from: false,
+  });
+  assert.deepEqual(parseDateRequest("le 20 à 18h", OCT9), {
+    date: "2026-10-20",
+    from: false,
+  });
+
+  const fromDate = applyBookingMessage(emptyBookingState(CENTER_ID), "Je veux à partir du 20", {
+    centerId: CENTER_ID,
+    now: OCT9,
+  });
+  assert.equal(fromDate.searchFrom, "2026-10-20");
+  assert.equal(fromDate.requestedDate, null);
+  assert.equal(fromDate.preferredTime, null);
+  assert.equal(fromDate.dateFlexible, true);
+
+  const exact = applyBookingMessage(fromDate, "Non je veux le 20", {
+    centerId: CENTER_ID,
+    now: OCT9,
+  });
+  assert.equal(exact.requestedDate, "2026-10-20");
+  assert.equal(exact.searchFrom, "2026-10-20");
+  assert.equal(exact.preferredTime, null);
+
+  const morning = applyBookingMessage(exact, "Le 20 au matin", {
+    centerId: CENTER_ID,
+    now: OCT9,
+  });
+  assert.equal(morning.requestedDate, "2026-10-20");
+  assert.equal(morning.dayPart, "morning");
+  assert.equal(morning.preferredTime, null);
+
+  const atSix = applyBookingMessage(emptyBookingState(CENTER_ID), "le 20 à 18h", {
+    centerId: CENTER_ID,
+    now: OCT9,
+  });
+  assert.equal(atSix.requestedDate, "2026-10-20");
+  assert.equal(atSix.preferredTime, "18:00");
+});
+
+test("date précise disponible : elle propose le 20, pas le 9 octobre", async () => {
+  let conversation = qualifiedConversation();
+  conversation = await reply(conversation, "Je veux le 20", { now: OCT9 });
+  assert.equal(conversation.bookingState.requestedDate, "2026-10-20");
+  assert.ok(conversation.proposedSlots.length > 0);
+  assert.ok(conversation.proposedSlots.every((slot) => slot.date === "2026-10-20"));
+  assert.match(lastSeya(conversation), /20\/10|mar\./i);
+  assert.doesNotMatch(lastSeya(conversation), /09\/10|10\/10|12\/10|ven\. 09|sam\. 10/i);
+});
+
+test("à partir du 20 : elle cherche à compter du 20, pas avant", async () => {
+  let conversation = qualifiedConversation();
+  conversation = await reply(conversation, "Je veux à partir du 20", { now: OCT9 });
+  assert.equal(conversation.bookingState.searchFrom, "2026-10-20");
+  assert.ok(conversation.proposedSlots.length > 0);
+  assert.ok(conversation.proposedSlots.every((slot) => slot.date >= "2026-10-20"));
+  assert.doesNotMatch(lastSeya(conversation), /09\/10|ven\. 09/i);
+});
+
+test("18 h pris le 20 : elle l’explique et propose le prochain 18 h", async () => {
+  let conversation = qualifiedConversation();
+  conversation = await reply(conversation, "le 20 à 18h", {
+    now: OCT9,
+    hours: hours().map((item) => ({ ...item, endTime: "20:00" })),
+    appointments: [
+      { date: "2026-10-20", start: "18:00", duration: 60, status: "confirmed" },
+    ],
+  });
+  assert.ok(conversation.proposedSlots.length > 0);
+  assert.ok(conversation.proposedSlots.every((slot) => slot.time === "18:00"));
+  assert.ok(conversation.proposedSlots.every((slot) => slot.date > "2026-10-20"));
+  assert.match(lastSeya(conversation), /20\/10/);
+  assert.match(lastSeya(conversation), /18h/);
+  assert.doesNotMatch(lastSeya(conversation), /09\/10|11h00/i);
+});
+
+test("18 h indisponible : elle propose le prochain 18 h, pas un autre horaire", () => {
+  const slots = pickSlotsForState(
+    [{ date: "2026-10-20", start: "18:00", duration: 60, status: "confirmed" }],
+    hours().map((item) => ({ ...item, endTime: "20:00" })),
+    {
+      ...emptyBookingState(CENTER_ID),
+      requestedDate: "2026-10-20",
+      preferredTime: "18:00",
+      preferredTimes: ["18:00"],
+    },
+    OCT9,
+    60,
+  );
+  assert.ok(slots.length > 0);
+  assert.ok(slots.every((slot) => slot.time === "18:00"));
+  assert.ok(slots.every((slot) => slot.date > "2026-10-20"));
+  assert.equal(slots[0].date, "2026-10-21");
+});
+
+test("uniquement le mercredi : elle reste sur les mercredis", () => {
+  const state = applyBookingMessage(
+    emptyBookingState(CENTER_ID),
+    "uniquement le mercredi",
+    { centerId: CENTER_ID, now: OCT9 },
+  );
+  assert.equal(state.requestedWeekday, 3);
+  assert.equal(state.strictWeekday, true);
+  assert.equal(state.requestedDate, "2026-10-14");
+
+  const slots = pickSlotsForState([], hours(), state, OCT9, 60);
+  assert.ok(slots.length > 0);
+  assert.ok(slots.every((slot) => new Date(`${slot.date}T12:00:00`).getDay() === 3));
+  assert.ok(slots.every((slot) => slot.date === "2026-10-14"));
+});
+
+test("uniquement le mercredi à 18 h : mercredi suivant à 18 h si le premier est pris", () => {
+  const state = applyBookingMessage(
+    emptyBookingState(CENTER_ID),
+    "uniquement le mercredi à 18h",
+    { centerId: CENTER_ID, now: OCT9 },
+  );
+  assert.equal(state.requestedWeekday, 3);
+  assert.equal(state.preferredTime, "18:00");
+  assert.equal(state.strictWeekday, true);
+
+  const slots = pickSlotsForState(
+    [{ date: "2026-10-14", start: "18:00", duration: 60, status: "confirmed" }],
+    hours().map((item) => ({ ...item, endTime: "20:00" })),
+    state,
+    OCT9,
+    60,
+  );
+  assert.ok(slots.length > 0);
+  assert.ok(slots.every((slot) => slot.time === "18:00"));
+  assert.ok(slots.every((slot) => new Date(`${slot.date}T12:00:00`).getDay() === 3));
+  assert.equal(slots[0].date, "2026-10-21");
+});
+
+test("créneau refusé : il n’est jamais reproposé, même plus loin", () => {
+  const refused = { date: "2026-10-20", time: "11:00" };
+  const slots = pickSlotsForState(
+    [],
+    hours(),
+    {
+      ...emptyBookingState(CENTER_ID),
+      requestedDate: "2026-10-20",
+      dayPart: "morning",
+      rejectedSlots: [refused],
+    },
+    OCT9,
+    60,
+  );
+  assert.equal(slots.some((slot) => slot.date === refused.date && slot.time === refused.time), false);
+  assert.ok(slots.length > 0);
+  assert.ok(slots.every((slot) => slot.date === "2026-10-20"));
+});
+
+test("aucune place sous 15 jours : elle cherche jusqu’à deux mois", () => {
+  const blocked = dateRange("2026-10-20", "2026-11-04");
+  const slots = pickSlotsForState(
+    [],
+    hours(),
+    {
+      ...emptyBookingState(CENTER_ID),
+      searchFrom: "2026-10-20",
+      dateFlexible: true,
+      rejectedDates: blocked,
+    },
+    OCT9,
+    60,
+  );
+  assert.ok(slots.length > 0);
+  assert.ok(slots.every((slot) => slot.date >= "2026-11-05"));
+  assert.equal(slots[0].date, "2026-11-05");
+});
+
+test("Cynthia : le 20 au matin après un refus des mauvaises dates", async () => {
+  let conversation = qualifiedConversation();
+  conversation = {
+    ...conversation,
+    proposedSlots: [
+      { date: "2026-10-09", time: "18:00", label: "ven. 09/10 à 18h00" },
+    ],
+    bookingState: {
+      ...conversation.bookingState,
+      lastOfferedSlots: [
+        { date: "2026-10-09", time: "18:00", label: "ven. 09/10 à 18h00" },
+      ],
+      preferredTime: "20:00",
+      preferredTimes: ["20:00"],
+      appointmentStatus: "proposed",
+    },
+  };
+  conversation = await reply(conversation, "Non je veux le 20", { now: OCT9 });
+  assert.equal(conversation.bookingState.requestedDate, "2026-10-20");
+  assert.ok(
+    (conversation.bookingState.rejectedSlots || []).some(
+      (slot) => slot.date === "2026-10-09" && slot.time === "18:00",
+    ),
+  );
+  assert.ok(conversation.proposedSlots.every((slot) => slot.date === "2026-10-20"));
+  assert.doesNotMatch(lastSeya(conversation), /09\/10|10\/10|12\/10|début ou en fin/i);
+
+  conversation = await reply(conversation, "Le 20 au matin", { now: OCT9 });
+  assert.equal(conversation.bookingState.requestedDate, "2026-10-20");
+  assert.equal(conversation.bookingState.dayPart, "morning");
+  assert.ok(conversation.proposedSlots.every((slot) => slot.date === "2026-10-20"));
+  assert.ok(conversation.proposedSlots.every((slot) => Number(slot.time.slice(0, 2)) < 12));
+  assert.match(lastSeya(conversation), /20\/10|mar\./i);
 });
 

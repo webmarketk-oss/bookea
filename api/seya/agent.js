@@ -74,6 +74,7 @@ const {
   withStaffOfferedSlots,
   willCallBackReply,
   slotsFromStaffThread,
+  hasDayOfMonthRequest,
 } = require("./conversation");
 const {
   findOfferMap,
@@ -362,31 +363,47 @@ function threadHasMedical(conversation, text) {
 }
 
 function formatHumanSlots(slots) {
-  const labels = (slots || []).slice(0, 3).map((slot) => slot.label);
+  const labels = (slots || []).slice(0, 2).map((slot) => slot.label);
   if (labels.length === 0) return "";
   if (labels.length === 1) return labels[0];
-  if (labels.length === 2) return `${labels[0]} ou ${labels[1]}`;
-  return `${labels[0]}, ${labels[1]} ou ${labels[2]}`;
+  return `${labels[0]} ou ${labels[1]}`;
 }
 
-function humanSlotReply(slots) {
-  const list = (slots || []).slice(0, 3);
-  if (!list.length) {
-    return "Je n’ai plus de place sur ce jour-là. Quel autre jour vous irait ?";
+function alternativeSlotPrefix(slots, state) {
+  if (!state?.requestedDate || !(slots || []).length) {
+    return "";
   }
+  if (slots.every((slot) => slot.date === state.requestedDate)) {
+    return "";
+  }
+  const date = new Date(`${state.requestedDate}T12:00:00`);
+  const dd = String(date.getDate()).padStart(2, "0");
+  const mm = String(date.getMonth() + 1).padStart(2, "0");
+  const hour = state.preferredTime
+    ? ` à ${String(state.preferredTime).replace(":", "h")}`
+    : state.dayPart === "morning"
+      ? " le matin"
+      : state.dayPart === "evening"
+        ? " en fin de journée"
+        : "";
+  return `Je n’ai pas de disponibilité le ${dd}/${mm}${hour}. `;
+}
+
+function humanSlotReply(slots, state) {
+  const list = (slots || []).slice(0, 2);
+  if (!list.length) {
+    return emptySlotFallback(state || {});
+  }
+  const prefix = alternativeSlotPrefix(list, state);
   const sameDay = list.every((slot) => slot.date === list[0].date);
   if (sameDay) {
     const day = list[0].label.replace(/\s+à\s+.*/, "");
     const times = list.map((slot) => String(slot.time || "").replace(":", "h"));
     const options =
-      times.length === 1
-        ? times[0]
-        : times.length === 2
-          ? `${times[0]} ou ${times[1]}`
-          : `${times[0]}, ${times[1]} ou ${times[2]}`;
-    return `Le ${day} je peux vous proposer ${options} — lequel vous irait le mieux ?`;
+      times.length === 1 ? times[0] : `${times[0]} ou ${times[1]}`;
+    return `${prefix}Le ${day} je peux vous proposer ${options} — lequel vous irait le mieux ?`;
   }
-  return `Je peux vous proposer ${formatHumanSlots(list)} — lequel vous irait le mieux ?`;
+  return `${prefix}Je peux vous proposer ${formatHumanSlots(list)} — lequel vous irait le mieux ?`;
 }
 
 function greetingName(value) {
@@ -472,17 +489,40 @@ function priceReply(seya, qualification, conversation, text) {
 
 function todayIso(now) {
   const date = now instanceof Date ? now : new Date();
-  const offset = date.getTimezoneOffset();
-  const local = new Date(date.getTime() - offset * 60000);
-  return local.toISOString().slice(0, 10);
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Europe/Paris",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(date);
+}
+
+function currentMinutes(now) {
+  const date = now instanceof Date ? now : new Date();
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Europe/Paris",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(date);
+  const hour = Number(parts.find((part) => part.type === "hour")?.value || 0);
+  const minute = Number(parts.find((part) => part.type === "minute")?.value || 0);
+  return hour * 60 + minute;
+}
+
+function daysBetweenIso(fromIso, toIso) {
+  const start = new Date(`${fromIso}T12:00:00`).getTime();
+  const end = new Date(`${toIso}T12:00:00`).getTime();
+  return Math.round((end - start) / 86400000);
 }
 
 function addDaysIso(iso, days) {
   const date = new Date(`${iso}T12:00:00`);
   date.setDate(date.getDate() + days);
-  const offset = date.getTimezoneOffset();
-  const local = new Date(date.getTime() - offset * 60000);
-  return local.toISOString().slice(0, 10);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
 
 function timeToMinutes(value) {
@@ -498,11 +538,6 @@ function minutesToTime(value) {
   const hours = Math.floor(value / 60);
   const minutes = value % 60;
   return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
-}
-
-function currentMinutes(now) {
-  const date = now instanceof Date ? now : new Date();
-  return date.getHours() * 60 + date.getMinutes();
 }
 
 function rangesOverlap(startA, endA, startB, endB) {
@@ -1250,41 +1285,100 @@ function parseDayRequest(text, conversation) {
   };
 }
 
+function weekdayFilters(state) {
+  if (state.strictWeekday || state.weekdayFromName) {
+    return state.requestedWeekday != null ? [state.requestedWeekday] : [];
+  }
+  if (state.requestedDate) {
+    return [];
+  }
+  if (state.weekHalf === "start") {
+    return [1, 2, 3];
+  }
+  if (state.weekHalf === "end") {
+    return [4, 5, 6];
+  }
+  return [];
+}
+
 function pickSlotsForState(appointments, hours, state, now, duration) {
   const preferredTimes = Array.isArray(state.preferredTimes)
     ? state.preferredTimes.filter(Boolean)
     : state.preferredTime
       ? [state.preferredTime]
       : [];
-  const options = {
-    count: 3,
-    days: 30,
-    date: state.requestedDate || "",
-    fromDate: state.searchFrom || "",
-    weekdays: state.requestedDate
-      ? []
-      : state.requestedWeekday != null
-        ? [state.requestedWeekday]
-        : state.weekHalf === "start"
-          ? [1, 2, 3]
-          : state.weekHalf === "end"
-            ? [4, 5, 6]
-            : [],
+  const slotDuration =
+    Number(duration) > 0
+      ? Number(duration)
+      : Number(state.visitDuration) > 0
+        ? Number(state.visitDuration)
+        : BILAN_DURATION_MINUTES;
+  const base = {
+    count: 2,
     excludeWeekdays: state.rejectedWeekdays,
     excludeDates: state.rejectedDates,
     excludeSlots: state.rejectedSlots,
-    duration:
-      Number(duration) > 0
-        ? Number(duration)
-        : Number(state.visitDuration) > 0
-          ? Number(state.visitDuration)
-          : BILAN_DURATION_MINUTES,
+    duration: slotDuration,
     dayPart: state.dayPart,
     preferredTime: preferredTimes[0] || "",
     preferredTimes,
     now,
   };
-  return suggestAvailableSlots(appointments, hours, options);
+  const search = (overrides) =>
+    suggestAvailableSlots(appointments, hours, { ...base, ...overrides });
+  const expand = (overrides) => {
+    for (const days of [7, 15, 30, 60]) {
+      const found = search({ ...overrides, days });
+      if (found.length) {
+        return found;
+      }
+    }
+    return [];
+  };
+  const namedWeekdays = weekdayFilters(state);
+
+  if (state.requestedDate) {
+    const exact = search({
+      date: state.requestedDate,
+      fromDate: state.requestedDate,
+      days: 60,
+      weekdays: [],
+    });
+    if (exact.length) {
+      return exact;
+    }
+    const after = addDaysIso(state.requestedDate, 1);
+    if (preferredTimes.length) {
+      const laterSameTime = expand({
+        date: "",
+        fromDate: after,
+        weekdays: namedWeekdays,
+        preferredTimes,
+      });
+      if (laterSameTime.length) {
+        return laterSameTime;
+      }
+    }
+    if (namedWeekdays.length) {
+      const nextWeekday = expand({
+        date: "",
+        fromDate: after,
+        weekdays: namedWeekdays,
+        preferredTimes,
+      });
+      if (nextWeekday.length) {
+        return nextWeekday;
+      }
+    }
+    return [];
+  }
+
+  return expand({
+    date: "",
+    fromDate: state.searchFrom || "",
+    weekdays: namedWeekdays,
+    preferredTimes,
+  });
 }
 
 function pickSlotsForMessage(appointments, hours, conversation, text, now, seya) {
@@ -1302,14 +1396,14 @@ function pickSlotsForMessage(appointments, hours, conversation, text, now, seya)
   );
 }
 
-function suggestAvailableSlots(appointments, hours, countOrOptions = 3, duration = BILAN_DURATION_MINUTES) {
+function suggestAvailableSlots(appointments, hours, countOrOptions = 2, duration = BILAN_DURATION_MINUTES) {
   const options =
     countOrOptions && typeof countOrOptions === "object"
       ? countOrOptions
       : { count: countOrOptions, duration };
-  const count = options.count || 3;
+  const count = options.count || 2;
   const slotDuration = options.duration || duration || BILAN_DURATION_MINUTES;
-  const maxDays = Math.min(options.days || 30, 30);
+  const maxSpan = Math.min(Math.max(Number(options.days) || 30, 1), 60);
   const onlyWeekdays = Array.isArray(options.weekdays) ? options.weekdays : [];
   const onlyDate = String(options.date || "");
   const excludeWeekdays = Array.isArray(options.excludeWeekdays)
@@ -1336,9 +1430,22 @@ function suggestAvailableSlots(appointments, hours, countOrOptions = 3, duration
     .map((item) => timeToMinutes(item))
     .filter((item) => Number.isFinite(item));
   const fromDate = String(options.fromDate || "");
-  const wantAllDay = preferredList.length > 0 || Boolean(onlyDate);
+  let origin = today;
+  if (fromDate && fromDate > origin) {
+    origin = fromDate;
+  }
+  if (onlyDate) {
+    origin = onlyDate;
+  }
+  const startOffset = Math.max(0, daysBetweenIso(today, origin));
+  const endOffset = onlyDate ? startOffset + 1 : startOffset + maxSpan;
+  const collectAll = preferredList.length > 0 || Boolean(onlyDate);
 
-  for (let offset = 0; offset < maxDays && (wantAllDay || slots.length < count); offset += 1) {
+  for (
+    let offset = startOffset;
+    offset < endOffset && offset < startOffset + 60 && (collectAll || slots.length < count);
+    offset += 1
+  ) {
     const date = addDaysIso(today, offset);
     if (fromDate && date < fromDate) {
       continue;
@@ -1382,35 +1489,18 @@ function suggestAvailableSlots(appointments, hours, countOrOptions = 3, duration
         continue;
       }
       slots.push({ date, time, label: formatSlotLabel(date, time) });
-      if (!wantAllDay && slots.length >= count) {
+      if (!collectAll && slots.length >= count) {
         break;
       }
     }
   }
-  if (preferredList.length && slots.length) {
-    return [...slots]
-      .sort((left, right) => {
-        const leftGap = Math.min(
-          ...preferredList.map((preferred) =>
-            Math.abs(timeToMinutes(left.time) - preferred),
-          ),
-        );
-        const rightGap = Math.min(
-          ...preferredList.map((preferred) =>
-            Math.abs(timeToMinutes(right.time) - preferred),
-          ),
-        );
-        if (leftGap !== rightGap) {
-          return leftGap - rightGap;
-        }
-        return (
-          String(left.date).localeCompare(String(right.date)) ||
-          String(left.time).localeCompare(String(right.time))
-        );
-      })
-      .slice(0, count);
+  let result = slots;
+  if (preferredList.length) {
+    result = slots.filter((slot) =>
+      preferredList.some((preferred) => timeToMinutes(slot.time) === preferred),
+    );
   }
-  return slots;
+  return result.slice(0, count);
 }
 
 function defaultHours() {
@@ -1461,14 +1551,19 @@ function applyLeadReply(conversation, text, seya, slots, extras = {}) {
   };
   const allowRepeat =
     asksOtherDay(intentText) ||
+    hasDayOfMonthRequest(intentText) ||
     /lundi|mardi|mercredi|jeudi|vendredi|samedi|debut de semaine|fin de semaine|fin de journee|soir|apres.?midi|dispo|creneau|créneau|1er|octobre|\d{1,2}\/\d{1,2}/i.test(
       String(intentText || ""),
     );
+  const allowDateFallback = (slots || []).some(
+    (slot) => bookingState.requestedDate && slot.date !== bookingState.requestedDate,
+  );
   const guarded = extras.guarded && !reread
     ? extras.guarded
     : guardSlots(slots, bookingState, {
         centerId: conversation.centerId,
         allowRepeat,
+        allowDateFallback,
       });
   const safeSlots = shouldSearchSlots(bookingState, intentText, conversation)
     ? guarded.slots
@@ -1911,7 +2006,7 @@ function applyLeadReply(conversation, text, seya, slots, extras = {}) {
         "RDV proposé",
         text,
         remaining.length
-          ? `Ce créneau n’est plus disponible. ${humanSlotReply(remaining)}`
+          ? `Ce créneau n’est plus disponible. ${humanSlotReply(remaining, bookingState)}`
           : "Ce créneau n’est plus disponible. Souhaitez-vous que je regarde un autre horaire ?",
         {
           ...bookingState,
@@ -1980,9 +2075,6 @@ function applyLeadReply(conversation, text, seya, slots, extras = {}) {
     !isJunkTreatment(qualification.need || conversation.treatment);
 
   if (readyToPropose && safeSlots.length === 0) {
-    const rejected = bookingState.requestedDate
-      ? [...new Set([...(bookingState.rejectedDates || []), bookingState.requestedDate])]
-      : bookingState.rejectedDates;
     return finishLeadReply(
       conversation,
       qualification,
@@ -1997,7 +2089,6 @@ function applyLeadReply(conversation, text, seya, slots, extras = {}) {
         lastOfferedSlots: [],
         appointmentStatus: "none",
         pendingQuestion: "offer_slots",
-        rejectedDates: rejected,
       },
       { proposedSlots: [] },
     );
@@ -2012,7 +2103,7 @@ function applyLeadReply(conversation, text, seya, slots, extras = {}) {
       seya,
       centerName: extras.centerName,
     });
-    const slotsText = humanSlotReply(safeSlots);
+    const slotsText = humanSlotReply(safeSlots, bookingState);
     const body =
       ack &&
       !alreadyTold(
@@ -2237,7 +2328,11 @@ function finishLeadReply(
   bookingState,
   extra = {},
 ) {
-  const slotSafe = enforceOutgoingText(seyaText, bookingState);
+  const slotSafe = enforceOutgoingText(
+    seyaText,
+    bookingState,
+    extra.proposedSlots,
+  );
   const { _seya, ...cleanConversation } = conversation;
   const switched = applyCareSwitch(cleanConversation, qualification);
   const checked = enforcePriceReply(slotSafe, leadText, extra.seya || _seya, {
@@ -2260,6 +2355,16 @@ function finishLeadReply(
         if ((bookingState.rejectedDates || []).includes(slot.date)) return false;
         if ((bookingState.rejectedWeekdays || []).includes(new Date(`${slot.date}T12:00:00`).getDay())) {
           return false;
+        }
+        if (
+          (bookingState.rejectedSlots || []).some(
+            (item) => item.date === slot.date && item.time === slot.time,
+          )
+        ) {
+          return false;
+        }
+        if (Array.isArray(extra.proposedSlots)) {
+          return true;
         }
         if (bookingState.requestedDate && slot.date !== bookingState.requestedDate) {
           return extra.shouldBook?.date === slot.date;
