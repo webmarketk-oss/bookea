@@ -85,6 +85,16 @@ const {
 } = require("./care-family");
 const { sanitizePersonName } = require("../../lib/seya-person-name");
 const { resolveGeneralBrief } = require("./general-brief");
+const {
+  applySeyaMissionFlags,
+  canBookSeya,
+  fillRelanceTemplate,
+  isQualifyCallback,
+  isWelcomeRelanceOnly,
+  operatorCallbackReply,
+  resolveSeyaMission,
+  welcomeRelanceHandoffReply,
+} = require("./mission");
 
 const BILAN_DURATION_MINUTES = 75;
 const FAMILY_VISIT_MINUTES = {
@@ -627,21 +637,22 @@ function agentSettings(seya) {
     ? record.treatmentBriefs
     : defaultBriefs;
   const offers = Array.isArray(record.offerMaps) ? record.offerMaps : [];
+  const flags = applySeyaMissionFlags(record);
   return {
     whatsappAgentEnabled: record.whatsappAgentEnabled !== false,
-    autoMessageOnNewLead: record.autoMessageOnNewLead !== false,
-    qualifyOnSignup: record.qualifyOnSignup !== false,
-    askForAppointment: record.askForAppointment !== false,
-    bookAppointment: record.bookAppointment === true,
+    autoMessageOnNewLead: flags.autoMessageOnNewLead,
+    seyaMission: flags.seyaMission,
+    qualifyOnSignup: flags.qualifyOnSignup,
+    askForAppointment: flags.askForAppointment,
+    bookAppointment: flags.bookAppointment,
     handoffToHuman: record.handoffToHuman !== false,
     treatmentBriefs: briefs,
     offerMaps: offers,
     centerProfile: normalizeCenterProfile(record.centerProfile),
     brief: resolveGeneralBrief(record.brief),
-    relanceEnabled: record.relanceEnabled !== false,
-    relanceDays: Array.isArray(record.relanceDays)
-      ? record.relanceDays.map(Number).filter((item) => item > 0)
-      : [1, 5, 30],
+    relanceEnabled: flags.relanceEnabled,
+    relanceDays: flags.relanceDays,
+    relances: flags.relances,
   };
 }
 
@@ -729,7 +740,10 @@ function defaultOfferForFamily(family, rawOffer) {
   return naturalOfferPhrase(family, rawOffer) || "";
 }
 
-function defaultOpeningForFamily(family) {
+function defaultOpeningForFamily(family, mission) {
+  if (mission === "welcome_relance") {
+    return "Bonjour {prenom}, c’est Seya du {centre}. On vient de recevoir votre demande pour {offre}. Je suis là si vous avez une question.";
+  }
   if (family === "minceur") {
     return "Bonjour {prenom}, c’est Seya du {centre}. On vient de recevoir votre demande pour {offre}. Sur quelle zone souhaitez-vous que l’on regarde ?";
   }
@@ -796,9 +810,13 @@ function buildOpeningMessage(context, centerName, seya) {
             : "",
     );
   const stored = String(brief?.opening || "").trim();
-  const template = looksRoboticOpening(stored)
-    ? defaultOpeningForFamily(family)
-    : stored || defaultOpeningForFamily(family);
+  const mission = resolveSeyaMission(seya);
+  const template =
+    mission === "welcome_relance"
+      ? defaultOpeningForFamily(family, mission)
+      : looksRoboticOpening(stored)
+        ? defaultOpeningForFamily(family, mission)
+        : stored || defaultOpeningForFamily(family, mission);
   return fillOpening(template, {
     prenom: greetingName(context.firstName),
     centre: String(centerName || "").trim() || "le centre",
@@ -1021,7 +1039,12 @@ function nextQualificationQuestion(qualification, seya, fallbackTreatment, conve
       need: qualification.need || fallbackTreatment,
     },
     now,
-    { durationMinutes: visitDurationMinutes(seya, conversation, text) },
+    {
+      durationMinutes: visitDurationMinutes(seya, conversation, text),
+      skipBookingCta: isWelcomeRelanceOnly(seya),
+      seyaMission: resolveSeyaMission(seya),
+      seya,
+    },
   );
 }
 
@@ -1782,7 +1805,56 @@ function applyLeadReply(conversation, text, seya, slots, extras = {}) {
     );
   }
 
-  if (wantsSlots(intentText, conversation) && !settings.bookAppointment) {
+  if (isWelcomeRelanceOnly(settings)) {
+    if (
+      wantsSlots(intentText, conversation) ||
+      isBookingThread(conversation) ||
+      /rendez-vous|\brdv\b|prendre rendez|un creneau|un créneau/i.test(intentText)
+    ) {
+      return finishLeadReply(
+        conversation,
+        qualification,
+        "À recontacter",
+        text,
+        welcomeRelanceHandoffReply(),
+        bookingState,
+      );
+    }
+    return finishLeadReply(
+      conversation,
+      qualification,
+      qualification.need ? "Qualifié" : conversation.status || "En cours",
+      text,
+      fallbackAfterNote(qualification, conversation, text),
+      bookingState,
+    );
+  }
+
+  if (isQualifyCallback(settings)) {
+    const callbackSlot = callbackSlotFromThread(
+      conversation,
+      intentText,
+      bookingState,
+      chosenSlot,
+    );
+    if (callbackSlot) {
+      return finishLeadReply(
+        conversation,
+        qualification,
+        "À recontacter",
+        text,
+        operatorCallbackReply(callbackSlot),
+        {
+          ...bookingState,
+          pendingQuestion: "callback",
+          appointmentStatus: "none",
+        },
+        { bookedSlot: null, shouldBook: null },
+      );
+    }
+  }
+
+  if (wantsSlots(intentText, conversation) && !canBookSeya(settings)) {
     return finishLeadReply(
       conversation,
       qualification,
@@ -1801,7 +1873,7 @@ function applyLeadReply(conversation, text, seya, slots, extras = {}) {
   );
   if (
     chosenSlot &&
-    settings.bookAppointment &&
+    canBookSeya(settings) &&
     !threadHasMedical(conversation, text) &&
     (slotAllowed(chosenSlot, bookingState) || staffOwned || reschedule)
   ) {
@@ -1886,7 +1958,7 @@ function applyLeadReply(conversation, text, seya, slots, extras = {}) {
   }
 
   const readyToPropose =
-    settings.bookAppointment &&
+    canBookSeya(settings) &&
     wantsSlots(intentText, conversation) &&
     shouldSearchSlots(bookingState, intentText, conversation) &&
     !asksPrice(text) &&
@@ -2066,7 +2138,37 @@ function withRereadPrefix(reread, text) {
   return `Vous avez raison, je reprends votre demande. ${reply}`;
 }
 
+function callbackSlotFromThread(conversation, text, bookingState, chosenSlot) {
+  const date = String(chosenSlot?.date || bookingState?.requestedDate || "").slice(0, 10);
+  const time = String(
+    chosenSlot?.time ||
+      bookingState?.preferredTime ||
+      (bookingState?.preferredTimes || [])[0] ||
+      "",
+  ).slice(0, 5);
+  if (!date || !time || !/^\d{2}:\d{2}$/.test(time)) {
+    const clocks = parseClockMinutes(text);
+    if (!date || !clocks.length) {
+      return null;
+    }
+    const minutes = clocks[0];
+    const clock = `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
+    return { date, time: clock, label: `${date} à ${clock.replace(":", "h")}` };
+  }
+  return { date, time, label: `${date} à ${time.replace(":", "h")}` };
+}
+
 function fallbackAfterNote(qualification, conversation, text) {
+  if (isWelcomeRelanceOnly(conversation?._seya)) {
+    if (isServiceAsk(text)) {
+      return serviceOfferReply(text, conversation?._seya) ||
+        "Je vérifie cette prestation auprès de l’équipe et je vous dis.";
+    }
+    if (asksOpenQuestion(text)) {
+      return "Oui, je vous écoute. Dites-moi précisément ce que vous voulez savoir.";
+    }
+    return "Je suis là si une question vous vient.";
+  }
   if (isServiceAsk(text)) {
     return serviceOfferReply(text, conversation?._seya) ||
       "Je vérifie cette prestation auprès de l’équipe et je vous dis.";
@@ -2226,6 +2328,25 @@ function relanceCopy(conversation, round = 1, centerName = "", seya) {
   const care = relanceCareLabel(conversation);
   const about = relanceAbout(care);
   const crmOffer = crmOfferForRelance(conversation, seya);
+  const settings = seya ? agentSettings(seya) : null;
+  const custom = String(settings?.relances?.[Number(round) - 1]?.message || "").trim();
+  if (custom) {
+    return fillRelanceTemplate(custom, {
+      prenom: firstName,
+      centre,
+      offre: crmOffer || care || "",
+    });
+  }
+  if (seya && String(seya.seyaMission || "") === "welcome_relance") {
+    const who = firstName ? `${firstName}, ` : "";
+    return `${who}je reviens vers vous. Dites-moi si une question vous vient.`.replace(/^./, (letter) =>
+      firstName ? letter : letter.toUpperCase(),
+    );
+  }
+  if (seya && String(seya.seyaMission || "") === "qualify_callback") {
+    const greet = firstName ? `Bonjour ${firstName}` : "Bonjour";
+    return `${greet}, je reviens vers vous. Quand seriez-vous disponible pour qu’une opératrice vous rappelle ?`;
+  }
   const lastLead = lastLeadText(conversation);
   const wantsTarif = askedPriceInThread(conversation);
   const candidates = wantsTarif
@@ -2447,6 +2568,9 @@ function readHours(settings) {
 
 module.exports = {
   agentSettings,
+  canBookSeya,
+  resolveSeyaMission,
+  operatorCallbackReply,
   applyBookingMessage,
   applyLeadReply,
   classifyHealthMessage,

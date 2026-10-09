@@ -37,6 +37,8 @@ import {
   defaultSeyaAgentSettings,
   emptySeyaCenterProfile,
   loadSeyaAgentSettings,
+  resolveSeyaMission,
+  SEYA_MISSION_OPTIONS,
   mergeSeyaConversations,
   readLocalSeyaConversations,
   saveSeyaAgentSettings,
@@ -1183,8 +1185,13 @@ export default function SeyaCrmPage() {
           />
           <ToggleRow
             title="Message dès qu’un lead arrive"
-            hint="Seya ouvre la conversation dès qu’un prospect avec téléphone entre dans le CRM."
+            hint={
+              resolveSeyaMission(agentSettings) === "book"
+                ? "Seya ouvre la conversation dès qu’un prospect avec téléphone entre dans le CRM."
+                : "Inclus dans la mission choisie."
+            }
             enabled={agentSettings.autoMessageOnNewLead}
+            locked={resolveSeyaMission(agentSettings) !== "book"}
             onToggle={() =>
               void persistAgentSettings({
                 ...agentSettings,
@@ -1192,43 +1199,51 @@ export default function SeyaCrmPage() {
               })
             }
           />
+          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+            <p className="font-semibold">Mission de Céa</p>
+            <p className="mt-1 text-xs font-medium leading-4 text-slate-500">
+              Une seule mission à la fois. Céa ne mélange pas prise de
+              rendez-vous, accueil, et rappel opératrice.
+            </p>
+            <div className="mt-3 grid gap-2">
+              {SEYA_MISSION_OPTIONS.map((option) => {
+                const selected =
+                  resolveSeyaMission(agentSettings) === option.id;
+                return (
+                  <button
+                    key={option.id}
+                    type="button"
+                    onClick={() =>
+                      void persistAgentSettings({
+                        ...agentSettings,
+                        seyaMission: option.id,
+                      })
+                    }
+                    className={`rounded-2xl border px-4 py-3 text-left ${
+                      selected
+                        ? "border-violet-300 bg-violet-50"
+                        : "border-slate-200 bg-white"
+                    }`}
+                  >
+                    <p className="text-sm font-semibold text-slate-800">
+                      {option.title}
+                    </p>
+                    <p className="mt-1 text-xs font-medium leading-4 text-slate-500">
+                      {option.hint}
+                    </p>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
           <ToggleRow
-            title="Qualifier le besoin"
-            hint="Seya cherche le soin, la zone et le délai. Elle ne pose pas de RDV toute seule."
-            enabled={agentSettings.qualifyOnSignup}
-            onToggle={() =>
-              void persistAgentSettings({
-                ...agentSettings,
-                qualifyOnSignup: !agentSettings.qualifyOnSignup,
-              })
-            }
-          />
-          <ToggleRow
-            title="Demander s’ils veulent un RDV"
-            hint="Après qualification : « une conseillère vous contacte » si oui. Pas de créneau posé."
-            enabled={agentSettings.askForAppointment}
-            onToggle={() =>
-              void persistAgentSettings({
-                ...agentSettings,
-                askForAppointment: !agentSettings.askForAppointment,
-              })
-            }
-          />
-          <ToggleRow
-            title="Laisser Seya poser le RDV dans l’agenda"
-            hint="Off par défaut. À activer seulement si le centre veut que l’IA booke."
-            enabled={agentSettings.bookAppointment}
-            onToggle={() =>
-              void persistAgentSettings({
-                ...agentSettings,
-                bookAppointment: !agentSettings.bookAppointment,
-              })
-            }
-          />
-          <ToggleRow
-            title="Relances 15 h, +24 h, puis 5 j"
-            hint="Uniquement trois relances : ~15 h après le dernier message, 24 h plus tard, puis à 5 jours. Rien d’autre. Stop si refus, stop, ou RDV confirmé."
+            title="Relances"
+            hint="Trois relances maximum, aux jours J+ saisis ci-dessous. Stop si refus, stop, ou RDV confirmé. Jamais entre 20 h et 7 h (heure de Paris). Le premier message peut partir la nuit."
             enabled={agentSettings.relanceEnabled}
+            locked={
+              resolveSeyaMission(agentSettings) === "welcome_relance" ||
+              resolveSeyaMission(agentSettings) === "welcome_relance_book"
+            }
             onToggle={() =>
               void persistAgentSettings({
                 ...agentSettings,
@@ -1236,6 +1251,71 @@ export default function SeyaCrmPage() {
               })
             }
           />
+          <div className="grid gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+            <p className="text-xs font-semibold text-slate-600">
+              Calendrier des 3 relances
+            </p>
+            <p className="text-[11px] font-medium leading-4 text-slate-400">
+              J+ se compte après le dernier message du fil. Laissez le texte
+              vide pour garder le message automatique. Variables : {"{prenom}"},{" "}
+              {"{centre}"}, {"{offre}"}.
+            </p>
+            {(agentSettings.relances || []).map((item, index) => (
+              <div
+                key={`relance-${index}`}
+                className="grid gap-3 rounded-2xl border border-slate-200 bg-white p-3 md:grid-cols-[88px_1fr]"
+              >
+                <label className="grid gap-1">
+                  <span className="text-[11px] font-semibold text-slate-500">
+                    Relance {index + 1} · J+
+                  </span>
+                  <input
+                    type="number"
+                    min={1}
+                    max={365}
+                    value={item.afterDays}
+                    onChange={(event) =>
+                      setAgentSettings((current) => ({
+                        ...current,
+                        relances: current.relances.map((relance, relanceIndex) =>
+                          relanceIndex === index
+                            ? {
+                                ...relance,
+                                afterDays: Number(event.target.value) || 1,
+                              }
+                            : relance,
+                        ),
+                      }))
+                    }
+                    onBlur={persistCurrentAgentSettings}
+                    className="h-11 rounded-2xl border border-slate-200 bg-slate-50 px-3 text-sm font-semibold outline-none focus:border-violet-500"
+                  />
+                </label>
+                <label className="grid gap-1">
+                  <span className="text-[11px] font-semibold text-slate-500">
+                    Message
+                  </span>
+                  <textarea
+                    value={item.message}
+                    onChange={(event) =>
+                      setAgentSettings((current) => ({
+                        ...current,
+                        relances: current.relances.map((relance, relanceIndex) =>
+                          relanceIndex === index
+                            ? { ...relance, message: event.target.value }
+                            : relance,
+                        ),
+                      }))
+                    }
+                    onBlur={persistCurrentAgentSettings}
+                    rows={3}
+                    placeholder="Laisser vide pour le texte automatique"
+                    className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-medium leading-5 text-slate-700 outline-none focus:border-violet-500"
+                  />
+                </label>
+              </div>
+            ))}
+          </div>
         </div>
 
         <label className="mt-5 block">
@@ -1719,11 +1799,13 @@ function ToggleRow({
   hint,
   enabled,
   onToggle,
+  locked = false,
 }: {
   title: string;
   hint: string;
   enabled: boolean;
   onToggle: () => void;
+  locked?: boolean;
 }) {
   return (
     <div className="grid gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4 md:grid-cols-[1fr_auto] md:items-center">
@@ -1733,10 +1815,15 @@ function ToggleRow({
       </div>
       <button
         type="button"
-        onClick={onToggle}
+        onClick={() => {
+          if (!locked) {
+            onToggle();
+          }
+        }}
+        disabled={locked}
         className={`h-12 rounded-2xl px-5 text-sm font-semibold ${
           enabled ? "bg-violet-100 text-violet-700" : "bg-white text-slate-500"
-        }`}
+        } ${locked ? "cursor-default opacity-80" : ""}`}
       >
         {enabled ? "Oui" : "Non"}
       </button>

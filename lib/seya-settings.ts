@@ -7,9 +7,58 @@ import {
   mergeSeyaConversationLists,
   persistableConversations,
 } from "@/api/seya/conversation-key";
+import {
+  applySeyaMissionFlags,
+  normalizeSeyaRelances,
+  resolveSeyaMission as resolveSeyaMissionFromRecord,
+} from "@/api/seya/mission";
 import { getActiveCenterContext } from "@/lib/center-access";
 import { sanitizePersonName } from "@/lib/seya-person-name";
 import { createClient } from "@/lib/supabase";
+
+export type SeyaMission =
+  | "book"
+  | "welcome_relance"
+  | "welcome_relance_book"
+  | "qualify_callback";
+
+export type SeyaRelance = {
+  afterDays: number;
+  message: string;
+};
+
+export const SEYA_MISSION_OPTIONS: Array<{
+  id: SeyaMission;
+  title: string;
+  hint: string;
+}> = [
+  {
+    id: "book",
+    title: "Prise de rendez-vous",
+    hint: "Céa mène le prospect et pose le rendez-vous dans l’agenda, comme aujourd’hui.",
+  },
+  {
+    id: "welcome_relance",
+    title: "Accueil + relances",
+    hint: "Un message d’accueil, puis les 3 relances. Pas de qualification vers un rendez-vous, pas de créneau posé.",
+  },
+  {
+    id: "welcome_relance_book",
+    title: "Accueil + relances + prise de rendez-vous",
+    hint: "Message d’accueil, relances, et Céa peut poser le rendez-vous dans l’agenda.",
+  },
+  {
+    id: "qualify_callback",
+    title: "Accueil + qualification + rappel opératrice",
+    hint: "Céa mène comme une prise de rendez-vous (soin, zone, jour, heure). Elle ne pose pas le RDV : elle dit qu’une opératrice les rappellera à la date et l’heure convenues.",
+  },
+];
+
+export function resolveSeyaMission(
+  value?: Partial<SeyaAgentSettings> | null,
+): SeyaMission {
+  return resolveSeyaMissionFromRecord(value) as SeyaMission;
+}
 
 export const SEYA_SETTINGS_UPDATED_EVENT = "bookea-seya-settings-updated";
 export const SEYA_CONVERSATIONS_UPDATED_EVENT =
@@ -74,12 +123,14 @@ export const emptySeyaCenterProfile: SeyaCenterProfile = {
 export type SeyaAgentSettings = {
   whatsappAgentEnabled: boolean;
   autoMessageOnNewLead: boolean;
+  seyaMission: SeyaMission;
   qualifyOnSignup: boolean;
   askForAppointment: boolean;
   bookAppointment: boolean;
   handoffToHuman: boolean;
   relanceEnabled: boolean;
   relanceDays: number[];
+  relances: SeyaRelance[];
   brief: string;
   centerProfile: SeyaCenterProfile;
   treatmentBriefs: SeyaTreatmentBrief[];
@@ -283,12 +334,14 @@ export const defaultSeyaOfferMaps: SeyaOfferMap[] = [];
 export const defaultSeyaAgentSettings: SeyaAgentSettings = {
   whatsappAgentEnabled: true,
   autoMessageOnNewLead: true,
+  seyaMission: "qualify_callback",
   qualifyOnSignup: true,
   askForAppointment: true,
   bookAppointment: false,
   handoffToHuman: true,
   relanceEnabled: true,
-  relanceDays: [1, 5, 30],
+  relanceDays: [1, 5, 14],
+  relances: normalizeSeyaRelances({}),
   brief: COMMON_SEYA_GENERAL_BRIEF,
   centerProfile: { ...emptySeyaCenterProfile },
   treatmentBriefs: defaultTreatmentBriefs,
@@ -424,9 +477,13 @@ export function resolveSeyaOpening(
             : "",
     );
   const stored = brief?.opening?.trim() || "";
-  const template = looksRoboticOpening(stored)
-    ? defaultOpeningForFamily(family)
-    : stored || defaultOpeningForFamily(family);
+  const mission = resolveSeyaMission(settings);
+  const template =
+    mission === "welcome_relance"
+      ? defaultOpeningForFamily(family, mission)
+      : looksRoboticOpening(stored)
+        ? defaultOpeningForFamily(family, mission)
+        : stored || defaultOpeningForFamily(family, mission);
   const center = String(centerName || "").trim() || "le centre";
   return fillSeyaTemplate(template, {
     prenom: greetingName(firstName),
@@ -517,7 +574,10 @@ function looksRoboticOpening(value?: string | null) {
   );
 }
 
-function defaultOpeningForFamily(family: string) {
+function defaultOpeningForFamily(family: string, mission?: SeyaMission) {
+  if (mission === "welcome_relance") {
+    return "Bonjour {prenom}, c’est Seya du {centre}. On vient de recevoir votre demande pour {offre}. Je suis là si vous avez une question.";
+  }
   if (family === "minceur") {
     return "Bonjour {prenom}, c’est Seya du {centre}. On vient de recevoir votre demande pour {offre}. Sur quelle zone souhaitez-vous que l’on regarde ?";
   }
@@ -659,19 +719,19 @@ function refreshLegacyTreatmentBrief(name: string, brief: string) {
 export function normalizeSeyaAgentSettings(
   value?: Partial<SeyaAgentSettings> | null,
 ): SeyaAgentSettings {
-  const days = Array.isArray(value?.relanceDays)
-    ? value.relanceDays.map(Number).filter((item) => item > 0)
-    : defaultSeyaAgentSettings.relanceDays;
+  const flags = applySeyaMissionFlags(value);
 
   return {
     whatsappAgentEnabled: value?.whatsappAgentEnabled !== false,
-    autoMessageOnNewLead: value?.autoMessageOnNewLead !== false,
-    qualifyOnSignup: value?.qualifyOnSignup !== false,
-    askForAppointment: value?.askForAppointment !== false,
-    bookAppointment: value?.bookAppointment === true,
+    autoMessageOnNewLead: flags.autoMessageOnNewLead,
+    seyaMission: flags.seyaMission as SeyaMission,
+    qualifyOnSignup: flags.qualifyOnSignup,
+    askForAppointment: flags.askForAppointment,
+    bookAppointment: flags.bookAppointment,
     handoffToHuman: value?.handoffToHuman !== false,
-    relanceEnabled: value?.relanceEnabled !== false,
-    relanceDays: days.length ? days : [1, 5, 30],
+    relanceEnabled: flags.relanceEnabled,
+    relanceDays: flags.relanceDays,
+    relances: flags.relances,
     brief: normalizeGeneralBrief(value?.brief),
     centerProfile: normalizeCenterProfile(value?.centerProfile),
     treatmentBriefs: normalizeTreatmentBriefs(value?.treatmentBriefs),

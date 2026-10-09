@@ -1,5 +1,6 @@
 const { classifyPriceQuestion, isNearDuplicate, isPriceRepeatComplaint } = require("./price");
 const { inferCareFamily } = require("./care-family");
+const { isWelcomeRelanceOnly, resolveSeyaMission } = require("./mission");
 
 function normalize(value) {
   return String(value || "")
@@ -1217,6 +1218,10 @@ function firstNeedAck(family, zoneLabel, conversation) {
 }
 
 function firstNeedReply(text, conversation, qualification, extras = {}) {
+  const mission = extras.seyaMission || resolveSeyaMission(extras.seya || conversation?._seya);
+  if (isWelcomeRelanceOnly(mission)) {
+    extras = { ...extras, skipBookingCta: true };
+  }
   const family =
     inferCareFamily(
       `${qualification?.need || ""} ${qualification?.zone || ""} ${text || ""} ${conversation?.treatment || ""} ${conversation?.campaign || ""}`,

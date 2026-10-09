@@ -2,6 +2,7 @@ const {
   mergeSeyaConversationLists,
   persistableConversations,
 } = require("./conversation-key");
+const { missionForcesWelcome } = require("./mission");
 
 function asRecord(value) {
   return value && typeof value === "object" ? value : {};
@@ -17,7 +18,13 @@ function isSeyaOff(seya) {
 
 function isSeyaWelcomeOff(seya) {
   const record = asRecord(seya);
-  return isSeyaOff(record) || isExplicitFalse(record.autoMessageOnNewLead);
+  if (isSeyaOff(record)) {
+    return true;
+  }
+  if (missionForcesWelcome(record)) {
+    return false;
+  }
+  return isExplicitFalse(record.autoMessageOnNewLead);
 }
 
 async function readCenterSeya(supabase, centerId) {

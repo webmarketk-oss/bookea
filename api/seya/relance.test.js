@@ -4,9 +4,9 @@ const assert = require("node:assert/strict");
 delete process.env.OPENAI_API_KEY;
 
 const { relanceCopy } = require("./agent");
-const { pickRelanceRound, shouldSkipRelance } = require("./relance");
+const { isRelanceQuietHours, pickRelanceRound, shouldSkipRelance } = require("./relance");
 
-const NOW = new Date("2026-09-28T18:00:00Z");
+const NOW = new Date("2026-09-28T10:00:00Z");
 
 function hoursAgo(hours) {
   return new Date(NOW.getTime() - hours * 3600000).toISOString();
@@ -30,7 +30,7 @@ function conversation(overrides = {}) {
   };
 }
 
-test("relance 1 : 15 h après le dernier message, pas avant", () => {
+test("relance 1 : à J+1, pas avant", () => {
   const early = conversation({
     messages: [
       { id: "m1", author: "seya", text: "Bonjour Léa", at: hoursAgo(10) },
@@ -40,13 +40,13 @@ test("relance 1 : 15 h après le dernier message, pas avant", () => {
 
   const due = conversation({
     messages: [
-      { id: "m1", author: "seya", text: "Bonjour Léa", at: hoursAgo(16) },
+      { id: "m1", author: "seya", text: "Bonjour Léa", at: hoursAgo(25) },
     ],
   });
   assert.equal(pickRelanceRound(due, NOW), 1);
 });
 
-test("relance 2 : 24 h après la première, uniquement dans cette fenêtre", () => {
+test("relance 2 : à J+5, pas avant", () => {
   const waiting = conversation({
     relanceCount: 1,
     lastRelanceAt: hoursAgo(10),
@@ -61,7 +61,7 @@ test("relance 2 : 24 h après la première, uniquement dans cette fenêtre", () 
     ...waiting,
     lastRelanceAt: hoursAgo(25),
     messages: [
-      { id: "m1", author: "seya", text: "Bonjour Léa", at: hoursAgo(40) },
+      { id: "m1", author: "seya", text: "Bonjour Léa", at: hoursAgo(5 * 24 + 2) },
       {
         id: "m2b",
         author: "seya",
@@ -71,19 +71,9 @@ test("relance 2 : 24 h après la première, uniquement dans cette fenêtre", () 
     ],
   };
   assert.equal(pickRelanceRound(due, NOW), 2);
-
-  const missed = {
-    ...waiting,
-    lastRelanceAt: hoursAgo(48),
-    messages: [
-      { id: "m1", author: "seya", text: "Bonjour Léa", at: hoursAgo(80) },
-      { id: "m2", author: "seya", text: "Je reviens vers vous", at: hoursAgo(48) },
-    ],
-  };
-  assert.equal(pickRelanceRound(missed, NOW), 0);
 });
 
-test("relance 3 : à 5 jours, puis plus rien hors 15 h / 24 h / 5 j", () => {
+test("relance 3 : à J+14, puis plus rien après 3 relances", () => {
   const tooEarly = conversation({
     relanceCount: 2,
     lastRelanceAt: hoursAgo(40),
@@ -91,19 +81,19 @@ test("relance 3 : à 5 jours, puis plus rien hors 15 h / 24 h / 5 j", () => {
   });
   assert.equal(pickRelanceRound(tooEarly, NOW), 0);
 
-  const dayFive = conversation({
+  const dayFourteen = conversation({
     relanceCount: 2,
     lastRelanceAt: hoursAgo(80),
-    messages: [{ id: "m1", author: "seya", text: "Bonjour Léa", at: hoursAgo(125) }],
+    messages: [{ id: "m1", author: "seya", text: "Bonjour Léa", at: hoursAgo(14 * 24 + 2) }],
   });
-  assert.equal(pickRelanceRound(dayFive, NOW), 3);
+  assert.equal(pickRelanceRound(dayFourteen, NOW), 3);
 
-  const tooLate = conversation({
+  const stillDue = conversation({
     relanceCount: 2,
     lastRelanceAt: hoursAgo(80),
-    messages: [{ id: "m1", author: "seya", text: "Bonjour Léa", at: hoursAgo(200) }],
+    messages: [{ id: "m1", author: "seya", text: "Bonjour Léa", at: hoursAgo(20 * 24) }],
   });
-  assert.equal(pickRelanceRound(tooLate, NOW), 0);
+  assert.equal(pickRelanceRound(stillDue, NOW), 3);
 
   const noExtra = conversation({
     relanceCount: 3,
@@ -113,11 +103,39 @@ test("relance 3 : à 5 jours, puis plus rien hors 15 h / 24 h / 5 j", () => {
   assert.equal(pickRelanceRound(noExtra, NOW), 0);
 });
 
-test("pas de relance 15 h si on a dépassé la fenêtre", () => {
-  const late = conversation({
-    messages: [{ id: "m1", author: "seya", text: "Bonjour Léa", at: hoursAgo(40) }],
+test("J+ saisi par le centre : une seule relance à J+14", () => {
+  const relances = [
+    { afterDays: 14, message: "" },
+    { afterDays: 21, message: "" },
+    { afterDays: 30, message: "" },
+  ];
+  const early = conversation({
+    messages: [{ id: "m1", author: "seya", text: "Bonjour Léa", at: hoursAgo(10 * 24) }],
   });
-  assert.equal(pickRelanceRound(late, NOW), 0);
+  assert.equal(pickRelanceRound(early, NOW, { relances }), 0);
+
+  const due = conversation({
+    messages: [{ id: "m1", author: "seya", text: "Bonjour Léa", at: hoursAgo(14 * 24 + 2) }],
+  });
+  assert.equal(pickRelanceRound(due, NOW, { relances }), 1);
+});
+
+test("pas de relance entre 20 h et 7 h, même si elle est due", () => {
+  const due = conversation({
+    messages: [{ id: "m1", author: "seya", text: "Bonjour Léa", at: hoursAgo(30) }],
+  });
+  const midnight = new Date("2026-09-29T00:30:00+02:00");
+  const evening = new Date("2026-09-28T20:00:00+02:00");
+  const morning = new Date("2026-09-28T06:59:00+02:00");
+  const daytime = new Date("2026-09-28T12:00:00+02:00");
+  assert.equal(isRelanceQuietHours(midnight), true);
+  assert.equal(isRelanceQuietHours(evening), true);
+  assert.equal(isRelanceQuietHours(morning), true);
+  assert.equal(isRelanceQuietHours(daytime), false);
+  assert.equal(pickRelanceRound(due, midnight), 0);
+  assert.equal(pickRelanceRound(due, evening), 0);
+  assert.equal(pickRelanceRound(due, morning), 0);
+  assert.equal(pickRelanceRound(due, daytime), 1);
 });
 
 test("une réponse du lead remet le compteur à zéro", () => {
@@ -127,7 +145,7 @@ test("une réponse du lead remet le compteur à zéro", () => {
     messages: [
       { id: "m1", author: "seya", text: "Bonjour Léa", at: hoursAgo(40) },
       { id: "m2", author: "seya", text: "Je reviens vers vous", at: hoursAgo(30) },
-      { id: "m3", author: "lead", text: "Je réfléchis encore", at: hoursAgo(16) },
+      { id: "m3", author: "lead", text: "Je réfléchis encore", at: hoursAgo(25) },
     ],
   });
   assert.equal(pickRelanceRound(item, NOW), 1);
@@ -343,6 +361,20 @@ test("pas de deuxième relance identique, ni avant 20 h", () => {
     ],
   });
   assert.equal(pickRelanceRound(tooSoon, NOW), 0);
+});
+
+test("message de relance saisi par le centre", () => {
+  const seya = {
+    relances: [
+      { afterDays: 1, message: "Bonjour {prenom}, on revient vers vous de {centre} pour {offre}." },
+      { afterDays: 5, message: "" },
+      { afterDays: 14, message: "" },
+    ],
+  };
+  const copy = relanceCopy(conversation(), 1, "JFG Clinique Clermont", seya);
+  assert.match(copy, /Bonjour Léa/);
+  assert.match(copy, /JFG Clinique Clermont/);
+  assert.match(copy, /votre bilan minceur/);
 });
 
 test("le texte de relance s’adapte et ne recopie pas un message déjà envoyé", () => {

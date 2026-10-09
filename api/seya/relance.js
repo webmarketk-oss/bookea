@@ -34,13 +34,10 @@ const {
   syncCrmFromConversation,
 } = require("./crm-sync");
 
-const FIRST_RELANCE_HOURS = 15;
-const FIRST_RELANCE_UNTIL_HOURS = 27;
-const SECOND_RELANCE_HOURS = 24;
-const SECOND_RELANCE_UNTIL_HOURS = 36;
-const THIRD_RELANCE_HOURS = 5 * 24;
-const THIRD_RELANCE_UNTIL_HOURS = 6 * 24;
-const MIN_RELANCE_GAP_HOURS = 20;
+const MIN_RELANCE_GAP_HOURS = 12;
+const RELANCE_QUIET_START_HOUR = 20;
+const RELANCE_QUIET_END_HOUR = 7;
+const DEFAULT_RELANCE_DAYS = [1, 5, 14];
 
 module.exports = async function handler(req, res) {
   if (req.method !== "GET" && req.method !== "POST") {
@@ -139,7 +136,10 @@ async function relanceCenter(supabase, center) {
       nextConversations.push(sealed);
       continue;
     }
-    const round = pickRelanceRound(conversation, now, { crmHold });
+    const round = pickRelanceRound(conversation, now, {
+      crmHold,
+      relances: agent.relances,
+    });
     if (!round) {
       nextConversations.push(updated);
       continue;
@@ -278,6 +278,11 @@ async function loadBookedVisitKeys(supabase, centerId) {
   }
 }
 
+function firstSeyaAt(conversation) {
+  const first = (conversation?.messages || []).find((item) => item.author === "seya");
+  return first?.at || conversation?.updatedAt || null;
+}
+
 function hoursSince(iso, now = new Date()) {
   if (!iso) {
     return 9999;
@@ -289,12 +294,30 @@ function hoursSince(iso, now = new Date()) {
   return (now.getTime() - then) / 3600000;
 }
 
-function inWindow(hours, start, end) {
-  return hours >= start && hours < end;
+function relanceAfterDays(extras = {}) {
+  const rows = Array.isArray(extras.relances) ? extras.relances : [];
+  return [0, 1, 2].map((index) => {
+    const day = Math.floor(Number(rows[index]?.afterDays));
+    return Number.isFinite(day) && day > 0 ? Math.min(365, day) : DEFAULT_RELANCE_DAYS[index];
+  });
+}
+
+function parisHour(now = new Date()) {
+  const parts = new Intl.DateTimeFormat("fr-FR", {
+    timeZone: "Europe/Paris",
+    hour: "numeric",
+    hourCycle: "h23",
+  }).formatToParts(now);
+  return Number(parts.find((item) => item.type === "hour")?.value || 0);
+}
+
+function isRelanceQuietHours(now = new Date()) {
+  const hour = parisHour(now);
+  return hour >= RELANCE_QUIET_START_HOUR || hour < RELANCE_QUIET_END_HOUR;
 }
 
 function pickRelanceRound(conversation, now = new Date(), extras = {}) {
-  if (shouldSkipRelance(conversation, extras)) {
+  if (isRelanceQuietHours(now) || shouldSkipRelance(conversation, extras)) {
     return 0;
   }
 
@@ -303,9 +326,10 @@ function pickRelanceRound(conversation, now = new Date(), extras = {}) {
   const repliedAfterRelance =
     lastLead && lastRelance && new Date(lastLead).getTime() > new Date(lastRelance).getTime();
   const already = repliedAfterRelance ? 0 : Number(conversation.relanceCount || 0);
-  const anchor = lastLead || lastSeyaAt(conversation);
-  const idle = hoursSince(anchor, now);
+  const origin = lastLead || firstSeyaAt(conversation) || lastSeyaAt(conversation);
+  const idleDays = hoursSince(origin, now) / 24;
   const sinceRelance = hoursSince(lastRelance, now);
+  const days = relanceAfterDays(extras);
 
   if (!repliedAfterRelance && lastRelance && sinceRelance < MIN_RELANCE_GAP_HOURS) {
     return 0;
@@ -315,27 +339,13 @@ function pickRelanceRound(conversation, now = new Date(), extras = {}) {
     return 0;
   }
 
-  if (already === 0) {
-    if (inWindow(idle, FIRST_RELANCE_HOURS, FIRST_RELANCE_UNTIL_HOURS)) {
-      return 1;
-    }
-    if (inWindow(idle, THIRD_RELANCE_HOURS, THIRD_RELANCE_UNTIL_HOURS)) {
-      return 3;
-    }
-    return 0;
+  if (already === 0 && idleDays >= days[0]) {
+    return 1;
   }
-
-  if (already === 1) {
-    if (inWindow(sinceRelance, SECOND_RELANCE_HOURS, SECOND_RELANCE_UNTIL_HOURS)) {
-      return 2;
-    }
-    if (inWindow(idle, THIRD_RELANCE_HOURS, THIRD_RELANCE_UNTIL_HOURS)) {
-      return 3;
-    }
-    return 0;
+  if (already === 1 && idleDays >= days[1]) {
+    return 2;
   }
-
-  if (inWindow(idle, THIRD_RELANCE_HOURS, THIRD_RELANCE_UNTIL_HOURS)) {
+  if (already === 2 && idleDays >= days[2]) {
     return 3;
   }
   return 0;
@@ -344,3 +354,5 @@ function pickRelanceRound(conversation, now = new Date(), extras = {}) {
 module.exports.shouldSkipRelance = shouldSkipRelance;
 module.exports.pickRelanceRound = pickRelanceRound;
 module.exports.hoursSince = hoursSince;
+module.exports.isRelanceQuietHours = isRelanceQuietHours;
+module.exports.parisHour = parisHour;

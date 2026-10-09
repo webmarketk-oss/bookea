@@ -379,7 +379,7 @@ export function SeyaInbox({
                 })}
               </div>
               {selected.proposedSlots.length > 0 &&
-              settings.bookAppointment &&
+              (settings.bookAppointment || settings.seyaMission === "welcome_relance_book" || settings.seyaMission === "book") &&
               selected.healthReview?.status !== "awaiting_human_health_review" ? (
                 <div className="grid gap-2 border-t border-slate-200 bg-white px-5 py-3 md:grid-cols-3">
                   {selected.proposedSlots.map((slot, index) => (

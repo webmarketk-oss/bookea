@@ -1,4 +1,11 @@
 import { naturalOfferPhrase } from "@/api/seya/care-family";
+import {
+  canBookSeya,
+  isQualifyCallback,
+  isWelcomeRelanceOnly,
+  operatorCallbackReply,
+  welcomeRelanceHandoffReply,
+} from "@/api/seya/mission";
 import { addDaysIso, todayIso } from "@/lib/crm-stats";
 import type { CenterDayHours } from "@/lib/center-hours";
 import { sanitizePersonName } from "@/lib/seya-person-name";
@@ -323,7 +330,45 @@ export function applyLeadReply(
     };
   }
 
-  if (asksRdv && !settings.bookAppointment) {
+  if (isWelcomeRelanceOnly(settings) && asksRdv) {
+    return {
+      conversation: {
+        ...conversation,
+        qualification,
+        status: "À recontacter",
+        messages: [
+          ...conversation.messages,
+          createSeyaMessage("lead", text),
+          createSeyaMessage("seya", welcomeRelanceHandoffReply()),
+        ],
+        updatedAt: new Date().toISOString(),
+      },
+      shouldBook: null,
+    };
+  }
+
+  const callbackSlot =
+    isQualifyCallback(settings)
+      ? chosenSlot || callbackSlotFromText(text)
+      : null;
+  if (callbackSlot && isQualifyCallback(settings)) {
+    return {
+      conversation: {
+        ...conversation,
+        qualification,
+        status: "À recontacter",
+        messages: [
+          ...conversation.messages,
+          createSeyaMessage("lead", text),
+          createSeyaMessage("seya", operatorCallbackReply(callbackSlot)),
+        ],
+        updatedAt: new Date().toISOString(),
+      },
+      shouldBook: null,
+    };
+  }
+
+  if (asksRdv && !canBookSeya(settings)) {
     return {
       conversation: {
         ...conversation,
@@ -343,7 +388,7 @@ export function applyLeadReply(
     };
   }
 
-  if (chosenSlot && settings.bookAppointment && !threadHasMedical(conversation, text)) {
+  if (chosenSlot && canBookSeya(settings) && !threadHasMedical(conversation, text)) {
     return {
       conversation: {
         ...conversation,
@@ -366,7 +411,7 @@ export function applyLeadReply(
   }
 
   const readyToPropose =
-    settings.bookAppointment &&
+    canBookSeya(settings) &&
     !asksSeyaPrice(text) &&
     !threadHasMedical(conversation, text) &&
     Boolean(qualification.need || conversation.treatment) &&
@@ -422,6 +467,10 @@ function nextQualificationQuestion(
     qualification.need || fallbackTreatment,
   );
 
+  if (isWelcomeRelanceOnly(settings)) {
+    return "Je suis là si une question vous vient.";
+  }
+
   if (settings.qualifyOnSignup && (!qualification.need || isJunkTreatmentName(qualification.need))) {
     return "C’est pour un soin minceur, un soin visage ou une épilation ?";
   }
@@ -436,12 +485,16 @@ function nextQualificationQuestion(
     return "C’est plutôt quelle zone ?";
   }
 
-  if (settings.bookAppointment && !qualification.availability && !qualification.delay) {
+  if (canBookSeya(settings) && !qualification.availability && !qualification.delay) {
     return "Vous êtes plutôt dispo en début ou fin de semaine ?";
   }
 
-  if (settings.bookAppointment) {
+  if (canBookSeya(settings)) {
     return "Je regarde le planning et je vous propose ce qui est vraiment libre.";
+  }
+
+  if (isQualifyCallback(settings)) {
+    return "Parfait. Vous êtes plutôt disponible en début de semaine, ou plutôt en fin de semaine ?";
   }
 
   if (settings.askForAppointment) {
@@ -449,6 +502,31 @@ function nextQualificationQuestion(
   }
 
   return "Je transmets ça à l’équipe du centre.";
+}
+
+function callbackSlotFromText(text: string): SeyaProposedSlot | null {
+  const clocks = parseClockMinutes(text);
+  const weekdays = [
+    "dimanche",
+    "lundi",
+    "mardi",
+    "mercredi",
+    "jeudi",
+    "vendredi",
+    "samedi",
+  ];
+  const needle = text.toLowerCase();
+  const weekday = weekdays.findIndex((day) => needle.includes(day));
+  if (!clocks.length || weekday < 0) {
+    return null;
+  }
+  const today = new Date();
+  const date = new Date(today);
+  const delta = (weekday - today.getDay() + 7) % 7 || 7;
+  date.setDate(today.getDate() + delta);
+  const iso = date.toISOString().slice(0, 10);
+  const time = `${String(Math.floor(clocks[0] / 60)).padStart(2, "0")}:${String(clocks[0] % 60).padStart(2, "0")}`;
+  return { date: iso, time, label: `${iso} à ${time.replace(":", "h")}` };
 }
 
 function hasMedicalFlag(text: string) {

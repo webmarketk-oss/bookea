@@ -11,12 +11,18 @@ import type { SeyaAgentSettings } from "./seya-settings.ts";
 const settings = {
   whatsappAgentEnabled: true,
   autoMessageOnNewLead: true,
+  seyaMission: "book",
   qualifyOnSignup: true,
   askForAppointment: true,
   bookAppointment: true,
   handoffToHuman: true,
   relanceEnabled: false,
-  relanceDays: [],
+  relanceDays: [1, 5, 14],
+  relances: [
+    { afterDays: 1, message: "" },
+    { afterDays: 5, message: "" },
+    { afterDays: 14, message: "" },
+  ],
   brief: "Toujours vérifier le planning réel avant de poser un RDV.",
   centerProfile: {
     activity: "",

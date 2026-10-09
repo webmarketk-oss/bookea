@@ -53,6 +53,12 @@ const {
   withStaffOfferedSlots,
 } = require("./conversation");
 const { understandThread } = require("./care-family");
+const {
+  canBookSeya,
+  isWelcomeRelanceOnly,
+  resolveSeyaMission,
+  seyaMissionPrompt,
+} = require("./mission");
 
 function seyaModel() {
   const requested = String(process.env.OPENAI_MODEL || "").trim();
@@ -101,6 +107,7 @@ async function generateSeyaReply({
     );
   const health = classifyHealthMessage(intentText);
   const rawSlots =
+    canBookSeya(seya) &&
     shouldSearchSlots(bookingState, intentText, conversationWithState) &&
     !health.personal &&
     !health.general &&
@@ -153,6 +160,10 @@ async function generateSeyaReply({
     classifyPriceQuestion(text) ||
     isPriceRepeatComplaint(text) ||
     /je vérifie le créneau|rendez-vous est confirmé/i.test(draft || "") ||
+    /opératrice vous rappellera|transmets votre demande à l’équipe/i.test(
+      draft || "",
+    ) ||
+    isWelcomeRelanceOnly(seya) ||
     (replyClosesThread(previousSeya) && !replyClosesThread(draft))
   ) {
     return { ...fallback, via: fallback.shouldBook ? "book" : "rules" };
@@ -275,12 +286,20 @@ function polishPrompt({
 
   return [
     "Tu es Seya, au standard WhatsApp. Chaleureuse, naturelle, claire, vouvoiement. Tu parles comme une réceptionniste au téléphone, 1 à 3 phrases.",
-    "Ton objectif est d’accompagner jusqu’à la prise de rendez-vous, sans insister et sans coller deux fois la même réponse.",
+    seyaMissionPrompt(settings),
+    resolveSeyaMission(settings) === "welcome_relance" ||
+    resolveSeyaMission(settings) === "qualify_callback"
+      ? "Tu restes sur cette mission. Interdit d’improviser une autre."
+      : "Ton objectif est d’accompagner jusqu’à la prise de rendez-vous, sans insister et sans coller deux fois la même réponse.",
     "Avant de répondre, tu relis tout le fil (prospect + équipe + toi), y compris une relance J+15, et tu t’y tiens. Les horaires écrits par l’équipe priment. Si elle a proposé 15h et que le prospect le choisit, tu confirmes 15h : interdit de dire que ce n’est pas disponible ou de proposer 11h30/12h. Si le prospect a dit qu’il reviendrait, qu’il n’a rien cette semaine, ou que l’info était claire, tu n’as plus à demander un jour. Si le prospect a corrigé le soin (visage, minceur, laser), tu restes sur CE soin. Interdit de revenir à la campagne d’origine. Interdit de parler minceur, analyse corporelle ou cures 500€ si le fil ou le centre est laser / Dépil.",
     "Tu réponds au dernier message, dans ce contexte. Interdit de reposer une question déjà traitée. Interdit de recoller le dernier message Seya.",
     "Le texte Bookea est une fiche de faits autorisés, pas un script. Si Bookea propose un créneau ou pose une question alors que la cliente n’a pas demandé ça, tu ne le recopies pas.",
-    "Tu ne mets jamais fin à la conversation. Interdit : « écrivez-moi quand vous voulez reprendre », « je vous prie », « je reviendrai vers vous », « une conseillère vous recontacte », « préférez-vous en rester là », « vous préférez rester là », « Avec plaisir, à bientôt » si elle n’a pas dit merci après un rendez-vous confirmé. Si elle confirme qu’elle est au bon centre (Dépil, Vichy), tu continues sur sa vraie demande (prix, créneau), tu ne clôtures pas.",
-    "Tu ne pousses jamais à sortir du circuit. Pas de question fermée du type rester là / arrêter / clore. Tu restes gentiment sur la prise de rendez-vous.",
+    resolveSeyaMission(settings) === "qualify_callback"
+      ? "Tu ne clôtures pas tant qu’il manque le jour ou l’heure. Dès que les deux sont connus, la seule conclusion autorisée est : « Une opératrice vous rappellera [jour] à [heure]. » Interdit de poser un RDV agenda."
+      : "Tu ne mets jamais fin à la conversation. Interdit : « écrivez-moi quand vous voulez reprendre », « je vous prie », « je reviendrai vers vous », « une conseillère vous recontacte », « préférez-vous en rester là », « vous préférez rester là », « Avec plaisir, à bientôt » si elle n’a pas dit merci après un rendez-vous confirmé. Si elle confirme qu’elle est au bon centre (Dépil, Vichy), tu continues sur sa vraie demande (prix, créneau), tu ne clôtures pas.",
+    canBookSeya(settings)
+      ? "Tu ne pousses jamais à sortir du circuit. Pas de question fermée du type rester là / arrêter / clore. Tu restes gentiment sur la prise de rendez-vous."
+      : "Interdit de proposer, confirmer ou bloquer un créneau agenda.",
     "Si elle dit aujourd’hui, un jour, 9h, oui merci, oui toujours, fin de journée, après-midi, ou « relis ce que je t’ai demandé », tu réponds à ÇA : un horaire déjà proposé, ou de nouveaux créneaux autorisés. Tu ne redemandes pas la zone.",
     "Tu ne dis jamais qu’il n’y a plus de créneau si des horaires autorisés sont listés plus bas.",
     "Si elle choisit 9h / 9h00 alors que 09h00 a été proposé, tu confirmes ce créneau.",
@@ -542,8 +561,12 @@ function applyAiDecision(conversation, text, seya, slots, decision, extras = {})
     action = "continue";
   }
 
-  if ((action === "book" || action === "propose_slots") && !settings.bookAppointment) {
-    action = settings.askForAppointment || settings.handoffToHuman ? "handoff" : "continue";
+  if ((action === "book" || action === "propose_slots") && !canBookSeya(settings)) {
+    action = resolveSeyaMission(settings) === "qualify_callback"
+      ? "continue"
+      : settings.askForAppointment || settings.handoffToHuman
+        ? "handoff"
+        : "continue";
   }
 
   const chosenSlot =
@@ -587,7 +610,7 @@ function applyAiDecision(conversation, text, seya, slots, decision, extras = {})
   if (
     action === "book" &&
     chosenSlot &&
-    settings.bookAppointment &&
+    canBookSeya(settings) &&
     !threadHasMedical(conversation, text) &&
     slotAllowed(chosenSlot, bookingState)
   ) {
@@ -608,7 +631,7 @@ function applyAiDecision(conversation, text, seya, slots, decision, extras = {})
     );
   }
 
-  if (action === "propose_slots" && settings.bookAppointment && wantsSlots(text, conversation)) {
+  if (action === "propose_slots" && canBookSeya(settings) && wantsSlots(text, conversation)) {
     if (!safeSlots.length) {
       return sealAiResult(
         withMessages(

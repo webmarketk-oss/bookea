@@ -2282,3 +2282,127 @@ test("prix maillot après le bilan pilaire : elle répond encore", async () => {
   assert.doesNotMatch(secondAnswer, /analyse corporelle|à bientôt/i);
 });
 
+test("accueil + relances : elle ne propose pas de rendez-vous", async () => {
+  const welcomeOnly = { ...seya, seyaMission: "welcome_relance", bookAppointment: false };
+  let conversation = startConversation(
+    {
+      leadId: "lead-welcome-only",
+      centerId: "jfg-clinique-clermont",
+      firstName: "Léa",
+      lastName: "Test",
+      phone: "0611223344",
+      treatment: "Soin minceur",
+    },
+    "JFG Clinique Clermont",
+    welcomeOnly,
+  );
+  assert.match(lastSeya(conversation), /question/i);
+  assert.doesNotMatch(lastSeya(conversation), /créneau|creneau/i);
+
+  const result = await generateSeyaReply({
+    conversation,
+    text: "Je veux un rendez-vous",
+    seya: welcomeOnly,
+    appointments: [],
+    hours: hours(),
+    centerName: "JFG Clinique Clermont",
+    centerId: "jfg-clinique-clermont",
+    now: NOW,
+  });
+  conversation = result.conversation;
+  assert.match(lastSeya(conversation), /transmets|équipe|conseillère/i);
+  assert.doesNotMatch(lastSeya(conversation), /début de semaine|créneau|je vérifie/i);
+  assert.equal(result.shouldBook, null);
+  assert.equal(conversation.status, "À recontacter");
+});
+
+test("qualification + rappel opératrice : elle note le jour et l’heure, elle ne booke pas", async () => {
+  const qualify = { ...seya, seyaMission: "qualify_callback", bookAppointment: false };
+  let conversation = startConversation(
+    {
+      leadId: "lead-callback",
+      centerId: "jfg-clinique-clermont",
+      firstName: "Léa",
+      lastName: "Test",
+      phone: "0611223344",
+      treatment: "Soin minceur",
+    },
+    "JFG Clinique Clermont",
+    qualify,
+  );
+  conversation = (
+    await generateSeyaReply({
+      conversation,
+      text: "Je veux un rendez-vous",
+      seya: qualify,
+      appointments: [],
+      hours: hours(),
+      centerName: "JFG Clinique Clermont",
+      centerId: "jfg-clinique-clermont",
+      now: NOW,
+    })
+  ).conversation;
+  assert.match(lastSeya(conversation), /semaine|jour/i);
+  assert.notEqual(conversation.status, "À recontacter");
+
+  const closed = await generateSeyaReply({
+    conversation,
+    text: "Jeudi à 15h",
+    seya: qualify,
+    appointments: [],
+    hours: hours(),
+    centerName: "JFG Clinique Clermont",
+    centerId: "jfg-clinique-clermont",
+    now: NOW,
+  });
+  conversation = closed.conversation;
+  assert.match(lastSeya(conversation), /opératrice vous rappellera/i);
+  assert.match(lastSeya(conversation), /jeudi/i);
+  assert.match(lastSeya(conversation), /15h/i);
+  assert.doesNotMatch(lastSeya(conversation), /je vérifie le créneau|rendez-vous est confirmé/i);
+  assert.equal(closed.shouldBook, null);
+  assert.equal(conversation.status, "À recontacter");
+});
+
+test("accueil + relances + prise de rendez-vous : elle peut booker", async () => {
+  const bundled = { ...seya, seyaMission: "welcome_relance_book", bookAppointment: true };
+  let conversation = startConversation(
+    {
+      leadId: "lead-welcome-book",
+      centerId: "jfg-clinique-clermont",
+      firstName: "Léa",
+      lastName: "Test",
+      phone: "0611223344",
+      treatment: "Soin minceur",
+    },
+    "JFG Clinique Clermont",
+    bundled,
+  );
+  conversation = (
+    await generateSeyaReply({
+      conversation,
+      text: "C’est pour le ventre",
+      seya: bundled,
+      appointments: [],
+      hours: hours(),
+      centerName: "JFG Clinique Clermont",
+      centerId: "jfg-clinique-clermont",
+      now: NOW,
+    })
+  ).conversation;
+  conversation = (
+    await generateSeyaReply({
+      conversation,
+      text: "Jeudi après-midi",
+      seya: bundled,
+      appointments: [],
+      hours: hours(),
+      centerName: "JFG Clinique Clermont",
+      centerId: "jfg-clinique-clermont",
+      now: NOW,
+    })
+  ).conversation;
+  const answer = lastSeya(conversation);
+  assert.match(answer, /jeu\.|jeudi|15h|16h|17h|18h|créneau|creneau|horaire|semaine/i);
+});
+
