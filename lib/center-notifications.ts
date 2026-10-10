@@ -16,6 +16,12 @@ import {
 import { loadSmsInbox, type SmsInboxItem } from "@/lib/sms-settings";
 import { createClient } from "@/lib/supabase";
 import type { Lead, LeadActivity } from "@/types/lead";
+import {
+  appointmentEventCopy,
+  formatShortEventWhen,
+  notificationVia,
+  parseHistorySlot,
+} from "@/api/center/event-copy";
 
 export const NOTIFICATIONS_UPDATED_EVENT = "bookea-notifications-updated";
 
@@ -297,11 +303,22 @@ function bookingNotifications(
     const when = formatDateTime(booking.date, booking.start);
 
     if (previousSlot && previousSlot !== nextSlot) {
+      const previous = parseHistorySlot(previousSlot);
+      const movedCopy = appointmentEventCopy({
+        kind: "appointment_moved",
+        via: "Bookea Client",
+        personName: name,
+        treatment: booking.treatment,
+        when,
+        previousWhen: previous
+          ? formatShortEventWhen(previous.date, previous.time)
+          : "",
+      });
       items.push({
         id: `moved-booking-${booking.id}-${nextSlot}`,
         kind: "appointment_moved",
-        title: "RDV déplacé",
-        body: `${name} a déplacé son RDV au ${when} (en ligne).`,
+        title: movedCopy.title,
+        body: movedCopy.body,
         href: "/dashboard/agenda",
         createdAt: booking.createdAt,
         unread: true,
@@ -410,16 +427,24 @@ function appointmentNotifications(appointments: NotificationAppointment[]) {
         isRecentInstant(cancelEntry?.at) ||
         isRecentInstant(appointment.updatedAt))
     ) {
-      const via =
-        cancelEntry?.source === "client_link" ||
-        appointment.clientResponse === CLIENT_CANCELLED
-          ? "lien SMS"
-          : "en ligne";
+      const via = notificationVia(
+        cancelEntry?.source ||
+          (appointment.clientResponse === CLIENT_CANCELLED
+            ? "client_link"
+            : "public_bookea"),
+      );
+      const cancelledCopy = appointmentEventCopy({
+        kind: "appointment_cancelled",
+        via,
+        personName: appointment.personName,
+        treatment: appointment.treatment,
+        when: formatShortEventWhen(appointment.date, appointment.start),
+      });
       items.push({
         id: `cancel-${appointment.id}`,
         kind: "appointment_cancelled",
-        title: "RDV annulé",
-        body: `${appointment.personName} a annulé son RDV du ${formatDateTime(appointment.date, appointment.start)} (${via}).`,
+        title: cancelledCopy.title,
+        body: cancelledCopy.body,
         href: "/dashboard/agenda",
         createdAt:
           appointment.cancelledAt ||
@@ -453,17 +478,29 @@ function appointmentNotifications(appointments: NotificationAppointment[]) {
       movedOnlineOrSms &&
       isRecentInstant(moveEntry?.at || appointment.updatedAt)
     ) {
-      const via =
-        moveEntry?.source === "client_link" ||
-        moveEntry?.source === "sms_link" ||
-        smsMoved
-          ? "lien SMS"
-          : "en ligne";
+      const via = notificationVia(
+        moveEntry?.source || (smsMoved ? "sms_link" : "public_bookea"),
+      );
+      const previous =
+        parseHistorySlot(moveEntry?.from) ||
+        (appointment.tokenSlot && appointment.tokenSlot !== currentSlot
+          ? parseHistorySlot(appointment.tokenSlot)
+          : null);
+      const movedCopy = appointmentEventCopy({
+        kind: "appointment_moved",
+        via,
+        personName: appointment.personName,
+        treatment: appointment.treatment,
+        when: formatShortEventWhen(appointment.date, appointment.start),
+        previousWhen: previous
+          ? formatShortEventWhen(previous.date, previous.time)
+          : "",
+      });
       items.push({
         id: `moved-${appointment.id}-${currentSlot}`,
         kind: "appointment_moved",
-        title: "RDV déplacé",
-        body: `${appointment.personName} a déplacé son RDV au ${formatDateTime(appointment.date, appointment.start)} (${via}).`,
+        title: movedCopy.title,
+        body: movedCopy.body,
         href: "/dashboard/agenda",
         createdAt: moveEntry?.at || appointment.updatedAt || new Date().toISOString(),
         unread: true,
@@ -610,7 +647,7 @@ async function loadClientMessageNotifications(): Promise<CenterNotification[]> {
   const since = `${lookbackStart()}T00:00:00.000Z`;
   const { data, error } = await supabase
     .from("messages")
-    .select("id,body,created_at,sender_client_id")
+    .select("id,body,created_at,sender_client_id,conversation_id")
     .eq("center_id", context.centerId)
     .eq("channel", "in_app")
     .not("sender_client_id", "is", null)
@@ -646,12 +683,15 @@ async function loadClientMessageNotifications(): Promise<CenterNotification[]> {
   return data.map((row) => {
     const name = names.get(String(row.sender_client_id || "")) || "Une cliente";
     const body = String(row.body || "").replace(/\s+/g, " ").trim();
+    const conversationId = String(row.conversation_id || "").trim();
     return {
       id: `client-message-${row.id}`,
       kind: "client_message" as const,
       title: "Message cliente Bookea",
       body: body ? `${name} : ${body}` : `${name} vous a écrit.`,
-      href: "/dashboard/seya-crm",
+      href: conversationId
+        ? `/dashboard/messagerie?conversation=${encodeURIComponent(conversationId)}`
+        : "/dashboard/messagerie",
       createdAt: String(row.created_at || new Date().toISOString()),
       unread: true,
     };

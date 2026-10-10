@@ -4,7 +4,11 @@ import { useEffect, useMemo, useState } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { loadBillingInvoices, type BillingInvoice } from "@/lib/billing-supabase";
 import { buildCampaignKpiRows } from "@/lib/campaign-kpi";
-import { getLeadRdvTakenDates, isRdvBookedStatus } from "@/lib/crm-stats";
+import {
+  getLeadRdvTakenDates,
+  isRdvBookedStatus,
+  leadHasOutcomeBetween,
+} from "@/lib/crm-stats";
 import { inactiveLeadStatuses } from "@/lib/lead-statuses";
 import { Lead } from "@/types/lead";
 import {
@@ -81,10 +85,25 @@ export default function KPIDashboard({ leads }: KPIDashboardProps) {
     [leads, period, customStartDate, customEndDate]
   );
 
+  const isInPeriod = (date: string) =>
+    isDateInKpiPeriod(parseDate(date), period, customStartDate, customEndDate);
   const totalProspects = periodLeads.length;
-  const rdvCount = periodLeads.filter(leadHasTakenRdv).length;
-  const devisCount = countByStatus(periodLeads, ["Devis"]);
-  const soldCount = countByStatus(periodLeads, soldStatuses);
+  const rdvCount = leads.filter((lead) =>
+    getLeadRdvTakenDates(lead).some(isInPeriod),
+  ).length;
+  const devisCount = leads.filter((lead) =>
+    leadHasOutcomeBetween(lead, ["Devis"], isInPeriod),
+  ).length;
+  const soldLeads = leads.filter((lead) =>
+    leadHasOutcomeBetween(lead, ["Vendu"], isInPeriod),
+  );
+  const soldCount = soldLeads.length;
+  const cancelledCount = leads.filter((lead) =>
+    leadHasOutcomeBetween(lead, ["Annulation"], isInPeriod),
+  ).length;
+  const pvppCount = leads.filter((lead) =>
+    leadHasOutcomeBetween(lead, ["PVPP"], isInPeriod),
+  ).length;
   const presentCount = countByStatus(periodLeads, presentStatuses);
   const depositCount = countByStatus(periodLeads, [
     "Acompte reçu",
@@ -97,12 +116,10 @@ export default function KPIDashboard({ leads }: KPIDashboardProps) {
       lead.status
     )
   ).length;
-  const revenue = periodLeads
-    .filter((lead) => soldStatuses.includes(lead.status))
-    .reduce((total, lead) => total + lead.dealAmount, 0);
+  const revenue = soldLeads.reduce((total, lead) => total + lead.dealAmount, 0);
 
-  const conversionRate = ratio(soldCount, totalProspects);
-  const rdvRate = ratio(rdvCount, totalProspects);
+  const conversionRate = Math.min(100, ratio(soldCount, totalProspects));
+  const rdvRate = Math.min(100, ratio(rdvCount, totalProspects));
   const attendanceRate = ratio(presentCount, presentCount + lostCountByNoShow(periodLeads));
   const depositRate = ratio(depositCount, Math.max(soldCount + rdvCount, 1));
   const redRate = ratio(lostCount, totalProspects);
@@ -155,14 +172,14 @@ export default function KPIDashboard({ leads }: KPIDashboardProps) {
     {
       title: "NB RDV pris",
       value: rdvCount,
-      subtitle: "RDV et acomptes posés",
+      subtitle: "À la date où le RDV a été pris",
       icon: CalendarDays,
       color: "text-blue-600",
     },
     {
       title: "NB devis",
       value: devisCount,
-      subtitle: "Devis en cours",
+      subtitle: "À la date du RDV",
       icon: FileText,
       color: "text-amber-600",
     },
@@ -176,9 +193,23 @@ export default function KPIDashboard({ leads }: KPIDashboardProps) {
     {
       title: "NB ventes",
       value: soldCount,
-      subtitle: "Vendu + converti",
+      subtitle: "À la date du RDV",
       icon: ShoppingBag,
       color: "text-emerald-600",
+    },
+    {
+      title: "Annulations",
+      value: cancelledCount,
+      subtitle: "À la date du RDV",
+      icon: XCircle,
+      color: "text-orange-600",
+    },
+    {
+      title: "PVPP",
+      value: pvppCount,
+      subtitle: "Pas venu pas prévenu, à la date du RDV",
+      icon: XCircle,
+      color: "text-zinc-700",
     },
     {
       title: "Acomptes validés",

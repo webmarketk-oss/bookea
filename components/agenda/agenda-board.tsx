@@ -45,6 +45,7 @@ import {
   agendaBlockTitle,
   isAgendaBlockKind,
   isAppointmentWithinHoursAhead,
+  stripAgendaBlockClientIdentity,
   withAgendaBlockIdentity,
 } from "@/lib/appointment-position-status";
 import { markPastAppointmentsPresent } from "@/lib/appointment-presence";
@@ -1438,7 +1439,10 @@ export default function AgendaBoard() {
     Object.assign(appointment, withClientPositionStatus(appointment));
 
     if (isAgendaBlockKind(appointment.kind, appointment.treatment, appointment.personName)) {
-      Object.assign(appointment, withAgendaBlockIdentity(appointment));
+      Object.assign(
+        appointment,
+        stripAgendaBlockClientIdentity(withAgendaBlockIdentity(appointment)),
+      );
       appointment.status = "Confirmé";
     }
 
@@ -1678,7 +1682,9 @@ export default function AgendaBoard() {
   ) {
     const previousAppointments = appointmentList;
     const localId = updatedAppointment.id;
-    const nextAppointment = withClientPositionStatus(updatedAppointment);
+    const nextAppointment = stripAgendaBlockClientIdentity(
+      withClientPositionStatus(updatedAppointment),
+    );
     setAppointmentList((currentAppointments) =>
       currentAppointments.map((appointment) =>
         appointment.id === localId ? nextAppointment : appointment
@@ -2068,21 +2074,23 @@ export default function AgendaBoard() {
           practitionerList[0]?.id ??
           "samantha";
 
-        return withAgendaBlockIdentity({
-          id: crypto.randomUUID(),
-          personName: block.label,
-          phone: "",
-          treatment: block.label,
-          practitionerId,
-          cabinId,
-          date,
-          start: block.start,
-          duration: block.duration,
-          status: "Confirmé" as AppointmentStatus,
-          source: "Seya" as AppointmentSource,
-          kind: block.kind,
-          notes: `Bloc créé par Seya : ${command}`,
-        });
+        return stripAgendaBlockClientIdentity(
+          withAgendaBlockIdentity({
+            id: crypto.randomUUID(),
+            personName: block.label,
+            phone: "",
+            treatment: block.label,
+            practitionerId,
+            cabinId,
+            date,
+            start: block.start,
+            duration: block.duration,
+            status: "Confirmé" as AppointmentStatus,
+            source: "Seya" as AppointmentSource,
+            kind: block.kind,
+            notes: `Bloc créé par Seya : ${command}`,
+          }),
+        );
       }),
     );
     const existingKeys = new Set(
@@ -2606,10 +2614,6 @@ export default function AgendaBoard() {
                 <Plus className="h-4 w-4" />
               </button>
             </div>
-            <p className="text-xs font-semibold text-slate-500">
-              Renommez les cabines, ajoutez-en ou retirez-en. Les changements
-              sont enregistrés.
-            </p>
           </div>
           <Card className="relative z-0 min-h-0 w-full flex-1 gap-0 overflow-hidden border-slate-200 py-0 shadow-sm">
             <CardContent className="relative min-h-0 min-w-0 w-full flex-1 overflow-hidden p-0">
@@ -3021,6 +3025,12 @@ export default function AgendaBoard() {
                           value === "Rendez-vous" ? form.treatment : value,
                         personName:
                           value === "Rendez-vous" ? form.personName : value,
+                        clientId:
+                          value === "Rendez-vous" ? form.clientId : "",
+                        phone: value === "Rendez-vous" ? form.phone : "",
+                        email: value === "Rendez-vous" ? form.email : "",
+                        birthDate:
+                          value === "Rendez-vous" ? form.birthDate : "",
                       }),
                     )
                   }
@@ -5931,14 +5941,18 @@ function AppointmentDetailsModal({
       ...appointment,
       ...form,
       personName: form.personName.trim() || (isBlock ? form.kind : ""),
-      phone: form.phone.trim(),
+      phone: isBlock ? "" : form.phone.trim(),
       treatment: form.treatment.trim() || (isBlock ? form.kind : ""),
-      email: form.email.trim() || undefined,
+      email: isBlock ? undefined : form.email.trim() || undefined,
+      clientId: isBlock ? undefined : form.clientId,
+      birthDate: isBlock ? undefined : form.birthDate,
       notes: form.notes.trim() || undefined,
       status: isBlock ? "Confirmé" : form.status,
     });
     onSave(
-      isBlock ? withAgendaBlockIdentity(nextAppointment) : nextAppointment,
+      isBlock
+        ? stripAgendaBlockClientIdentity(withAgendaBlockIdentity(nextAppointment))
+        : nextAppointment,
       {
         sms: sendSms,
         email: sendEmail,
@@ -6017,6 +6031,12 @@ function AppointmentDetailsModal({
                       value === "Rendez-vous" ? currentForm.treatment : value,
                     personName:
                       value === "Rendez-vous" ? currentForm.personName : value,
+                    clientId:
+                      value === "Rendez-vous" ? currentForm.clientId : "",
+                    phone: value === "Rendez-vous" ? currentForm.phone : "",
+                    email: value === "Rendez-vous" ? currentForm.email : "",
+                    birthDate:
+                      value === "Rendez-vous" ? currentForm.birthDate : "",
                   }),
                 )
               }

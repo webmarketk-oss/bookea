@@ -16,6 +16,7 @@ const {
   rateLimit,
   relationObject,
 } = require("./service");
+const { notifyAppointmentEvent } = require("../center/event-notify");
 
 function publicAppointmentView(row) {
   const center = relationObject(row?.centers);
@@ -80,8 +81,9 @@ async function loadByPhone(supabase, phone) {
     .from("appointments")
     .select(
       `${APPOINTMENT_SELECT},
-      centers(name),
-      services(name)`,
+      centers(id,name,email,settings),
+      services(name),
+      clients(first_name,last_name)`,
     )
     .in("client_id", clientIds)
     .gte("appointment_date", today)
@@ -127,8 +129,9 @@ async function loadByToken(supabase, token) {
     .from("appointments")
     .select(
       `${APPOINTMENT_SELECT},
-      centers(name),
-      services(name)`,
+      centers(id,name,email,settings),
+      services(name),
+      clients(first_name,last_name)`,
     )
     .eq("confirmation_token_hash", hash)
     .maybeSingle();
@@ -175,7 +178,7 @@ async function syncLinkedLead(supabase, row, nextStatus, note) {
   });
 }
 
-async function applyAction(supabase, row, action) {
+async function applyAction(supabase, row, action, source = "client_link") {
   const now = new Date().toISOString();
   const currentState = readConfirmationState(row);
 
@@ -243,7 +246,7 @@ async function applyAction(supabase, row, action) {
 
     const nextHistory = appendStatusHistory(row.status_history, {
       at: now,
-      source: "client_link",
+      source,
       action: "cancel",
       from: row.status,
       to: "cancelled",
@@ -269,8 +272,19 @@ async function applyAction(supabase, row, action) {
       supabase,
       row,
       "À relancer",
-      "La cliente a annulé son rendez-vous depuis le lien SMS.",
+      source === "client_link"
+        ? "La cliente a annulé son rendez-vous depuis le lien SMS."
+        : "La cliente a annulé son rendez-vous depuis Bookea Client.",
     );
+
+    await notifyAppointmentEvent(supabase, {
+      ...row,
+      status: "cancelled",
+      cancelled_at: now,
+      status_history: nextHistory,
+    }, "appointment_cancelled", source).catch((error) => {
+      console.error("[appointments/confirm] center notify", error);
+    });
 
     return "cancelled";
   }
@@ -353,3 +367,5 @@ module.exports = async function handler(req, res) {
     });
   }
 };
+
+module.exports.applyAction = applyAction;

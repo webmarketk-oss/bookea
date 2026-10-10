@@ -60,6 +60,89 @@ export function isAgendaBlockKind(
   return Boolean(resolveAgendaBlockKind(kind, treatment, personName, notes));
 }
 
+export const AGENDA_BLOCK_CLIENT_MARKER = "[agenda-block]";
+
+const HIDDEN_AGENDA_BLOCK_FIRST_NAMES = new Set([
+  "Pause",
+  "Formation",
+  "Indisponible",
+  "Fermeture",
+  "Agenda",
+]);
+
+export function belongsOnClientFiche(appointment: {
+  kind?: string | null;
+  treatment?: string | null;
+  personName?: string | null;
+  notes?: string | null;
+}) {
+  return !isAgendaBlockKind(
+    appointment.kind,
+    appointment.treatment,
+    appointment.personName,
+    appointment.notes,
+  );
+}
+
+export function isHiddenAgendaBlockClient(row: {
+  firstName?: string | null;
+  lastName?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  privateNote?: string | null;
+}) {
+  if (String(row.privateNote || "").includes(AGENDA_BLOCK_CLIENT_MARKER)) {
+    return true;
+  }
+
+  const firstName = String(row.firstName || "").trim();
+  const lastName = String(row.lastName || "").trim();
+  const phone = String(row.phone || "").replace(/[^\d]/g, "");
+  const email = String(row.email || "").trim().toLowerCase();
+
+  if (phone || (email && !email.endsWith("@internal.bookea"))) {
+    return false;
+  }
+
+  if (firstName === "Agenda" && (!lastName || lastName === "Interne")) {
+    return true;
+  }
+
+  return HIDDEN_AGENDA_BLOCK_FIRST_NAMES.has(firstName) && !lastName;
+}
+
+export function stripAgendaBlockClientIdentity<
+  T extends {
+    kind?: string | null;
+    treatment?: string | null;
+    personName?: string | null;
+    notes?: string | null;
+    clientId?: string;
+    phone?: string;
+    email?: string;
+    birthDate?: string;
+  },
+>(appointment: T): T {
+  if (
+    !isAgendaBlockKind(
+      appointment.kind,
+      appointment.treatment,
+      appointment.personName,
+      appointment.notes,
+    )
+  ) {
+    return appointment;
+  }
+
+  return {
+    ...appointment,
+    clientId: undefined,
+    phone: "",
+    email: undefined,
+    birthDate: undefined,
+  };
+}
+
 export function agendaBlockTitle(
   kind?: string | null,
   treatment?: string | null,

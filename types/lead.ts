@@ -51,6 +51,16 @@ export interface Lead {
   reminderDate?: string;
   latestComment?: string;
   activityLog: LeadActivity[];
+  appointments?: LeadAppointment[];
+}
+
+export type LeadAppointmentOutcome = "Devis" | "Vendu" | "Annulation" | "PVPP";
+
+export interface LeadAppointment {
+  id: string;
+  bookedOn: string;
+  date: string;
+  outcome?: LeadAppointmentOutcome;
 }
 
 export interface LeadActivity {

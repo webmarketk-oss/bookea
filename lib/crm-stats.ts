@@ -1,5 +1,10 @@
 import { normalizeLeadStatus } from "@/lib/lead-statuses";
-import type { Lead, LeadActivity, LeadStatus } from "@/types/lead";
+import type {
+  Lead,
+  LeadActivity,
+  LeadAppointmentOutcome,
+  LeadStatus,
+} from "@/types/lead";
 
 export type CrmQuickFilter =
   | "Tous"
@@ -199,15 +204,106 @@ export function isLeadCreatedSince(lead: Lead, startDate: string) {
   return isLeadCreatedBetween(lead, startDate, todayIso());
 }
 
+const outcomeByLeadStatus: Partial<Record<LeadStatus, LeadAppointmentOutcome>> = {
+  Devis: "Devis",
+  Vendu: "Vendu",
+  "Client converti": "Vendu",
+  "No show": "PVPP",
+};
+
+function activityOutcome(activity: LeadActivity) {
+  if (activity.type === "comment") {
+    return undefined;
+  }
+  const arrowMatch = activity.text.trim().match(/→\s*([^.\n]+)/);
+  if (!arrowMatch) {
+    return undefined;
+  }
+  return outcomeByLeadStatus[normalizeLeadStatus(arrowMatch[1].trim())];
+}
+
+function leadFallbackDate(lead: Lead) {
+  return (
+    toDateOnlyIso(lead.lastActivityAt) ||
+    toDateOnlyIso(lead.updatedDate) ||
+    lead.createdDate ||
+    null
+  );
+}
+
 export function getLeadRdvTakenDates(lead: Lead) {
-  return Array.from(
-    new Set(
-      lead.activityLog
-        .filter(isRdvTakenActivity)
-        .map((activity) => activityDateToIso(activity))
-        .filter((date): date is string => Boolean(date)),
-    ),
-  ).sort();
+  const dates = new Set(
+    lead.activityLog
+      .filter(isRdvTakenActivity)
+      .map((activity) => activityDateToIso(activity))
+      .filter((date): date is string => Boolean(date)),
+  );
+
+  for (const appointment of lead.appointments ?? []) {
+    if (appointment.bookedOn) {
+      dates.add(appointment.bookedOn);
+    }
+  }
+
+  if (dates.size === 0) {
+    const outcomeDates = lead.activityLog
+      .filter((activity) => Boolean(activityOutcome(activity)))
+      .map((activity) => activityDateToIso(activity))
+      .filter((date): date is string => Boolean(date))
+      .sort();
+    if (outcomeDates[0]) {
+      dates.add(outcomeDates[0]);
+    } else if (outcomeByLeadStatus[normalizeLeadStatus(lead.status)]) {
+      const fallback = leadFallbackDate(lead);
+      if (fallback) {
+        dates.add(fallback);
+      }
+    }
+  }
+
+  return Array.from(dates).sort();
+}
+
+export function getLeadOutcomes(lead: Lead) {
+  const outcomes: Array<{ outcome: LeadAppointmentOutcome; date: string }> = [];
+  const fromAgenda = new Set<LeadAppointmentOutcome>();
+
+  for (const appointment of lead.appointments ?? []) {
+    if (appointment.outcome && appointment.date) {
+      outcomes.push({ outcome: appointment.outcome, date: appointment.date });
+      fromAgenda.add(appointment.outcome);
+    }
+  }
+
+  const fromLog = new Set<LeadAppointmentOutcome>();
+  for (const activity of lead.activityLog) {
+    const outcome = activityOutcome(activity);
+    const date = activityDateToIso(activity);
+    if (outcome && date && !fromAgenda.has(outcome)) {
+      outcomes.push({ outcome, date });
+      fromLog.add(outcome);
+    }
+  }
+
+  const current = outcomeByLeadStatus[normalizeLeadStatus(lead.status)];
+  if (current && !fromAgenda.has(current) && !fromLog.has(current)) {
+    const fallback = leadFallbackDate(lead);
+    if (fallback) {
+      outcomes.push({ outcome: current, date: fallback });
+    }
+  }
+
+  return outcomes;
+}
+
+export function leadHasOutcomeBetween(
+  lead: Lead,
+  outcomes: LeadAppointmentOutcome[],
+  isInPeriod: (date: string) => boolean,
+) {
+  return getLeadOutcomes(lead).some(
+    (item) => outcomes.includes(item.outcome) && isInPeriod(item.date),
+  );
 }
 
 export function isLeadRdvTakenOn(lead: Lead, date: string) {

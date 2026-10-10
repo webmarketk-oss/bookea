@@ -1,6 +1,7 @@
 import { cabins, cabinVisuals, practitioners } from "@/lib/agenda-data";
 import {
   applyPositionedAppointmentStatus,
+  AGENDA_BLOCK_CLIENT_MARKER,
   agendaBlockTitle,
   isAgendaBlockKind,
   resolveAgendaBlockKind,
@@ -520,7 +521,9 @@ async function ensureAppointmentLinks(
 ): Promise<AppointmentLinks> {
   const centerId = await getAgendaCenterId(supabase);
   const [clientId, serviceId, roomId, practitionerId] = await Promise.all([
-    ensureAppointmentClient(supabase, centerId, appointment),
+    isBookableAppointment(appointment)
+      ? ensureAppointmentClient(supabase, centerId, appointment)
+      : ensureAgendaBlockClient(supabase, centerId),
     ensureAppointmentService(supabase, centerId, appointment.treatment),
     ensureRoom(supabase, centerId, appointment.cabinId),
     ensurePractitioner(supabase, centerId, appointment.practitionerId),
@@ -757,7 +760,47 @@ function appointmentPersonName(
 }
 
 function isBookableAppointment(appointment: Appointment) {
-  return !isAgendaBlockKind(appointment.kind, appointment.treatment);
+  return !isAgendaBlockKind(
+    appointment.kind,
+    appointment.treatment,
+    appointment.personName,
+    appointment.notes,
+  );
+}
+
+async function ensureAgendaBlockClient(
+  supabase: SupabaseClient,
+  centerId: string,
+) {
+  const { data: existing, error: existingError } = await supabase
+    .from("clients")
+    .select("id")
+    .eq("center_id", centerId)
+    .ilike("private_note", `%${AGENDA_BLOCK_CLIENT_MARKER}%`)
+    .is("merged_into_client_id", null)
+    .limit(1)
+    .maybeSingle();
+
+  if (existingError) throw new Error(existingError.message);
+  if (existing?.id) return existing.id as string;
+
+  const { data, error } = await supabase
+    .from("clients")
+    .insert({
+      center_id: centerId,
+      first_name: "Agenda",
+      last_name: "Interne",
+      email: `agenda-block.${centerId.replace(/-/g, "")}@internal.bookea`,
+      phone: null,
+      status: "inactive",
+      private_note: `${AGENDA_BLOCK_CLIENT_MARKER} Support des pauses, formations et indisponibilités du planning.`,
+    })
+    .select("id")
+    .single();
+
+  if (error) throw new Error(error.message);
+
+  return data.id as string;
 }
 
 function clientNameFields(appointment: Appointment) {

@@ -3,7 +3,6 @@
 import {
   BellRing,
   CalendarCheck,
-  CheckCheck,
   Clock,
   Mail,
   MessageCircle,
@@ -13,10 +12,14 @@ import {
   Sparkles,
   UserRound,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+
+import { NotificationsBell } from "@/components/layout/notifications-bell";
+import { getActiveCenterContext } from "@/lib/center-access";
+import { createClient } from "@/lib/supabase";
 
 type Message = {
-  id: number;
+  id: string;
   author: "client" | "centre" | "seya";
   text: string;
   time: string;
@@ -24,8 +27,8 @@ type Message = {
 };
 
 type EmailNotification = {
-  id: number;
-  conversationId: number;
+  id: string;
+  conversationId: string;
   recipient: string;
   subject: string;
   time: string;
@@ -33,7 +36,7 @@ type EmailNotification = {
 };
 
 type Conversation = {
-  id: number;
+  id: string;
   name: string;
   phone: string;
   email: string;
@@ -45,8 +48,6 @@ type Conversation = {
   unread: number;
   messages: Message[];
 };
-
-const initialConversations: Conversation[] = [];
 
 const statusStyles: Record<Conversation["status"], string> = {
   Client: "bg-emerald-100 text-emerald-700",
@@ -61,12 +62,150 @@ const quickReplies = [
   "Bonjour {{prenom}}, nous pouvons bloquer le rendez-vous avec un acompte.",
 ];
 
+function personLabel(firstName?: string | null, lastName?: string | null) {
+  return [firstName, lastName].filter(Boolean).join(" ").trim() || "Cliente";
+}
+
+type InboxClient = {
+  id: string;
+  first_name: string | null;
+  last_name: string | null;
+  phone: string | null;
+  email: string | null;
+};
+
+type InboxMessage = {
+  id: string;
+  conversation_id: string;
+  body: string;
+  created_at: string;
+  sender_client_id: string | null;
+  sender_profile_id: string | null;
+};
+
+function formatMessageTime(iso?: string) {
+  if (!iso) {
+    return "";
+  }
+  const stamp = Date.parse(iso);
+  if (!Number.isFinite(stamp)) {
+    return "";
+  }
+  return new Intl.DateTimeFormat("fr-FR", {
+    day: "numeric",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(stamp));
+}
+
 export default function MessagingPage() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
-  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [draft, setDraft] = useState("");
   const [emailNotifications, setEmailNotifications] = useState<EmailNotification[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    const requestedConversation =
+      new URLSearchParams(window.location.search).get("conversation") || "";
+    async function load() {
+      try {
+        const supabase = createClient();
+        const context = await getActiveCenterContext(supabase);
+        const { data: rows, error } = await supabase
+          .from("conversations")
+          .select("id,client_id,last_message_at")
+          .eq("center_id", context.centerId)
+          .order("last_message_at", { ascending: false });
+        if (error) {
+          throw new Error(error.message);
+        }
+        const list = rows || [];
+        const clientIds = [
+          ...new Set(list.map((row) => String(row.client_id || "")).filter(Boolean)),
+        ];
+        const conversationIds = list.map((row) => row.id);
+        const [{ data: clients }, { data: messages }] = await Promise.all([
+          clientIds.length
+            ? supabase
+                .from("clients")
+                .select("id,first_name,last_name,phone,email")
+                .in("id", clientIds)
+            : Promise.resolve({ data: [] as InboxClient[] }),
+          conversationIds.length
+            ? supabase
+                .from("messages")
+                .select(
+                  "id,conversation_id,body,created_at,sender_client_id,sender_profile_id",
+                )
+                .in("conversation_id", conversationIds)
+                .order("created_at", { ascending: true })
+            : Promise.resolve({ data: [] as InboxMessage[] }),
+        ]);
+        const clientMap = new Map(
+          (clients || []).map((client) => [
+            String(client.id),
+            {
+              name: personLabel(client.first_name, client.last_name),
+              phone: String(client.phone || "—"),
+              email: String(client.email || "—"),
+            },
+          ]),
+        );
+        const next: Conversation[] = list.map((row) => {
+          const client = clientMap.get(String(row.client_id || ""));
+          const thread = (messages || []).filter(
+            (item) => item.conversation_id === row.id,
+          );
+          const last = thread.at(-1);
+          return {
+            id: String(row.id),
+            name: client?.name || "Cliente",
+            phone: client?.phone || "—",
+            email: client?.email || "—",
+            status: "Client",
+            channel: "In-app",
+            lastSeen: formatMessageTime(String(row.last_message_at || "")) || "—",
+            nextAppointment: "—",
+            service: "Messagerie Bookea",
+            unread: last?.sender_client_id ? 1 : 0,
+            messages: thread.map((item) => ({
+              id: String(item.id),
+              author: item.sender_client_id ? "client" : "centre",
+              text: String(item.body || ""),
+              time: formatMessageTime(String(item.created_at || "")),
+            })),
+          };
+        });
+        if (!cancelled) {
+          setConversations(next);
+          setSelectedId((current) => {
+            if (requestedConversation && next.some((item) => item.id === requestedConversation)) {
+              return requestedConversation;
+            }
+            return current && next.some((item) => item.id === current)
+              ? current
+              : next[0]?.id || null;
+          });
+        }
+      } catch {
+        if (!cancelled) {
+          setConversations([]);
+        }
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      }
+    }
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const filteredConversations = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -98,7 +237,7 @@ export default function MessagingPage() {
     0,
   );
 
-  function selectConversation(id: number) {
+  function selectConversation(id: string) {
     setSelectedId(id);
     setConversations((current) =>
       current.map((conversation) =>
@@ -128,11 +267,10 @@ export default function MessagingPage() {
               messages: [
                 ...conversation.messages,
                 {
-                  id: Date.now(),
+                  id: `local-${Date.now()}`,
                   author: "centre",
                   text,
                   time: now,
-                  mailNotified: true,
                 },
               ],
             }
@@ -141,7 +279,7 @@ export default function MessagingPage() {
     );
     setEmailNotifications((current) => [
       {
-        id: Date.now(),
+        id: `mail-${Date.now()}`,
         conversationId: selectedConversation.id,
         recipient: selectedConversation.email,
         subject: `Nouveau message de JFG Clinique Clermont`,
@@ -165,9 +303,12 @@ export default function MessagingPage() {
     <main className="min-h-screen bg-[#eef3f9] px-6 py-6 text-slate-950">
       <section className="mb-6">
         <p className="text-sm font-medium text-violet-600">Bookea CRM</p>
-        <h1 className="mt-1 text-xl font-semibold tracking-tight">
-          Messagerie in-app
-        </h1>
+        <div className="mt-1 flex items-center justify-between gap-3">
+          <h1 className="text-xl font-semibold tracking-tight">
+            Messagerie in-app
+          </h1>
+          <NotificationsBell />
+        </div>
         <p className="mt-2 max-w-3xl text-sm text-slate-500">
           Communiquez avec vos client(e)s directement dans Bookea, sans perdre
           l'historique des échanges.
@@ -196,7 +337,9 @@ export default function MessagingPage() {
           <div className="space-y-2">
             {filteredConversations.length === 0 ? (
               <p className="rounded-2xl border border-slate-100 p-4 text-sm font-semibold text-slate-500">
-                Aucune conversation pour ce centre.
+                {loading
+                  ? "Chargement des conversations…"
+                  : "Aucune conversation pour ce centre."}
               </p>
             ) : null}
             {filteredConversations.map((conversation) => (
@@ -402,8 +545,8 @@ export default function MessagingPage() {
                   ))
               ) : (
                 <p className="text-sm font-bold leading-6 text-blue-900">
-                  Le prochain message envoyé depuis Bookea déclenchera aussi une
-                  notification mail à {selectedConversation.email}.
+                  Un e-mail est envoyé au centre à chaque nouveau message
+                  cliente, avec un lien vers cette conversation.
                 </p>
               )}
             </div>

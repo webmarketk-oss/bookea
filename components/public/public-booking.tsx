@@ -874,6 +874,28 @@ export function PublicBooking() {
     savePublicBooking(booking);
 
     const slug = storedSettings?.center?.slug?.trim();
+    const isPublishedCenter =
+      Boolean(slug) &&
+      selectedCenter.name.trim().toLowerCase() ===
+        String(storedSettings?.center?.name || "").trim().toLowerCase();
+    if (isPublishedCenter) {
+      await fetch("/api/public/booking", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          slug,
+          bookingId: booking.id,
+          firstName,
+          lastName,
+          phone,
+          email,
+          treatment: booking.treatment,
+          date: booking.date,
+          start: booking.start,
+          duration: booking.duration,
+        }),
+      }).catch(() => null);
+    }
     if (booking.deposit > 0 && storedSettings?.stripeConnected && slug) {
       setBookingStatus("Redirection vers le paiement de l'acompte…");
       try {

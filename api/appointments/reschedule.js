@@ -24,6 +24,7 @@ const {
   reminderHoursForKind,
   reminderSendAt,
 } = require("../sms/brevo");
+const { notifyAppointmentEvent } = require("../center/event-notify");
 
 const SLOT_STEP = 30;
 const DAYS_AHEAD = 21;
@@ -182,8 +183,9 @@ async function loadByToken(supabase, token) {
     .from("appointments")
     .select(
       `${APPOINTMENT_SELECT},
-      centers(name,settings),
-      services(name)`,
+      centers(id,name,email,settings),
+      services(name),
+      clients(first_name,last_name)`,
     )
     .eq("confirmation_token_hash", hash)
     .maybeSingle();
@@ -365,7 +367,7 @@ async function rescheduleSmsJobs(supabase, appointment) {
     .eq("id", appointment.center_id);
 }
 
-async function applyReschedule(supabase, row, date, time) {
+async function applyReschedule(supabase, row, date, time, source = "client_link") {
   const currentState = readConfirmationState(row);
 
   if (!canRescheduleState(currentState)) {
@@ -419,11 +421,13 @@ async function applyReschedule(supabase, row, date, time) {
   }
 
   const now = new Date().toISOString();
+  const previousDate = String(row.appointment_date || "").slice(0, 10);
+  const previousTime = String(row.starts_at || "").slice(0, 5);
   const nextHistory = appendStatusHistory(row.status_history, {
     at: now,
-    source: "client_link",
+    source,
     action: "reschedule",
-    from: `${String(row.appointment_date || "").slice(0, 10)}|${String(row.starts_at || "").slice(0, 5)}`,
+    from: `${previousDate}|${previousTime}`,
     to: `${date}|${time}`,
   });
   const nextRow = {
@@ -474,14 +478,39 @@ async function applyReschedule(supabase, row, date, time) {
     syncLinkedLead(
       supabase,
       row,
-      `La cliente a modifié son rendez-vous depuis le lien SMS : ${formatPublicAppointmentDate(date)} à ${time}.`,
+      source === "client_link"
+        ? `La cliente a modifié son rendez-vous depuis le lien SMS : ${formatPublicAppointmentDate(date)} à ${time}.`
+        : `La cliente a modifié son rendez-vous depuis Bookea Client : ${formatPublicAppointmentDate(date)} à ${time}.`,
     ),
     rescheduleSmsJobs(supabase, nextRow).catch((jobError) => {
       console.error("[appointments/reschedule] sms jobs", jobError);
     }),
+    notifyAppointmentEvent(
+      supabase,
+      { ...nextRow, status_history: nextHistory },
+      "appointment_moved",
+      source,
+      { date, time, previousDate, previousTime },
+    ).catch((error) => {
+      console.error("[appointments/reschedule] center notify", error);
+    }),
   ]);
 
   return { state: "rescheduled", row: nextRow };
+}
+
+async function listRescheduleDays(supabase, row) {
+  const state = readConfirmationState(row);
+  const today = parisDateOf(new Date());
+  const lastDay = addDaysYmd(today, DAYS_AHEAD - 1);
+  const center = relationObject(row.centers);
+  const [occupied, roomCount] = await Promise.all([
+    loadOccupiedSlots(supabase, row.center_id, today, lastDay, row.id),
+    loadRoomCount(supabase, row.center_id),
+  ]);
+  return canRescheduleState(state)
+    ? buildAvailableDays(row, occupied, roomCount, center?.settings)
+    : [];
 }
 
 module.exports = async function handler(req, res) {
@@ -600,3 +629,8 @@ module.exports = async function handler(req, res) {
     });
   }
 };
+
+module.exports.applyReschedule = applyReschedule;
+module.exports.listRescheduleDays = listRescheduleDays;
+module.exports.isDateTimeValid = isDateTimeValid;
+module.exports.canRescheduleState = canRescheduleState;

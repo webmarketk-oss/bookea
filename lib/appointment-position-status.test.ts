@@ -3,8 +3,11 @@ import test from "node:test";
 import {
   agendaBlockTitle,
   applyPositionedAppointmentStatus,
+  belongsOnClientFiche,
   dbStatusWhenSlotPositioned,
+  isHiddenAgendaBlockClient,
   statusWhenAppointmentPositioned,
+  stripAgendaBlockClientIdentity,
   withAgendaBlockIdentity,
 } from "./appointment-position-status.ts";
 
@@ -107,4 +110,68 @@ test("un bloc Indisponible ne s’affiche pas comme Pause", () => {
   assert.equal(next.kind, "Indisponible");
   assert.equal(next.treatment, "Indisponible");
   assert.equal(next.personName, "Indisponible");
+});
+
+test("une pause n’apparaît pas sur la fiche client", () => {
+  assert.equal(
+    belongsOnClientFiche({
+      kind: "Pause",
+      treatment: "Pause",
+      personName: "Pause",
+    }),
+    false,
+  );
+  assert.equal(
+    belongsOnClientFiche({
+      kind: "Rendez-vous",
+      treatment: "Laser",
+      personName: "Marie Dupont",
+    }),
+    true,
+  );
+});
+
+test("une fiche Pause sans contact est cachée du CRM", () => {
+  assert.equal(
+    isHiddenAgendaBlockClient({
+      firstName: "Pause",
+      lastName: "",
+      phone: "",
+      email: "",
+    }),
+    true,
+  );
+  assert.equal(
+    isHiddenAgendaBlockClient({
+      firstName: "Marie",
+      lastName: "Dupont",
+      phone: "0612345678",
+    }),
+    false,
+  );
+  assert.equal(
+    isHiddenAgendaBlockClient({
+      firstName: "Agenda",
+      lastName: "Interne",
+      privateNote: "[agenda-block] Planning",
+    }),
+    true,
+  );
+});
+
+test("une pause ne garde pas l’identité d’une cliente", () => {
+  const next = stripAgendaBlockClientIdentity({
+    kind: "Pause" as const,
+    treatment: "Pause",
+    personName: "Pause",
+    clientId: "client-1",
+    phone: "0612345678",
+    email: "marie@test.fr",
+    birthDate: "1990-01-01",
+  });
+
+  assert.equal(next.clientId, undefined);
+  assert.equal(next.phone, "");
+  assert.equal(next.email, undefined);
+  assert.equal(next.birthDate, undefined);
 });

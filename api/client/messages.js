@@ -1,6 +1,7 @@
 const { createServiceClient, parsePayload, rateLimit } = require("../appointments/service");
 const { canMessageCenter } = require("./account-lib");
 const { loadAccount, requireUser } = require("./account");
+const { notifyClientMessageEvent } = require("../center/event-notify");
 
 module.exports = async function handler(req, res) {
   if (req.method !== "POST") {
@@ -86,6 +87,15 @@ module.exports = async function handler(req, res) {
       .from("conversations")
       .update({ last_message_at: now })
       .eq("id", conversationId);
+
+    await notifyClientMessageEvent(supabase, {
+      centerId,
+      conversationId,
+      personName: [account.firstName, account.lastName].filter(Boolean).join(" "),
+      preview: text,
+    }).catch((error) => {
+      console.error("[client/messages] center notify", error);
+    });
 
     return res.status(200).json({
       ok: true,

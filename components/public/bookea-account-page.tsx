@@ -15,12 +15,16 @@ import { useRouter } from "next/navigation";
 
 import { PlaceSuggestField } from "@/components/forms/place-suggest-field";
 import {
+  cancelClientAppointment,
   emptyClientAccount,
   loadClientAccount,
+  loadClientAppointmentSlots,
+  rescheduleClientAppointment,
   saveClientSettings,
   sendClientMessage,
   type ClientAccount,
   type ClientAppointmentCard,
+  type ClientRescheduleDay,
 } from "@/lib/client-account";
 import { createClient } from "@/lib/supabase";
 
@@ -99,6 +103,11 @@ export function BookeaAccountPage() {
   const [activeCenterId, setActiveCenterId] = useState("");
   const [messageDraft, setMessageDraft] = useState("");
   const [sending, setSending] = useState(false);
+  const [actingId, setActingId] = useState("");
+  const [rescheduleId, setRescheduleId] = useState("");
+  const [rescheduleDays, setRescheduleDays] = useState<ClientRescheduleDay[]>([]);
+  const [rescheduleDate, setRescheduleDate] = useState("");
+  const [rescheduleTime, setRescheduleTime] = useState("");
   const [savingProfile, setSavingProfile] = useState(false);
   const [profileFeedback, setProfileFeedback] = useState("");
   const [profileForm, setProfileForm] = useState({
@@ -208,6 +217,72 @@ export function BookeaAccountPage() {
   function openContact(appointment: ClientAppointmentCard) {
     setActiveCenterId(appointment.centerId);
     setActiveTab("messages");
+  }
+
+  async function reloadAccount() {
+    const next = await loadClientAccount();
+    if (next) {
+      setAccount(next);
+    }
+  }
+
+  async function cancelAppointment(appointment: ClientAppointmentCard) {
+    if (
+      actingId ||
+      !window.confirm(
+        `Annuler le rendez-vous ${appointment.service} du ${appointment.date} ?`,
+      )
+    ) {
+      return;
+    }
+    setActingId(appointment.id);
+    setError("");
+    try {
+      await cancelClientAppointment(appointment.id);
+      await reloadAccount();
+    } catch {
+      setError("Le rendez-vous n’a pas pu être annulé. Réessayez.");
+    } finally {
+      setActingId("");
+    }
+  }
+
+  async function openReschedule(appointment: ClientAppointmentCard) {
+    setActingId(appointment.id);
+    setError("");
+    try {
+      const days = await loadClientAppointmentSlots(appointment.id);
+      setRescheduleId(appointment.id);
+      setRescheduleDays(days);
+      setRescheduleDate(days[0]?.date || "");
+      setRescheduleTime(days[0]?.times[0] || "");
+    } catch {
+      setError("Impossible de charger les créneaux disponibles.");
+    } finally {
+      setActingId("");
+    }
+  }
+
+  async function confirmReschedule() {
+    if (!rescheduleId || !rescheduleDate || !rescheduleTime) {
+      return;
+    }
+    setActingId(rescheduleId);
+    setError("");
+    try {
+      await rescheduleClientAppointment(
+        rescheduleId,
+        rescheduleDate,
+        rescheduleTime,
+      );
+      setRescheduleId("");
+      setRescheduleDays([]);
+      await reloadAccount();
+    } catch {
+      setError("Le rendez-vous n’a pas pu être déplacé. Choisissez un autre créneau.");
+    } finally {
+      setActingId("");
+    }
   }
 
   async function saveProfile() {
@@ -391,13 +466,104 @@ export function BookeaAccountPage() {
                           </p>
                         </div>
                       </div>
-                      <button
-                        type="button"
-                        onClick={() => openContact(appointment)}
-                        className="mt-3 rounded-xl bg-slate-950 px-4 py-2 text-sm font-semibold text-white"
-                      >
-                        Contacter {appointment.center}
-                      </button>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          onClick={() => openContact(appointment)}
+                          className="rounded-xl bg-slate-950 px-4 py-2 text-sm font-semibold text-white"
+                        >
+                          Contacter {appointment.center}
+                        </button>
+                        <button
+                          type="button"
+                          disabled={actingId === appointment.id}
+                          onClick={() => void openReschedule(appointment)}
+                          className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700"
+                        >
+                          Déplacer
+                        </button>
+                        <button
+                          type="button"
+                          disabled={actingId === appointment.id}
+                          onClick={() => void cancelAppointment(appointment)}
+                          className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-2 text-sm font-semibold text-rose-700"
+                        >
+                          Annuler
+                        </button>
+                      </div>
+                      {rescheduleId === appointment.id ? (
+                        <div className="mt-3 space-y-3 rounded-2xl bg-white p-3">
+                          {rescheduleDays.length === 0 ? (
+                            <p className="text-sm font-medium text-slate-500">
+                              Aucun créneau disponible pour le moment.
+                            </p>
+                          ) : (
+                            <>
+                              <label className="block text-sm font-medium text-slate-700">
+                                Nouveau jour
+                                <select
+                                  value={rescheduleDate}
+                                  onChange={(event) => {
+                                    const nextDate = event.target.value;
+                                    const day = rescheduleDays.find(
+                                      (item) => item.date === nextDate,
+                                    );
+                                    setRescheduleDate(nextDate);
+                                    setRescheduleTime(day?.times[0] || "");
+                                  }}
+                                  className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2"
+                                >
+                                  {rescheduleDays.map((day) => (
+                                    <option key={day.date} value={day.date}>
+                                      {day.label}
+                                    </option>
+                                  ))}
+                                </select>
+                              </label>
+                              <label className="block text-sm font-medium text-slate-700">
+                                Nouvelle heure
+                                <select
+                                  value={rescheduleTime}
+                                  onChange={(event) =>
+                                    setRescheduleTime(event.target.value)
+                                  }
+                                  className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2"
+                                >
+                                  {(
+                                    rescheduleDays.find(
+                                      (day) => day.date === rescheduleDate,
+                                    )?.times || []
+                                  ).map((time) => (
+                                    <option key={time} value={time}>
+                                      {time}
+                                    </option>
+                                  ))}
+                                </select>
+                              </label>
+                              <div className="flex flex-wrap gap-2">
+                                <button
+                                  type="button"
+                                  disabled={actingId === appointment.id}
+                                  onClick={() => void confirmReschedule()}
+                                  className="rounded-xl bg-violet-600 px-4 py-2 text-sm font-semibold text-white"
+                                >
+                                  Confirmer le nouveau créneau
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setRescheduleId("");
+                                    setRescheduleDays([]);
+                                  }}
+                                  className="rounded-xl px-4 py-2 text-sm font-semibold text-slate-500"
+                                >
+                                  Fermer
+                                </button>
+                              </div>
+                            </>
+                          )}
+                        </div>
+                      ) : null}
                     </article>
                   ))}
                 </div>

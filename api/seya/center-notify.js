@@ -187,7 +187,15 @@ async function resolveNotifySender(center, seya) {
   };
 }
 
-async function sendBrevoToCenter({ to, subject, text, centerName, senderEmail, senderName }) {
+async function sendBrevoToCenter({
+  to,
+  subject,
+  text,
+  centerName,
+  senderEmail,
+  senderName,
+  tags,
+}) {
   const apiKey = process.env.BREVO_API_KEY;
   const from = isValidEmail(senderEmail) ? senderEmail : defaultSenderEmail();
   if (!apiKey) {
@@ -213,7 +221,8 @@ async function sendBrevoToCenter({ to, subject, text, centerName, senderEmail, s
       subject: String(subject || "").slice(0, 200),
       textContent: text,
       htmlContent: toHtml(text),
-      tags: ["bookea-seya-center"],
+      tags:
+        Array.isArray(tags) && tags.length > 0 ? tags : ["bookea-seya-center"],
     }),
   });
   if (!response.ok) {
@@ -343,5 +352,7 @@ module.exports = {
   notifyCenterSeyaAction,
   notifyKey,
   notifyMailStatus,
+  resolveNotifySender,
+  sendBrevoToCenter,
   sendCenterNotifyTest,
 };

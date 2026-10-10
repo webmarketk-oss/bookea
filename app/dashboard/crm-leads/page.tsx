@@ -15,6 +15,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
 import { inactiveLeadStatuses, leadStatuses } from "@/lib/lead-statuses";
+import { matchesPersonSearch } from "@/lib/person-search";
 import {
   addDaysIso,
   matchesCrmQuickFilter,
@@ -405,10 +406,9 @@ export default function CRMLeadsPage() {
 
   const filteredLeads = leadList.filter((lead) => {
     const search = filters.search.trim().toLowerCase();
-    const fullName = `${lead.firstName} ${lead.lastName}`.toLowerCase();
     const matchesSearch =
       search.length === 0 ||
-      fullName.includes(search) ||
+      matchesPersonSearch(search, lead.firstName, lead.lastName) ||
       lead.phone.toLowerCase().includes(search) ||
       lead.email.toLowerCase().includes(search) ||
       lead.treatment.toLowerCase().includes(search);

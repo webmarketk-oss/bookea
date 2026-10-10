@@ -73,7 +73,18 @@ test("un message cliente devient une notification Seya", () => {
   assert.match(item.title, /Message cliente/i);
   assert.match(item.body, /Samantha/);
   assert.match(item.body, /décaler samedi/);
-  assert.equal(item.href, "/dashboard/seya-crm");
+  assert.equal(item.href, "/dashboard/messagerie");
+});
+
+test("un message cliente pointe vers la conversation Bookea", () => {
+  const item = clientMessageNotification({
+    id: "m2",
+    conversationId: "conv-9",
+    clientName: "Léa",
+    body: "Bonjour",
+    createdAt: "2026-10-03T08:00:00.000Z",
+  });
+  assert.equal(item.href, "/dashboard/messagerie?conversation=conv-9");
 });
 
 test("le créneau se lit en français, et un RDV passé se classe bien", () => {

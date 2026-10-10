@@ -6,11 +6,18 @@ import {
   toDateOnlyIso,
   toLocalIsoDate,
 } from "@/lib/crm-stats";
+import { belongsOnClientFiche, isHiddenAgendaBlockClient } from "@/lib/appointment-position-status";
 import { sanitizePersonName } from "@/lib/seya-person-name";
 import { closeSeyaThreadsForBookedLead } from "@/lib/seya-close-booking";
 import { createClient } from "@/lib/supabase";
 import { normalizeLeadStatus } from "@/lib/lead-statuses";
-import type { Lead, LeadActivity, LeadStatus } from "@/types/lead";
+import type {
+  Lead,
+  LeadActivity,
+  LeadAppointment,
+  LeadAppointmentOutcome,
+  LeadStatus,
+} from "@/types/lead";
 
 type SupabaseClient = ReturnType<typeof createClient>;
 
@@ -156,6 +163,7 @@ type ClientRow = {
         starts_at: string;
         duration_minutes: number;
         status: string;
+        notes?: string | null;
         services: Relation<{ name: string | null }>;
         practitioners: Relation<{ first_name: string | null; last_name: string | null }>;
         rooms: Relation<{ name: string | null }>;
@@ -266,10 +274,79 @@ export async function loadCrmLeads() {
     throw new Error(error.message);
   }
 
+  const rows = (data ?? []) as unknown as LeadRow[];
+  const appointmentsByLead = await loadLeadAppointments(
+    supabase,
+    context.centerId,
+    rows,
+  );
+
   return {
     center: context,
-    leads: ((data ?? []) as unknown as LeadRow[]).map(toLead),
+    leads: rows.map(
+      (row): Lead => ({
+        ...toLead(row),
+        appointments: appointmentsByLead.get(row.id) ?? [],
+      }),
+    ),
   };
+}
+
+const appointmentOutcomeByStatus: Record<string, LeadAppointmentOutcome> = {
+  quote: "Devis",
+  sold: "Vendu",
+  cancelled: "Annulation",
+  no_show: "PVPP",
+};
+
+async function loadLeadAppointments(
+  supabase: SupabaseClient,
+  centerId: string,
+  leads: LeadRow[],
+) {
+  const byLead = new Map<string, LeadAppointment[]>();
+  const leadsByClient = new Map<string, string[]>();
+  for (const lead of leads) {
+    if (lead.client_id) {
+      leadsByClient.set(lead.client_id, [
+        ...(leadsByClient.get(lead.client_id) ?? []),
+        lead.id,
+      ]);
+    }
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from("appointments")
+      .select("id,lead_id,client_id,created_at,appointment_date,status,notes")
+      .eq("center_id", centerId);
+    if (error) {
+      return byLead;
+    }
+
+    for (const row of data ?? []) {
+      if (!belongsOnClientFiche({ notes: row.notes })) {
+        continue;
+      }
+      const ownerIds = row.lead_id
+        ? [String(row.lead_id)]
+        : leadsByClient.get(String(row.client_id || "")) ?? [];
+      if (ownerIds.length !== 1) {
+        continue;
+      }
+      const appointment: LeadAppointment = {
+        id: String(row.id),
+        bookedOn: toLocalIsoDate(String(row.created_at)),
+        date: String(row.appointment_date || "").slice(0, 10),
+        outcome: appointmentOutcomeByStatus[String(row.status || "")],
+      };
+      byLead.set(ownerIds[0], [...(byLead.get(ownerIds[0]) ?? []), appointment]);
+    }
+  } catch {
+    return byLead;
+  }
+
+  return byLead;
 }
 
 export async function createCrmLead(input: NewCrmLeadInput) {
@@ -755,6 +832,7 @@ export async function loadCrmClients(options?: { includeClientId?: string | null
           starts_at,
           duration_minutes,
           status,
+          notes,
           services(name),
           practitioners(first_name,last_name),
           rooms(name)
@@ -800,7 +878,7 @@ export async function loadCrmAgendaContacts(): Promise<CrmAgendaContact[]> {
     loadCrmLeads().catch(() => ({ leads: [] as Lead[] })),
     supabase
       .from("clients")
-      .select("id,first_name,last_name,phone,email,status,birthdate")
+      .select("id,first_name,last_name,phone,email,status,birthdate,private_note")
       .eq("center_id", context.centerId)
       .is("merged_into_client_id", null),
   ]);
@@ -811,7 +889,7 @@ export async function loadCrmAgendaContacts(): Promise<CrmAgendaContact[]> {
   if (clientsResult.error) {
     const fallback = await supabase
       .from("clients")
-      .select("id,first_name,last_name,phone,email,status,birthdate")
+      .select("id,first_name,last_name,phone,email,status,birthdate,private_note")
       .eq("center_id", context.centerId);
 
     if (fallback.error) {
@@ -846,6 +924,18 @@ export async function loadCrmAgendaContacts(): Promise<CrmAgendaContact[]> {
   }
 
   for (const client of clientRows) {
+    if (
+      isHiddenAgendaBlockClient({
+        firstName: client.first_name,
+        lastName: client.last_name,
+        email: client.email,
+        phone: client.phone,
+        privateNote: client.private_note,
+      })
+    ) {
+      continue;
+    }
+
     const phoneKey = lastPhoneDigits(String(client.phone || ""));
     const emailKey = String(client.email || "").trim().toLowerCase();
 
@@ -1457,6 +1547,18 @@ function toLead(row: LeadRow): Lead {
 }
 
 function isVisibleCrmClientRow(row: ClientRow) {
+  if (
+    isHiddenAgendaBlockClient({
+      firstName: row.first_name,
+      lastName: row.last_name,
+      email: row.email,
+      phone: row.phone,
+      privateNote: row.private_note,
+    })
+  ) {
+    return false;
+  }
+
   const status = (row.status || "").trim().toLowerCase();
 
   if (status && status !== "prospect") {
@@ -1489,8 +1591,13 @@ function toCrmClient(row: ClientRow): CrmClient {
     .slice()
     .sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at))[0];
   const nextAppointment = appointments
-    .filter((appointment) =>
-      ["confirmed", "to_confirm", "in_progress"].includes(appointment.status),
+    .filter(
+      (appointment) =>
+        ["confirmed", "to_confirm", "in_progress"].includes(appointment.status) &&
+        belongsOnClientFiche({
+          treatment: relationObject(appointment.services)?.name,
+          notes: appointment.notes,
+        }),
     )
     .sort((a, b) =>
       `${a.appointment_date} ${a.starts_at}`.localeCompare(

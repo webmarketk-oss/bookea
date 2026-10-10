@@ -36,6 +36,7 @@ import { cabins, practitioners } from "@/lib/agenda-data";
 import { useSidebarControl } from "@/components/layout/sidebar-control";
 import { collapseDashboardSidebar } from "@/components/layout/use-sidebar-slide";
 import { loadCrmAppointments } from "@/lib/agenda-supabase";
+import { belongsOnClientFiche } from "@/lib/appointment-position-status";
 import { markPastAppointmentsPresent } from "@/lib/appointment-presence";
 import type { Appointment } from "@/types/agenda";
 import {
@@ -2189,9 +2190,10 @@ function getClientAppointmentHistory(client: Client, appointments: Appointment[]
   const matchingAppointments = appointments
     .filter(
       (appointment) =>
-        appointment.clientId === client.id ||
-        normalize(appointment.personName) === clientName ||
-        (Boolean(clientPhone) && normalize(appointment.phone) === clientPhone)
+        belongsOnClientFiche(appointment) &&
+        (appointment.clientId === client.id ||
+          normalize(appointment.personName) === clientName ||
+          (Boolean(clientPhone) && normalize(appointment.phone) === clientPhone))
     )
     .map((appointment) => ({
       id: appointment.id,

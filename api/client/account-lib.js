@@ -129,12 +129,15 @@ function canMessageCenter(account, centerId) {
 function clientMessageNotification(row) {
   const name = String(row?.clientName || "Une cliente").trim() || "Une cliente";
   const body = String(row?.body || "").replace(/\s+/g, " ").trim();
+  const conversationId = String(row?.conversationId || "").trim();
   return {
     id: `client-message-${row.id}`,
     kind: "client_message",
     title: "Message cliente Bookea",
     body: body ? `${name} : ${body}` : `${name} vous a écrit.`,
-    href: "/dashboard/seya-crm",
+    href: conversationId
+      ? `/dashboard/messagerie?conversation=${encodeURIComponent(conversationId)}`
+      : "/dashboard/messagerie",
     createdAt: row.createdAt,
     unread: true,
   };

@@ -26,7 +26,7 @@ import {
   Wallet,
 } from "lucide-react";
 
-const rdvBookedSubtitle = "RDV pris, acompte envoyé, acompte reçu…";
+const rdvBookedSubtitle = "Y compris devis, vendu, annulation, PVPP";
 
 type DashboardCardsProps = {
   leads: Lead[];

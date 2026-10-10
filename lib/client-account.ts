@@ -113,6 +113,70 @@ export async function sendClientMessage(centerId: string, text: string) {
   return (await response.json()) as { message: ClientThreadMessage };
 }
 
+export type ClientRescheduleDay = {
+  date: string;
+  label: string;
+  times: string[];
+};
+
+export async function loadClientAppointmentSlots(appointmentId: string) {
+  const headers = await authHeaders();
+  if (!headers) {
+    throw new Error("unauthorized");
+  }
+  const response = await fetch(
+    `/api/client/appointments?appointmentId=${encodeURIComponent(appointmentId)}`,
+    { headers },
+  );
+  const payload = (await response.json().catch(() => ({}))) as {
+    days?: ClientRescheduleDay[];
+    error?: string;
+  };
+  if (!response.ok) {
+    throw new Error(payload.error || "slots_failed");
+  }
+  return payload.days || [];
+}
+
+export async function cancelClientAppointment(appointmentId: string) {
+  const headers = await authHeaders();
+  if (!headers) {
+    throw new Error("unauthorized");
+  }
+  const response = await fetch("/api/client/appointments", {
+    method: "POST",
+    headers: { ...headers, "Content-Type": "application/json" },
+    body: JSON.stringify({ appointmentId, action: "cancel" }),
+  });
+  if (!response.ok) {
+    throw new Error("cancel_failed");
+  }
+}
+
+export async function rescheduleClientAppointment(
+  appointmentId: string,
+  date: string,
+  time: string,
+) {
+  const headers = await authHeaders();
+  if (!headers) {
+    throw new Error("unauthorized");
+  }
+  const response = await fetch("/api/client/appointments", {
+    method: "POST",
+    headers: { ...headers, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      appointmentId,
+      action: "reschedule",
+      date,
+      time,
+    }),
+  });
+  if (!response.ok) {
+    throw new Error("reschedule_failed");
+  }
+}
+
 export async function saveClientSettings(input: ClientProfileInput) {
   const headers = await authHeaders();
   if (!headers) {
