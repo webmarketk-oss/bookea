@@ -1,6 +1,7 @@
 import {
   appendAdminAlert,
   createAdminAlert,
+  markAdminAlertInvoiced,
   markAdminAlertRead,
   normalizeAdminAlerts,
   type AdminAlert,
@@ -257,6 +258,27 @@ export async function markCenterAdminAlertRead(
   await persistCenterSettings(center.supabase, center.id, {
     ...center.settings,
     adminAlerts: markAdminAlertRead(center.settings.adminAlerts, alertId),
+  });
+}
+
+export async function markCenterAdminAlertInvoiced(
+  centerId: string,
+  alertId: string,
+  receipt: {
+    invoiceId: string;
+    invoicedAt?: string;
+    emailedAt?: string;
+    emailedTo?: string;
+  },
+) {
+  const center = await loadCenterSettings(centerId);
+  await persistCenterSettings(center.supabase, center.id, {
+    ...center.settings,
+    adminAlerts: markAdminAlertInvoiced(
+      center.settings.adminAlerts,
+      alertId,
+      receipt,
+    ),
   });
 }
 

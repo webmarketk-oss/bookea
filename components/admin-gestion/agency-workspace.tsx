@@ -65,7 +65,19 @@ const MONTHS = [
 type Section = "facturation" | "clients" | "prestations" | "kpi";
 
 export function AgencyWorkspace() {
-  const [company, setCompany] = useState<AgencyCompany>("webk");
+  const [company, setCompany] = useState<AgencyCompany>(() => {
+    if (typeof window === "undefined") {
+      return "webk";
+    }
+    const value = new URLSearchParams(window.location.search).get("company");
+    return value === "bookea" || value === "webk" ? value : "webk";
+  });
+  const [openInvoiceId] = useState<string | null>(() => {
+    if (typeof window === "undefined") {
+      return null;
+    }
+    return new URLSearchParams(window.location.search).get("invoice");
+  });
   const [section, setSection] = useState<Section>("facturation");
   const [states, setStates] = useState<Record<AgencyCompany, AgencyBillingState> | null>(
     null,
@@ -93,6 +105,13 @@ export function AgencyWorkspace() {
         return;
       }
       setStates({ webk: nextWebk, bookea: nextBookea });
+      const params = new URLSearchParams(window.location.search);
+      const mail = params.get("mail");
+      if (mail === "sent") {
+        setNotice("Facture envoyée au centre.");
+      } else if (mail === "pending") {
+        setNotice("Facture prête. L’e-mail n’est pas parti : vérifiez l’adresse du centre ou la boîte Bookea.");
+      }
     })();
     return () => {
       alive = false;
@@ -118,6 +137,12 @@ export function AgencyWorkspace() {
         return next;
       });
       setNotice("Enregistré.");
+    } catch (error) {
+      setNotice(
+        error instanceof Error
+          ? error.message
+          : "Factures non enregistrées en ligne. Réessayez.",
+      );
     } finally {
       setSaving(false);
     }
@@ -229,14 +254,26 @@ export function AgencyWorkspace() {
       ) : null}
 
       {notice ? (
-        <p className="text-sm font-semibold text-emerald-700">{notice}</p>
+        <p
+          className={`text-sm font-semibold ${
+            notice === "Enregistré." || notice === "Facture envoyée au centre."
+              ? "text-emerald-700"
+              : "text-amber-700"
+          }`}
+        >
+          {notice}
+        </p>
       ) : null}
       {saving ? (
         <p className="text-sm font-semibold text-slate-400">Enregistrement...</p>
       ) : null}
 
       {section === "facturation" ? (
-        <BillingSection state={state} onChange={update} />
+        <BillingSection
+          state={state}
+          onChange={update}
+          openInvoiceId={openInvoiceId}
+        />
       ) : null}
       {section === "clients" ? (
         <ClientsSection state={state} onChange={update} />
@@ -267,13 +304,15 @@ export function AgencyWorkspace() {
 function BillingSection({
   state,
   onChange,
+  openInvoiceId,
 }: {
   state: AgencyBillingState;
   onChange: (patch: Partial<AgencyBillingState>) => void;
+  openInvoiceId?: string | null;
 }) {
   const [draft, setDraft] = useState(() => emptyInvoiceDraft(state));
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [previewId, setPreviewId] = useState<string | null>(null);
+  const [previewId, setPreviewId] = useState<string | null>(openInvoiceId ?? null);
   const [statusFilter, setStatusFilter] = useState<AgencyInvoiceStatus | "tous">(
     "tous",
   );
@@ -1500,78 +1539,14 @@ async function downloadAgencyInvoice(
   state: AgencyBillingState,
   invoice: AgencyInvoice,
 ) {
-  const [{ jsPDF }, html2canvasModule] = await Promise.all([
-    import("jspdf"),
-    import("html2canvas"),
-  ]);
-  const html2canvas = html2canvasModule.default;
-  const iframe = document.createElement("iframe");
-  iframe.setAttribute("aria-hidden", "true");
-  iframe.style.position = "fixed";
-  iframe.style.left = "-10000px";
-  iframe.style.top = "0";
-  iframe.style.width = "794px";
-  iframe.style.height = "1123px";
-  iframe.style.border = "0";
-  document.body.appendChild(iframe);
-
-  const frameDoc = iframe.contentDocument;
-  if (!frameDoc) {
-    iframe.remove();
-    throw new Error("Impossible de préparer le PDF.");
-  }
-
-  frameDoc.open();
-  frameDoc.write(buildAgencyInvoiceHtml(state, invoice));
-  frameDoc.close();
-
-  await waitForInvoiceImages(frameDoc);
-  const canvas = await html2canvas(frameDoc.body, {
-    scale: 2,
-    useCORS: true,
-    backgroundColor: "#ffffff",
-    windowWidth: 794,
-  });
-  iframe.remove();
-
-  const pdf = new jsPDF({ unit: "mm", format: "a4", orientation: "portrait" });
-  const pageWidth = pdf.internal.pageSize.getWidth();
-  const pageHeight = pdf.internal.pageSize.getHeight();
-  const imageWidth = pageWidth;
-  const imageHeight = (canvas.height * imageWidth) / canvas.width;
-  const image = canvas.toDataURL("image/png");
-  let remaining = imageHeight;
-  let offset = 0;
-
-  pdf.addImage(image, "PNG", 0, offset, imageWidth, imageHeight);
-  remaining -= pageHeight;
-  while (remaining > 0) {
-    offset -= pageHeight;
-    pdf.addPage();
-    pdf.addImage(image, "PNG", 0, offset, imageWidth, imageHeight);
-    remaining -= pageHeight;
-  }
-  pdf.save(`${invoice.number}.pdf`);
-}
-
-function waitForInvoiceImages(doc: Document) {
-  const images = Array.from(doc.images);
-  if (images.length === 0) {
-    return Promise.resolve();
-  }
-  return Promise.all(
-    images.map(
-      (image) =>
-        new Promise<void>((resolve) => {
-          if (image.complete) {
-            resolve();
-            return;
-          }
-          image.onload = () => resolve();
-          image.onerror = () => resolve();
-        }),
-    ),
-  ).then(() => undefined);
+  const { agencyInvoicePdfDataUrl } = await import(
+    "@/lib/admin-agency-invoice-pdf"
+  );
+  const dataUrl = await agencyInvoicePdfDataUrl(state, invoice);
+  const link = document.createElement("a");
+  link.href = dataUrl;
+  link.download = `${invoice.number}.pdf`;
+  link.click();
 }
 
 function emptyInvoiceDraft(state: AgencyBillingState) {

@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   appendAdminAlert,
   createAdminAlert,
+  markAdminAlertInvoiced,
   markAdminAlertRead,
   normalizeAdminAlerts,
 } from "./admin-alerts.ts";
@@ -32,4 +33,24 @@ test("les alertes invalides sont ignorées", () => {
     normalizeAdminAlerts([{ kind: "sms_pack", title: "x" }, null]),
     [],
   );
+});
+
+test("une souscription facturée reste liée à la facture envoyée", () => {
+  const alert = createAdminAlert({
+    id: "alert-2",
+    kind: "seya_pack",
+    title: "JFG a souscrit 200 conversations",
+    message: "JFG a souscrit 200 conversations Seya — 129,95 €",
+    amountEuros: 129.95,
+    quantity: 200,
+  });
+  const billed = markAdminAlertInvoiced([alert], "alert-2", {
+    invoiceId: "inv-9",
+    emailedAt: "2026-10-09T18:00:00.000Z",
+    emailedTo: "contact@jfg.fr",
+  });
+  assert.equal(billed[0]?.billingStatus, "invoiced");
+  assert.equal(billed[0]?.invoiceId, "inv-9");
+  assert.equal(billed[0]?.emailedTo, "contact@jfg.fr");
+  assert.equal(billed[0]?.readAt, "2026-10-09T18:00:00.000Z");
 });

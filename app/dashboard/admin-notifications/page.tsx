@@ -10,6 +10,7 @@ import {
   Users,
 } from "lucide-react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
 import {
@@ -17,7 +18,14 @@ import {
   companyLabel,
   type AgencyCompany,
 } from "@/lib/admin-agency-billing";
-import { loadAgencyBilling } from "@/lib/admin-agency-store";
+import {
+  loadAgencyBilling,
+  loadBookeaCentersForBilling,
+} from "@/lib/admin-agency-store";
+import {
+  fulfillSubscriptionInvoice,
+  subscriptionInvoiceHref,
+} from "@/lib/admin-subscription-invoice";
 import {
   loadAdminInbox,
   markCenterAdminAlertRead,
@@ -52,6 +60,7 @@ function formatWhen(value: string) {
 }
 
 export default function AdminNotificationsPage() {
+  const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [allowed, setAllowed] = useState(false);
   const [items, setItems] = useState<AdminInboxItem[]>([]);
@@ -59,6 +68,7 @@ export default function AdminNotificationsPage() {
     Array<{ company: AgencyCompany; label: string; overdue: boolean }>
   >([]);
   const [markingId, setMarkingId] = useState<string | null>(null);
+  const [fulfillingId, setFulfillingId] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [centerFilter, setCenterFilter] = useState("tous");
   const [dateFrom, setDateFrom] = useState("");
@@ -256,6 +266,52 @@ export default function AdminNotificationsPage() {
     setCenterFilter("tous");
     setDateFrom("");
     setDateTo("");
+  }
+
+  async function handleOpenInvoice(item: AdminInboxItem) {
+    if (fulfillingId) {
+      return;
+    }
+    setFulfillingId(item.id);
+    setError("");
+    try {
+      const centers = await loadBookeaCentersForBilling();
+      const center = centers.find((row) => row.id === item.centerId) || {
+        id: item.centerId,
+        name: item.centerName,
+        legalName: "",
+        address: "",
+        email: "",
+        phone: "",
+        city: "",
+      };
+      const result = await fulfillSubscriptionInvoice(item, center);
+      setItems((current) =>
+        current.map((alert) =>
+          alert.id === item.id
+            ? {
+                ...alert,
+                readAt: alert.readAt || new Date().toISOString(),
+                billingStatus: "invoiced",
+                invoiceId: result.invoice.id,
+                emailedAt: result.emailedAt,
+                emailedTo: result.emailedTo,
+              }
+            : alert,
+        ),
+      );
+      router.push(
+        subscriptionInvoiceHref(result.invoice.id, Boolean(result.emailedAt)),
+      );
+    } catch (openError) {
+      setError(
+        openError instanceof Error
+          ? openError.message
+          : "Impossible de préparer la facture.",
+      );
+    } finally {
+      setFulfillingId(null);
+    }
   }
 
   async function handleMarkRead(item: AdminInboxItem) {
@@ -522,11 +578,21 @@ export default function AdminNotificationsPage() {
                       : item.kind === "crm_pack"
                         ? Users
                         : Smartphone;
+                  const billed = item.billingStatus === "invoiced";
 
                   return (
                     <article
                       key={`${item.centerId}:${item.id}`}
-                      className={`rounded-2xl border bg-white p-5 shadow-sm ${
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => void handleOpenInvoice(item)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter" || event.key === " ") {
+                          event.preventDefault();
+                          void handleOpenInvoice(item);
+                        }
+                      }}
+                      className={`cursor-pointer rounded-2xl border bg-white p-5 text-left shadow-sm transition hover:border-violet-300 ${
                         item.readAt
                           ? "border-slate-200"
                           : "border-violet-200 ring-1 ring-violet-100"
@@ -546,23 +612,48 @@ export default function AdminNotificationsPage() {
                             </p>
                             <p className="mt-2 text-xs font-medium text-slate-400">
                               {formatWhen(item.createdAt)} · {item.centerName} ·{" "}
-                              {formatEuro(item.amountEuros)} · à facturer
+                              {formatEuro(item.amountEuros)} ·{" "}
+                              {billed
+                                ? item.emailedTo
+                                  ? `envoyée à ${item.emailedTo}`
+                                  : "facturée"
+                                : "à facturer"}
                             </p>
                           </div>
                         </div>
                         <div className="flex shrink-0 flex-wrap gap-2">
                           <Link
                             href={`/dashboard/admin-centres#center-${item.centerId}`}
+                            onClick={(event) => event.stopPropagation()}
                             className="inline-flex h-10 items-center rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 hover:bg-slate-50"
                           >
                             Fiche centre
                           </Link>
+                          <button
+                            type="button"
+                            disabled={fulfillingId === item.id}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              void handleOpenInvoice(item);
+                            }}
+                            className="inline-flex h-10 items-center gap-2 rounded-xl bg-slate-950 px-3 text-sm font-semibold text-white hover:bg-violet-700 disabled:opacity-60"
+                          >
+                            {fulfillingId === item.id ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <Mail className="h-4 w-4" />
+                            )}
+                            {billed ? "Ouvrir la facture" : "Facturer et envoyer"}
+                          </button>
                           {!item.readAt ? (
                             <button
                               type="button"
                               disabled={markingId === item.id}
-                              onClick={() => void handleMarkRead(item)}
-                              className="inline-flex h-10 items-center gap-2 rounded-xl bg-slate-950 px-3 text-sm font-semibold text-white hover:bg-violet-700 disabled:opacity-60"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                void handleMarkRead(item);
+                              }}
+                              className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
                             >
                               {markingId === item.id ? (
                                 <Loader2 className="h-4 w-4 animate-spin" />

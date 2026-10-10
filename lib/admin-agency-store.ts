@@ -35,27 +35,67 @@ function writeLocal(state: AgencyBillingState) {
   window.localStorage.setItem(storageKey(state.company), JSON.stringify(state));
 }
 
+export async function adminAuthHeaders() {
+  const supabase = createClient();
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+  return {
+    "Content-Type": "application/json",
+    ...(session?.access_token
+      ? { Authorization: `Bearer ${session.access_token}` }
+      : {}),
+  };
+}
+
 async function loadRemote(company: AgencyCompany) {
   try {
-    const supabase = createClient();
-    const { data, error } = await supabase
-      .from("admin_agency_billing")
-      .select("payload")
-      .eq("company", company)
-      .maybeSingle();
-    if (error || !data) {
-      return error ? ("error" as const) : null;
+    const response = await fetch(
+      `/api/admin/agency-billing?company=${encodeURIComponent(company)}`,
+      { headers: await adminAuthHeaders(), cache: "no-store" },
+    );
+    const result = (await response.json().catch(() => null)) as {
+      ok?: boolean;
+      state?: unknown;
+    } | null;
+    if (!response.ok || !result?.ok) {
+      return "error" as const;
     }
-    return normalizeAgencyState(company, data.payload);
+    return result.state ? normalizeAgencyState(company, result.state) : null;
   } catch {
     return "error" as const;
+  }
+}
+
+async function saveRemote(state: AgencyBillingState) {
+  const response = await fetch("/api/admin/agency-billing", {
+    method: "PUT",
+    headers: await adminAuthHeaders(),
+    body: JSON.stringify({ company: state.company, state }),
+  });
+  const result = (await response.json().catch(() => null)) as {
+    ok?: boolean;
+    error?: string;
+  } | null;
+  if (!response.ok || !result?.ok) {
+    throw new Error(
+      result?.error || "Factures non enregistrées en ligne. Réessayez.",
+    );
   }
 }
 
 export async function loadAgencyBilling(company: AgencyCompany) {
   const local = readLocal(company);
   const remote = await loadRemote(company);
-  if (remote === "error" || !remote) {
+  if (remote === "error") {
+    return local;
+  }
+  if (!remote) {
+    if (local.invoices.length || local.clients.length) {
+      await saveAgencyBilling(local).catch((error) =>
+        console.warn("[admin-agency-billing]", error),
+      );
+    }
     return local;
   }
   const invoices = mergeAgencyInvoices(local.invoices, remote.invoices);
@@ -66,7 +106,9 @@ export async function loadAgencyBilling(company: AgencyCompany) {
   };
   writeLocal(next);
   if (invoices.length > remote.invoices.length) {
-    await saveAgencyBilling(next);
+    await saveAgencyBilling(next).catch((error) =>
+      console.warn("[admin-agency-billing]", error),
+    );
   }
   return next;
 }
@@ -87,33 +129,7 @@ export async function saveAgencyBilling(state: AgencyBillingState) {
     );
     return next;
   }
-  try {
-    const supabase = createClient();
-    const { data: existing } = await supabase
-      .from("admin_agency_billing")
-      .select("payload")
-      .eq("company", next.company)
-      .maybeSingle();
-    const mailbox =
-      existing?.payload &&
-      typeof existing.payload === "object" &&
-      "mailbox" in existing.payload
-        ? (existing.payload as { mailbox?: unknown }).mailbox
-        : undefined;
-    const { error } = await supabase.from("admin_agency_billing").upsert(
-      {
-        company: next.company,
-        payload: mailbox ? { ...next, mailbox } : next,
-        updated_at: next.updatedAt,
-      },
-      { onConflict: "company" },
-    );
-    if (error) {
-      console.warn("[admin-agency-billing]", error.message);
-    }
-  } catch (error) {
-    console.warn("[admin-agency-billing]", error);
-  }
+  await saveRemote(next);
   return next;
 }
 

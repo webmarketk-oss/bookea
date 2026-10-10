@@ -115,6 +115,9 @@ export type AgencyInvoice = {
   comments: string;
   commentLog?: AgencyInvoiceComment[];
   invoiceNote: string;
+  sourceAlertId?: string;
+  emailedAt?: string;
+  emailedTo?: string;
   createdAt: string;
 };
 
@@ -794,6 +797,145 @@ export function duplicateAgencyInvoice(
   };
 }
 
+export function subscriptionInvoiceLine(alert: {
+  kind: "seya_pack" | "sms_pack" | "crm_pack";
+  amountEuros: number;
+  quantity: number;
+}): AgencyInvoiceLine {
+  const kind: AgencyServiceKind =
+    alert.kind === "seya_pack"
+      ? "whatsapp"
+      : alert.kind === "sms_pack"
+        ? "sms"
+        : "crm_sms";
+  const label =
+    alert.kind === "seya_pack"
+      ? `Pack WhatsApp ${alert.quantity} conversations Seya`
+      : alert.kind === "sms_pack"
+        ? `Pack SMS ${alert.quantity} crédits`
+        : "Bookea CRM + SMS";
+  return {
+    id: createId(),
+    label,
+    kind,
+    quantity: 1,
+    unitPrice: Number(alert.amountEuros) || 0,
+    discountType: "Aucune",
+    discountValue: 0,
+  };
+}
+
+export function agencyClientFromCenter(center: BillingCenterContact): AgencyClient {
+  return {
+    id: createId(),
+    centerId: center.id,
+    name: center.name || "Centre",
+    legalName: center.legalName,
+    address: center.address,
+    email: center.email,
+    phone: center.phone,
+    city: center.city,
+    active: true,
+    phoningOffer: false,
+    comments: "",
+    firstInvoiceOn: "",
+    nextInvoiceOn: "",
+    createdAt: new Date().toISOString(),
+  };
+}
+
+export function ensureAgencyClientForCenter(
+  state: AgencyBillingState,
+  center: BillingCenterContact,
+) {
+  const existing = state.clients.find((client) => client.centerId === center.id);
+  if (existing) {
+    const synced = applyBillingCenterContact(existing, center);
+    if (synced === existing) {
+      return { state, client: existing };
+    }
+    return {
+      state: {
+        ...state,
+        clients: state.clients.map((client) =>
+          client.id === synced.id ? synced : client,
+        ),
+      },
+      client: synced,
+    };
+  }
+
+  const client = agencyClientFromCenter(center);
+  return {
+    state: { ...state, clients: [client, ...state.clients] },
+    client,
+  };
+}
+
+export function ensureSubscriptionInvoice(
+  state: AgencyBillingState,
+  input: {
+    center: BillingCenterContact;
+    alert: {
+      id: string;
+      kind: "seya_pack" | "sms_pack" | "crm_pack";
+      amountEuros: number;
+      quantity: number;
+      message?: string;
+      createdAt?: string;
+      invoiceId?: string;
+    };
+  },
+) {
+  const existing = state.invoices.find(
+    (invoice) =>
+      invoice.sourceAlertId === input.alert.id ||
+      (input.alert.invoiceId && invoice.id === input.alert.invoiceId),
+  );
+  if (existing) {
+    return { state, invoice: existing, created: false };
+  }
+
+  const withClient = ensureAgencyClientForCenter(state, input.center);
+  const issuedOn =
+    String(input.alert.createdAt || "").slice(0, 10) ||
+    new Date().toISOString().slice(0, 10);
+  const period = defaultInvoicePeriod(issuedOn);
+  const invoice: AgencyInvoice = {
+    id: createId(),
+    number: nextInvoiceNumber(withClient.state),
+    clientId: withClient.client.id,
+    issuedOn,
+    nextCycleOn: nextBillingCycleOn(issuedOn),
+    ...period,
+    status: "En attente de paiement",
+    lines: [subscriptionInvoiceLine(input.alert)],
+    comments: "",
+    commentLog: [],
+    invoiceNote: String(input.alert.message || "").trim(),
+    sourceAlertId: input.alert.id,
+    createdAt: new Date().toISOString(),
+  };
+
+  return {
+    state: {
+      ...withClient.state,
+      invoices: [invoice, ...withClient.state.invoices],
+      clients: withClient.state.clients.map((client) =>
+        client.id === withClient.client.id
+          ? {
+              ...client,
+              firstInvoiceOn: client.firstInvoiceOn || issuedOn,
+              nextInvoiceOn: invoice.nextCycleOn,
+            }
+          : client,
+      ),
+    },
+    invoice,
+    created: true,
+  };
+}
+
 export function nextInvoiceNumber(state: AgencyBillingState, now = new Date()) {
   const prefix = state.company === "webk" ? "WK" : "BK";
   const year = String(now.getFullYear());
@@ -1089,6 +1231,9 @@ function normalizeInvoice(value: unknown): AgencyInvoice | null {
       record.id,
     ),
     invoiceNote: String(record.invoiceNote || ""),
+    sourceAlertId: String(record.sourceAlertId || "").trim() || undefined,
+    emailedAt: String(record.emailedAt || "").trim() || undefined,
+    emailedTo: String(record.emailedTo || "").trim() || undefined,
     createdAt: String(record.createdAt || new Date().toISOString()),
   };
 }

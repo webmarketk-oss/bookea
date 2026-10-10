@@ -21,6 +21,8 @@ import {
   pendingPaymentKpi,
   nextBillingCycleOn,
   nextInvoiceNumber,
+  ensureSubscriptionInvoice,
+  emptyAgencyState,
   addInvoiceComment,
   duplicateAgencyInvoice,
   defaultInvoicePeriod,
@@ -344,6 +346,40 @@ test("seuls les clients actifs génèrent une notification de cycle", () => {
   assert.equal(alerts.length, 1);
   assert.equal(alerts[0]?.clientName, "JFG");
   assert.equal(alerts[0]?.overdue, false);
+});
+
+test("une notif de souscription prépare une facture Bookea sans doublon", () => {
+  const center = {
+    id: "center-1",
+    name: "JFG Clinic",
+    legalName: "JFG Clinic SARL",
+    address: "12 rue de la Paix",
+    email: "contact@jfg.fr",
+    phone: "0473000000",
+    city: "Clermont",
+  };
+  const alert = {
+    id: "alert-wa",
+    kind: "seya_pack" as const,
+    amountEuros: 129.95,
+    quantity: 200,
+    message: "JFG Clinic a souscrit 200 conversations Seya — 129,95 €",
+    createdAt: "2026-10-09T10:00:00.000Z",
+  };
+  const first = ensureSubscriptionInvoice(emptyAgencyState("bookea"), {
+    center,
+    alert,
+  });
+  assert.equal(first.created, true);
+  assert.equal(first.invoice.number, "BK-2026-001");
+  assert.equal(first.invoice.lines[0]?.label, "Pack WhatsApp 200 conversations Seya");
+  assert.equal(first.invoice.lines[0]?.unitPrice, 129.95);
+  assert.equal(first.state.clients[0]?.email, "contact@jfg.fr");
+
+  const second = ensureSubscriptionInvoice(first.state, { center, alert });
+  assert.equal(second.created, false);
+  assert.equal(second.invoice.id, first.invoice.id);
+  assert.equal(second.state.invoices.length, 1);
 });
 
 test("le numéro de facture WebK s’incrémente sur l’année", () => {
