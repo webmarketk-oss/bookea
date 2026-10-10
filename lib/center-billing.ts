@@ -11,11 +11,13 @@ import {
   smsPacks,
   whatsappLeadPacks,
 } from "@/lib/bookea-tarifs";
+import { nextRenewalPeriod } from "@/api/billing/_renewal";
 import { getActiveCenterContext } from "@/lib/center-access";
 import {
   appendOfferHistory,
   createBookeaPlan,
   createOfferHistoryItem,
+  formatOfferDate,
   monthlyRenewal,
   normalizeBookeaPlan,
   seyaOfferFromQuota,
@@ -209,7 +211,7 @@ export async function setCenterSeyaQuota(
   return {
     centerId: center.id,
     quota: nextQuota,
-    used: seyaConversationCount(center.settings.seya),
+    used: seyaConversationCount(center.settings.seya, nextQuota),
   };
 }
 
@@ -248,6 +250,96 @@ export async function subscribeBookeaPlan() {
     plan,
     alert,
   };
+}
+
+export async function renewSeyaPack() {
+  const context = await getActiveCenterContext();
+  const center = await loadCenterSettings(context.centerId);
+  const current = normalizeSeyaQuota(center.settings.seyaQuota);
+  const offer = seyaOfferFromQuota(current);
+  if (!offer) {
+    throw new Error("Aucun pack WhatsApp à renouveler.");
+  }
+
+  const price =
+    whatsappLeadPacks.find((item) => item.leads === offer.leads)?.price ??
+    offer.price;
+  const period = nextRenewalPeriod(current.renewsAt);
+  const nextQuota: SeyaQuota = {
+    conversationLimit: offer.leads,
+    packLeads: offer.leads,
+    subscribedAt: period.renewedAt,
+    renewsAt: period.renewsAt,
+    updatedAt: period.renewedAt,
+  };
+  const alert = createAdminAlert({
+    kind: "seya_pack",
+    title: `${center.name} a renouvelé ${offer.leads} conversations Seya`,
+    message: `${center.name} a renouvelé ${offer.leads} conversations Seya — ${formatEuro(price)} — jusqu’au ${formatOfferDate(period.renewsAt)}`,
+    amountEuros: price,
+    quantity: offer.leads,
+    offer: "seya",
+  });
+  const historyItem = createOfferHistoryItem({
+    id: alert.id,
+    kind: "seya_pack",
+    label: `WhatsApp ${offer.leads} leads`,
+    amountEuros: price,
+    quantity: offer.leads,
+    subscribedAt: period.renewedAt,
+    renewsAt: period.renewsAt,
+  });
+
+  await persistCenterSettings(center.supabase, center.id, {
+    ...center.settings,
+    seyaQuota: nextQuota,
+    adminAlerts: appendAdminAlert(center.settings.adminAlerts, alert),
+    offerHistory: appendOfferHistory(center.settings.offerHistory, historyItem),
+  });
+
+  return { centerName: center.name, renewsAt: period.renewsAt };
+}
+
+export async function renewBookeaPlan() {
+  const context = await getActiveCenterContext();
+  const center = await loadCenterSettings(context.centerId);
+  const current = normalizeBookeaPlan(center.settings.bookeaPlan);
+  if (!current) {
+    throw new Error("Aucun abonnement Bookea à renouveler.");
+  }
+
+  const period = nextRenewalPeriod(current.renewsAt);
+  const plan = {
+    ...current,
+    subscribedAt: period.renewedAt,
+    renewsAt: period.renewsAt,
+  };
+  const alert = createAdminAlert({
+    kind: "crm_pack",
+    title: `${center.name} a renouvelé Bookea CRM + SMS`,
+    message: `${center.name} a renouvelé Bookea CRM + SMS — ${plan.price} € / mois — jusqu’au ${formatOfferDate(period.renewsAt)}`,
+    amountEuros: plan.price,
+    quantity: 1,
+    offer: "crm",
+  });
+  const historyItem = createOfferHistoryItem({
+    id: alert.id,
+    kind: "crm_pack",
+    label: "Bookea CRM + SMS",
+    amountEuros: plan.price,
+    quantity: 1,
+    subscribedAt: period.renewedAt,
+    renewsAt: period.renewsAt,
+  });
+
+  await persistCenterSettings(center.supabase, center.id, {
+    ...center.settings,
+    bookeaPlan: plan,
+    adminAlerts: appendAdminAlert(center.settings.adminAlerts, alert),
+    offerHistory: appendOfferHistory(center.settings.offerHistory, historyItem),
+  });
+
+  return { centerName: center.name, renewsAt: period.renewsAt };
 }
 
 export async function markCenterAdminAlertRead(
@@ -335,7 +427,7 @@ export async function loadActiveCenterBilling() {
     centerName: center.name,
     smsRemaining: sms.remaining,
     seyaQuota,
-    seyaUsed: seyaConversationCount(center.settings.seya),
+    seyaUsed: seyaConversationCount(center.settings.seya, seyaQuota),
     whatsappOffer: seyaOfferFromQuota(seyaQuota),
     bookeaPlan: normalizeBookeaPlan(center.settings.bookeaPlan),
   };

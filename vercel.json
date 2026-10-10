@@ -11,6 +11,10 @@
     {
       "path": "/api/seya/relance",
       "schedule": "* * * * *"
+    },
+    {
+      "path": "/api/billing/renewals",
+      "schedule": "0 7 * * *"
     }
   ],
   "functions": {

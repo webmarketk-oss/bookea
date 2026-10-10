@@ -30,6 +30,7 @@ import {
   invoiceCommentLog,
   invoicePeriod,
   periodRange,
+  withCenterClients,
   withSyncedCenterContacts,
   keepInvoiceEdits,
   type AgencyBillingState,
@@ -42,7 +43,7 @@ import {
   type AgencyServiceKind,
 } from "@/lib/admin-agency-billing";
 import {
-  loadAgencyBilling,
+  loadAgencyBillingStatus,
   loadBookeaCentersForBilling,
   saveAgencyBilling,
 } from "@/lib/admin-agency-store";
@@ -89,25 +90,33 @@ export function AgencyWorkspace() {
   const [customTo, setCustomTo] = useState("");
   const persistChain = useRef(Promise.resolve());
   const statesRef = useRef(states);
-  statesRef.current = states;
 
   useEffect(() => {
     let alive = true;
     void (async () => {
       const [webk, bookea, centers] = await Promise.all([
-        loadAgencyBilling("webk"),
-        loadAgencyBilling("bookea"),
+        loadAgencyBillingStatus("webk"),
+        loadAgencyBillingStatus("bookea"),
         loadBookeaCentersForBilling().catch(() => []),
       ]);
-      const nextWebk = withSyncedCenterContacts(webk, centers);
-      const nextBookea = withSyncedCenterContacts(bookea, centers);
+      const nextWebk = withSyncedCenterContacts(webk.state, centers);
+      const nextBookea = withCenterClients(
+        withSyncedCenterContacts(bookea.state, centers),
+        centers,
+      );
       if (!alive) {
         return;
       }
-      setStates({ webk: nextWebk, bookea: nextBookea });
+      const loaded = { webk: nextWebk, bookea: nextBookea };
+      statesRef.current = loaded;
+      setStates(loaded);
       const params = new URLSearchParams(window.location.search);
       const mail = params.get("mail");
-      if (mail === "sent") {
+      if (!webk.online || !bookea.online) {
+        setNotice(
+          "Factures en ligne non chargées : seule la copie de cet appareil s’affiche. Rechargez la page ou reconnectez-vous.",
+        );
+      } else if (mail === "sent") {
         setNotice("Facture envoyée au centre.");
       } else if (mail === "pending") {
         setNotice("Facture prête. L’e-mail n’est pas parti : vérifiez l’adresse du centre ou la boîte Bookea.");
@@ -128,14 +137,17 @@ export function AgencyWorkspace() {
     setSaving(true);
     try {
       const savedList = await Promise.all(updates.map((item) => saveAgencyBilling(item)));
-      setStates((current) => {
-        if (!current) return current;
+      const current = statesRef.current;
+      if (current) {
         const next = { ...current };
-        for (const saved of savedList) {
-          next[saved.company] = saved;
+        for (const [index, saved] of savedList.entries()) {
+          if (current[saved.company] === updates[index]) {
+            next[saved.company] = saved;
+          }
         }
-        return next;
-      });
+        statesRef.current = next;
+        setStates(next);
+      }
       setNotice("Enregistré.");
     } catch (error) {
       setNotice(
@@ -149,30 +161,31 @@ export function AgencyWorkspace() {
   }
 
   function update(patch: Partial<AgencyBillingState>) {
-    if (!states) return;
-    setStates((current) => {
-      if (!current) return current;
-      const prev = current[company];
-      const resolved = { ...patch };
-      if (patch.invoices) {
-        resolved.invoices = keepInvoiceEdits(patch.invoices, prev.invoices);
-      }
-      return { ...current, [company]: { ...prev, ...resolved } };
-    });
+    const current = statesRef.current;
+    if (!current) return;
+    const prev = current[company];
+    const resolved = { ...patch };
+    if (patch.invoices) {
+      resolved.invoices = keepInvoiceEdits(patch.invoices, prev.invoices);
+    }
+    const next = { ...current, [company]: { ...prev, ...resolved } };
+    statesRef.current = next;
+    setStates(next);
     if (patch.bank) {
       const bank = patch.bank;
       const otherId = company === "webk" ? "bookea" : "webk";
       persistChain.current = persistChain.current.then(async () => {
-        await Promise.resolve();
         const snapshot = statesRef.current?.[company];
-        if (!snapshot) return;
-        const other = await loadAgencyBilling(otherId);
-        await persist(snapshot, { ...other, bank });
+        const other = statesRef.current?.[otherId];
+        if (!snapshot || !other) return;
+        const shared = { ...other, bank };
+        statesRef.current = { ...statesRef.current!, [otherId]: shared };
+        setStates(statesRef.current);
+        await persist(snapshot, shared);
       });
       return;
     }
     persistChain.current = persistChain.current.then(async () => {
-      await Promise.resolve();
       const snapshot = statesRef.current?.[company];
       if (!snapshot) return;
       await persist(snapshot);
@@ -575,6 +588,11 @@ function BillingSection({
                 </option>
               ))}
             </select>
+            {state.clients.length === 0 ? (
+              <span className="mt-1 block text-xs font-semibold text-amber-700">
+                Aucun client pour l’instant. Ajoutez-en dans l’onglet Portefeuille.
+              </span>
+            ) : null}
           </label>
           <label className="block text-sm font-semibold text-slate-600">
             Date de la facture

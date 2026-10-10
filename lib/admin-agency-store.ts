@@ -1,6 +1,7 @@
 import {
   billingCenterContactFromRow,
   emptyAgencyState,
+  mergeAgencyClients,
   mergeAgencyInvoices,
   normalizeAgencyState,
   protectInvoicesFromEmptyOverwrite,
@@ -85,11 +86,25 @@ async function saveRemote(state: AgencyBillingState) {
 }
 
 export async function loadAgencyBilling(company: AgencyCompany) {
-  const local = readLocal(company);
+  return (await loadAgencyBillingStatus(company)).state;
+}
+
+export async function loadAgencyBillingStatus(company: AgencyCompany): Promise<{
+  state: AgencyBillingState;
+  online: boolean;
+}> {
   const remote = await loadRemote(company);
   if (remote === "error") {
-    return local;
+    return { state: readLocal(company), online: false };
   }
+  return { state: await adoptRemoteBilling(company, remote), online: true };
+}
+
+async function adoptRemoteBilling(
+  company: AgencyCompany,
+  remote: AgencyBillingState | null,
+) {
+  const local = readLocal(company);
   if (!remote) {
     if (local.invoices.length || local.clients.length) {
       await saveAgencyBilling(local).catch((error) =>
@@ -99,13 +114,17 @@ export async function loadAgencyBilling(company: AgencyCompany) {
     return local;
   }
   const invoices = mergeAgencyInvoices(local.invoices, remote.invoices);
+  const clients = mergeAgencyClients(local.clients, remote.clients);
   const next = {
     ...remote,
     invoices,
-    clients: local.clients.length > remote.clients.length ? local.clients : remote.clients,
+    clients,
   };
   writeLocal(next);
-  if (invoices.length > remote.invoices.length) {
+  if (
+    invoices.length > remote.invoices.length ||
+    clients.length > remote.clients.length
+  ) {
     await saveAgencyBilling(next).catch((error) =>
       console.warn("[admin-agency-billing]", error),
     );

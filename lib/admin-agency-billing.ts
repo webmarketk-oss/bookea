@@ -1,3 +1,5 @@
+import type { AdminAlertKind, AdminAlertOffer } from "@/lib/admin-alerts";
+
 export type AgencyCompany = "webk" | "bookea";
 
 export type AgencyInvoiceStatus =
@@ -402,6 +404,33 @@ export function mergeAgencyInvoices(
   });
 }
 
+export function mergeAgencyClients(
+  primary: AgencyClient[],
+  secondary: AgencyClient[] = [],
+) {
+  const byId = new Map<string, AgencyClient>();
+  for (const item of [...secondary, ...primary]) {
+    const id = String(item?.id || "").trim();
+    if (id) {
+      byId.set(id, item);
+    }
+  }
+  return [...byId.values()];
+}
+
+export function withCenterClients(
+  state: AgencyBillingState,
+  centers: BillingCenterContact[],
+) {
+  const linked = new Set(state.clients.map((client) => client.centerId).filter(Boolean));
+  const missing = centers
+    .filter((center) => center.id && !linked.has(center.id))
+    .map((center) => agencyClientFromCenter(center));
+  return missing.length > 0
+    ? { ...state, clients: [...state.clients, ...missing] }
+    : state;
+}
+
 export function keepInvoiceEdits(
   nextInvoices: AgencyInvoice[],
   currentInvoices: AgencyInvoice[],
@@ -798,22 +827,24 @@ export function duplicateAgencyInvoice(
 }
 
 export function subscriptionInvoiceLine(alert: {
-  kind: "seya_pack" | "sms_pack" | "crm_pack";
+  kind: AdminAlertKind;
+  offer?: AdminAlertOffer;
   amountEuros: number;
   quantity: number;
 }): AgencyInvoiceLine {
-  const kind: AgencyServiceKind =
-    alert.kind === "seya_pack"
-      ? "whatsapp"
-      : alert.kind === "sms_pack"
-        ? "sms"
-        : "crm_sms";
-  const label =
-    alert.kind === "seya_pack"
-      ? `Pack WhatsApp ${alert.quantity} conversations Seya`
-      : alert.kind === "sms_pack"
-        ? `Pack SMS ${alert.quantity} crédits`
-        : "Bookea CRM + SMS";
+  const seya =
+    alert.kind === "seya_pack" ||
+    (alert.kind === "pack_expired" && alert.offer === "seya");
+  const kind: AgencyServiceKind = seya
+    ? "whatsapp"
+    : alert.kind === "sms_pack"
+      ? "sms"
+      : "crm_sms";
+  const label = seya
+    ? `Pack WhatsApp ${alert.quantity} conversations Seya`
+    : alert.kind === "sms_pack"
+      ? `Pack SMS ${alert.quantity} crédits`
+      : "Bookea CRM + SMS";
   return {
     id: createId(),
     label,
@@ -878,7 +909,8 @@ export function ensureSubscriptionInvoice(
     center: BillingCenterContact;
     alert: {
       id: string;
-      kind: "seya_pack" | "sms_pack" | "crm_pack";
+      kind: AdminAlertKind;
+      offer?: AdminAlertOffer;
       amountEuros: number;
       quantity: number;
       message?: string;

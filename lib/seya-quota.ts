@@ -1,3 +1,5 @@
+import { periodConversationCount } from "../api/billing/_renewal.js";
+
 export const SEYA_PACK_LIMITS = [100, 150, 200, 250, 300, 400, 500] as const;
 
 export type SeyaQuota = {
@@ -38,9 +40,17 @@ export function normalizeSeyaQuota(value?: unknown): SeyaQuota {
   };
 }
 
-export function seyaConversationCount(seya: unknown): number {
+export function seyaConversationCount(
+  seya: unknown,
+  quota?: unknown,
+): number {
   const conversations = asRecord(seya).conversations;
-  return Array.isArray(conversations) ? conversations.length : 0;
+  if (!Array.isArray(conversations)) {
+    return 0;
+  }
+  return quota === undefined
+    ? conversations.length
+    : periodConversationCount(conversations, quota);
 }
 
 export function seyaRemainingConversations(
@@ -68,6 +78,7 @@ export function isNewSeyaConversationBlocked(
     return false;
   }
 
-  const used = Array.isArray(conversations) ? conversations.length : 0;
-  return used >= limit;
+  return (
+    periodConversationCount(conversations, asRecord(settings).seyaQuota) >= limit
+  );
 }

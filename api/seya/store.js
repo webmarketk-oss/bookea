@@ -4,6 +4,7 @@ const {
 } = require("./conversation-key");
 const { conversationsForCenter } = require("./center-route");
 const { missionForcesWelcome } = require("./mission");
+const { periodConversationCount } = require("../billing/_renewal");
 
 function asRecord(value) {
   return value && typeof value === "object" ? value : {};
@@ -91,7 +92,9 @@ function isNewSeyaConversationBlocked(settings, conversations, existing) {
   if (limit == null) {
     return false;
   }
-  return (Array.isArray(conversations) ? conversations.length : 0) >= limit;
+  return (
+    periodConversationCount(conversations, asRecord(settings).seyaQuota) >= limit
+  );
 }
 
 async function writeSeyaConversations(supabase, centerId, conversations) {

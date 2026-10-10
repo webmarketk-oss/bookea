@@ -280,7 +280,10 @@ export default function AdminCentresPage() {
             smsRemaining: quota.remaining,
             smsMonthlyGrant: quota.monthlyGrant,
             smsUsedThisMonth: quota.usedThisMonth,
-            seyaUsed: seyaConversationCount(center.settings?.seya ?? center.seya),
+            seyaUsed: seyaConversationCount(
+              center.settings?.seya ?? center.seya,
+              seyaQuota,
+            ),
             seyaLimit: seyaQuota.conversationLimit,
             whatsappOffer,
             bookeaPlan,

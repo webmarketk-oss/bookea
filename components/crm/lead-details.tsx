@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { PlaceSuggestField } from "@/components/forms/place-suggest-field";
+import { AdaptiveSelect } from "@/components/ui/adaptive-select";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -818,22 +819,18 @@ export default function LeadDetails({
                 <span className="mb-1.5 block text-xs font-medium text-slate-500">
                   Statut
                 </span>
-                <select
+                <AdaptiveSelect
+                  ariaLabel="Statut"
                   value={infoForm.status}
-                  onChange={(event) =>
+                  options={leadStatusSelectOptions(infoForm.status)}
+                  onChange={(status) =>
                     setInfoForm((form) => ({
                       ...form,
-                      status: event.target.value as LeadStatus,
+                      status: status as LeadStatus,
                     }))
                   }
                   className={`h-8 w-full rounded-full border-0 px-3 text-xs font-semibold outline-none ring-1 ${leadStatusClassName(infoForm.status)}`}
-                >
-                  {leadStatusSelectOptions(infoForm.status).map((status) => (
-                    <option key={status} value={status}>
-                      {status}
-                    </option>
-                  ))}
-                </select>
+                />
               </label>
               <div className="grid grid-cols-2 gap-2">
                 <InfoField
@@ -1079,17 +1076,13 @@ function InfoSelect({
         {icon ? <span className="[&_svg]:h-4 [&_svg]:w-4">{icon}</span> : null}
         {label}
       </span>
-      <select
+      <AdaptiveSelect
+        ariaLabel={label}
         value={value}
-        onChange={(event) => onChange(event.target.value)}
+        options={options}
+        onChange={onChange}
         className="h-8 w-full rounded-lg border border-slate-200 bg-white px-2.5 text-sm font-semibold text-slate-800 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
-      >
-        {options.map((option) => (
-          <option key={option} value={option}>
-            {option}
-          </option>
-        ))}
-      </select>
+      />
     </label>
   );
 }

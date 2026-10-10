@@ -2,8 +2,10 @@
 
 import {
   Bell,
+  CalendarClock,
   CheckCircle2,
   Loader2,
+  PowerOff,
   Mail,
   MessageCircle,
   Smartphone,
@@ -26,9 +28,11 @@ import {
   fulfillSubscriptionInvoice,
   subscriptionInvoiceHref,
 } from "@/lib/admin-subscription-invoice";
+import { isInvoiceableAdminAlert } from "@/lib/admin-alerts";
 import {
   loadAdminInbox,
   markCenterAdminAlertRead,
+  setCenterSeyaQuota,
   type AdminInboxItem,
 } from "@/lib/center-billing";
 import { loadIsBookeaAdmin } from "@/lib/center-access";
@@ -69,6 +73,8 @@ export default function AdminNotificationsPage() {
   >([]);
   const [markingId, setMarkingId] = useState<string | null>(null);
   const [fulfillingId, setFulfillingId] = useState<string | null>(null);
+  const [cuttingId, setCuttingId] = useState<string | null>(null);
+  const [cutIds, setCutIds] = useState<string[]>([]);
   const [error, setError] = useState("");
   const [centerFilter, setCenterFilter] = useState("tous");
   const [dateFrom, setDateFrom] = useState("");
@@ -311,6 +317,38 @@ export default function AdminNotificationsPage() {
       );
     } finally {
       setFulfillingId(null);
+    }
+  }
+
+  async function handleCutSeya(item: AdminInboxItem) {
+    if (
+      !window.confirm(
+        `Couper Seya pour ${item.centerName} ? Plus aucune nouvelle conversation ne sera ouverte.`,
+      )
+    ) {
+      return;
+    }
+    setCuttingId(item.id);
+    setError("");
+    try {
+      await setCenterSeyaQuota(item.centerId, 0);
+      await markCenterAdminAlertRead(item.centerId, item.id);
+      setItems((current) =>
+        current.map((alert) =>
+          alert.id === item.id
+            ? { ...alert, readAt: alert.readAt || new Date().toISOString() }
+            : alert,
+        ),
+      );
+      setCutIds((current) => [...current, item.id]);
+    } catch (cutError) {
+      setError(
+        cutError instanceof Error
+          ? cutError.message
+          : "Impossible de couper Seya pour ce centre.",
+      );
+    } finally {
+      setCuttingId(null);
     }
   }
 
@@ -572,8 +610,10 @@ export default function AdminNotificationsPage() {
             ) : (
               <div className="space-y-3">
                 {filteredItems.map((item) => {
-                  const Icon =
-                    item.kind === "seya_pack"
+                  const invoiceable = isInvoiceableAdminAlert(item);
+                  const Icon = !invoiceable
+                    ? CalendarClock
+                    : item.kind === "seya_pack"
                       ? MessageCircle
                       : item.kind === "crm_pack"
                         ? Users
@@ -583,16 +623,25 @@ export default function AdminNotificationsPage() {
                   return (
                     <article
                       key={`${item.centerId}:${item.id}`}
-                      role="button"
-                      tabIndex={0}
-                      onClick={() => void handleOpenInvoice(item)}
+                      role={invoiceable ? "button" : undefined}
+                      tabIndex={invoiceable ? 0 : undefined}
+                      onClick={
+                        invoiceable
+                          ? () => void handleOpenInvoice(item)
+                          : undefined
+                      }
                       onKeyDown={(event) => {
-                        if (event.key === "Enter" || event.key === " ") {
+                        if (
+                          invoiceable &&
+                          (event.key === "Enter" || event.key === " ")
+                        ) {
                           event.preventDefault();
                           void handleOpenInvoice(item);
                         }
                       }}
-                      className={`cursor-pointer rounded-2xl border bg-white p-5 text-left shadow-sm transition hover:border-violet-300 ${
+                      className={`rounded-2xl border bg-white p-5 text-left shadow-sm transition ${
+                        invoiceable ? "cursor-pointer hover:border-violet-300" : ""
+                      } ${
                         item.readAt
                           ? "border-slate-200"
                           : "border-violet-200 ring-1 ring-violet-100"
@@ -613,11 +662,15 @@ export default function AdminNotificationsPage() {
                             <p className="mt-2 text-xs font-medium text-slate-400">
                               {formatWhen(item.createdAt)} · {item.centerName} ·{" "}
                               {formatEuro(item.amountEuros)} ·{" "}
-                              {billed
-                                ? item.emailedTo
-                                  ? `envoyée à ${item.emailedTo}`
-                                  : "facturée"
-                                : "à facturer"}
+                              {!invoiceable
+                                ? cutIds.includes(item.id)
+                                  ? "Seya coupé"
+                                  : "non renouvelé"
+                                : billed
+                                  ? item.emailedTo
+                                    ? `envoyée à ${item.emailedTo}`
+                                    : "facturée"
+                                  : "à facturer"}
                             </p>
                           </div>
                         </div>
@@ -629,22 +682,38 @@ export default function AdminNotificationsPage() {
                           >
                             Fiche centre
                           </Link>
-                          <button
-                            type="button"
-                            disabled={fulfillingId === item.id}
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              void handleOpenInvoice(item);
-                            }}
-                            className="inline-flex h-10 items-center gap-2 rounded-xl bg-slate-950 px-3 text-sm font-semibold text-white hover:bg-violet-700 disabled:opacity-60"
-                          >
-                            {fulfillingId === item.id ? (
-                              <Loader2 className="h-4 w-4 animate-spin" />
-                            ) : (
-                              <Mail className="h-4 w-4" />
-                            )}
-                            {billed ? "Ouvrir la facture" : "Facturer et envoyer"}
-                          </button>
+                          {invoiceable ? (
+                            <button
+                              type="button"
+                              disabled={fulfillingId === item.id}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                void handleOpenInvoice(item);
+                              }}
+                              className="inline-flex h-10 items-center gap-2 rounded-xl bg-slate-950 px-3 text-sm font-semibold text-white hover:bg-violet-700 disabled:opacity-60"
+                            >
+                              {fulfillingId === item.id ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                              ) : (
+                                <Mail className="h-4 w-4" />
+                              )}
+                              {billed ? "Ouvrir la facture" : "Facturer et envoyer"}
+                            </button>
+                          ) : item.offer === "seya" && !cutIds.includes(item.id) ? (
+                            <button
+                              type="button"
+                              disabled={cuttingId === item.id}
+                              onClick={() => void handleCutSeya(item)}
+                              className="inline-flex h-10 items-center gap-2 rounded-xl bg-rose-600 px-3 text-sm font-semibold text-white hover:bg-rose-700 disabled:opacity-60"
+                            >
+                              {cuttingId === item.id ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                              ) : (
+                                <PowerOff className="h-4 w-4" />
+                              )}
+                              Couper Seya
+                            </button>
+                          ) : null}
                           {!item.readAt ? (
                             <button
                               type="button"

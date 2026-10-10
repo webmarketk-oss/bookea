@@ -89,6 +89,14 @@ export function WhatsappPacks() {
   }, [notice]);
 
   async function handleSubscribe(leads: number) {
+    const pack = whatsappLeadPacks.find((item) => item.leads === leads);
+    if (
+      !window.confirm(
+        `Souscrire le pack WhatsApp ${leads} conversations pour ${formatEuro(pack?.price ?? 0)} / mois ? Bookea vous enverra la facture.`,
+      )
+    ) {
+      return;
+    }
     setBusyLeads(leads);
     setNotice(null);
     try {
@@ -150,6 +158,14 @@ export function SmsPacks() {
   }, [notice]);
 
   async function handleSubscribe(quantity: number) {
+    const pack = smsPacks.find((item) => item.quantity === quantity);
+    if (
+      !window.confirm(
+        `Ajouter ${quantity} SMS pour ${formatEuro(pack?.price ?? 0)} ? Bookea vous enverra la facture.`,
+      )
+    ) {
+      return;
+    }
     setBusyQuantity(quantity);
     setNotice(null);
     try {
@@ -213,6 +229,13 @@ export function CrmPacks() {
   }
 
   async function handleSubscribe() {
+    if (
+      !window.confirm(
+        `Souscrire ${crmPlus?.title ?? "Bookea"} pour ${crmPlus?.price ?? ""} € / mois ? Bookea vous enverra la facture.`,
+      )
+    ) {
+      return;
+    }
     setBusy(true);
     setNotice(null);
     try {

@@ -23,6 +23,8 @@ import {
   nextInvoiceNumber,
   ensureSubscriptionInvoice,
   emptyAgencyState,
+  mergeAgencyClients,
+  withCenterClients,
   addInvoiceComment,
   duplicateAgencyInvoice,
   defaultInvoicePeriod,
@@ -548,4 +550,48 @@ test("une remise s’applique en euros ou en pourcentage sur la prestation", () 
     }),
     200,
   );
+});
+
+test("les clients de deux appareils se cumulent au lieu de garder la plus longue liste", () => {
+  const base = {
+    centerId: "",
+    legalName: "",
+    address: "",
+    email: "",
+    phone: "",
+    city: "",
+    active: true,
+    phoningOffer: false,
+    comments: "",
+    firstInvoiceOn: "",
+    nextInvoiceOn: "",
+    createdAt: "2026-10-01T00:00:00.000Z",
+  };
+  const merged = mergeAgencyClients(
+    [{ ...base, id: "a", name: "Client A modifié" }],
+    [
+      { ...base, id: "a", name: "Client A" },
+      { ...base, id: "b", name: "Client B" },
+    ],
+  );
+  assert.deepEqual(
+    merged.map((client) => client.name).sort(),
+    ["Client A modifié", "Client B"],
+  );
+});
+
+test("en Bookea, chaque centre est proposé comme client une seule fois", () => {
+  const center = {
+    id: "center-1",
+    name: "JFG Clinic GAP",
+    legalName: "",
+    address: "",
+    email: "gap@example.com",
+    phone: "",
+    city: "Gap",
+  };
+  const once = withCenterClients(emptyAgencyState("bookea"), [center]);
+  assert.equal(once.clients.length, 1);
+  assert.equal(once.clients[0].centerId, "center-1");
+  assert.equal(withCenterClients(once, [center]), once);
 });

@@ -89,7 +89,88 @@ async function writeBilling(supabase, company, payload) {
   }
 }
 
-module.exports = async function handler(req, res) {
+function asRecord(value) {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value
+    : {};
+}
+
+function mergeById(primary, secondary) {
+  const byId = new Map();
+  for (const item of [
+    ...(Array.isArray(secondary) ? secondary : []),
+    ...(Array.isArray(primary) ? primary : []),
+  ]) {
+    const id = String(asRecord(item).id || "").trim();
+    if (id) {
+      byId.set(id, item);
+    }
+  }
+  return [...byId.values()];
+}
+
+function mergeTableBilling(company, state, tablePayload) {
+  const table = { ...asRecord(tablePayload) };
+  delete table.mailbox;
+  if (!state) {
+    return Object.keys(table).length > 0 ? { ...table, company } : null;
+  }
+  return {
+    ...state,
+    invoices: mergeById(state.invoices, table.invoices),
+    clients: mergeById(state.clients, table.clients),
+  };
+}
+
+function tableMigrationPath(company) {
+  return `agency-billing/${company}.from-table`;
+}
+
+async function readTableBilling(supabase, company) {
+  const { data, error } = await supabase
+    .from("admin_agency_billing")
+    .select("payload")
+    .eq("company", company)
+    .maybeSingle();
+  if (error) {
+    console.error("[admin/agency-billing] table", error.message);
+    return null;
+  }
+  return data?.payload ?? null;
+}
+
+async function adoptTableBilling(supabase, company, state) {
+  const marker = await supabase.storage
+    .from(BUCKET)
+    .download(tableMigrationPath(company));
+  if (marker.data) {
+    return state;
+  }
+  if (marker.error && !isMissingObject(marker.error)) {
+    throw marker.error;
+  }
+
+  const merged = mergeTableBilling(
+    company,
+    state,
+    await readTableBilling(supabase, company),
+  );
+  if (merged && merged !== state) {
+    await writeBilling(supabase, company, merged);
+  }
+  const { error } = await supabase.storage
+    .from(BUCKET)
+    .upload(tableMigrationPath(company), Buffer.from(new Date().toISOString()), {
+      contentType: "text/plain",
+      upsert: true,
+    });
+  if (error) {
+    throw error;
+  }
+  return merged;
+}
+
+async function handler(req, res) {
   res.setHeader("Cache-Control", "no-store");
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET, PUT, OPTIONS");
@@ -121,7 +202,11 @@ module.exports = async function handler(req, res) {
     await ensureBucket(supabase);
 
     if (req.method === "GET") {
-      const state = await readBilling(supabase, company);
+      const state = await adoptTableBilling(
+        supabase,
+        company,
+        await readBilling(supabase, company),
+      );
       return res.status(200).json({ ok: true, state });
     }
 
@@ -141,4 +226,7 @@ module.exports = async function handler(req, res) {
           : "La facturation n’a pas pu être enregistrée.",
     });
   }
-};
+}
+
+module.exports = handler;
+module.exports.mergeTableBilling = mergeTableBilling;

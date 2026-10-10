@@ -1,6 +1,12 @@
-export type AdminAlertKind = "seya_pack" | "sms_pack" | "crm_pack";
+export type AdminAlertKind =
+  | "seya_pack"
+  | "sms_pack"
+  | "crm_pack"
+  | "pack_expired";
 
 export type AdminAlertBillingStatus = "to_invoice" | "invoiced";
+
+export type AdminAlertOffer = "seya" | "crm";
 
 export type AdminAlert = {
   id: string;
@@ -12,6 +18,7 @@ export type AdminAlert = {
   amountEuros: number;
   quantity: number;
   billingStatus: AdminAlertBillingStatus;
+  offer?: AdminAlertOffer;
   invoiceId?: string;
   invoicedAt?: string;
   emailedAt?: string;
@@ -26,12 +33,17 @@ function asRecord(value: unknown) {
     : {};
 }
 
+export function isInvoiceableAdminAlert(alert: Pick<AdminAlert, "kind">) {
+  return alert.kind !== "pack_expired";
+}
+
 export function createAdminAlert(input: {
   kind: AdminAlertKind;
   title: string;
   message: string;
   amountEuros: number;
   quantity: number;
+  offer?: AdminAlertOffer;
   createdAt?: string;
   id?: string;
 }): AdminAlert {
@@ -45,6 +57,7 @@ export function createAdminAlert(input: {
     amountEuros: Number(input.amountEuros) || 0,
     quantity: Math.max(0, Math.floor(Number(input.quantity) || 0)),
     billingStatus: "to_invoice",
+    ...(input.offer ? { offer: input.offer } : {}),
   };
 }
 
@@ -53,7 +66,8 @@ export function normalizeAdminAlert(value: unknown): AdminAlert | null {
   const kind =
     record.kind === "seya_pack" ||
     record.kind === "sms_pack" ||
-    record.kind === "crm_pack"
+    record.kind === "crm_pack" ||
+    record.kind === "pack_expired"
       ? record.kind
       : null;
   const id = String(record.id || "").trim();
@@ -74,6 +88,8 @@ export function normalizeAdminAlert(value: unknown): AdminAlert | null {
     quantity: Math.max(0, Math.floor(Number(record.quantity) || 0)),
     billingStatus:
       record.billingStatus === "invoiced" ? "invoiced" : "to_invoice",
+    offer:
+      record.offer === "seya" || record.offer === "crm" ? record.offer : undefined,
     invoiceId: String(record.invoiceId || "").trim() || undefined,
     invoicedAt: String(record.invoicedAt || "").trim() || undefined,
     emailedAt: String(record.emailedAt || "").trim() || undefined,

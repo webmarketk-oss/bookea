@@ -9,6 +9,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { AdaptiveSelect } from "@/components/ui/adaptive-select";
 import { isOpenReminderDue, toDateOnlyIso } from "@/lib/crm-stats";
 import {
   isInactiveLeadStatus,
@@ -217,44 +218,35 @@ export default function ProspectsTable({
               </TableCell>
 
               <TableCell>
-                <select
+                <AdaptiveSelect
+                  ariaLabel="Statut"
                   value={lead.status}
-                  onClick={(event) => event.stopPropagation()}
-                  onChange={(event) =>
-                    onStatusChange(lead.id, event.target.value as LeadStatus)
+                  options={leadStatusSelectOptions(lead.status)}
+                  onChange={(status) =>
+                    onStatusChange(lead.id, status as LeadStatus)
                   }
                   className={cn(
                     "h-7 w-full min-w-[8.75rem] max-w-[9.25rem] rounded-full border-0 px-2.5 text-xs font-semibold outline-none ring-1 transition-colors",
                     "focus:ring-2 focus:ring-blue-400",
                     leadStatusClassName(lead.status)
                   )}
-                >
-                  {leadStatusSelectOptions(lead.status).map((status) => (
-                    <option key={status} value={status}>
-                      {status}
-                    </option>
-                  ))}
-                </select>
+                />
               </TableCell>
 
               <TableCell>
-                <select
+                <AdaptiveSelect
+                  ariaLabel="Commercial"
                   value={lead.commercial}
-                  onClick={(event) => event.stopPropagation()}
-                  onChange={(event) =>
-                    onCommercialChange(lead.id, event.target.value)
+                  options={
+                    commercialOptions.includes(lead.commercial)
+                      ? commercialOptions
+                      : [lead.commercial, ...commercialOptions].filter(Boolean)
+                  }
+                  onChange={(commercial) =>
+                    onCommercialChange(lead.id, commercial)
                   }
                   className="h-8 rounded-lg border border-slate-200 bg-white px-2 text-sm font-semibold outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
-                >
-                  {(commercialOptions.includes(lead.commercial)
-                    ? commercialOptions
-                    : [lead.commercial, ...commercialOptions].filter(Boolean)
-                  ).map((commercial) => (
-                    <option key={commercial} value={commercial}>
-                      {commercial}
-                    </option>
-                  ))}
-                </select>
+                />
               </TableCell>
 
               <TableCell>

@@ -1,5 +1,8 @@
 import { addDaysIso, todayIso } from "@/lib/crm-stats";
+import { renewalStage } from "@/api/billing/_renewal";
 import { getActiveCenterContext, readActiveCenterId } from "@/lib/center-access";
+import { loadActiveCenterBilling } from "@/lib/center-billing";
+import { formatOfferDate } from "@/lib/center-offers";
 import {
   loadPublicCenterProfile,
   readCenterSettings,
@@ -38,7 +41,8 @@ export type CenterNotificationKind =
   | "client_message"
   | "new_review"
   | "confirm_tomorrow"
-  | "recall_today";
+  | "recall_today"
+  | "offer_renewal";
 
 export type CenterNotification = {
   id: string;
@@ -712,8 +716,57 @@ function reviewNotifications(reviews: CenterExternalReview[]) {
     }));
 }
 
+async function loadRenewalNotifications(): Promise<CenterNotification[]> {
+  const billing = await loadActiveCenterBilling();
+  const offers = [
+    billing.whatsappOffer
+      ? {
+          offer: "seya",
+          label: `pack WhatsApp ${billing.whatsappOffer.leads} conversations`,
+          renewsAt: billing.whatsappOffer.renewsAt,
+        }
+      : null,
+    billing.bookeaPlan
+      ? {
+          offer: "crm",
+          label: `abonnement Bookea ${billing.bookeaPlan.title}`,
+          renewsAt: billing.bookeaPlan.renewsAt,
+        }
+      : null,
+  ];
+  const items: CenterNotification[] = [];
+
+  for (const item of offers) {
+    const stage = item ? renewalStage(item.renewsAt) : null;
+    if (!item || !stage) {
+      continue;
+    }
+    const day = formatOfferDate(item.renewsAt);
+    items.push({
+      id: `renewal-${item.offer}-${String(item.renewsAt).slice(0, 10)}-${stage}`,
+      kind: "offer_renewal",
+      title:
+        stage === "expired"
+          ? `Votre ${item.label} a expiré le ${day}`
+          : stage === "due_today"
+            ? `Votre ${item.label} arrive à échéance aujourd’hui`
+            : `Votre ${item.label} se renouvelle le ${day}`,
+      body:
+        stage === "expired"
+          ? "Renouvelez-le depuis Tarifs pour le réactiver."
+          : "Renouvelez-le depuis Tarifs pour continuer sans interruption.",
+      href: "/dashboard/tarifs",
+      createdAt: `${todayIso()}T08:00:00`,
+      unread: true,
+    });
+  }
+
+  return items;
+}
+
 function sortNotifications(items: CenterNotification[]) {
   const rank: Record<CenterNotificationKind, number> = {
+    offer_renewal: 0,
     confirm_tomorrow: 0,
     recall_today: 1,
     appointment_cancelled: 2,
@@ -792,14 +845,21 @@ export async function loadCenterNotifications(): Promise<CenterNotification[]> {
     return applyReadState(notificationsCache.items, state);
   }
 
-  const [leadsResult, appointmentsResult, inboxResult, profileResult, messagesResult] =
-    await Promise.allSettled([
-      loadCrmLeads().then((result) => result.leads),
-      loadNotificationAppointments(),
-      loadSmsInbox(),
-      loadPublicCenterProfile(),
-      loadClientMessageNotifications(),
-    ]);
+  const [
+    leadsResult,
+    appointmentsResult,
+    inboxResult,
+    profileResult,
+    messagesResult,
+    renewalResult,
+  ] = await Promise.allSettled([
+    loadCrmLeads().then((result) => result.leads),
+    loadNotificationAppointments(),
+    loadSmsInbox(),
+    loadPublicCenterProfile(),
+    loadClientMessageNotifications(),
+    loadRenewalNotifications(),
+  ]);
 
   if (
     leadsResult.status === "rejected" &&
@@ -834,6 +894,7 @@ export async function loadCenterNotifications(): Promise<CenterNotification[]> {
     ...leadNotifications(leads),
     ...replyNotifications(leads, inbox),
     ...(messagesResult.status === "fulfilled" ? messagesResult.value : []),
+    ...(renewalResult.status === "fulfilled" ? renewalResult.value : []),
     ...reviewNotifications(reviews),
   ]);
 
