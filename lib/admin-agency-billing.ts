@@ -1,3 +1,4 @@
+import * as shared from "../api/billing/_agency-invoice.js";
 import type { AdminAlertKind, AdminAlertOffer } from "@/lib/admin-alerts";
 
 export type AgencyCompany = "webk" | "bookea";
@@ -69,6 +70,7 @@ export type AgencyClient = {
   firstInvoiceOn: string;
   nextInvoiceOn: string;
   createdAt: string;
+  serverRevision?: number;
 };
 
 export type BillingCenterContact = {
@@ -120,6 +122,12 @@ export type AgencyInvoice = {
   sourceAlertId?: string;
   emailedAt?: string;
   emailedTo?: string;
+  paidAt?: string;
+  paymentMethod?: "carte";
+  payToken?: string;
+  stripeSessionIds?: string[];
+  stripeSessionAt?: string;
+  serverRevision?: number;
   createdAt: string;
 };
 
@@ -131,6 +139,7 @@ export type AgencyBillingState = {
   services: AgencyService[];
   invoices: AgencyInvoice[];
   updatedAt: string;
+  revision?: number;
 };
 
 export const AGENCY_COMPANIES: Array<{
@@ -142,25 +151,11 @@ export const AGENCY_COMPANIES: Array<{
   { id: "bookea", label: "Bookea", short: "BK" },
 ];
 
-export const AGENCY_LEGAL_ENTITY = {
-  legalName: "SFK Web K Agency LLC",
-  contactName: "Samantha Kahlaoui",
-  address: "1209 MOUNTAIN ROAD PL NE",
-  postalCode: "87110",
-  city: "ALBUQUERQUE",
-  country: "États-Unis",
-};
+export const AGENCY_LEGAL_ENTITY = shared.AGENCY_LEGAL_ENTITY;
 
-export const REVERSE_CHARGE_MENTION =
-  "Il s’agit d’une prestation de services internationale transfrontalière. Autoliquidation par le preneur — Reverse Charge - Art. 283-2 du CGI. TVA non applicable.";
+export const REVERSE_CHARGE_MENTION: string = shared.REVERSE_CHARGE_MENTION;
 
-export const DEFAULT_AGENCY_BANK: AgencyBankDetails = {
-  accountName: "SFK WEBK AGENCY LLC",
-  iban: "BE21 9055 5762 3503",
-  bic: "TRWIBEB1XXX",
-  bankName: "Wise",
-  bankAddress: "Rue du Trône 100, 3rd floor, Brussels, 1050, Belgium",
-};
+export const DEFAULT_AGENCY_BANK: AgencyBankDetails = shared.DEFAULT_AGENCY_BANK;
 
 export function defaultAgencyIdentity(company: AgencyCompany): AgencyIdentity {
   return {
@@ -226,20 +221,6 @@ export function issuerAddressLines(identity: AgencyIdentity) {
   ].filter(Boolean);
 }
 
-function firstFilled(...values: unknown[]) {
-  for (const value of values) {
-    const text = String(value ?? "").trim();
-    if (text) {
-      return text;
-    }
-  }
-  return "";
-}
-
-function includesIgnoreCase(haystack: string, needle: string) {
-  return Boolean(needle) && haystack.toLowerCase().includes(needle.toLowerCase());
-}
-
 export function billingCenterContactFromRow(row: {
   id?: unknown;
   name?: unknown;
@@ -273,38 +254,7 @@ export function billingCenterContactFromRow(row: {
     };
   } | null;
 }): BillingCenterContact {
-  const settings = row.settings || {};
-  const settingsCenter = settings.center || {};
-  const legal = row.legal || settings.legal || {};
-  const publicCenter = row.publicCenter || settings.public?.center || {};
-  const city = firstFilled(row.city);
-  const street = firstFilled(
-    row.address_line1,
-    publicCenter.address,
-    settingsCenter.address,
-  );
-  const cityLine = [firstFilled(row.postal_code), city].filter(Boolean).join(" ");
-  const address =
-    street &&
-    cityLine &&
-    !includesIgnoreCase(street, cityLine) &&
-    !includesIgnoreCase(street, city)
-      ? `${street}, ${cityLine}`
-      : street || cityLine;
-
-  return {
-    id: String(row.id || ""),
-    name: firstFilled(row.name) || "Centre",
-    legalName: firstFilled(
-      legal.legalName,
-      publicCenter.legalName,
-      settingsCenter.legalName,
-    ),
-    address,
-    email: firstFilled(row.email, publicCenter.email, settingsCenter.email),
-    phone: firstFilled(row.phone, publicCenter.phone, settingsCenter.phone),
-    city,
-  };
+  return shared.billingCenterContactFromRow(row);
 }
 
 export function invoiceClientDetails(
@@ -333,23 +283,7 @@ export function applyBillingCenterContact(
   client: AgencyClient,
   center: BillingCenterContact,
 ): AgencyClient {
-  const next = {
-    ...client,
-    name: center.name || client.name,
-    legalName: center.legalName || client.legalName,
-    address: center.address || client.address,
-    email: center.email || client.email,
-    phone: center.phone || client.phone,
-    city: center.city || client.city,
-  };
-  return next.name === client.name &&
-    next.legalName === client.legalName &&
-    next.address === client.address &&
-    next.email === client.email &&
-    next.phone === client.phone &&
-    next.city === client.city
-    ? client
-    : next;
+  return shared.applyBillingCenterContact(client, center);
 }
 
 export function syncAgencyClientsWithCenters(
@@ -383,6 +317,15 @@ export function protectInvoicesFromEmptyOverwrite(
   return { ...next, invoices: remote.invoices };
 }
 
+function newerServerCopy<T extends { serverRevision?: number }>(
+  item: T,
+  previous?: T,
+) {
+  return previous && (previous.serverRevision || 0) > (item.serverRevision || 0)
+    ? previous
+    : item;
+}
+
 export function mergeAgencyInvoices(
   primary: AgencyInvoice[],
   secondary: AgencyInvoice[] = [],
@@ -393,7 +336,7 @@ export function mergeAgencyInvoices(
     if (!id) {
       continue;
     }
-    byId.set(id, item);
+    byId.set(id, newerServerCopy(item, byId.get(id)));
   }
   return [...byId.values()].sort((left, right) => {
     const byDate = String(right.issuedOn || "").localeCompare(String(left.issuedOn || ""));
@@ -412,7 +355,7 @@ export function mergeAgencyClients(
   for (const item of [...secondary, ...primary]) {
     const id = String(item?.id || "").trim();
     if (id) {
-      byId.set(id, item);
+      byId.set(id, newerServerCopy(item, byId.get(id)));
     }
   }
   return [...byId.values()];
@@ -525,6 +468,7 @@ export function normalizeAgencyState(
           .filter((item): item is AgencyInvoice => Boolean(item))
       : [],
     updatedAt: String(record.updatedAt || new Date().toISOString()),
+    ...(Number(record.revision) > 0 ? { revision: Number(record.revision) } : {}),
   };
 }
 
@@ -642,6 +586,12 @@ export function buildAgencyInvoiceHtml(
     state.clients.find((item) => item.id === invoice.clientId),
   );
   const total = invoiceTotal(invoice);
+  const payUrl =
+    state.company === "bookea" &&
+    invoice.status !== "Payée" &&
+    invoice.status !== "Annulée"
+      ? invoicePayUrl(invoice)
+      : "";
   const issuer = issuerAddressLines(state.identity)
     .map((line) => escapeHtml(line))
     .join("<br />");
@@ -785,6 +735,11 @@ export function buildAgencyInvoiceHtml(
       ? `<div class="box"><p class="doc-label">Commentaire</p><p class="note">${escapeHtml(invoice.invoiceNote).replace(/\n/g, "<br />")}</p></div>`
       : ""
   }
+  ${
+    payUrl
+      ? `<div class="box"><p class="doc-label">Payer par carte</p><p class="note">Réglez cette facture en ligne, par carte bancaire :<br /><a href="${escapeHtml(payUrl)}">Payer la facture par carte</a></p></div>`
+      : ""
+  }
   <div class="box">
     <p class="doc-label">Coordonnées pour le virement</p>
     <p class="bank">${bankTransferLines(state.bank || DEFAULT_AGENCY_BANK).map((line) => escapeHtml(line)).join("<br />")}</p>
@@ -806,13 +761,29 @@ export function cloneInvoiceLines(lines: AgencyInvoiceLine[]) {
   return lines.map((line) => ({ ...line, id: createId() }));
 }
 
+const INVOICE_ONLY_FIELDS = [
+  "sourceAlertId",
+  "emailedAt",
+  "emailedTo",
+  "paidAt",
+  "paymentMethod",
+  "payToken",
+  "stripeSessionIds",
+  "stripeSessionAt",
+  "serverRevision",
+] as const;
+
 export function duplicateAgencyInvoice(
   state: AgencyBillingState,
   invoice: AgencyInvoice,
-) {
+): AgencyInvoice {
   const issuedOn = nextBillingCycleOn(invoice.issuedOn);
+  const rest: Partial<AgencyInvoice> = { ...invoice };
+  for (const key of INVOICE_ONLY_FIELDS) {
+    delete rest[key];
+  }
   return {
-    ...invoice,
+    ...(rest as AgencyInvoice),
     id: createId(),
     number: nextInvoiceNumber(state),
     issuedOn,
@@ -832,75 +803,18 @@ export function subscriptionInvoiceLine(alert: {
   amountEuros: number;
   quantity: number;
 }): AgencyInvoiceLine {
-  const seya =
-    alert.kind === "seya_pack" ||
-    (alert.kind === "pack_expired" && alert.offer === "seya");
-  const kind: AgencyServiceKind = seya
-    ? "whatsapp"
-    : alert.kind === "sms_pack"
-      ? "sms"
-      : "crm_sms";
-  const label = seya
-    ? `Pack WhatsApp ${alert.quantity} conversations Seya`
-    : alert.kind === "sms_pack"
-      ? `Pack SMS ${alert.quantity} crédits`
-      : "Bookea CRM + SMS";
-  return {
-    id: createId(),
-    label,
-    kind,
-    quantity: 1,
-    unitPrice: Number(alert.amountEuros) || 0,
-    discountType: "Aucune",
-    discountValue: 0,
-  };
+  return shared.subscriptionInvoiceLine(alert) as AgencyInvoiceLine;
 }
 
 export function agencyClientFromCenter(center: BillingCenterContact): AgencyClient {
-  return {
-    id: createId(),
-    centerId: center.id,
-    name: center.name || "Centre",
-    legalName: center.legalName,
-    address: center.address,
-    email: center.email,
-    phone: center.phone,
-    city: center.city,
-    active: true,
-    phoningOffer: false,
-    comments: "",
-    firstInvoiceOn: "",
-    nextInvoiceOn: "",
-    createdAt: new Date().toISOString(),
-  };
+  return shared.agencyClientFromCenter(center);
 }
 
 export function ensureAgencyClientForCenter(
   state: AgencyBillingState,
   center: BillingCenterContact,
-) {
-  const existing = state.clients.find((client) => client.centerId === center.id);
-  if (existing) {
-    const synced = applyBillingCenterContact(existing, center);
-    if (synced === existing) {
-      return { state, client: existing };
-    }
-    return {
-      state: {
-        ...state,
-        clients: state.clients.map((client) =>
-          client.id === synced.id ? synced : client,
-        ),
-      },
-      client: synced,
-    };
-  }
-
-  const client = agencyClientFromCenter(center);
-  return {
-    state: { ...state, clients: [client, ...state.clients] },
-    client,
-  };
+): { state: AgencyBillingState; client: AgencyClient } {
+  return shared.ensureAgencyClientForCenter(state, center);
 }
 
 export function ensureSubscriptionInvoice(
@@ -918,63 +832,20 @@ export function ensureSubscriptionInvoice(
       invoiceId?: string;
     };
   },
-) {
-  const existing = state.invoices.find(
-    (invoice) =>
-      invoice.sourceAlertId === input.alert.id ||
-      (input.alert.invoiceId && invoice.id === input.alert.invoiceId),
-  );
-  if (existing) {
-    return { state, invoice: existing, created: false };
-  }
-
-  const withClient = ensureAgencyClientForCenter(state, input.center);
-  const issuedOn =
-    String(input.alert.createdAt || "").slice(0, 10) ||
-    new Date().toISOString().slice(0, 10);
-  const period = defaultInvoicePeriod(issuedOn);
-  const invoice: AgencyInvoice = {
-    id: createId(),
-    number: nextInvoiceNumber(withClient.state),
-    clientId: withClient.client.id,
-    issuedOn,
-    nextCycleOn: nextBillingCycleOn(issuedOn),
-    ...period,
-    status: "En attente de paiement",
-    lines: [subscriptionInvoiceLine(input.alert)],
-    comments: "",
-    commentLog: [],
-    invoiceNote: String(input.alert.message || "").trim(),
-    sourceAlertId: input.alert.id,
-    createdAt: new Date().toISOString(),
-  };
-
-  return {
-    state: {
-      ...withClient.state,
-      invoices: [invoice, ...withClient.state.invoices],
-      clients: withClient.state.clients.map((client) =>
-        client.id === withClient.client.id
-          ? {
-              ...client,
-              firstInvoiceOn: client.firstInvoiceOn || issuedOn,
-              nextInvoiceOn: invoice.nextCycleOn,
-            }
-          : client,
-      ),
-    },
-    invoice,
-    created: true,
-  };
+): { state: AgencyBillingState; invoice: AgencyInvoice; created: boolean } {
+  return shared.ensureSubscriptionInvoice(state, input);
 }
 
-export function nextInvoiceNumber(state: AgencyBillingState, now = new Date()) {
-  const prefix = state.company === "webk" ? "WK" : "BK";
-  const year = String(now.getFullYear());
-  const count = state.invoices.filter((item) =>
-    item.number.startsWith(`${prefix}-${year}-`),
-  ).length;
-  return `${prefix}-${year}-${String(count + 1).padStart(3, "0")}`;
+export function nextInvoiceNumber(state: AgencyBillingState, now = new Date()): string {
+  return shared.nextInvoiceNumber(state, now);
+}
+
+export function createPayToken(): string {
+  return shared.createPayToken();
+}
+
+export function invoicePayUrl(invoice: Pick<AgencyInvoice, "id" | "payToken">): string {
+  return shared.invoicePayUrl(invoice);
 }
 
 export function billingAlerts(
@@ -1211,6 +1082,7 @@ function normalizeClient(value: unknown): AgencyClient | null {
     firstInvoiceOn: String(record.firstInvoiceOn || ""),
     nextInvoiceOn: String(record.nextInvoiceOn || ""),
     createdAt: String(record.createdAt || new Date().toISOString()),
+    ...serverRevisionField(record),
   };
 }
 
@@ -1266,8 +1138,21 @@ function normalizeInvoice(value: unknown): AgencyInvoice | null {
     sourceAlertId: String(record.sourceAlertId || "").trim() || undefined,
     emailedAt: String(record.emailedAt || "").trim() || undefined,
     emailedTo: String(record.emailedTo || "").trim() || undefined,
+    paidAt: String(record.paidAt || "").trim() || undefined,
+    paymentMethod: record.paymentMethod === "carte" ? "carte" : undefined,
+    payToken: String(record.payToken || "").trim() || undefined,
+    stripeSessionIds: Array.isArray(record.stripeSessionIds)
+      ? record.stripeSessionIds.map((id) => String(id)).filter(Boolean)
+      : undefined,
+    stripeSessionAt: String(record.stripeSessionAt || "").trim() || undefined,
     createdAt: String(record.createdAt || new Date().toISOString()),
+    ...serverRevisionField(record),
   };
+}
+
+function serverRevisionField(record: Record<string, unknown>) {
+  const revision = Number(record.serverRevision);
+  return revision > 0 ? { serverRevision: revision } : {};
 }
 
 function normalizeCommentLog(

@@ -77,12 +77,14 @@ async function saveRemote(state: AgencyBillingState) {
   const result = (await response.json().catch(() => null)) as {
     ok?: boolean;
     error?: string;
+    state?: unknown;
   } | null;
   if (!response.ok || !result?.ok) {
     throw new Error(
       result?.error || "Factures non enregistrées en ligne. Réessayez.",
     );
   }
+  return result.state ? normalizeAgencyState(state.company, result.state) : state;
 }
 
 export async function loadAgencyBilling(company: AgencyCompany) {
@@ -148,8 +150,9 @@ export async function saveAgencyBilling(state: AgencyBillingState) {
     );
     return next;
   }
-  await saveRemote(next);
-  return next;
+  const saved = await saveRemote(next);
+  writeLocal(saved);
+  return saved;
 }
 
 export async function loadBookeaCentersForBilling(): Promise<

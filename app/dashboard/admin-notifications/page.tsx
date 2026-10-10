@@ -20,10 +20,7 @@ import {
   companyLabel,
   type AgencyCompany,
 } from "@/lib/admin-agency-billing";
-import {
-  loadAgencyBilling,
-  loadBookeaCentersForBilling,
-} from "@/lib/admin-agency-store";
+import { loadAgencyBilling } from "@/lib/admin-agency-store";
 import {
   fulfillSubscriptionInvoice,
   subscriptionInvoiceHref,
@@ -281,17 +278,10 @@ export default function AdminNotificationsPage() {
     setFulfillingId(item.id);
     setError("");
     try {
-      const centers = await loadBookeaCentersForBilling();
-      const center = centers.find((row) => row.id === item.centerId) || {
-        id: item.centerId,
-        name: item.centerName,
-        legalName: "",
-        address: "",
-        email: "",
-        phone: "",
-        city: "",
-      };
-      const result = await fulfillSubscriptionInvoice(item, center);
+      const result = await fulfillSubscriptionInvoice(item);
+      if (!item.readAt) {
+        await markCenterAdminAlertRead(item.centerId, item.id).catch(() => undefined);
+      }
       setItems((current) =>
         current.map((alert) =>
           alert.id === item.id

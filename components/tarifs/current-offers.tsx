@@ -11,6 +11,7 @@ import {
   renewSeyaPack,
 } from "@/lib/center-billing";
 import { formatOfferDate } from "@/lib/center-offers";
+import { subscriptionInvoiceNotice } from "@/lib/subscription-invoice-request";
 
 type RenewableLine = {
   offer: "seya" | "crm";
@@ -175,7 +176,7 @@ export function CurrentOffers() {
         line.offer === "seya" ? await renewSeyaPack() : await renewBookeaPlan();
       setNotice({
         ok: true,
-        text: `Renouvelé jusqu’au ${formatOfferDate(result.renewsAt)}.`,
+        text: `Renouvelé jusqu’au ${formatOfferDate(result.renewsAt)}. ${subscriptionInvoiceNotice(result.invoice)}`,
       });
       notifyOffersUpdated();
     } catch (error) {

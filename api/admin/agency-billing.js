@@ -1,8 +1,15 @@
 const { createClient } = require("@supabase/supabase-js");
 const { parsePayload } = require("../appointments/service");
+const { mergeIncomingBilling } = require("../billing/_agency-invoice");
+const { reconcileCardPayments } = require("../billing/_invoice-payment");
+const {
+  BUCKET,
+  ensureBucket,
+  isMissingObject,
+  readBilling,
+  writeBilling,
+} = require("./_agency-billing-store");
 
-const BUCKET = "bookea-admin-private";
-const MAX_BYTES = 8 * 1024 * 1024;
 const COMPANIES = new Set(["webk", "bookea"]);
 
 function createServiceClient() {
@@ -33,60 +40,6 @@ async function requireBookeaAdmin(supabase, req) {
     .eq("profile_id", data.user.id)
     .maybeSingle();
   return Boolean(admin?.profile_id);
-}
-
-async function ensureBucket(supabase) {
-  const existing = await supabase.storage.getBucket(BUCKET);
-  if (existing.data) {
-    return;
-  }
-  const created = await supabase.storage.createBucket(BUCKET, {
-    public: false,
-    fileSizeLimit: MAX_BYTES,
-  });
-  if (created.error && !/already exists|duplicate/i.test(created.error.message || "")) {
-    throw created.error;
-  }
-}
-
-function billingPath(company) {
-  return `agency-billing/${company}.json`;
-}
-
-function isMissingObject(error) {
-  const status = Number(error?.statusCode || error?.status || 0);
-  return status === 404 || /not.?found|does not exist/i.test(String(error?.message || ""));
-}
-
-async function readBilling(supabase, company) {
-  const { data, error } = await supabase.storage
-    .from(BUCKET)
-    .download(billingPath(company));
-  if (error) {
-    if (isMissingObject(error)) {
-      return null;
-    }
-    throw error;
-  }
-  const text = await data.text();
-  return text ? JSON.parse(text) : null;
-}
-
-async function writeBilling(supabase, company, payload) {
-  const body = Buffer.from(JSON.stringify(payload), "utf8");
-  if (body.length > MAX_BYTES) {
-    throw new Error("Données de facturation trop volumineuses.");
-  }
-  const { error } = await supabase.storage
-    .from(BUCKET)
-    .upload(billingPath(company), body, {
-      contentType: "application/json",
-      upsert: true,
-      cacheControl: "0",
-    });
-  if (error) {
-    throw error;
-  }
 }
 
 function asRecord(value) {
@@ -202,20 +155,35 @@ async function handler(req, res) {
     await ensureBucket(supabase);
 
     if (req.method === "GET") {
-      const state = await adoptTableBilling(
+      let state = await adoptTableBilling(
         supabase,
         company,
         await readBilling(supabase, company),
       );
+      if (company === "bookea" && state) {
+        state = (await reconcileCardPayments(supabase).catch((error) => {
+          console.error("[admin/agency-billing] stripe", error);
+          return null;
+        })) || state;
+      }
       return res.status(200).json({ ok: true, state });
     }
 
-    const state = payload.state;
-    if (!state || typeof state !== "object" || state.company !== company) {
+    const incoming = payload.state;
+    if (!incoming || typeof incoming !== "object" || incoming.company !== company) {
       return res.status(400).json({ ok: false, error: "Facturation invalide." });
     }
+    const state = mergeIncomingBilling(
+      await readBilling(supabase, company),
+      incoming,
+    );
     await writeBilling(supabase, company, state);
-    return res.status(200).json({ ok: true, updatedAt: state.updatedAt || null });
+    return res.status(200).json({
+      ok: true,
+      updatedAt: state.updatedAt || null,
+      revision: state.revision,
+      state,
+    });
   } catch (error) {
     console.error("[admin/agency-billing]", error);
     return res.status(500).json({

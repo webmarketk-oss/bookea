@@ -9,6 +9,11 @@ const {
   expiredAdminAlert,
   renewalReminderCopy,
 } = require("./_renewal");
+const { reconcileCardPayments } = require("./_invoice-payment");
+const {
+  invoiceCenterAlert,
+  pendingAutoInvoiceAlerts,
+} = require("./_subscription-invoice");
 
 const TARIFS_URL = "https://www.bookeai.fr/dashboard/tarifs";
 const ADMIN_ALERTS_LIMIT = 200;
@@ -160,7 +165,22 @@ module.exports = async function handler(req, res) {
         console.error("[billing/renewals]", row.id, centerError);
         results.push({ centerId: row.id, error: String(centerError?.message || centerError) });
       }
+      for (const alert of pendingAutoInvoiceAlerts(center.settings, now.getTime())) {
+        try {
+          const invoiced = await invoiceCenterAlert(supabase, {
+            centerId: row.id,
+            alertId: alert.id,
+          });
+          results.push({ centerId: row.id, alertId: alert.id, invoice: invoiced.invoice.number });
+        } catch (invoiceError) {
+          console.error("[billing/renewals] invoice", row.id, invoiceError);
+          results.push({ centerId: row.id, alertId: alert.id, error: String(invoiceError?.message || invoiceError) });
+        }
+      }
     }
+    await reconcileCardPayments(supabase).catch((stripeError) =>
+      console.error("[billing/renewals] stripe", stripeError),
+    );
 
     return res.status(200).json({ ok: true, processed: results.length, results });
   } catch (error) {

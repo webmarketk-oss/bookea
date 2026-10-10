@@ -595,3 +595,56 @@ test("en Bookea, chaque centre est proposé comme client une seule fois", () => 
   assert.equal(once.clients[0].centerId, "center-1");
   assert.equal(withCenterClients(once, [center]), once);
 });
+
+test("une facture payée par carte côté serveur n’est pas écrasée par la copie de l’appareil", () => {
+  const local = normalizeAgencyState("bookea", {
+    invoices: [
+      { id: "a", clientId: "c1", issuedOn: "2026-10-10", status: "En attente de paiement" },
+    ],
+  }).invoices;
+  const remote = normalizeAgencyState("bookea", {
+    revision: 4,
+    invoices: [
+      {
+        id: "a",
+        clientId: "c1",
+        issuedOn: "2026-10-10",
+        status: "Payée",
+        paidAt: "2026-10-10T12:00:00.000Z",
+        paymentMethod: "carte",
+        serverRevision: 4,
+      },
+    ],
+  });
+  assert.equal(remote.revision, 4);
+  const merged = mergeAgencyInvoices(local, remote.invoices);
+  assert.equal(merged[0].status, "Payée");
+  assert.equal(merged[0].paymentMethod, "carte");
+});
+
+test("dupliquer une facture payée par carte ne recopie ni le paiement ni le lien", () => {
+  const state = normalizeAgencyState("bookea", {});
+  const copy = duplicateAgencyInvoice(state, {
+    id: "1",
+    number: "BK-2026-001",
+    clientId: "c1",
+    issuedOn: "2026-10-04",
+    nextCycleOn: "2026-11-03",
+    status: "Payée",
+    comments: "",
+    invoiceNote: "",
+    createdAt: "2026-10-04T00:00:00.000Z",
+    lines: [],
+    sourceAlertId: "alert-1",
+    emailedAt: "2026-10-04T00:00:00.000Z",
+    paidAt: "2026-10-05T00:00:00.000Z",
+    paymentMethod: "carte",
+    payToken: "token",
+    stripeSessionIds: ["cs_1"],
+    serverRevision: 3,
+  });
+  for (const key of ["sourceAlertId", "emailedAt", "paidAt", "paymentMethod", "payToken", "stripeSessionIds", "serverRevision"]) {
+    assert.equal(key in copy, false, key);
+  }
+  assert.equal(copy.status, "En attente de paiement");
+});

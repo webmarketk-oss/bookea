@@ -18,6 +18,14 @@
     }
   ],
   "functions": {
+    "api/billing/subscription-invoice.js": {
+      "maxDuration": 30,
+      "includeFiles": "public/bookea-invoice-logo.png"
+    },
+    "api/billing/renewals.js": {
+      "maxDuration": 60,
+      "includeFiles": "public/bookea-invoice-logo.png"
+    },
     "api/health/repair-seya.js": {
       "maxDuration": 60
     },

@@ -10,8 +10,10 @@ import {
   buildAgencyInvoiceHtml,
   companyLabel,
   createId,
+  createPayToken,
   formatEuroAmount,
   formatShortDate,
+  invoicePayUrl,
   invoiceTotal,
   invoicesInRange,
   issuerAddressLines,
@@ -326,6 +328,7 @@ function BillingSection({
   const [draft, setDraft] = useState(() => emptyInvoiceDraft(state));
   const [editingId, setEditingId] = useState<string | null>(null);
   const [previewId, setPreviewId] = useState<string | null>(openInvoiceId ?? null);
+  const [copiedPayLinkId, setCopiedPayLinkId] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<AgencyInvoiceStatus | "tous">(
     "tous",
   );
@@ -476,6 +479,23 @@ function BillingSection({
         item.id === invoice.id ? updated : item,
       ),
     });
+  }
+
+  function copyPayLink(invoice: AgencyInvoice) {
+    const payable = invoice.payToken
+      ? invoice
+      : { ...invoice, payToken: createPayToken() };
+    if (payable !== invoice) {
+      onChange({
+        invoices: state.invoices.map((item) =>
+          item.id === invoice.id ? payable : item,
+        ),
+      });
+    }
+    void navigator.clipboard
+      .writeText(invoicePayUrl(payable))
+      .then(() => setCopiedPayLinkId(invoice.id))
+      .catch(() => window.prompt("Lien de paiement à copier :", invoicePayUrl(payable)));
   }
 
   function deleteInvoice(invoice: AgencyInvoice) {
@@ -973,6 +993,11 @@ function BillingSection({
                           </option>
                         ))}
                       </select>
+                      {invoice.paymentMethod === "carte" && invoice.paidAt ? (
+                        <p className="mt-1 text-[11px] font-semibold text-emerald-700">
+                          Payée par carte le {formatShortDate(invoice.paidAt)}
+                        </p>
+                      ) : null}
                     </td>
                     <td className="min-w-[13rem] px-3 py-2">
                       <InvoiceFollowUpCell
@@ -1010,6 +1035,19 @@ function BillingSection({
                         >
                           Dupliquer
                         </button>
+                        {state.company === "bookea" &&
+                        invoice.status !== "Payée" &&
+                        invoice.status !== "Annulée" ? (
+                          <button
+                            type="button"
+                            onClick={() => copyPayLink(invoice)}
+                            className="col-span-2 h-7 rounded-md border border-violet-200 px-2 text-[11px] font-bold text-violet-700"
+                          >
+                            {copiedPayLinkId === invoice.id
+                              ? "Lien copié"
+                              : "Lien de paiement"}
+                          </button>
+                        ) : null}
                         <button
                           type="button"
                           onClick={() => deleteInvoice(invoice)}

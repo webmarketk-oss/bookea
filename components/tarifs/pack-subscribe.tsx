@@ -20,6 +20,7 @@ import {
   subscribeSmsPack,
 } from "@/lib/center-billing";
 import { seyaRemainingConversations } from "@/lib/seya-quota";
+import { subscriptionInvoiceNotice } from "@/lib/subscription-invoice-request";
 
 type Notice = { type: "success" | "error"; message: string };
 
@@ -104,7 +105,7 @@ export function WhatsappPacks() {
       notifyOffersUpdated();
       setNotice({
         type: "success",
-        message: `${result.quota.conversationLimit} conversations Seya sont maintenant débloquées pour ${result.centerName}.`,
+        message: `${result.quota.conversationLimit} conversations Seya sont maintenant débloquées pour ${result.centerName}. ${subscriptionInvoiceNotice(result.invoice)}`,
       });
     } catch (error) {
       setNotice({
@@ -174,7 +175,7 @@ export function SmsPacks() {
       setRemaining(result.remaining);
       setNotice({
         type: "success",
-        message: `${quantity} SMS ajoutés. Nouveau solde : ${result.remaining}.`,
+        message: `${quantity} SMS ajoutés. Nouveau solde : ${result.remaining}. ${subscriptionInvoiceNotice(result.invoice)}`,
       });
     } catch (error) {
       setNotice({
@@ -243,7 +244,7 @@ export function CrmPacks() {
       notifyOffersUpdated();
       setNotice({
         type: "success",
-        message: `Bookea CRM + SMS est actif pour ${result.centerName}.`,
+        message: `Bookea CRM + SMS est actif pour ${result.centerName}. ${subscriptionInvoiceNotice(result.invoice)}`,
       });
     } catch (error) {
       setNotice({

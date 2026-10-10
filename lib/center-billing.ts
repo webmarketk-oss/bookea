@@ -1,7 +1,6 @@
 import {
   appendAdminAlert,
   createAdminAlert,
-  markAdminAlertInvoiced,
   markAdminAlertRead,
   normalizeAdminAlerts,
   type AdminAlert,
@@ -28,6 +27,7 @@ import {
   type SeyaQuota,
 } from "@/lib/seya-quota";
 import { createClient } from "@/lib/supabase";
+import { requestSubscriptionInvoice } from "@/lib/subscription-invoice-request";
 import {
   normalizeSmsQuota,
   type SmsQuota,
@@ -106,6 +106,7 @@ export async function subscribeSmsPack(quantity: number) {
     changed: false,
   };
   const alert = createAdminAlert({
+    autoInvoice: true,
     kind: "sms_pack",
     title: `${center.name} a rechargé ${pack.quantity} SMS`,
     message: `${center.name} a rechargé ${pack.quantity} SMS — ${formatEuro(pack.price)} — à recharger côté opérateur`,
@@ -137,6 +138,7 @@ export async function subscribeSmsPack(quantity: number) {
     centerName: center.name,
     remaining: nextQuota.remaining,
     alert,
+    invoice: await requestSubscriptionInvoice(center.id, alert.id),
   };
 }
 
@@ -157,6 +159,7 @@ export async function subscribeSeyaPack(leads: number) {
     updatedAt: dates.subscribedAt,
   };
   const alert = createAdminAlert({
+    autoInvoice: true,
     kind: "seya_pack",
     title: `${center.name} a souscrit ${pack.leads} conversations Seya`,
     message: `${center.name} a souscrit ${pack.leads} conversations Seya — ${formatEuro(pack.price)}`,
@@ -186,6 +189,7 @@ export async function subscribeSeyaPack(leads: number) {
     centerName: center.name,
     quota: nextQuota,
     alert,
+    invoice: await requestSubscriptionInvoice(center.id, alert.id),
   };
 }
 
@@ -220,6 +224,7 @@ export async function subscribeBookeaPlan() {
   const center = await loadCenterSettings(context.centerId);
   const plan = createBookeaPlan();
   const alert = createAdminAlert({
+    autoInvoice: true,
     kind: "crm_pack",
     title: `${center.name} a souscrit Bookea CRM + SMS`,
     message: `${center.name} a souscrit Bookea CRM + SMS — ${plan.price} € / mois`,
@@ -249,6 +254,7 @@ export async function subscribeBookeaPlan() {
     centerName: center.name,
     plan,
     alert,
+    invoice: await requestSubscriptionInvoice(center.id, alert.id),
   };
 }
 
@@ -273,6 +279,7 @@ export async function renewSeyaPack() {
     updatedAt: period.renewedAt,
   };
   const alert = createAdminAlert({
+    autoInvoice: true,
     kind: "seya_pack",
     title: `${center.name} a renouvelé ${offer.leads} conversations Seya`,
     message: `${center.name} a renouvelé ${offer.leads} conversations Seya — ${formatEuro(price)} — jusqu’au ${formatOfferDate(period.renewsAt)}`,
@@ -297,7 +304,11 @@ export async function renewSeyaPack() {
     offerHistory: appendOfferHistory(center.settings.offerHistory, historyItem),
   });
 
-  return { centerName: center.name, renewsAt: period.renewsAt };
+  return {
+    centerName: center.name,
+    renewsAt: period.renewsAt,
+    invoice: await requestSubscriptionInvoice(center.id, alert.id),
+  };
 }
 
 export async function renewBookeaPlan() {
@@ -315,6 +326,7 @@ export async function renewBookeaPlan() {
     renewsAt: period.renewsAt,
   };
   const alert = createAdminAlert({
+    autoInvoice: true,
     kind: "crm_pack",
     title: `${center.name} a renouvelé Bookea CRM + SMS`,
     message: `${center.name} a renouvelé Bookea CRM + SMS — ${plan.price} € / mois — jusqu’au ${formatOfferDate(period.renewsAt)}`,
@@ -339,7 +351,11 @@ export async function renewBookeaPlan() {
     offerHistory: appendOfferHistory(center.settings.offerHistory, historyItem),
   });
 
-  return { centerName: center.name, renewsAt: period.renewsAt };
+  return {
+    centerName: center.name,
+    renewsAt: period.renewsAt,
+    invoice: await requestSubscriptionInvoice(center.id, alert.id),
+  };
 }
 
 export async function markCenterAdminAlertRead(
@@ -350,27 +366,6 @@ export async function markCenterAdminAlertRead(
   await persistCenterSettings(center.supabase, center.id, {
     ...center.settings,
     adminAlerts: markAdminAlertRead(center.settings.adminAlerts, alertId),
-  });
-}
-
-export async function markCenterAdminAlertInvoiced(
-  centerId: string,
-  alertId: string,
-  receipt: {
-    invoiceId: string;
-    invoicedAt?: string;
-    emailedAt?: string;
-    emailedTo?: string;
-  },
-) {
-  const center = await loadCenterSettings(centerId);
-  await persistCenterSettings(center.supabase, center.id, {
-    ...center.settings,
-    adminAlerts: markAdminAlertInvoiced(
-      center.settings.adminAlerts,
-      alertId,
-      receipt,
-    ),
   });
 }
 

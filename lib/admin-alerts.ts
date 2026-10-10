@@ -19,6 +19,7 @@ export type AdminAlert = {
   quantity: number;
   billingStatus: AdminAlertBillingStatus;
   offer?: AdminAlertOffer;
+  autoInvoice?: boolean;
   invoiceId?: string;
   invoicedAt?: string;
   emailedAt?: string;
@@ -44,6 +45,7 @@ export function createAdminAlert(input: {
   amountEuros: number;
   quantity: number;
   offer?: AdminAlertOffer;
+  autoInvoice?: boolean;
   createdAt?: string;
   id?: string;
 }): AdminAlert {
@@ -58,6 +60,7 @@ export function createAdminAlert(input: {
     quantity: Math.max(0, Math.floor(Number(input.quantity) || 0)),
     billingStatus: "to_invoice",
     ...(input.offer ? { offer: input.offer } : {}),
+    ...(input.autoInvoice ? { autoInvoice: true } : {}),
   };
 }
 
@@ -90,6 +93,7 @@ export function normalizeAdminAlert(value: unknown): AdminAlert | null {
       record.billingStatus === "invoiced" ? "invoiced" : "to_invoice",
     offer:
       record.offer === "seya" || record.offer === "crm" ? record.offer : undefined,
+    ...(record.autoInvoice === true ? { autoInvoice: true } : {}),
     invoiceId: String(record.invoiceId || "").trim() || undefined,
     invoicedAt: String(record.invoicedAt || "").trim() || undefined,
     emailedAt: String(record.emailedAt || "").trim() || undefined,
