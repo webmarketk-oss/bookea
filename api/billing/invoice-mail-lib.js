@@ -54,9 +54,9 @@ function defaultInvoiceMailCopy(invoice = {}, centerName = "") {
 
 function parsePdfAttachment(value, fileName) {
   const raw = String(value || "").trim();
-  const match = raw.match(/^data:application\/pdf;base64,([A-Za-z0-9+/=\s]+)$/i);
+  const match = raw.match(/^data:application\/pdf(?:;[^;,]*)*;base64,([A-Za-z0-9+/=\s]+)$/i);
   const content = (match ? match[1] : raw).replace(/\s/g, "");
-  if (!content || content.length < 80) {
+  if (!content || content.length < 80 || !/^[A-Za-z0-9+/]+=*$/.test(content)) {
     return null;
   }
   const name = String(fileName || "facture.pdf").replace(/[^\w.-]+/g, "_");

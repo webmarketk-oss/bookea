@@ -32,3 +32,12 @@ test("un échec n’écrit pas l’envoi sur la facture", () => {
   assert.equal(invoiceMailReceipts(settings)["inv-1"].emailedTo, "camille@test.fr");
   assert.equal(invoiceMailReceipts({}).inv1, undefined);
 });
+
+test("le PDF généré par le navigateur (avec nom de fichier) est bien joint", () => {
+  const { jsPDF } = require("jspdf");
+  const dataUrl = new jsPDF().output("datauristring");
+  assert.match(dataUrl, /^data:application\/pdf;filename=/);
+  const attachment = parsePdfAttachment(dataUrl, "WK-2026-001.pdf");
+  assert.equal(Buffer.from(attachment.content, "base64").subarray(0, 5).toString(), "%PDF-");
+  assert.equal(parsePdfAttachment(`data:application/pdf;filename=x.pdf;base64,${"A".repeat(40)}!!`, "x"), null);
+});
