@@ -145,7 +145,7 @@ test("une réponse du lead remet le compteur à zéro", () => {
     messages: [
       { id: "m1", author: "seya", text: "Bonjour Léa", at: hoursAgo(40) },
       { id: "m2", author: "seya", text: "Je reviens vers vous", at: hoursAgo(30) },
-      { id: "m3", author: "lead", text: "Je réfléchis encore", at: hoursAgo(25) },
+      { id: "m3", author: "lead", text: "D’accord, merci pour les infos", at: hoursAgo(25) },
     ],
   });
   assert.equal(pickRelanceRound(item, NOW), 1);

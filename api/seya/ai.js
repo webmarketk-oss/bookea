@@ -50,11 +50,27 @@ const {
   wantsNoon,
   wantsSlots,
   isWillComeBack,
+  isWillCallBack,
   isThreadComplaint,
   withStaffOfferedSlots,
   hasDayOfMonthRequest,
 } = require("./conversation");
 const { understandThread } = require("./care-family");
+const {
+  activeLeadPause,
+  cityFromAddress,
+  confirmsOtherCity,
+  hasOpenQuestion,
+  isPauseRequest,
+  leadCityMention,
+  locationCheckReply,
+  otherCityReply,
+  pauseReply,
+  resumesBooking,
+  sameCity,
+  stripBookingPush,
+  withLeadPause,
+} = require("./lead-pause");
 const {
   canBookSeya,
   isWelcomeRelanceOnly,
@@ -74,7 +90,100 @@ function hasAiKey() {
   return Boolean(String(process.env.OPENAI_API_KEY || "").trim());
 }
 
-async function generateSeyaReply({
+const PAUSED_FALLBACK = "Nous restons disponibles si vous avez des questions 😊";
+
+function guardedReply(conversation, text, reply) {
+  return {
+    conversation: {
+      ...conversation,
+      messages: [
+        ...(conversation.messages || []),
+        message("lead", text),
+        message("seya", reply),
+      ],
+      updatedAt: new Date().toISOString(),
+    },
+    shouldBook: null,
+    via: "rules",
+  };
+}
+
+function holdBookingPush(result, pause) {
+  const messages = [...(result.conversation.messages || [])];
+  const index = messages.map((item) => item.author).lastIndexOf("seya");
+  if (index >= 0) {
+    messages[index] = {
+      ...messages[index],
+      text: stripBookingPush(messages[index].text) || PAUSED_FALLBACK,
+    };
+  }
+  return {
+    ...result,
+    shouldBook: null,
+    conversation: withLeadPause({ ...result.conversation, messages }, pause),
+  };
+}
+
+async function generateSeyaReply(input) {
+  const { text, centerAddress } = input;
+  const at = (input.now instanceof Date ? input.now : new Date()).toISOString();
+  let conversation = input.conversation;
+  const centerCity = cityFromAddress(centerAddress);
+
+  const pendingCity = conversation.locationCheck?.leadCity || "";
+  if (pendingCity) {
+    conversation = { ...conversation, locationCheck: null };
+    if (centerCity && confirmsOtherCity(text, pendingCity) && !hasOpenQuestion(text)) {
+      return guardedReply(
+        withLeadPause(conversation, { at, reason: "autre_ville", text }),
+        text,
+        otherCityReply(centerCity),
+      );
+    }
+  }
+
+  const leadCity = leadCityMention(text);
+  if (leadCity && centerCity && !sameCity(leadCity, centerCity)) {
+    return guardedReply(
+      {
+        ...conversation,
+        locationCheck: { leadCity, at },
+        proposedSlots: [],
+        bookingState: { ...(conversation.bookingState || {}), lastOfferedSlots: [] },
+      },
+      text,
+      locationCheckReply(centerCity, leadCity),
+    );
+  }
+
+  const pausing = isPauseRequest(text);
+  const handledComeBack = isWillComeBack(text) || isWillCallBack(text);
+  if (pausing && !hasOpenQuestion(text) && !handledComeBack) {
+    return guardedReply(
+      withLeadPause(conversation, { at, reason: "reflexion", text }),
+      text,
+      pauseReply(conversation, text),
+    );
+  }
+  const previousPause = resumesBooking(text) ? null : activeLeadPause(conversation);
+  const pause = pausing ? { at, reason: "reflexion", text } : previousPause;
+  if (pause) {
+    const held = await generateCoreReply({
+      ...input,
+      conversation: withLeadPause(conversation, pause),
+      slots: [],
+      appointments: undefined,
+    });
+    return holdBookingPush(held, pause);
+  }
+
+  const result = await generateCoreReply({ ...input, conversation });
+  return conversation.leadPause
+    ? { ...result, conversation: { ...result.conversation, leadPause: null } }
+    : result;
+}
+
+async function generateCoreReply({
   conversation,
   text,
   seya,
@@ -303,6 +412,11 @@ function polishPrompt({
       : "Ton objectif est d’accompagner jusqu’à la prise de rendez-vous, sans insister et sans coller deux fois la même réponse.",
     "Avant de répondre, tu relis tout le fil (prospect + équipe + toi), le centre concerné et l’axe du prospect (laser, minceur ou visage), y compris une relance J+15, et tu t’y tiens. Les horaires écrits par l’équipe priment. Si elle a proposé 15h et que le prospect le choisit, tu confirmes 15h : interdit de dire que ce n’est pas disponible ou de proposer 11h30/12h. Si le prospect a dit qu’il reviendrait, qu’il n’a rien cette semaine, ou que l’info était claire, tu n’as plus à demander un jour. Si le prospect a corrigé le soin (visage, minceur, laser), tu restes sur CE soin et tu n’utilises que les réglages de CE soin dans CE centre. Interdit de revenir à la campagne d’origine. Interdit de parler minceur, analyse corporelle ou cures 500€ si le fil ou le centre est laser / Dépil. Si l’axe est flou, tu poses une question courte pour le clarifier.",
     "Tu réponds au dernier message, dans ce contexte. Interdit de reposer une question déjà traitée. Interdit de recoller le dernier message Seya.",
+    "Priorité absolue : tu réponds d’abord à ce que la personne vient de dire (question, précision, ville, demande de réfléchir). La trame commerciale passe toujours après. Si elle donne sa ville et qu’elle n’est pas celle du centre, tu dis où se trouve le centre et tu lui demandes si elle cherchait un centre dans sa ville. Interdit d’inventer un autre centre, une adresse ou un transfert.",
+    "Si elle veut réfléchir, dit qu’elle reviendra vers vous, qu’elle recontactera ou « pas pour le moment » : tu respectes sa pause. Interdit de demander ses disponibilités, de proposer un créneau ou un rendez-vous. Ce n’est pas un refus définitif : tu restes chaleureuse et disponible pour ses questions.",
+    conversation.leadPause
+      ? "Le prospect a demandé une pause : tu réponds seulement à son message, sans aucune question sur ses disponibilités et sans proposer de créneau, tant qu’elle ne redemande pas elle-même un rendez-vous."
+      : "",
     "Le texte Bookea est une fiche de faits autorisés, pas un script. Si Bookea propose un créneau ou pose une question alors que la cliente n’a pas demandé ça, tu ne le recopies pas.",
     resolveSeyaMission(settings) === "qualify_callback"
       ? "Tu ne clôtures pas tant qu’il manque le jour ou l’heure. Dès que les deux sont connus, la seule conclusion autorisée est : « Une opératrice vous rappellera [jour] à [heure]. » Interdit de poser un RDV agenda."

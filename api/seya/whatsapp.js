@@ -35,8 +35,10 @@ const { isCrmRelanceHold } = require("./crm-sync");
 const {
   isNewSeyaConversationBlocked,
   isSeyaOff,
+  readCenterSeya,
   writeSeyaConversations,
 } = require("./store");
+const { activeLeadPause, stripBookingPush } = require("./lead-pause");
 
 const GRAPH_VERSION = "v21.0";
 const inboundLocks = new Map();
@@ -252,6 +254,25 @@ function outgoingWhatsAppTexts(followUps, draftedReply, previousSeya, inboundTex
     }
     return outgoing.findIndex((item) => isNearDuplicate(item, text)) === index;
   });
+}
+
+function leadMessageCount(conversation) {
+  return (conversation?.messages || []).filter((item) => item.author === "lead").length;
+}
+
+function holdOutgoingAfterPause(fresh, answered, texts) {
+  if (!fresh || leadMessageCount(fresh) <= leadMessageCount(answered)) {
+    return texts;
+  }
+  const pause = activeLeadPause(fresh);
+  return pause ? texts.map(stripBookingPush).filter(Boolean) : texts;
+}
+
+async function readFreshConversation(supabase, centerId, conversation) {
+  const { seya } = await readCenterSeya(supabase, centerId);
+  return (Array.isArray(seya?.conversations) ? seya.conversations : []).find((item) =>
+    isSameSeyaConversation(item, conversation),
+  );
 }
 
 function replaceDraftWithSent(conversation, sentTexts) {
@@ -788,6 +809,22 @@ async function handleIncoming(supabase, incoming) {
   );
   if (!uniqueOutgoing.length && incoming.text) {
     uniqueOutgoing = [String(draftedReply || "").trim() || EMPTY_SEYA_REPLY];
+  }
+  const fresh = await readFreshConversation(supabase, center.id, existing).catch((freshError) => {
+    console.error("[seya/whatsapp] fresh read", freshError);
+    return null;
+  });
+  const heldOutgoing = holdOutgoingAfterPause(fresh, existing, uniqueOutgoing);
+  if (heldOutgoing !== uniqueOutgoing) {
+    uniqueOutgoing = heldOutgoing;
+    const pause = activeLeadPause(fresh);
+    next.leadPause = pause;
+    next.proposedSlots = [];
+    next.bookingState = { ...(next.bookingState || {}), pendingQuestion: "no_slots", lastOfferedSlots: [] };
+    if (!uniqueOutgoing.length) {
+      const lastSeyaIndex = (next.messages || []).map((item) => item.author).lastIndexOf("seya");
+      next.messages = (next.messages || []).filter((_, index) => index !== lastSeyaIndex);
+    }
   }
   Object.assign(next, replaceDraftWithSent(next, uniqueOutgoing));
 
@@ -1535,6 +1572,7 @@ async function sendSharedWhatsApp(phone, text, extras = {}) {
 handler.sendSharedWhatsApp = sendSharedWhatsApp;
 handler.outgoingWhatsAppTexts = outgoingWhatsAppTexts;
 handler.replaceDraftWithSent = replaceDraftWithSent;
+handler.holdOutgoingAfterPause = holdOutgoingAfterPause;
 handler.isTemplateRequired = isTemplateRequired;
 handler.welcomeTemplateVars = welcomeTemplateVars;
 handler.extractIncomingMessages = extractIncomingMessages;

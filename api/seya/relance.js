@@ -27,6 +27,8 @@ const {
   threadHasConfirmedVisit,
 } = require("./conversation");
 const { isSeyaOff, readCenterSeya, writeSeyaConversations } = require("./store");
+const { isSameSeyaConversation } = require("./conversation-key");
+const { activeLeadPause, withLeadPause } = require("./lead-pause");
 const {
   conversationOnRelanceHold,
   loadRelanceHoldKeys,
@@ -92,7 +94,7 @@ function createServiceClient() {
   });
 }
 
-async function relanceCenter(supabase, center) {
+async function relanceCenter(supabase, center, now = new Date()) {
   const latest = await readCenterSeya(supabase, center.id);
   const seya = latest.seya;
   const agent = agentSettings(seya);
@@ -104,7 +106,6 @@ async function relanceCenter(supabase, center) {
   await markMessagedNouveauLeads(supabase, center.id, conversations);
   const nextConversations = [];
   const sent = [];
-  const now = new Date();
   const bookedKeys = await loadBookedVisitKeys(supabase, center.id);
   const crmHold = await loadRelanceHoldKeys(supabase, center.id);
   let closed = false;
@@ -116,8 +117,13 @@ async function relanceCenter(supabase, center) {
       conversation,
       crmHold,
     );
-    const updated = { ...synced };
+    let updated = { ...synced };
     if (updated.status !== conversation.status) {
+      closed = true;
+    }
+    const pause = activeLeadPause(conversation);
+    if (pause && !conversation.leadPause) {
+      updated = withLeadPause(updated, pause);
       closed = true;
     }
     const bookedVisit = conversationMatchesBookedVisit(conversation, bookedKeys);
@@ -146,7 +152,7 @@ async function relanceCenter(supabase, center) {
     }
 
     const current = await readCenterSeya(supabase, center.id);
-    if (isSeyaOff(current.seya)) {
+    if (isSeyaOff(current.seya) || !stillDueForRelance(current.seya, conversation, crmHold)) {
       nextConversations.push(updated);
       continue;
     }
@@ -211,8 +217,28 @@ async function relanceCenter(supabase, center) {
   return sent;
 }
 
+function leadMessageCount(conversation) {
+  return (conversation?.messages || []).filter((item) => item.author === "lead").length;
+}
+
+function stillDueForRelance(seya, conversation, crmHold) {
+  const fresh = (Array.isArray(seya?.conversations) ? seya.conversations : []).find((item) =>
+    isSameSeyaConversation(item, conversation),
+  );
+  if (!fresh) {
+    return true;
+  }
+  return (
+    leadMessageCount(fresh) === leadMessageCount(conversation) &&
+    !shouldSkipRelance(fresh, { crmHold })
+  );
+}
+
 function shouldSkipRelance(conversation, extras = {}) {
   const status = String(conversation?.status || "");
+  if (activeLeadPause(conversation)) {
+    return true;
+  }
   if (conversationOnRelanceHold(conversation, extras.crmHold)) {
     return true;
   }
@@ -352,6 +378,8 @@ function pickRelanceRound(conversation, now = new Date(), extras = {}) {
 }
 
 module.exports.shouldSkipRelance = shouldSkipRelance;
+module.exports.relanceCenter = relanceCenter;
+module.exports.stillDueForRelance = stillDueForRelance;
 module.exports.pickRelanceRound = pickRelanceRound;
 module.exports.hoursSince = hoursSince;
 module.exports.isRelanceQuietHours = isRelanceQuietHours;
