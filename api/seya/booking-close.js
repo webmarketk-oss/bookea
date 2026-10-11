@@ -80,6 +80,49 @@ function sealConfirmedConversation(conversation) {
   };
 }
 
+function seyaStatusForCrmStatus(crmStatus) {
+  const value = String(crmStatus || "").trim().toLowerCase();
+  if (/^hors[- ]?zone$/.test(value)) {
+    return "Hors zone";
+  }
+  if (/^(pas int[eé]ress[eé]|prospect perdu|intraitable)$/.test(value)) {
+    return "Pas intéressé";
+  }
+  return null;
+}
+
+function closeConversationForCrmStatus(conversation, crmStatus) {
+  const status = seyaStatusForCrmStatus(crmStatus);
+  if (
+    !conversation ||
+    !status ||
+    conversation.status === status ||
+    conversationHasStaffBooking(conversation)
+  ) {
+    return conversation;
+  }
+  return {
+    ...conversation,
+    status,
+    welcomeSendAt: null,
+    proposedSlots: [],
+    bookingState: {
+      ...(conversation.bookingState || {}),
+      pendingQuestion: null,
+      lastOfferedSlots: [],
+    },
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+function closeConversationsForCrmStatus(conversations, match, crmStatus) {
+  return (Array.isArray(conversations) ? conversations : []).map((item) =>
+    item && matchesBookedLead(item, match)
+      ? closeConversationForCrmStatus(item, crmStatus)
+      : item,
+  );
+}
+
 function bookedVisitKeysFromAppointments(rows) {
   const keys = new Set();
   for (const row of rows || []) {
@@ -115,9 +158,12 @@ function conversationMatchesBookedVisit(conversation, bookedKeys) {
 module.exports = {
   bookedSlotFromAppointment,
   bookedVisitKeysFromAppointments,
+  closeConversationForCrmStatus,
   closeConversationsForBooking,
+  closeConversationsForCrmStatus,
   conversationHasStaffBooking,
   conversationMatchesBookedVisit,
   matchesBookedLead,
   sealConfirmedConversation,
+  seyaStatusForCrmStatus,
 };

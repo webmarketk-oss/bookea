@@ -595,3 +595,101 @@ test("relance tarif : elle revient sur le prix, elle ne dit pas qu’elle relit"
   assert.doesNotMatch(copy, /relis|reprends votre demande/i);
   assert.doesNotMatch(copy, /Réseau/i);
 });
+
+function crmLeads(rows) {
+  return {
+    from() {
+      return {
+        select() {
+          return { eq: async () => ({ data: rows, error: null }) };
+        },
+      };
+    },
+  };
+}
+
+async function roundWithCrm(row, thread, now = NOW) {
+  const { loadRelanceHoldKeys } = require("./crm-sync");
+  const crmHold = await loadRelanceHoldKeys(
+    crmLeads([{ id: "1", phone: "0612345678", ...row }]),
+    "center-1",
+    now,
+  );
+  return pickRelanceRound(thread, now, { crmHold });
+}
+
+function idleSince(hours, extra = {}) {
+  return conversation({
+    messages: [{ id: "m1", author: "seya", text: "Bonjour Léa", at: hoursAgo(hours) }],
+    ...extra,
+  });
+}
+
+test("CRM En réflexion ou Reviendra vers nous : jamais relancé", async () => {
+  for (const status of ["En réflexion", "En reflexion", "Reviendra vers nous"]) {
+    assert.equal(await roundWithCrm({ status, recall_date: null }, idleSince(30)), 0, status);
+    assert.equal(
+      await roundWithCrm(
+        { status, recall_date: "2026-09-01" },
+        idleSince(24 * 40),
+      ),
+      0,
+      `${status} + date passée`,
+    );
+  }
+  assert.equal(
+    await roundWithCrm({ status: "Message WhatsApp envoyé", recall_date: null }, idleSince(30)),
+    1,
+  );
+});
+
+test("date de relance CRM : rien avant la date, ni le jour même", async () => {
+  const row = { status: "À relancer", recall_date: "2026-10-05" };
+  assert.equal(await roundWithCrm(row, idleSince(24 * 6)), 0);
+  assert.equal(
+    await roundWithCrm(row, idleSince(24 * 6), new Date("2026-10-05T09:00:00Z")),
+    0,
+  );
+  assert.equal(
+    await roundWithCrm(
+      { status: "Message WhatsApp envoyé", recall_date: "2026-10-05" },
+      idleSince(24 * 6, { relanceCount: 2, lastRelanceAt: hoursAgo(24) }),
+    ),
+    0,
+  );
+});
+
+test("après la date de relance : la séquence reprend depuis la date, sans rattrapage", async () => {
+  const row = { status: "À relancer", recall_date: "2026-10-05" };
+  const thread = idleSince(24 * 20, { relanceCount: 2, lastRelanceAt: hoursAgo(24 * 10) });
+
+  assert.equal(await roundWithCrm(row, thread, new Date("2026-10-06T09:00:00Z")), 1);
+
+  const afterFirst = {
+    ...thread,
+    relanceCount: 1,
+    lastRelanceAt: "2026-10-06T09:00:00Z",
+  };
+  assert.equal(await roundWithCrm(row, afterFirst, new Date("2026-10-08T09:00:00Z")), 0);
+  assert.equal(await roundWithCrm(row, afterFirst, new Date("2026-10-10T09:00:00Z")), 2);
+
+  assert.equal(
+    await roundWithCrm(
+      { status: "À relancer", recall_date: "2026-06-01" },
+      idleSince(24 * 150),
+      new Date("2026-10-06T09:00:00Z"),
+    ),
+    0,
+  );
+});
+
+test("le prospect répond après la date de relance : relances normales", async () => {
+  const row = { status: "À relancer", recall_date: "2026-09-20" };
+  const replied = conversation({
+    messages: [
+      { id: "m1", author: "seya", text: "Bonjour Léa", at: hoursAgo(24 * 20) },
+      { id: "m2", author: "lead", text: "Oui je suis intéressée", at: hoursAgo(30) },
+    ],
+  });
+  assert.equal(await roundWithCrm(row, replied), 1);
+});

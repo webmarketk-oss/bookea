@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/table";
 import { AdaptiveSelect } from "@/components/ui/adaptive-select";
 import { isOpenReminderDue, toDateOnlyIso } from "@/lib/crm-stats";
+import { leadOfferLabel } from "@/lib/lead-offer";
 import {
   isInactiveLeadStatus,
   leadStatusClassName,
@@ -74,7 +75,7 @@ export default function ProspectsTable({
         <TableHeader>
           <TableRow>
             <TableHead className="min-w-[12rem]">Prospect</TableHead>
-            <TableHead className="w-[9rem] min-w-[9rem] max-w-[9rem]">Offre</TableHead>
+            <TableHead className="w-[9rem] min-w-[9rem] max-w-[9rem]">Soin / offre</TableHead>
             <TableHead>
               <button
                 type="button"
@@ -160,6 +161,7 @@ export default function ProspectsTable({
           {sortedLeads.map((lead) => {
             const isInactive = isInactiveLeadStatus(lead.status);
             const latestComment = getLatestLeadComment(lead);
+            const offer = leadOfferLabel(lead);
 
             return (
             <TableRow
@@ -197,6 +199,14 @@ export default function ProspectsTable({
                 >
                   {lead.treatment || lead.campaign || "—"}
                 </span>
+                {offer ? (
+                  <span
+                    title={offer}
+                    className="mt-1 block max-w-full truncate px-1 text-[11px] font-semibold text-slate-600"
+                  >
+                    {offer}
+                  </span>
+                ) : null}
               </TableCell>
 
               <TableCell>{lead.createdAt}</TableCell>

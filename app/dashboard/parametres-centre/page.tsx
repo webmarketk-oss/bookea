@@ -66,6 +66,11 @@ import {
 } from "@/lib/center-media";
 import { PlaceSuggestField } from "@/components/forms/place-suggest-field";
 import { askAlert, askConfirm } from "@/components/ui/app-dialog";
+import {
+  loadLeadOfferRoutes,
+  saveLeadOfferRoutes,
+  type LeadOfferRoute,
+} from "@/lib/lead-offer-routes";
 
 type StripeConnectStatus = {
   ok?: boolean;
@@ -2548,6 +2553,7 @@ export default function CenterSettingsPage() {
       {activeTab === "sources" && (
         <section className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-sm">
           <InboundLeadsCard slug={center.slug} />
+          <LeadOfferRoutesCard />
           <div className="mt-8 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
             <SectionTitle
               icon={<Share2 className="h-4 w-4" />}
@@ -3155,6 +3161,119 @@ function InboundLeadsCard({ slug }: { slug: string }) {
           hint="Réservation sur la fiche publique."
           url={urls.bookea}
         />
+      </div>
+    </div>
+  );
+}
+
+function LeadOfferRoutesCard() {
+  const [routes, setRoutes] = useState<LeadOfferRoute[]>([]);
+  const [loaded, setLoaded] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [notice, setNotice] = useState("");
+
+  useEffect(() => {
+    let active = true;
+    void loadLeadOfferRoutes()
+      .then((items) => {
+        if (active) {
+          setRoutes(items);
+        }
+      })
+      .catch(() => null)
+      .finally(() => {
+        if (active) {
+          setLoaded(true);
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  function updateRoute(index: number, patch: Partial<LeadOfferRoute>) {
+    setNotice("");
+    setRoutes((current) =>
+      current.map((route, routeIndex) =>
+        routeIndex === index ? { ...route, ...patch } : route,
+      ),
+    );
+  }
+
+  async function save() {
+    setSaving(true);
+    setNotice("");
+    try {
+      setRoutes(await saveLeadOfferRoutes(routes));
+      setNotice("Correspondances enregistrées.");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Enregistrement impossible.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="mt-5 rounded-[24px] border border-amber-100 bg-amber-50/60 p-5">
+      <SectionTitle
+        icon={<Share2 className="h-4 w-4" />}
+        title="Tunnels Systeme.io → offre affichée"
+        subtitle="Pour ce centre uniquement. Le tunnel, la page ou l’ID d’offre reçu doit être identique (voir « Tunnel / page reçus » dans l’historique du prospect). Un champ offre envoyé par l’intégration reste prioritaire. Sans correspondance, aucune offre n’est devinée."
+      />
+      <div className="mt-4 grid gap-3">
+        {routes.map((route, index) => (
+          <div
+            key={index}
+            className="grid gap-2 rounded-2xl border border-white bg-white p-3 shadow-sm md:grid-cols-[1fr_1fr_auto]"
+          >
+            <input
+              value={route.match}
+              onChange={(event) => updateRoute(index, { match: event.target.value })}
+              placeholder="Tunnel, page ou ID reçu"
+              className="h-10 rounded-xl border border-slate-200 px-3 text-sm outline-none focus:border-violet-500"
+            />
+            <input
+              value={route.offer}
+              onChange={(event) => updateRoute(index, { offer: event.target.value })}
+              placeholder="Offre affichée (ex. Bilan minceur offert)"
+              className="h-10 rounded-xl border border-slate-200 px-3 text-sm outline-none focus:border-violet-500"
+            />
+            <button
+              type="button"
+              onClick={() => {
+                setNotice("");
+                setRoutes((current) => current.filter((_, routeIndex) => routeIndex !== index));
+              }}
+              className="inline-flex h-10 items-center justify-center rounded-xl border border-slate-200 px-3 text-slate-500 hover:text-red-600"
+              aria-label="Supprimer la correspondance"
+            >
+              <Trash2 className="h-4 w-4" />
+            </button>
+          </div>
+        ))}
+      </div>
+      <div className="mt-4 flex flex-wrap items-center gap-3">
+        <button
+          type="button"
+          onClick={() => {
+            setNotice("");
+            setRoutes((current) => [...current, { match: "", offer: "" }]);
+          }}
+          className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700"
+        >
+          <Plus className="h-4 w-4" />
+          Ajouter un tunnel
+        </button>
+        <button
+          type="button"
+          disabled={!loaded || saving}
+          onClick={() => void save()}
+          className="inline-flex h-10 items-center gap-2 rounded-xl bg-slate-950 px-3 text-sm font-medium text-white disabled:opacity-60"
+        >
+          <Save className="h-4 w-4" />
+          {saving ? "Enregistrement…" : "Enregistrer"}
+        </button>
+        {notice ? <p className="text-sm font-medium text-slate-600">{notice}</p> : null}
       </div>
     </div>
   );

@@ -1,6 +1,9 @@
 const { crmUpdateFromLeadMessage, lockedCrmStatuses } = require("./conversation");
+const { closeConversationForCrmStatus, seyaStatusForCrmStatus } = require("./booking-close");
 
 const WA_SENT_STATUS = "Message WhatsApp envoyé";
+const crmClosingStatuses = new WeakMap();
+const crmRecallDays = new WeakMap();
 
 function last9(value) {
   return String(value || "").replace(/\D/g, "").slice(-9);
@@ -85,22 +88,52 @@ async function markMessagedNouveauLeads(supabase, centerId, conversations) {
   }
 }
 
+const CRM_HOLD_STATUS =
+  /reviendra vers nous|pas int[eé]ress|hors[- ]?zone|intraitable|contre[- ]?indication|revue sant[eé]|prospect perdu/i;
+const CRM_RELANCE_HOLD_STATUS = /en r[eé]flexion/i;
+
 function isCrmRelanceHold(row) {
   if (!row) {
     return false;
   }
-  if (
-    /reviendra vers nous|pas int[eé]ress|hors[- ]?zone|intraitable|contre[- ]?indication|revue sant[eé]|prospect perdu/i.test(
-      String(row.status || ""),
-    )
-  ) {
+  if (CRM_HOLD_STATUS.test(String(row.status || ""))) {
     return true;
   }
-  return Boolean(String(row.recall_date || row.reminderDate || "").trim());
+  return Boolean(crmRecallDay(row));
 }
 
-async function loadRelanceHoldKeys(supabase, centerId) {
+function crmRecallDay(row) {
+  const day = String(row?.recall_date || row?.reminderDate || "").trim().slice(0, 10);
+  return /^\d{4}-\d{2}-\d{2}$/.test(day) ? day : "";
+}
+
+function parisToday(now = new Date()) {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Europe/Paris",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(now);
+}
+
+function isCrmRelanceHeld(row, now = new Date()) {
+  if (!row) {
+    return false;
+  }
+  const status = String(row.status || "");
+  if (CRM_HOLD_STATUS.test(status) || CRM_RELANCE_HOLD_STATUS.test(status)) {
+    return true;
+  }
+  const recall = crmRecallDay(row);
+  return Boolean(recall && recall > parisToday(now));
+}
+
+async function loadRelanceHoldKeys(supabase, centerId, now = new Date()) {
   const hold = new Set();
+  const closing = new Map();
+  const recalls = new Map();
+  crmClosingStatuses.set(hold, closing);
+  crmRecallDays.set(hold, recalls);
   if (!supabase?.from || !centerId) {
     return hold;
   }
@@ -114,15 +147,20 @@ async function loadRelanceHoldKeys(supabase, centerId) {
       return hold;
     }
     for (const row of data || []) {
-      if (!isCrmRelanceHold(row)) {
+      const keys = leadRelanceKeys(row);
+      if (!isCrmRelanceHeld(row, now)) {
+        const recall = crmRecallDay(row);
+        for (const key of recall ? keys : []) {
+          recalls.set(key, recall);
+        }
         continue;
       }
-      if (row.id) {
-        hold.add(`id:${row.id}`);
-      }
-      const phone = last9(row.phone);
-      if (phone) {
-        hold.add(`phone:${phone}`);
+      const closes = Boolean(seyaStatusForCrmStatus(row.status));
+      for (const key of keys) {
+        hold.add(key);
+        if (closes) {
+          closing.set(key, row.status);
+        }
       }
     }
   } catch {
@@ -130,6 +168,19 @@ async function loadRelanceHoldKeys(supabase, centerId) {
   }
 
   return hold;
+}
+
+function crmRecallDayFor(conversation, crmHold) {
+  const recalls = crmHold ? crmRecallDays.get(crmHold) : null;
+  if (!recalls || recalls.size === 0 || !conversation) {
+    return "";
+  }
+  const phone = last9(conversation.phone);
+  return (
+    (conversation.leadId && recalls.get(`id:${conversation.leadId}`)) ||
+    (phone && recalls.get(`phone:${phone}`)) ||
+    ""
+  );
 }
 
 function leadRelanceKeys(row) {
@@ -149,7 +200,23 @@ function isLockedCrmStatus(status) {
   return lockedCrmStatuses().some((item) => item.toLowerCase() === current);
 }
 
+function closeForCrmStatus(conversation, crmHold) {
+  const closing = crmHold ? crmClosingStatuses.get(crmHold) : null;
+  if (!closing || closing.size === 0 || !conversation) {
+    return conversation;
+  }
+  const phone = last9(conversation.phone);
+  const crmStatus =
+    (conversation.leadId && closing.get(`id:${conversation.leadId}`)) ||
+    (phone && closing.get(`phone:${phone}`));
+  return crmStatus ? closeConversationForCrmStatus(conversation, crmStatus) : conversation;
+}
+
 async function syncCrmFromConversation(supabase, centerId, conversation, crmHold) {
+  const closed = closeForCrmStatus(conversation, crmHold);
+  if (closed !== conversation) {
+    return closed;
+  }
   const lastLead = [...(conversation?.messages || [])]
     .reverse()
     .find((item) => item.author === "lead");
@@ -185,7 +252,7 @@ async function syncCrmFromConversation(supabase, centerId, conversation, crmHold
       return next;
     }
     if (isLockedCrmStatus(lead.status) || isCrmRelanceHold(lead)) {
-      if (isCrmRelanceHold(lead) && crmHold) {
+      if (isCrmRelanceHeld(lead) && crmHold) {
         for (const key of leadRelanceKeys(lead)) {
           crmHold.add(key);
         }
@@ -210,7 +277,7 @@ async function syncCrmFromConversation(supabase, centerId, conversation, crmHold
       .update(patch)
       .eq("id", lead.id)
       .eq("center_id", centerId);
-    if (!updateError && crmHold && isCrmRelanceHold({ ...lead, ...patch })) {
+    if (!updateError && crmHold && isCrmRelanceHeld({ ...lead, ...patch })) {
       for (const key of leadRelanceKeys(lead)) {
         crmHold.add(key);
       }
@@ -244,6 +311,8 @@ module.exports = {
   WA_SENT_STATUS,
   conversationHasSentSeyaMessage,
   conversationOnRelanceHold,
+  crmRecallDayFor,
+  isCrmRelanceHeld,
   isCrmRelanceHold,
   loadRelanceHoldKeys,
   markLeadWhatsAppSent,

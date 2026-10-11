@@ -55,12 +55,16 @@ module.exports = async function handler(req, res) {
     }
 
     const fields = incomingLeadFields(payload, req.query);
-    const mapped = recoverIncomingLead(mapIncomingLead(payload, req.query), fields);
-    const sourceName = resolveIncomingSource(payload, req.query, "Facebook", req);
-    const phone = isPlaceholderValue(mapped.phone) ? "" : mapped.phone;
-    const firstName = isJunkLeadName(mapped.firstName) ? "" : mapped.firstName;
+    const origin = leadOrigin(
+      resolveIncomingSource(payload, req.query, "Facebook", req),
+      fields,
+    );
+    const sourceName = origin.source;
+    const received = recoverIncomingLead(mapIncomingLead(payload, req.query), fields);
+    const phone = isPlaceholderValue(received.phone) ? "" : received.phone;
+    const firstName = isJunkLeadName(received.firstName) ? "" : received.firstName;
 
-    if (!phone && !mapped.email) {
+    if (!phone && !received.email) {
       return res.status(400).json({ ok: false, error: "missing_contact" });
     }
 
@@ -80,6 +84,7 @@ module.exports = async function handler(req, res) {
       await ownerEmailsForCenter(supabase, center, fields),
     );
 
+    const mapped = applyCenterOfferRoute(received, fields, center.settings);
     const imported = {
       ...mapped,
       firstName: firstName || "Prospect",
@@ -94,6 +99,8 @@ module.exports = async function handler(req, res) {
     const leadId = await importPostedLead(supabase, center.id, imported, {
       possibleDuplicate: Boolean(existingId),
       sourceName,
+      importTool: origin.importTool,
+      fields,
     });
 
     let whatsapp = { sent: false, skipped: "no_phone" };
@@ -483,17 +490,16 @@ function mapIncomingLead(payload, query) {
   const pageName = pickUseful(fields, ["page_name", "page"]);
   const adName = pickUseful(fields, ["ad_name", "ad", "adset_name", "publicite"]);
   const offer = pickOffer(fields);
-  const treatment = cleanIncomingTreatment(
-    offer ||
-      pickUseful(fields, [
-        "treatment",
-        "service",
-        "soin",
-        "prestation",
-        "interet",
-        "interesse",
-        "interest",
-      ]) ||
+  const treatment = axisFromOffer(offer) || cleanIncomingTreatment(
+    pickUseful(fields, [
+      "treatment",
+      "service",
+      "soin",
+      "prestation",
+      "interet",
+      "interesse",
+      "interest",
+    ]) ||
       formName ||
       adName,
     fields,
@@ -646,6 +652,109 @@ function inferTreatmentFromBlob(text) {
   return careLabelForFamily(inferCareFamily(text));
 }
 
+function axisFromOffer(offer) {
+  return offer ? inferTreatmentFromBlob(offer) : "";
+}
+
+function looksLikeSystemeIo(fields) {
+  return Object.keys(fields || {}).some((key) =>
+    /^payload_(member|affiliate|offer|contact)_|funnel/.test(key),
+  );
+}
+
+function leadOrigin(sourceLabel, fields) {
+  if (sourceLabel === "SaveMyLeads") {
+    return {
+      source: looksLikeSystemeIo(fields) ? "Systeme.io" : "Facebook",
+      importTool: "SaveMyLeads",
+    };
+  }
+  return { source: sourceLabel, importTool: "" };
+}
+
+const FUNNEL_FIELD =
+  /(^|_)(funnel|tunnel|page|step|landing|url|sourceurl|form_id|offer_id|offer_reference|offer_title)(_|$)/;
+
+function funnelRefs(fields) {
+  const refs = [];
+  for (const [key, value] of Object.entries(fields || {})) {
+    if (!FUNNEL_FIELD.test(key)) {
+      continue;
+    }
+    const text = String(value ?? "").trim();
+    if (!text || text.length > 300 || text.includes("@") || looksLikeJsonBlob(text)) {
+      continue;
+    }
+    if (!refs.some((ref) => ref.value === text)) {
+      refs.push({ key, value: text });
+    }
+  }
+  return refs;
+}
+
+function routeKey(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/^https?:\/\//, "")
+    .replace(/^www\./, "")
+    .replace(/[?#].*$/, "")
+    .replace(/\/+$/, "")
+    .replace(/\s+/g, " ");
+}
+
+function routeCandidates(value) {
+  const key = routeKey(value);
+  const last = key.split("/").filter(Boolean).pop() || "";
+  return [...new Set([key, last].filter(Boolean))];
+}
+
+function centerOfferRoutes(settings) {
+  const routes =
+    settings && typeof settings === "object" ? settings.leadOfferRoutes : null;
+  return (Array.isArray(routes) ? routes : [])
+    .map((item) => ({
+      match: routeKey(item?.match),
+      offer: String(item?.offer || "").trim(),
+    }))
+    .filter((item) => item.match && item.offer);
+}
+
+function routedOffer(settings, fields) {
+  const routes = centerOfferRoutes(settings);
+  if (!routes.length) {
+    return "";
+  }
+  const offers = new Set();
+  for (const ref of funnelRefs(fields)) {
+    const candidates = routeCandidates(ref.value);
+    for (const route of routes) {
+      if (candidates.includes(route.match)) {
+        offers.add(route.offer);
+      }
+    }
+  }
+  return offers.size === 1 ? [...offers][0] : "";
+}
+
+function applyCenterOfferRoute(mapped, fields, settings) {
+  if (pickUseful(fields, ["offre"])) {
+    return mapped;
+  }
+  const offer = routedOffer(settings, fields);
+  if (!offer) {
+    return mapped;
+  }
+  return {
+    ...mapped,
+    offer,
+    campaign: offer,
+    treatment: axisFromOffer(offer) || mapped.treatment,
+  };
+}
+
 function cleanIncomingTreatment(value, fields) {
   if (!isJunkIncoming(value)) {
     return inferTreatmentFromBlob(value) || String(value).trim();
@@ -655,6 +764,7 @@ function cleanIncomingTreatment(value, fields) {
 
 async function importPostedLead(supabase, centerId, mapped, options = {}) {
   const sourceName = options.sourceName || "Facebook";
+  const importTool = options.importTool || "";
   const [sourceId, campaignId, serviceId] = await Promise.all([
     ensureLeadSource(supabase, centerId, sourceName),
     ensureCampaign(supabase, centerId, mapped.campaign),
@@ -671,7 +781,7 @@ async function importPostedLead(supabase, centerId, mapped, options = {}) {
   const now = new Date().toISOString();
   const importComment = mapped.pageName
     ? `Lead importé depuis ${mapped.pageName}.`
-    : `Lead importé depuis ${mapped.formName || sourceName}.`;
+    : `Lead importé depuis ${mapped.formName || sourceName}${importTool ? ` via ${importTool}` : ""}.`;
   const comment = String(mapped.comment || "").trim() || importComment;
 
   const { data: crmLead, error: leadError } = await supabase
@@ -705,8 +815,8 @@ async function importPostedLead(supabase, centerId, mapped, options = {}) {
       lead_id: crmLead.id,
       event_type: "system",
       note: options.possibleDuplicate
-        ? `${buildLeadNote(mapped)} Possible doublon : un prospect avec le même téléphone existe déjà.`
-        : buildLeadNote(mapped),
+        ? `${buildLeadNote(mapped, options)} Possible doublon : un prospect avec le même téléphone existe déjà.`
+        : buildLeadNote(mapped, options),
     },
   ];
   if (String(mapped.comment || "").trim()) {
@@ -1038,14 +1148,21 @@ function resolveIncomingSource(payload, query, fallback = "Facebook", req) {
   return label || "Facebook";
 }
 
-function buildLeadNote(lead) {
+function buildLeadNote(lead, options = {}) {
+  const refs = funnelRefs(options.fields).map((ref) => `${ref.key} = ${ref.value}`);
+  const received = Object.keys(options.fields || {}).sort().slice(0, 40);
   return [
     "Lead reçu via webhook Bookea.",
+    options.sourceName ? `Source : ${options.sourceName}.` : null,
+    options.importTool ? `Import : ${options.importTool}.` : null,
     lead.pageName ? `Page : ${lead.pageName}.` : null,
     lead.formName ? `Formulaire : ${lead.formName}.` : null,
     lead.phone ? `Téléphone : ${lead.phone}.` : null,
     lead.email ? `Email : ${lead.email}.` : null,
-    lead.treatment ? `Demande : ${lead.treatment}.` : null,
+    lead.offer ? `Offre : ${lead.offer}.` : null,
+    lead.treatment ? `Axe : ${lead.treatment}.` : null,
+    refs.length ? `Tunnel / page reçus : ${refs.join(" ; ")}.` : null,
+    received.length ? `Champs reçus : ${received.join(", ")}.` : null,
   ]
     .filter(Boolean)
     .join(" ");
@@ -1462,6 +1579,10 @@ function firstValue(...values) {
 
 module.exports.mapIncomingLead = mapIncomingLead;
 module.exports.resolveIncomingSource = resolveIncomingSource;
+module.exports.leadOrigin = leadOrigin;
+module.exports.applyCenterOfferRoute = applyCenterOfferRoute;
+module.exports.importPostedLead = importPostedLead;
+module.exports.incomingLeadFields = incomingLeadFields;
 module.exports.extractLooseContact = extractLooseContact;
 module.exports.payloadFromBody = payloadFromBody;
 module.exports.unwrapLeadPayload = unwrapLeadPayload;

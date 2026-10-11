@@ -31,6 +31,7 @@ const { isSameSeyaConversation } = require("./conversation-key");
 const { activeLeadPause, withLeadPause } = require("./lead-pause");
 const {
   conversationOnRelanceHold,
+  crmRecallDayFor,
   loadRelanceHoldKeys,
   markMessagedNouveauLeads,
   syncCrmFromConversation,
@@ -107,7 +108,7 @@ async function relanceCenter(supabase, center, now = new Date()) {
   const nextConversations = [];
   const sent = [];
   const bookedKeys = await loadBookedVisitKeys(supabase, center.id);
-  const crmHold = await loadRelanceHoldKeys(supabase, center.id);
+  const crmHold = await loadRelanceHoldKeys(supabase, center.id, now);
   let closed = false;
 
   for (const conversation of conversations) {
@@ -342,6 +343,17 @@ function isRelanceQuietHours(now = new Date()) {
   return hour >= RELANCE_QUIET_START_HOUR || hour < RELANCE_QUIET_END_HOUR;
 }
 
+function roundAfterRecall(conversation, now, recallStart, days) {
+  const lastRelance = Date.parse(conversation.lastRelanceAt || "");
+  const sentAfter =
+    Number.isFinite(lastRelance) && lastRelance >= recallStart
+      ? Number(conversation.relanceCount || 0)
+      : 0;
+  const sinceRecall = (now.getTime() - recallStart) / 86400000;
+  const due = days.filter((day) => sinceRecall >= day).length;
+  return due === sentAfter + 1 ? due : 0;
+}
+
 function pickRelanceRound(conversation, now = new Date(), extras = {}) {
   if (isRelanceQuietHours(now) || shouldSkipRelance(conversation, extras)) {
     return 0;
@@ -359,6 +371,12 @@ function pickRelanceRound(conversation, now = new Date(), extras = {}) {
 
   if (!repliedAfterRelance && lastRelance && sinceRelance < MIN_RELANCE_GAP_HOURS) {
     return 0;
+  }
+
+  const recall = crmRecallDayFor(conversation, extras.crmHold);
+  const recallStart = recall ? Date.parse(`${recall}T00:00:00Z`) : NaN;
+  if (Number.isFinite(recallStart) && !(lastLead && Date.parse(lastLead) >= recallStart)) {
+    return roundAfterRecall(conversation, now, recallStart, days);
   }
 
   if (already >= 3) {

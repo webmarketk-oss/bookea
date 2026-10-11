@@ -5,9 +5,12 @@ const {
   conversationHasSentSeyaMessage,
   conversationOnRelanceHold,
   isCrmRelanceHold,
+  loadRelanceHoldKeys,
   markLeadWhatsAppSent,
   syncCrmFromConversation,
 } = require("./crm-sync");
+const { closeConversationsForCrmStatus } = require("./booking-close");
+const { inboxTag } = require("../../lib/seya-inbox-sort.ts");
 
 test("un fil déjà envoyé n’est plus « À envoyer »", () => {
   assert.equal(
@@ -202,4 +205,84 @@ test("j’habite dans le 01 / trop de route met le CRM en Hors zone", async () =
   assert.equal(next.status, "Terminé");
   assert.equal(updated.status, "Hors zone");
   assert.equal(hold.has("id:lead-evelyne"), true);
+});
+
+const emma = {
+  leadId: "lead-emma",
+  phone: "+33618798109",
+  status: "Qualifié",
+  proposedSlots: [{ date: "2026-10-14", time: "10:00" }],
+  bookingState: { pendingQuestion: "offer_slots", lastOfferedSlots: ["x"] },
+  messages: [
+    { author: "lead", text: "Je souhaite réfléchir" },
+    { author: "seya", text: "Bonjour Emma, je me permets de revenir vers vous" },
+  ],
+};
+
+test("CRM Pas intéressé : la conversation Seya passe en Fermé, sans toucher les autres", () => {
+  const other = { ...emma, leadId: "lead-autre", phone: "0611223344" };
+  const [closed, untouched] = closeConversationsForCrmStatus(
+    [emma, other],
+    { leadId: "lead-emma", phone: "0618798109" },
+    "Pas intéressé",
+  );
+  assert.equal(closed.status, "Pas intéressé");
+  assert.deepEqual(closed.proposedSlots, []);
+  assert.equal(closed.bookingState.pendingQuestion, null);
+  assert.equal(inboxTag(emma), "qualifie");
+  assert.equal(inboxTag(closed), "ferme");
+  assert.equal(untouched, other);
+});
+
+test("CRM Hors zone / Prospect perdu / Intraitable ferment, les autres statuts non", () => {
+  const match = { leadId: "lead-emma" };
+  assert.equal(inboxTag(closeConversationsForCrmStatus([emma], match, "Hors zone")[0]), "hors_zone");
+  assert.equal(closeConversationsForCrmStatus([emma], match, "Prospect perdu")[0].status, "Pas intéressé");
+  assert.equal(closeConversationsForCrmStatus([emma], match, "Intraitable")[0].status, "Pas intéressé");
+  for (const status of ["En réflexion", "Reviendra vers nous", "À relancer", "Message WhatsApp envoyé"]) {
+    assert.equal(closeConversationsForCrmStatus([emma], match, status)[0], emma);
+  }
+});
+
+test("un RDV déjà pris n’est pas fermé par le statut CRM", () => {
+  const booked = { ...emma, status: "RDV confirmé", bookedSlot: { date: "2026-10-14", time: "10:00" } };
+  assert.equal(closeConversationsForCrmStatus([booked], { leadId: "lead-emma" }, "Pas intéressé")[0], booked);
+});
+
+test("passage relance : un lead déjà en Pas intéressé dans le CRM ferme sa conversation", async () => {
+  const supabase = {
+    from(table) {
+      assert.equal(table, "leads");
+      return {
+        select() {
+          return {
+            eq: async () => ({
+              data: [
+                { id: "lead-emma", phone: "0618798109", status: "Pas intéressé", recall_date: null },
+                { id: "lead-autre", phone: "0611223344", status: "Message WhatsApp envoyé", recall_date: null },
+              ],
+              error: null,
+            }),
+          };
+        },
+      };
+    },
+  };
+  const hold = await loadRelanceHoldKeys(supabase, "center-1");
+  assert.equal(conversationOnRelanceHold(emma, hold), true);
+
+  const next = await syncCrmFromConversation(supabase, "center-1", emma, hold);
+  assert.equal(next.status, "Pas intéressé");
+  assert.equal(inboxTag(next), "ferme");
+
+  const byPhone = await syncCrmFromConversation(
+    supabase,
+    "center-1",
+    { ...emma, leadId: "" },
+    hold,
+  );
+  assert.equal(byPhone.status, "Pas intéressé");
+
+  const other = { ...emma, leadId: "lead-autre", phone: "0611223344", messages: [] };
+  assert.equal(await syncCrmFromConversation(supabase, "center-1", other, hold), other);
 });

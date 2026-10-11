@@ -783,8 +783,14 @@ export default function LeadDetails({
                   }))
                 }
               />
+              {lead.importTool ? (
+                <p className="rounded-xl bg-slate-50 px-3 py-2.5 text-xs font-medium text-slate-500">
+                  Import technique :{" "}
+                  <span className="font-semibold text-slate-700">{lead.importTool}</span>
+                </p>
+              ) : null}
               <InfoField
-                label="Offre / soin demandé"
+                label="Axe / soin"
                 value={infoForm.treatment}
                 list="lead-treatment-options"
                 onChange={(value) =>
@@ -792,7 +798,7 @@ export default function LeadDetails({
                 }
               />
               <InfoField
-                label="Campagne pub"
+                label="Offre / campagne"
                 value={infoForm.campaign}
                 onChange={(value) =>
                   setInfoForm((form) => ({ ...form, campaign: value }))

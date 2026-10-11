@@ -39,6 +39,7 @@ export interface Lead {
   city?: string;
   treatment: string;
   source: string;
+  importTool?: string;
   campaign: string;
   status: LeadStatus;
   dealAmount: number;

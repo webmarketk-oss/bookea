@@ -8,7 +8,12 @@ import {
 } from "@/lib/crm-stats";
 import { belongsOnClientFiche, isHiddenAgendaBlockClient } from "@/lib/appointment-position-status";
 import { sanitizePersonName } from "@/lib/seya-person-name";
-import { closeSeyaThreadsForBookedLead } from "@/lib/seya-close-booking";
+import { seyaStatusForCrmStatus } from "@/api/seya/booking-close";
+import { leadImportToolFromEvents, leadSourceFromStored } from "@/lib/lead-offer";
+import {
+  closeSeyaThreadsForBookedLead,
+  closeSeyaThreadsForCrmStatus,
+} from "@/lib/seya-close-booking";
 import { createClient } from "@/lib/supabase";
 import { normalizeLeadStatus } from "@/lib/lead-statuses";
 import type {
@@ -460,6 +465,13 @@ export async function updateCrmLeadStatus(
       leadId: lead.id,
       phone: lead.phone,
     });
+  } else if (seyaStatusForCrmStatus(status)) {
+    await closeSeyaThreadsForCrmStatus(
+      supabase,
+      centerId,
+      { leadId: lead.id, phone: lead.phone },
+      status,
+    );
   }
 }
 
@@ -757,6 +769,13 @@ export async function updateCrmLeadDetails(lead: Lead, input: NewCrmLeadInput) {
         leadId: lead.id,
         phone: input.phone || lead.phone,
       });
+    } else if (seyaStatusForCrmStatus(nextStatus)) {
+      await closeSeyaThreadsForCrmStatus(
+        supabase,
+        centerId,
+        { leadId: lead.id, phone: input.phone || lead.phone },
+        nextStatus,
+      );
     }
   }
 }
@@ -1469,6 +1488,10 @@ function toLead(row: LeadRow): Lead {
   const assignee = relationObject(row.profiles);
   const source = readLeadSource(leadSource?.name);
   const events = row.lead_events ?? [];
+  const importTool = leadImportToolFromEvents(
+    leadSource?.name,
+    events.filter((event) => event.event_type === "system").map((event) => event.note),
+  );
   const activityLog: LeadActivity[] = events
     .slice()
     .sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at))
@@ -1531,6 +1554,7 @@ function toLead(row: LeadRow): Lead {
     city: client?.city || "",
     treatment: service?.name || "Soin à préciser",
     source,
+    importTool: importTool || undefined,
     campaign: campaign?.name?.trim() || "",
     status: normalizeLeadStatus(row.status),
     dealAmount: Number(row.amount_cure_ttc ?? 0),
@@ -1899,6 +1923,7 @@ function readLeadSource(value?: string | null): string {
   const source = name.toLowerCase();
 
   if (source.includes("facebook")) return "Facebook";
+  if (leadSourceFromStored(name)) return leadSourceFromStored(name);
   if (source.includes("instagram")) return "Instagram";
   if (source.includes("google")) return "Google";
   if (source.includes("site")) return "Site Web";
