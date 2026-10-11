@@ -7,11 +7,10 @@ import { daysUntilRenewal, renewalStage } from "@/api/billing/_renewal";
 import { formatEuro } from "@/lib/bookea-tarifs";
 import {
   loadActiveCenterBilling,
-  renewBookeaPlan,
-  renewSeyaPack,
+  startOfferCheckout,
+  syncOfferCheckouts,
 } from "@/lib/center-billing";
 import { formatOfferDate } from "@/lib/center-offers";
-import { subscriptionInvoiceNotice } from "@/lib/subscription-invoice-request";
 
 type RenewableLine = {
   offer: "seya" | "crm";
@@ -38,6 +37,35 @@ export const BOOKEA_OFFERS_UPDATED = "bookea-offers-updated";
 
 export function notifyOffersUpdated() {
   window.dispatchEvent(new Event(BOOKEA_OFFERS_UPDATED));
+}
+
+export const CHECKOUT_CONFIRM =
+  "Vous allez être redirigé vers le paiement sécurisé par carte (Stripe). L’offre s’active dès le paiement validé et la facture vous est envoyée.";
+
+function paymentReturnNotice(params: URLSearchParams) {
+  const status = params.get("paiement");
+  if (status === "ok") {
+    const invoice = params.get("facture");
+    const email = params.get("envoi");
+    return {
+      ok: true,
+      text: `Paiement reçu, votre offre est active.${
+        invoice
+          ? ` Facture ${invoice} réglée${email ? `, envoyée à ${email}` : ""}.`
+          : ""
+      }`,
+    };
+  }
+  if (status === "attente") {
+    return {
+      ok: true,
+      text: "Paiement en cours de validation : l’offre s’activera automatiquement dès sa confirmation.",
+    };
+  }
+  if (status === "annule") {
+    return { ok: false, text: "Paiement annulé : aucune offre n’a été activée." };
+  }
+  return null;
 }
 
 function renewalText(renewsAt: string | null) {
@@ -125,6 +153,29 @@ export function CurrentOffers() {
   }, []);
 
   useEffect(() => {
+    const url = new URL(window.location.href);
+    const returned = paymentReturnNotice(url.searchParams);
+    if (returned) {
+      ["paiement", "facture", "envoi"].forEach((key) => url.searchParams.delete(key));
+      window.history.replaceState(window.history.state, "", url.toString());
+    }
+    void syncOfferCheckouts()
+      .catch(() => 0)
+      .then((activated) => {
+        if (activated > 0) {
+          notifyOffersUpdated();
+        }
+        if (returned || activated > 0) {
+          setNotice(
+            returned?.ok === false || !activated
+              ? returned
+              : { ok: true, text: returned?.text || "Paiement reçu, votre offre est active." },
+          );
+        }
+      });
+  }, []);
+
+  useEffect(() => {
     let alive = true;
     void loadActiveCenterBilling()
       .then((billing) => {
@@ -164,7 +215,7 @@ export function CurrentOffers() {
   async function handleRenew(line: RenewableLine) {
     if (
       !window.confirm(
-        `Renouveler ${line.confirmLabel} pour un mois ? Bookea vous enverra la facture.`,
+        `Renouveler ${line.confirmLabel} pour un mois ?\n\n${CHECKOUT_CONFIRM}`,
       )
     ) {
       return;
@@ -172,14 +223,11 @@ export function CurrentOffers() {
     setRenewing(line.offer);
     setNotice(null);
     try {
-      const result =
-        line.offer === "seya" ? await renewSeyaPack() : await renewBookeaPlan();
-      setNotice({
-        ok: true,
-        text: `Renouvelé jusqu’au ${formatOfferDate(result.renewsAt)}. ${subscriptionInvoiceNotice(result.invoice)}`,
+      await startOfferCheckout({
+        type: line.offer === "seya" ? "renew_seya" : "renew_crm",
       });
-      notifyOffersUpdated();
     } catch (error) {
+      setRenewing(null);
       setNotice({
         ok: false,
         text:
@@ -187,8 +235,6 @@ export function CurrentOffers() {
             ? error.message
             : "Impossible de renouveler. Réessayez.",
       });
-    } finally {
-      setRenewing(null);
     }
   }
 

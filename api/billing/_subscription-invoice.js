@@ -9,6 +9,7 @@ const {
   createPayToken,
   ensureSubscriptionInvoice,
   invoicePayUrl,
+  markInvoicePaid,
 } = require("./_agency-invoice");
 const { buildAgencyInvoicePdf } = require("./_agency-invoice-pdf");
 const { defaultInvoiceMailCopy } = require("./invoice-mail-lib");
@@ -49,14 +50,23 @@ function pendingAutoInvoiceAlerts(settings, now = Date.now()) {
   );
 }
 
-function invoiceMail({ number, clientName, payUrl }) {
+function formatPaidDay(value) {
+  const time = Date.parse(String(value || ""));
+  return Number.isFinite(time)
+    ? new Intl.DateTimeFormat("fr-FR", { timeZone: "Europe/Paris", dateStyle: "long" }).format(new Date(time))
+    : "";
+}
+
+function invoiceMail({ number, clientName, payUrl, paidAt }) {
   const copy = defaultInvoiceMailCopy(
     { number, type: "Facture", client: clientName || "bonjour" },
     "Bookea",
   );
   const greeting = `Bonjour ${clientName || "bonjour"},`;
   const intro = `Veuillez trouver ci-joint votre facture ${number}.`;
-  const payment = payUrl
+  const payment = paidAt
+    ? [`Elle a été réglée par carte bancaire le ${formatPaidDay(paidAt)}. Merci !`]
+    : payUrl
     ? [
         "Vous pouvez la régler par carte bancaire ici :",
         payUrl,
@@ -64,7 +74,7 @@ function invoiceMail({ number, clientName, payUrl }) {
       ]
     : ["Vous pouvez la régler par virement, avec les coordonnées indiquées sur la facture."];
   const textContent = [greeting, "", intro, "", ...payment, "", "Cordialement,", "Bookea"].join("\n");
-  const button = payUrl
+  const button = payUrl && !paidAt
     ? `<p style="margin:20px 0"><a href="${escapeHtml(payUrl)}" style="display:inline-block;padding:12px 20px;border-radius:10px;background:#0f172a;color:#ffffff;text-decoration:none;font-weight:600">Payer par carte</a></p><p>Vous pouvez aussi régler par virement, avec les coordonnées indiquées sur la facture.</p>`
     : `<p>${escapeHtml(payment[0])}</p>`;
   const htmlContent = `<div style="font-family:Arial,sans-serif;font-size:15px;line-height:1.6;color:#0f172a"><p>${escapeHtml(greeting)}</p><p>${escapeHtml(intro)}</p>${button}<p>Cordialement,<br />Bookea</p></div>`;
@@ -157,9 +167,12 @@ async function invoiceCenterAlert(supabase, { centerId, alertId }) {
 
   const prepared = await updateServerBilling(supabase, COMPANY, (current) => {
     const result = ensureSubscriptionInvoice(current, { center, alert });
-    const invoice = result.invoice.payToken
+    const withToken = result.invoice.payToken
       ? result.invoice
       : { ...result.invoice, payToken: createPayToken() };
+    const invoice = alert.paidAt
+      ? markInvoicePaid(withToken, { paidAt: alert.paidAt })
+      : withToken;
     if (!result.created && invoice === result.invoice && result.state === current) {
       return { invoice, created: false };
     }
@@ -191,12 +204,18 @@ async function invoiceCenterAlert(supabase, { centerId, alertId }) {
       mailError = "Connectez d’abord la boîte mail Bookea pour envoyer la facture.";
     } else {
       try {
-        const payUrl = isStripeConfigured() ? invoicePayUrl(invoice) : "";
+        const payUrl =
+          isStripeConfigured() && invoice.status !== "Payée" ? invoicePayUrl(invoice) : "";
         await sendInvoiceEmail({
           mailbox,
           toEmail,
           toName: client?.name || center.name,
-          mail: invoiceMail({ number: invoice.number, clientName: center.name, payUrl }),
+          mail: invoiceMail({
+            number: invoice.number,
+            clientName: center.name,
+            payUrl,
+            paidAt: invoice.status === "Payée" ? invoice.paidAt : "",
+          }),
           pdf: buildAgencyInvoicePdf(state, invoice, { payUrl }),
           number: invoice.number,
         });

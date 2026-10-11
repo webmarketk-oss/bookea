@@ -5,6 +5,7 @@ const {
   AGENCY_LEGAL_ENTITY,
   DEFAULT_AGENCY_BANK,
   REVERSE_CHARGE_MENTION,
+  formatEuroAmount,
   invoiceTotal,
   lineNet,
 } = require("./_agency-invoice");
@@ -20,14 +21,6 @@ function pdfText(value) {
     .replace(/[“”«»]/g, '"')
     .replace(/[—–−]/g, "-")
     .replace(/…/g, "...");
-}
-
-function formatEuroAmount(value) {
-  return new Intl.NumberFormat("fr-FR", {
-    style: "currency",
-    currency: "EUR",
-    maximumFractionDigits: 0,
-  }).format(Number(value) || 0);
 }
 
 function formatShortDate(value) {
@@ -231,7 +224,21 @@ function buildAgencyInvoicePdf(state, invoice, options = {}) {
     );
   }
 
-  if (options.payUrl) {
+  if (invoice.status === "Payée" && invoice.paymentMethod === "carte") {
+    box(
+      "Paiement",
+      (top) => {
+        doc.setFontSize(9.5);
+        color("#047857");
+        write(
+          `Facture réglée par carte bancaire le ${formatShortDate(String(invoice.paidAt || "").slice(0, 10))}.`,
+          MARGIN + 12,
+          top + 16,
+        );
+      },
+      38,
+    );
+  } else if (options.payUrl) {
     box(
       "Payer par carte",
       (top) => {

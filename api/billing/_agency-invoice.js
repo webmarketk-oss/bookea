@@ -95,6 +95,17 @@ function lineNet(line) {
   return Math.max(0, gross - discount);
 }
 
+function formatEuroAmount(value) {
+  const amount = Math.round((Number(value) || 0) * 100) / 100;
+  const digits = Number.isInteger(amount) ? 0 : 2;
+  return new Intl.NumberFormat("fr-FR", {
+    style: "currency",
+    currency: "EUR",
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  }).format(amount);
+}
+
 function invoiceTotal(invoice) {
   return asArray(invoice?.lines).reduce((sum, line) => sum + lineNet(line), 0);
 }
@@ -396,6 +407,7 @@ module.exports = {
   emptyServerBilling,
   ensureAgencyClientForCenter,
   ensureSubscriptionInvoice,
+  formatEuroAmount,
   invoicePayUrl,
   invoiceTotal,
   lineNet,

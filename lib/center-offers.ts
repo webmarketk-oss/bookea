@@ -1,3 +1,5 @@
+import { whatsappPackPrice } from "../api/billing/_offers.js";
+
 type SeyaQuotaLike = {
   conversationLimit: number | null;
   packLeads: number | null;
@@ -12,16 +14,6 @@ export type BookeaPlan = {
   price: number;
   subscribedAt: string;
   renewsAt: string;
-};
-
-const WHATSAPP_PRICES: Record<number, number> = {
-  100: 69.97,
-  150: 99.97,
-  200: 129.95,
-  250: 159.95,
-  300: 189.95,
-  400: 249.92,
-  500: 309.9,
 };
 
 function asRecord(value: unknown) {
@@ -74,7 +66,7 @@ export function seyaOfferFromQuota(quota: SeyaQuotaLike) {
 
   return {
     leads,
-    price: WHATSAPP_PRICES[leads] ?? 0,
+    price: whatsappPackPrice(leads) ?? 0,
     subscribedAt: start,
     renewsAt,
   };

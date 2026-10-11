@@ -3,7 +3,7 @@
 import { Loader2 } from "lucide-react";
 import { useEffect, useState } from "react";
 
-import { notifyOffersUpdated } from "@/components/tarifs/current-offers";
+import { CHECKOUT_CONFIRM } from "@/components/tarifs/current-offers";
 import { FeatureTicks } from "@/components/tarifs/feature-ticks";
 import { PriceCard } from "@/components/tarifs/price-card";
 import {
@@ -15,14 +15,39 @@ import {
 } from "@/lib/bookea-tarifs";
 import {
   loadActiveCenterBilling,
-  subscribeBookeaPlan,
-  subscribeSeyaPack,
-  subscribeSmsPack,
+  startOfferCheckout,
+  type OfferCheckoutRequest,
 } from "@/lib/center-billing";
 import { seyaRemainingConversations } from "@/lib/seya-quota";
-import { subscriptionInvoiceNotice } from "@/lib/subscription-invoice-request";
 
 type Notice = { type: "success" | "error"; message: string };
+
+function useOfferCheckout<Key>() {
+  const [busy, setBusy] = useState<Key | null>(null);
+  const [notice, setNotice] = useState<Notice | null>(null);
+
+  async function pay(key: Key, question: string, offer: OfferCheckoutRequest) {
+    if (!window.confirm(`${question}\n\n${CHECKOUT_CONFIRM}`)) {
+      return;
+    }
+    setBusy(key);
+    setNotice(null);
+    try {
+      await startOfferCheckout(offer);
+    } catch (error) {
+      setBusy(null);
+      setNotice({
+        type: "error",
+        message:
+          error instanceof Error
+            ? error.message
+            : "Le paiement n’a pas pu démarrer. Réessayez.",
+      });
+    }
+  }
+
+  return { busy, notice, pay };
+}
 
 function SubscribeButton({
   label,
@@ -65,8 +90,7 @@ function NoticeBanner({ notice }: { notice: Notice | null }) {
 }
 
 export function WhatsappPacks() {
-  const [busyLeads, setBusyLeads] = useState<number | null>(null);
-  const [notice, setNotice] = useState<Notice | null>(null);
+  const { busy: busyLeads, notice, pay } = useOfferCheckout<number>();
   const [status, setStatus] = useState<string>("");
 
   useEffect(() => {
@@ -87,37 +111,15 @@ export function WhatsappPacks() {
       .catch(() => {
         setStatus("");
       });
-  }, [notice]);
+  }, []);
 
-  async function handleSubscribe(leads: number) {
+  function handleSubscribe(leads: number) {
     const pack = whatsappLeadPacks.find((item) => item.leads === leads);
-    if (
-      !window.confirm(
-        `Souscrire le pack WhatsApp ${leads} conversations pour ${formatEuro(pack?.price ?? 0)} / mois ? Bookea vous enverra la facture.`,
-      )
-    ) {
-      return;
-    }
-    setBusyLeads(leads);
-    setNotice(null);
-    try {
-      const result = await subscribeSeyaPack(leads);
-      notifyOffersUpdated();
-      setNotice({
-        type: "success",
-        message: `${result.quota.conversationLimit} conversations Seya sont maintenant débloquées pour ${result.centerName}. ${subscriptionInvoiceNotice(result.invoice)}`,
-      });
-    } catch (error) {
-      setNotice({
-        type: "error",
-        message:
-          error instanceof Error
-            ? error.message
-            : "Impossible de souscrire ce pack.",
-      });
-    } finally {
-      setBusyLeads(null);
-    }
+    void pay(
+      leads,
+      `Souscrire le pack WhatsApp ${leads} conversations pour ${formatEuro(pack?.price ?? 0)} / mois ?`,
+      { type: "seya", leads },
+    );
   }
 
   return (
@@ -138,7 +140,7 @@ export function WhatsappPacks() {
             <SubscribeButton
               label="Souscrire"
               busy={busyLeads === pack.leads}
-              onClick={() => void handleSubscribe(pack.leads)}
+              onClick={() => handleSubscribe(pack.leads)}
             />
           </PriceCard>
         ))}
@@ -148,46 +150,22 @@ export function WhatsappPacks() {
 }
 
 export function SmsPacks() {
-  const [busyQuantity, setBusyQuantity] = useState<number | null>(null);
-  const [notice, setNotice] = useState<Notice | null>(null);
+  const { busy: busyQuantity, notice, pay } = useOfferCheckout<number>();
   const [remaining, setRemaining] = useState<number | null>(null);
 
   useEffect(() => {
     void loadActiveCenterBilling()
       .then((billing) => setRemaining(billing.smsRemaining))
       .catch(() => setRemaining(null));
-  }, [notice]);
+  }, []);
 
-  async function handleSubscribe(quantity: number) {
+  function handleSubscribe(quantity: number) {
     const pack = smsPacks.find((item) => item.quantity === quantity);
-    if (
-      !window.confirm(
-        `Ajouter ${quantity} SMS pour ${formatEuro(pack?.price ?? 0)} ? Bookea vous enverra la facture.`,
-      )
-    ) {
-      return;
-    }
-    setBusyQuantity(quantity);
-    setNotice(null);
-    try {
-      const result = await subscribeSmsPack(quantity);
-      notifyOffersUpdated();
-      setRemaining(result.remaining);
-      setNotice({
-        type: "success",
-        message: `${quantity} SMS ajoutés. Nouveau solde : ${result.remaining}. ${subscriptionInvoiceNotice(result.invoice)}`,
-      });
-    } catch (error) {
-      setNotice({
-        type: "error",
-        message:
-          error instanceof Error
-            ? error.message
-            : "Impossible d’ajouter ces SMS.",
-      });
-    } finally {
-      setBusyQuantity(null);
-    }
+    void pay(
+      quantity,
+      `Ajouter ${quantity} SMS pour ${formatEuro(pack?.price ?? 0)} ?`,
+      { type: "sms", quantity },
+    );
   }
 
   return (
@@ -210,7 +188,7 @@ export function SmsPacks() {
             <SubscribeButton
               label="Ajouter"
               busy={busyQuantity === pack.quantity}
-              onClick={() => void handleSubscribe(pack.quantity)}
+              onClick={() => handleSubscribe(pack.quantity)}
             />
           </PriceCard>
         ))}
@@ -222,41 +200,18 @@ export function SmsPacks() {
 const crmPlus = crmOffers.find((offer) => offer.id === "crm-plus");
 
 export function CrmPacks() {
-  const [busy, setBusy] = useState(false);
-  const [notice, setNotice] = useState<Notice | null>(null);
+  const { busy, notice, pay } = useOfferCheckout<"crm">();
 
   if (!crmPlus) {
     return null;
   }
 
-  async function handleSubscribe() {
-    if (
-      !window.confirm(
-        `Souscrire ${crmPlus?.title ?? "Bookea"} pour ${crmPlus?.price ?? ""} € / mois ? Bookea vous enverra la facture.`,
-      )
-    ) {
-      return;
-    }
-    setBusy(true);
-    setNotice(null);
-    try {
-      const result = await subscribeBookeaPlan();
-      notifyOffersUpdated();
-      setNotice({
-        type: "success",
-        message: `Bookea CRM + SMS est actif pour ${result.centerName}. ${subscriptionInvoiceNotice(result.invoice)}`,
-      });
-    } catch (error) {
-      setNotice({
-        type: "error",
-        message:
-          error instanceof Error
-            ? error.message
-            : "Impossible de souscrire Bookea.",
-      });
-    } finally {
-      setBusy(false);
-    }
+  function handleSubscribe() {
+    void pay(
+      "crm",
+      `Souscrire ${crmPlus?.title ?? "Bookea"} pour ${crmPlus?.price ?? ""} € / mois ?`,
+      { type: "crm" },
+    );
   }
 
   return (
@@ -272,8 +227,8 @@ export function CrmPacks() {
           <FeatureTicks items={crmPlus.points} />
           <SubscribeButton
             label="Souscrire"
-            busy={busy}
-            onClick={() => void handleSubscribe()}
+            busy={busy === "crm"}
+            onClick={handleSubscribe}
           />
         </PriceCard>
       </div>

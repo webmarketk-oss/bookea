@@ -1,23 +1,10 @@
 import {
-  appendAdminAlert,
-  createAdminAlert,
   markAdminAlertRead,
   normalizeAdminAlerts,
   type AdminAlert,
 } from "@/lib/admin-alerts";
-import {
-  formatEuro,
-  smsPacks,
-  whatsappLeadPacks,
-} from "@/lib/bookea-tarifs";
-import { nextRenewalPeriod } from "@/api/billing/_renewal";
 import { getActiveCenterContext } from "@/lib/center-access";
 import {
-  appendOfferHistory,
-  createBookeaPlan,
-  createOfferHistoryItem,
-  formatOfferDate,
-  monthlyRenewal,
   normalizeBookeaPlan,
   seyaOfferFromQuota,
 } from "@/lib/center-offers";
@@ -27,26 +14,12 @@ import {
   type SeyaQuota,
 } from "@/lib/seya-quota";
 import { createClient } from "@/lib/supabase";
-import { requestSubscriptionInvoice } from "@/lib/subscription-invoice-request";
-import {
-  normalizeSmsQuota,
-  type SmsQuota,
-  type SmsQuotaRecord,
-} from "@/lib/sms-settings";
+import { normalizeSmsQuota, type SmsQuotaRecord } from "@/lib/sms-settings";
 
 type CenterSettings = Record<string, unknown>;
 
 function asRecord(value: unknown): CenterSettings {
   return value && typeof value === "object" ? (value as CenterSettings) : {};
-}
-
-function smsQuotaRecord(quota: SmsQuota): SmsQuotaRecord {
-  return {
-    remaining: quota.remaining,
-    lastGrantMonth: quota.lastGrantMonth,
-    monthlyGrant: quota.monthlyGrant,
-    usedThisMonth: quota.usedThisMonth,
-  };
 }
 
 async function loadCenterSettings(centerId: string) {
@@ -90,109 +63,6 @@ async function persistCenterSettings(
   }
 }
 
-export async function subscribeSmsPack(quantity: number) {
-  const pack = smsPacks.find((item) => item.quantity === quantity);
-  if (!pack) {
-    throw new Error("Pack SMS inconnu.");
-  }
-
-  const context = await getActiveCenterContext();
-  const center = await loadCenterSettings(context.centerId);
-  const currentSms = asRecord(center.settings.sms);
-  const quota = normalizeSmsQuota(currentSms.quota as SmsQuotaRecord | undefined);
-  const nextQuota: SmsQuota = {
-    ...quota,
-    remaining: quota.remaining + pack.quantity,
-    changed: false,
-  };
-  const alert = createAdminAlert({
-    autoInvoice: true,
-    kind: "sms_pack",
-    title: `${center.name} a rechargé ${pack.quantity} SMS`,
-    message: `${center.name} a rechargé ${pack.quantity} SMS — ${formatEuro(pack.price)} — à recharger côté opérateur`,
-    amountEuros: pack.price,
-    quantity: pack.quantity,
-  });
-
-  const historyItem = createOfferHistoryItem({
-    id: alert.id,
-    kind: "sms_pack",
-    label: `${pack.quantity} SMS`,
-    amountEuros: pack.price,
-    quantity: pack.quantity,
-    renewsAt: null,
-  });
-
-  await persistCenterSettings(center.supabase, center.id, {
-    ...center.settings,
-    sms: {
-      ...currentSms,
-      quota: smsQuotaRecord(nextQuota),
-    },
-    adminAlerts: appendAdminAlert(center.settings.adminAlerts, alert),
-    offerHistory: appendOfferHistory(center.settings.offerHistory, historyItem),
-  });
-
-  return {
-    centerId: center.id,
-    centerName: center.name,
-    remaining: nextQuota.remaining,
-    alert,
-    invoice: await requestSubscriptionInvoice(center.id, alert.id),
-  };
-}
-
-export async function subscribeSeyaPack(leads: number) {
-  const pack = whatsappLeadPacks.find((item) => item.leads === leads);
-  if (!pack) {
-    throw new Error("Pack WhatsApp inconnu.");
-  }
-
-  const context = await getActiveCenterContext();
-  const center = await loadCenterSettings(context.centerId);
-  const dates = monthlyRenewal();
-  const nextQuota: SeyaQuota = {
-    conversationLimit: pack.leads,
-    packLeads: pack.leads,
-    subscribedAt: dates.subscribedAt,
-    renewsAt: dates.renewsAt,
-    updatedAt: dates.subscribedAt,
-  };
-  const alert = createAdminAlert({
-    autoInvoice: true,
-    kind: "seya_pack",
-    title: `${center.name} a souscrit ${pack.leads} conversations Seya`,
-    message: `${center.name} a souscrit ${pack.leads} conversations Seya — ${formatEuro(pack.price)}`,
-    amountEuros: pack.price,
-    quantity: pack.leads,
-  });
-
-  const historyItem = createOfferHistoryItem({
-    id: alert.id,
-    kind: "seya_pack",
-    label: `WhatsApp ${pack.leads} leads`,
-    amountEuros: pack.price,
-    quantity: pack.leads,
-    subscribedAt: dates.subscribedAt,
-    renewsAt: dates.renewsAt,
-  });
-
-  await persistCenterSettings(center.supabase, center.id, {
-    ...center.settings,
-    seyaQuota: nextQuota,
-    adminAlerts: appendAdminAlert(center.settings.adminAlerts, alert),
-    offerHistory: appendOfferHistory(center.settings.offerHistory, historyItem),
-  });
-
-  return {
-    centerId: center.id,
-    centerName: center.name,
-    quota: nextQuota,
-    alert,
-    invoice: await requestSubscriptionInvoice(center.id, alert.id),
-  };
-}
-
 export async function setCenterSeyaQuota(
   centerId: string,
   conversationLimit: number | null,
@@ -219,143 +89,51 @@ export async function setCenterSeyaQuota(
   };
 }
 
-export async function subscribeBookeaPlan() {
+export type OfferCheckoutRequest =
+  | { type: "seya"; leads: number }
+  | { type: "sms"; quantity: number }
+  | { type: "crm" }
+  | { type: "renew_seya" }
+  | { type: "renew_crm" };
+
+async function postCheckout(body: Record<string, unknown>) {
   const context = await getActiveCenterContext();
-  const center = await loadCenterSettings(context.centerId);
-  const plan = createBookeaPlan();
-  const alert = createAdminAlert({
-    autoInvoice: true,
-    kind: "crm_pack",
-    title: `${center.name} a souscrit Bookea CRM + SMS`,
-    message: `${center.name} a souscrit Bookea CRM + SMS — ${plan.price} € / mois`,
-    amountEuros: plan.price,
-    quantity: 1,
+  const {
+    data: { session },
+  } = await createClient().auth.getSession();
+  const response = await fetch("/api/billing/checkout", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(session?.access_token
+        ? { Authorization: `Bearer ${session.access_token}` }
+        : {}),
+    },
+    body: JSON.stringify({ centerId: context.centerId, ...body }),
   });
-
-  const historyItem = createOfferHistoryItem({
-    id: alert.id,
-    kind: "crm_pack",
-    label: "Bookea CRM + SMS",
-    amountEuros: plan.price,
-    quantity: 1,
-    subscribedAt: plan.subscribedAt,
-    renewsAt: plan.renewsAt,
-  });
-
-  await persistCenterSettings(center.supabase, center.id, {
-    ...center.settings,
-    bookeaPlan: plan,
-    adminAlerts: appendAdminAlert(center.settings.adminAlerts, alert),
-    offerHistory: appendOfferHistory(center.settings.offerHistory, historyItem),
-  });
-
-  return {
-    centerId: center.id,
-    centerName: center.name,
-    plan,
-    alert,
-    invoice: await requestSubscriptionInvoice(center.id, alert.id),
+  const result = (await response.json().catch(() => ({}))) as {
+    ok?: boolean;
+    url?: string;
+    activated?: number;
+    error?: string;
   };
+  if (!response.ok || result.ok === false) {
+    throw new Error(result.error || "Le paiement n’a pas pu démarrer. Réessayez.");
+  }
+  return result;
 }
 
-export async function renewSeyaPack() {
-  const context = await getActiveCenterContext();
-  const center = await loadCenterSettings(context.centerId);
-  const current = normalizeSeyaQuota(center.settings.seyaQuota);
-  const offer = seyaOfferFromQuota(current);
-  if (!offer) {
-    throw new Error("Aucun pack WhatsApp à renouveler.");
+export async function startOfferCheckout(offer: OfferCheckoutRequest) {
+  const result = await postCheckout({ action: "start", offer });
+  if (!result.url) {
+    throw new Error("Le paiement n’a pas pu démarrer. Réessayez.");
   }
-
-  const price =
-    whatsappLeadPacks.find((item) => item.leads === offer.leads)?.price ??
-    offer.price;
-  const period = nextRenewalPeriod(current.renewsAt);
-  const nextQuota: SeyaQuota = {
-    conversationLimit: offer.leads,
-    packLeads: offer.leads,
-    subscribedAt: period.renewedAt,
-    renewsAt: period.renewsAt,
-    updatedAt: period.renewedAt,
-  };
-  const alert = createAdminAlert({
-    autoInvoice: true,
-    kind: "seya_pack",
-    title: `${center.name} a renouvelé ${offer.leads} conversations Seya`,
-    message: `${center.name} a renouvelé ${offer.leads} conversations Seya — ${formatEuro(price)} — jusqu’au ${formatOfferDate(period.renewsAt)}`,
-    amountEuros: price,
-    quantity: offer.leads,
-    offer: "seya",
-  });
-  const historyItem = createOfferHistoryItem({
-    id: alert.id,
-    kind: "seya_pack",
-    label: `WhatsApp ${offer.leads} leads`,
-    amountEuros: price,
-    quantity: offer.leads,
-    subscribedAt: period.renewedAt,
-    renewsAt: period.renewsAt,
-  });
-
-  await persistCenterSettings(center.supabase, center.id, {
-    ...center.settings,
-    seyaQuota: nextQuota,
-    adminAlerts: appendAdminAlert(center.settings.adminAlerts, alert),
-    offerHistory: appendOfferHistory(center.settings.offerHistory, historyItem),
-  });
-
-  return {
-    centerName: center.name,
-    renewsAt: period.renewsAt,
-    invoice: await requestSubscriptionInvoice(center.id, alert.id),
-  };
+  window.location.assign(result.url);
 }
 
-export async function renewBookeaPlan() {
-  const context = await getActiveCenterContext();
-  const center = await loadCenterSettings(context.centerId);
-  const current = normalizeBookeaPlan(center.settings.bookeaPlan);
-  if (!current) {
-    throw new Error("Aucun abonnement Bookea à renouveler.");
-  }
-
-  const period = nextRenewalPeriod(current.renewsAt);
-  const plan = {
-    ...current,
-    subscribedAt: period.renewedAt,
-    renewsAt: period.renewsAt,
-  };
-  const alert = createAdminAlert({
-    autoInvoice: true,
-    kind: "crm_pack",
-    title: `${center.name} a renouvelé Bookea CRM + SMS`,
-    message: `${center.name} a renouvelé Bookea CRM + SMS — ${plan.price} € / mois — jusqu’au ${formatOfferDate(period.renewsAt)}`,
-    amountEuros: plan.price,
-    quantity: 1,
-    offer: "crm",
-  });
-  const historyItem = createOfferHistoryItem({
-    id: alert.id,
-    kind: "crm_pack",
-    label: "Bookea CRM + SMS",
-    amountEuros: plan.price,
-    quantity: 1,
-    subscribedAt: period.renewedAt,
-    renewsAt: period.renewsAt,
-  });
-
-  await persistCenterSettings(center.supabase, center.id, {
-    ...center.settings,
-    bookeaPlan: plan,
-    adminAlerts: appendAdminAlert(center.settings.adminAlerts, alert),
-    offerHistory: appendOfferHistory(center.settings.offerHistory, historyItem),
-  });
-
-  return {
-    centerName: center.name,
-    renewsAt: period.renewsAt,
-    invoice: await requestSubscriptionInvoice(center.id, alert.id),
-  };
+export async function syncOfferCheckouts() {
+  const result = await postCheckout({ action: "sync" });
+  return result.activated ?? 0;
 }
 
 export async function markCenterAdminAlertRead(

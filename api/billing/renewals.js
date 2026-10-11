@@ -9,7 +9,9 @@ const {
   expiredAdminAlert,
   renewalReminderCopy,
 } = require("./_renewal");
+const { isStripeConfigured } = require("../center/_stripe-lib");
 const { reconcileCardPayments } = require("./_invoice-payment");
+const { syncPendingCheckouts } = require("./_offer-checkout");
 const {
   invoiceCenterAlert,
   pendingAutoInvoiceAlerts,
@@ -164,6 +166,14 @@ module.exports = async function handler(req, res) {
       } catch (centerError) {
         console.error("[billing/renewals]", row.id, centerError);
         results.push({ centerId: row.id, error: String(centerError?.message || centerError) });
+      }
+      if (isStripeConfigured() && Array.isArray(center.settings.pendingCheckouts)) {
+        try {
+          const activated = await syncPendingCheckouts(supabase, center, now.getTime());
+          results.push(...activated.map((item) => ({ centerId: row.id, paidOffer: item.offer.type })));
+        } catch (checkoutError) {
+          console.error("[billing/renewals] checkout", row.id, checkoutError);
+        }
       }
       for (const alert of pendingAutoInvoiceAlerts(center.settings, now.getTime())) {
         try {

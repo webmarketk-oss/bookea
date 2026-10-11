@@ -20,6 +20,7 @@ export type AdminAlert = {
   billingStatus: AdminAlertBillingStatus;
   offer?: AdminAlertOffer;
   autoInvoice?: boolean;
+  paidAt?: string;
   invoiceId?: string;
   invoicedAt?: string;
   emailedAt?: string;
@@ -96,6 +97,7 @@ export function normalizeAdminAlert(value: unknown): AdminAlert | null {
     ...(record.autoInvoice === true ? { autoInvoice: true } : {}),
     invoiceId: String(record.invoiceId || "").trim() || undefined,
     invoicedAt: String(record.invoicedAt || "").trim() || undefined,
+    paidAt: String(record.paidAt || "").trim() || undefined,
     emailedAt: String(record.emailedAt || "").trim() || undefined,
     emailedTo: String(record.emailedTo || "").trim() || undefined,
   };

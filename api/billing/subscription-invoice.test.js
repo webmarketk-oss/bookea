@@ -259,3 +259,9 @@ test("la facture part par e-mail avec le PDF quand la boîte Bookea est connect�
   assert.equal(billing.invoices[0].emailedTo, "clermont@example.com");
   assert.equal(supabase.centers[0].settings.adminAlerts[0].emailedTo, "clermont@example.com");
 });
+
+test("les montants gardent leurs centimes sur la facture", () => {
+  const { formatEuroAmount } = require("./_agency-invoice");
+  assert.equal(formatEuroAmount(69.97).replace(/\s/g, " "), "69,97 €");
+  assert.equal(formatEuroAmount(70).replace(/\s/g, " "), "70 €");
+});

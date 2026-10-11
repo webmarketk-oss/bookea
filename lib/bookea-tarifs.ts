@@ -1,14 +1,9 @@
-export const BREVO_SMS_FRANCE_UNIT = 0.045;
+import * as offers from "../api/billing/_offers.js";
 
-const brevoUnitForQuantity = (quantity: number) => {
-  if (quantity >= 800) return 0.038;
-  if (quantity >= 300) return 0.04;
-  if (quantity >= 200) return 0.042;
-  return BREVO_SMS_FRANCE_UNIT;
-};
+export const BREVO_SMS_FRANCE_UNIT: number = offers.BREVO_SMS_FRANCE_UNIT;
 
-export function brevoSmsCost(quantity: number) {
-  return Number((quantity * brevoUnitForQuantity(quantity)).toFixed(2));
+export function brevoSmsCost(quantity: number): number {
+  return offers.brevoSmsCost(quantity);
 }
 
 export const WHATSAPP_PACK_POINTS = [
@@ -17,15 +12,8 @@ export const WHATSAPP_PACK_POINTS = [
   "Reprise de RDV",
 ] as const;
 
-export const whatsappLeadPacks = [
-  { leads: 100, price: 69.97 },
-  { leads: 150, price: 99.97 },
-  { leads: 200, price: 129.95 },
-  { leads: 250, price: 159.95 },
-  { leads: 300, price: 189.95 },
-  { leads: 400, price: 249.92 },
-  { leads: 500, price: 309.9 },
-] as const;
+export const whatsappLeadPacks: ReadonlyArray<{ leads: number; price: number }> =
+  offers.WHATSAPP_LEAD_PACKS;
 
 export function formatEuro(value: number, digits = 2) {
   return new Intl.NumberFormat("fr-FR", {
@@ -36,7 +24,7 @@ export function formatEuro(value: number, digits = 2) {
   }).format(value);
 }
 
-export const smsPacks = [30, 50, 100, 200, 300, 800].map((quantity) => {
+export const smsPacks = offers.SMS_PACK_QUANTITIES.map((quantity: number) => {
   const price = brevoSmsCost(quantity);
 
   return {

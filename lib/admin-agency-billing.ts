@@ -976,12 +976,8 @@ export function formatLineDiscount(line: AgencyInvoiceLine) {
   return `−${formatEuroAmount(amount)}`;
 }
 
-export function formatEuroAmount(value: number) {
-  return new Intl.NumberFormat("fr-FR", {
-    style: "currency",
-    currency: "EUR",
-    maximumFractionDigits: 0,
-  }).format(Number(value) || 0);
+export function formatEuroAmount(value: number): string {
+  return shared.formatEuroAmount(value);
 }
 
 export function invoiceCommentLog(invoice: Pick<AgencyInvoice, "comments" | "commentLog" | "createdAt" | "id">) {
