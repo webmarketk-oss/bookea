@@ -51,12 +51,12 @@ export async function agencyInvoicePdfDataUrl(
   let remaining = imageHeight;
   let offset = 0;
 
-  pdf.addImage(image, "PNG", 0, offset, imageWidth, imageHeight);
+  pdf.addImage(image, "PNG", 0, offset, imageWidth, imageHeight, "invoice", "FAST");
   remaining -= pageHeight;
   while (remaining > 0) {
     offset -= pageHeight;
     pdf.addPage();
-    pdf.addImage(image, "PNG", 0, offset, imageWidth, imageHeight);
+    pdf.addImage(image, "PNG", 0, offset, imageWidth, imageHeight, "invoice", "FAST");
     remaining -= pageHeight;
   }
   return pdf.output("datauristring");

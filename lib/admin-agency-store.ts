@@ -192,6 +192,9 @@ export async function sendAgencyInvoiceEmail(input: {
     emailedTo?: string;
     error?: string;
   };
+  if (response.status === 413) {
+    throw new Error("Le PDF de la facture est trop lourd pour être envoyé.");
+  }
   if (!response.ok || !result.ok || !result.emailedAt || !result.emailedTo) {
     throw new Error(result.error || "L’envoi de la facture a échoué.");
   }
