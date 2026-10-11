@@ -172,3 +172,28 @@ export async function loadBookeaCentersForBilling(): Promise<
     billingCenterContactFromRow(center),
   );
 }
+
+export async function sendAgencyInvoiceEmail(input: {
+  number: string;
+  client: string;
+  to: string;
+  subject: string;
+  message: string;
+  pdf: string;
+}) {
+  const response = await fetch("/api/admin/send-agency-invoice", {
+    method: "POST",
+    headers: await adminAuthHeaders(),
+    body: JSON.stringify(input),
+  });
+  const result = (await response.json().catch(() => ({}))) as {
+    ok?: boolean;
+    emailedAt?: string;
+    emailedTo?: string;
+    error?: string;
+  };
+  if (!response.ok || !result.ok || !result.emailedAt || !result.emailedTo) {
+    throw new Error(result.error || "L’envoi de la facture a échoué.");
+  }
+  return { emailedAt: result.emailedAt, emailedTo: result.emailedTo };
+}

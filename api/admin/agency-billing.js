@@ -160,8 +160,8 @@ async function handler(req, res) {
         company,
         await readBilling(supabase, company),
       );
-      if (company === "bookea" && state) {
-        state = (await reconcileCardPayments(supabase).catch((error) => {
+      if (state) {
+        state = (await reconcileCardPayments(supabase, company).catch((error) => {
           console.error("[admin/agency-billing] stripe", error);
           return null;
         })) || state;

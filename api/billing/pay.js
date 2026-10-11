@@ -19,7 +19,7 @@ function escapeHtml(value) {
     .replace(/"/g, "&quot;");
 }
 
-function sendPage(res, status, { title, text, action }) {
+function sendPage(res, status, { title, text, action, brand = "Bookea" }) {
   const button = action
     ? `<a href="${escapeHtml(action.href)}" style="display:inline-block;margin-top:20px;padding:12px 20px;border-radius:10px;background:#0f172a;color:#fff;text-decoration:none;font-weight:600">${escapeHtml(action.label)}</a>`
     : "";
@@ -30,11 +30,11 @@ function sendPage(res, status, { title, text, action }) {
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>${escapeHtml(title)} · Bookea</title>
+  <title>${escapeHtml(title)} · ${escapeHtml(brand)}</title>
 </head>
 <body style="margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:#f8fafc;font-family:Arial,sans-serif;color:#0f172a">
   <main style="max-width:440px;margin:24px;padding:32px;border:1px solid #e2e8f0;border-radius:16px;background:#fff;text-align:center">
-    <p style="margin:0 0 8px;color:#64748b;font-size:13px;letter-spacing:.08em;text-transform:uppercase">Bookea</p>
+    <p style="margin:0 0 8px;color:#64748b;font-size:13px;letter-spacing:.08em;text-transform:uppercase">${escapeHtml(brand)}</p>
     <h1 style="margin:0 0 12px;font-size:22px">${escapeHtml(title)}</h1>
     <p style="margin:0;color:#475569;line-height:1.6">${escapeHtml(text)}</p>
     ${button}
@@ -64,9 +64,15 @@ module.exports = async function handler(req, res) {
       });
     }
 
+    const page = (status, content) =>
+      sendPage(res, status, {
+        ...content,
+        brand: state.company === "webk" ? "WebK" : "Bookea",
+      });
+
     if (sessionId && isStripeConfigured()) {
-      const paid = await confirmCardPayment(supabase, invoice.id, sessionId);
-      return sendPage(res, 200, paid
+      const paid = await confirmCardPayment(supabase, state.company, invoice.id, sessionId);
+      return page(200, paid
         ? {
             title: "Merci, paiement reçu",
             text: `La facture ${invoice.number} est réglée. Vous pouvez fermer cette page.`,
@@ -77,26 +83,26 @@ module.exports = async function handler(req, res) {
           });
     }
     if (invoice.status === "Payée") {
-      return sendPage(res, 200, {
+      return page(200, {
         title: "Facture déjà réglée",
         text: `La facture ${invoice.number} est déjà payée. Merci !`,
       });
     }
     if (invoice.status === "Annulée") {
-      return sendPage(res, 410, {
+      return page(410, {
         title: "Facture annulée",
         text: `La facture ${invoice.number} a été annulée : aucun paiement n’est dû.`,
       });
     }
     if (cancelled) {
-      return sendPage(res, 200, {
+      return page(200, {
         title: "Paiement annulé",
         text: `Aucun montant n’a été débité pour la facture ${invoice.number}.`,
         action: { href: invoicePayUrl(invoice), label: "Réessayer le paiement" },
       });
     }
     if (!isStripeConfigured() || invoiceAmountCents(invoice) < 50) {
-      return sendPage(res, 503, {
+      return page(503, {
         title: "Paiement par carte indisponible",
         text: `Merci de régler la facture ${invoice.number} par virement, avec les coordonnées bancaires indiquées sur la facture.`,
       });

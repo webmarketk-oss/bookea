@@ -586,12 +586,7 @@ export function buildAgencyInvoiceHtml(
     state.clients.find((item) => item.id === invoice.clientId),
   );
   const total = invoiceTotal(invoice);
-  const payUrl =
-    state.company === "bookea" &&
-    invoice.status !== "Payée" &&
-    invoice.status !== "Annulée"
-      ? invoicePayUrl(invoice)
-      : "";
+  const payUrl = isInvoicePayable(invoice) ? invoicePayUrl(invoice) : "";
   const issuer = issuerAddressLines(state.identity)
     .map((line) => escapeHtml(line))
     .join("<br />");
@@ -737,7 +732,7 @@ export function buildAgencyInvoiceHtml(
   }
   ${
     payUrl
-      ? `<div class="box"><p class="doc-label">Payer par carte</p><p class="note">Réglez cette facture en ligne, par carte bancaire :<br /><a href="${escapeHtml(payUrl)}">Payer la facture par carte</a></p></div>`
+      ? `<div class="box"><p class="doc-label">Payer par carte</p><p class="note">Réglez cette facture en ligne, par carte bancaire :<br /><a href="${escapeHtml(payUrl)}" style="word-break:break-all">${escapeHtml(payUrl)}</a></p></div>`
       : ""
   }
   <div class="box">
@@ -846,6 +841,37 @@ export function createPayToken(): string {
 
 export function invoicePayUrl(invoice: Pick<AgencyInvoice, "id" | "payToken">): string {
   return shared.invoicePayUrl(invoice);
+}
+
+export function isInvoicePayable(invoice: Pick<AgencyInvoice, "status">) {
+  return invoice.status !== "Payée" && invoice.status !== "Annulée";
+}
+
+export function withPayToken(invoice: AgencyInvoice): AgencyInvoice {
+  return invoice.payToken ? invoice : { ...invoice, payToken: createPayToken() };
+}
+
+export function defaultAgencyInvoiceMail(
+  state: AgencyBillingState,
+  invoice: AgencyInvoice,
+) {
+  const client = state.clients.find((item) => item.id === invoice.clientId);
+  const payUrl = isInvoicePayable(invoice) ? invoicePayUrl(invoice) : "";
+  return {
+    to: String(client?.email || "").trim(),
+    subject: `Votre facture ${invoice.number}`,
+    message: [
+      `Bonjour ${client?.name || ""},`.replace(" ,", ","),
+      "",
+      `Veuillez trouver ci-joint votre facture ${invoice.number} d’un montant de ${formatEuroAmount(invoiceTotal(invoice))}.`,
+      ...(payUrl
+        ? ["", "Vous pouvez la régler par carte bancaire en suivant ce lien :", payUrl]
+        : []),
+      "",
+      "Cordialement,",
+      state.identity.name || companyLabel(state.company),
+    ].join("\n"),
+  };
 }
 
 export function billingAlerts(

@@ -125,3 +125,60 @@ test("paiement par carte : Stripe, retour, facture payée", async (t) => {
   const again = await call({ i: "inv-1", t: "token-1" });
   assert.match(again.body, /déjà réglée/);
 });
+
+test("une facture WebK se paie aussi par carte et passe payée côté WebK", async (t) => {
+  files.set(
+    "agency-billing/webk.json",
+    JSON.stringify({
+      company: "webk",
+      revision: 4,
+      clients: [{ id: "client-w", name: "Institut Riom", email: "riom@example.com" }],
+      invoices: [
+        {
+          ...invoice,
+          id: "inv-w",
+          number: "WK-2026-001",
+          clientId: "client-w",
+          payToken: "token-w",
+          lines: [{ ...invoice.lines[0], label: "Site internet", unitPrice: 500 }],
+        },
+      ],
+    }),
+  );
+  const originalFetch = global.fetch;
+  const originalKey = process.env.STRIPE_SECRET_KEY;
+  process.env.STRIPE_SECRET_KEY = "sk_test_fake";
+  const requests = [];
+  global.fetch = async (url, init) => {
+    requests.push({ url, init });
+    return {
+      ok: true,
+      json: async () =>
+        init.method === "POST"
+          ? { id: "cs_test_w", url: "https://checkout.stripe.com/c/pay/cs_test_w" }
+          : {
+              id: "cs_test_w",
+              payment_status: "paid",
+              created: 1791622800,
+              metadata: { bookea_invoice_id: "inv-w" },
+            },
+    };
+  };
+  t.after(() => {
+    global.fetch = originalFetch;
+    process.env.STRIPE_SECRET_KEY = originalKey;
+  });
+
+  const start = await call({ i: "inv-w", t: "token-w" });
+  assert.equal(start.status, 303);
+  const form = new URLSearchParams(requests[0].init.body);
+  assert.equal(form.get("line_items[0][price_data][unit_amount]"), "50000");
+  assert.equal(form.get("metadata[bookea_company]"), "webk");
+
+  const back = await call({ i: "inv-w", t: "token-w", session_id: "cs_test_w" });
+  assert.match(back.body, /Merci, paiement reçu/);
+  assert.match(back.body, /WebK/);
+  const webk = JSON.parse(files.get("agency-billing/webk.json"));
+  assert.equal(webk.invoices[0].status, "Payée");
+  assert.equal(webk.invoices[0].paymentMethod, "carte");
+});

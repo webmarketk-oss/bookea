@@ -53,7 +53,7 @@ async function sendBrevoEmail({
     throw new Error("L’envoi n’est pas encore branché côté Bookea.");
   }
 
-  const htmlContent = `<div style="font-family:Arial,sans-serif;font-size:15px;line-height:1.6;color:#0f172a;white-space:pre-wrap">${escapeHtml(textContent)}</div>`;
+  const htmlContent = `<div style="font-family:Arial,sans-serif;font-size:15px;line-height:1.6;color:#0f172a;white-space:pre-wrap">${linkify(escapeHtml(textContent))}</div>`;
   const response = await fetch("https://api.brevo.com/v3/smtp/email", {
     method: "POST",
     headers: {
@@ -81,6 +81,13 @@ async function sendBrevoEmail({
   return result;
 }
 
+function linkify(html) {
+  return html.replace(
+    /https?:\/\/[^\s<]+/g,
+    (url) => `<a href="${url}" style="color:#6d28d9;font-weight:600">${url}</a>`,
+  );
+}
+
 function escapeHtml(value) {
   return String(value || "")
     .replace(/&/g, "&amp;")
@@ -89,7 +96,7 @@ function escapeHtml(value) {
     .replace(/"/g, "&quot;");
 }
 
-module.exports = async function handler(req, res) {
+async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
@@ -121,7 +128,7 @@ module.exports = async function handler(req, res) {
     if (!isValidEmail(toEmail)) {
       return res.status(400).json({
         ok: false,
-        error: "Le centre n’a pas d’adresse e-mail valide.",
+        error: "Adresse e-mail invalide.",
       });
     }
     if (!rateLimit(`admin-agency-invoice:${toEmail}`, 8, 60_000)) {
@@ -180,4 +187,8 @@ module.exports = async function handler(req, res) {
           : "L’envoi de la facture a échoué.",
     });
   }
-};
+}
+
+module.exports = handler;
+module.exports.linkify = linkify;
+module.exports.escapeHtml = escapeHtml;

@@ -35,6 +35,8 @@ import {
   protectInvoicesFromEmptyOverwrite,
   mergeAgencyInvoices,
   keepInvoiceEdits,
+  defaultAgencyInvoiceMail,
+  withPayToken,
 } from "./admin-agency-billing.ts";
 
 test("les deux marques partagent la même société US et la mention d’autoliquidation", () => {
@@ -647,4 +649,48 @@ test("dupliquer une facture payée par carte ne recopie ni le paiement ni le lie
     assert.equal(key in copy, false, key);
   }
   assert.equal(copy.status, "En attente de paiement");
+});
+
+test("une facture WebK a son lien de paiement dans le PDF et dans l’e-mail prérempli", () => {
+  const state = normalizeAgencyState("webk", {
+    ...emptyAgencyState("webk"),
+    clients: [{ id: "c1", name: "JFG Clinic", email: "jfg@example.com" }],
+  });
+  const invoice = withPayToken({
+    id: "w1",
+    number: "WK-2026-001",
+    clientId: "c1",
+    issuedOn: "2026-10-11",
+    nextCycleOn: "2026-11-10",
+    status: "En attente de paiement",
+    lines: [
+      {
+        id: "l1",
+        label: "Site internet",
+        kind: "autre",
+        quantity: 1,
+        unitPrice: 500,
+        discountType: "Aucune",
+        discountValue: 0,
+      },
+    ],
+    comments: "",
+    commentLog: [],
+    invoiceNote: "",
+    createdAt: "2026-10-11T10:00:00.000Z",
+  });
+  assert.ok(invoice.payToken);
+  assert.equal(withPayToken(invoice), invoice);
+
+  const mail = defaultAgencyInvoiceMail(state, invoice);
+  assert.equal(mail.to, "jfg@example.com");
+  assert.equal(mail.subject, "Votre facture WK-2026-001");
+  assert.match(mail.message, /^Bonjour JFG Clinic,/);
+  assert.match(mail.message, /montant de 500\s€/);
+  assert.match(mail.message, /\/api\/billing\/pay\?i=w1&t=/);
+  assert.match(buildAgencyInvoiceHtml(state, invoice), /\/api\/billing\/pay\?i=w1&amp;t=/);
+
+  const paid = { ...invoice, status: "Payée" as const };
+  assert.doesNotMatch(defaultAgencyInvoiceMail(state, paid).message, /api\/billing\/pay/);
+  assert.doesNotMatch(buildAgencyInvoiceHtml(state, paid), /api\/billing\/pay/);
 });

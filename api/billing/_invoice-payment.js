@@ -16,16 +16,23 @@ const {
   rememberStripeSession,
 } = require("./_agency-invoice");
 
-const COMPANY = "bookea";
+const COMPANIES = ["bookea", "webk"];
 const SESSION_CHECK_MS = 2 * 24 * 60 * 60 * 1000;
 
+async function loadCompanyBilling(supabase, company) {
+  return normalizeServerBilling(company, await readBilling(supabase, company));
+}
+
 async function findPayableInvoice(supabase, invoiceId, token) {
-  const state = normalizeServerBilling(COMPANY, await readBilling(supabase, COMPANY));
-  const invoice = state.invoices.find((item) => item.id === invoiceId);
-  return {
-    state,
-    invoice: invoice && payTokenMatches(invoice, token) ? invoice : null,
-  };
+  let state = null;
+  for (const company of COMPANIES) {
+    state = await loadCompanyBilling(supabase, company);
+    const invoice = state.invoices.find((item) => item.id === invoiceId);
+    if (invoice) {
+      return { state, invoice: payTokenMatches(invoice, token) ? invoice : null };
+    }
+  }
+  return { state, invoice: null };
 }
 
 function invoiceAmountCents(invoice) {
@@ -57,6 +64,7 @@ async function startCardPayment(supabase, state, invoice) {
     metadata: {
       bookea_invoice_id: invoice.id,
       bookea_invoice_number: invoice.number,
+      bookea_company: state.company,
     },
     payment_intent_data: {
       description: `Facture ${invoice.number}`,
@@ -66,7 +74,7 @@ async function startCardPayment(supabase, state, invoice) {
     cancel_url: `${payUrl}&etat=annule`,
   });
 
-  await updateServerBilling(supabase, COMPANY, (current) =>
+  await updateServerBilling(supabase, state.company, (current) =>
     current.invoices.some((item) => item.id === invoice.id)
       ? {
           state: {
@@ -93,9 +101,9 @@ async function paidSession(sessionId, invoiceId) {
     : null;
 }
 
-async function markPaid(supabase, payments) {
+async function markPaid(supabase, company, payments) {
   const byId = new Map(payments.map((payment) => [payment.invoiceId, payment]));
-  const result = await updateServerBilling(supabase, COMPANY, (current) => {
+  const result = await updateServerBilling(supabase, company, (current) => {
     const changed = current.invoices.filter(
       (item) => byId.has(item.id) && item.status !== "Payée",
     );
@@ -115,12 +123,12 @@ async function markPaid(supabase, payments) {
   return result.state;
 }
 
-async function confirmCardPayment(supabase, invoiceId, sessionId) {
+async function confirmCardPayment(supabase, company, invoiceId, sessionId) {
   const session = await paidSession(sessionId, invoiceId);
   if (!session) {
     return false;
   }
-  await markPaid(supabase, [
+  await markPaid(supabase, company, [
     {
       invoiceId,
       paidAt: session.created
@@ -131,11 +139,11 @@ async function confirmCardPayment(supabase, invoiceId, sessionId) {
   return true;
 }
 
-async function reconcileCardPayments(supabase, now = Date.now()) {
+async function reconcileCardPayments(supabase, company, now = Date.now()) {
   if (!isStripeConfigured()) {
     return null;
   }
-  const state = normalizeServerBilling(COMPANY, await readBilling(supabase, COMPANY));
+  const state = await loadCompanyBilling(supabase, company);
   const pending = state.invoices
     .filter(
       (invoice) =>
@@ -159,10 +167,11 @@ async function reconcileCardPayments(supabase, now = Date.now()) {
       }
     }
   }
-  return payments.length ? markPaid(supabase, payments) : null;
+  return payments.length ? markPaid(supabase, company, payments) : null;
 }
 
 module.exports = {
+  COMPANIES,
   confirmCardPayment,
   findPayableInvoice,
   invoiceAmountCents,

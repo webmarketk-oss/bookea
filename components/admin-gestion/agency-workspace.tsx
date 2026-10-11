@@ -11,10 +11,13 @@ import {
   companyLabel,
   createId,
   createPayToken,
+  defaultAgencyInvoiceMail,
   formatEuroAmount,
   formatShortDate,
   invoicePayUrl,
   invoiceTotal,
+  isInvoicePayable,
+  withPayToken,
   invoicesInRange,
   issuerAddressLines,
   kpiBreakdown,
@@ -48,6 +51,7 @@ import {
   loadAgencyBillingStatus,
   loadBookeaCentersForBilling,
   saveAgencyBilling,
+  sendAgencyInvoiceEmail,
 } from "@/lib/admin-agency-store";
 
 const MONTHS = [
@@ -162,9 +166,9 @@ export function AgencyWorkspace() {
     }
   }
 
-  function update(patch: Partial<AgencyBillingState>) {
+  function update(patch: Partial<AgencyBillingState>): Promise<void> {
     const current = statesRef.current;
-    if (!current) return;
+    if (!current) return Promise.resolve();
     const prev = current[company];
     const resolved = { ...patch };
     if (patch.invoices) {
@@ -185,13 +189,14 @@ export function AgencyWorkspace() {
         setStates(statesRef.current);
         await persist(snapshot, shared);
       });
-      return;
+      return persistChain.current;
     }
     persistChain.current = persistChain.current.then(async () => {
       const snapshot = statesRef.current?.[company];
       if (!snapshot) return;
       await persist(snapshot);
     });
+    return persistChain.current;
   }
 
   if (!state) {
@@ -322,19 +327,22 @@ function BillingSection({
   openInvoiceId,
 }: {
   state: AgencyBillingState;
-  onChange: (patch: Partial<AgencyBillingState>) => void;
+  onChange: (patch: Partial<AgencyBillingState>) => Promise<void>;
   openInvoiceId?: string | null;
 }) {
   const [draft, setDraft] = useState(() => emptyInvoiceDraft(state));
   const [editingId, setEditingId] = useState<string | null>(null);
   const [previewId, setPreviewId] = useState<string | null>(openInvoiceId ?? null);
   const [copiedPayLinkId, setCopiedPayLinkId] = useState<string | null>(null);
+  const [mailInvoiceId, setMailInvoiceId] = useState<string | null>(null);
+  const payTokenSave = useRef<Promise<void>>(Promise.resolve());
   const [statusFilter, setStatusFilter] = useState<AgencyInvoiceStatus | "tous">(
     "tous",
   );
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const preview = state.invoices.find((item) => item.id === previewId);
+  const mailInvoice = state.invoices.find((item) => item.id === mailInvoiceId);
   const filteredInvoices = useMemo(
     () =>
       state.invoices.filter((invoice) => {
@@ -433,6 +441,7 @@ function BillingSection({
       nextCycleOn,
       ...period,
       status: "En attente de paiement",
+      payToken: createPayToken(),
       lines: draft.lines,
       comments: "",
       commentLog: [],
@@ -455,7 +464,7 @@ function BillingSection({
   }
 
   function duplicateInvoice(invoice: AgencyInvoice) {
-    const copy = duplicateAgencyInvoice(state, invoice);
+    const copy = withPayToken(duplicateAgencyInvoice(state, invoice));
     onChange({
       invoices: [copy, ...state.invoices],
       clients: state.clients.map((client) =>
@@ -481,21 +490,54 @@ function BillingSection({
     });
   }
 
-  function copyPayLink(invoice: AgencyInvoice) {
-    const payable = invoice.payToken
-      ? invoice
-      : { ...invoice, payToken: createPayToken() };
+  function ensurePayToken(invoice: AgencyInvoice) {
+    const payable = withPayToken(invoice);
     if (payable !== invoice) {
-      onChange({
+      payTokenSave.current = onChange({
         invoices: state.invoices.map((item) =>
           item.id === invoice.id ? payable : item,
         ),
       });
     }
+    return payable;
+  }
+
+  function copyPayLink(invoice: AgencyInvoice) {
+    const payable = ensurePayToken(invoice);
     void navigator.clipboard
       .writeText(invoicePayUrl(payable))
       .then(() => setCopiedPayLinkId(invoice.id))
       .catch(() => window.prompt("Lien de paiement à copier :", invoicePayUrl(payable)));
+  }
+
+  function withPayLink(invoice: AgencyInvoice) {
+    return isInvoicePayable(invoice) ? ensurePayToken(invoice) : invoice;
+  }
+
+  function openMail(invoice: AgencyInvoice) {
+    withPayLink(invoice);
+    setMailInvoiceId(invoice.id);
+  }
+
+  async function sendMail(
+    invoice: AgencyInvoice,
+    mail: { to: string; subject: string; message: string },
+  ) {
+    await payTokenSave.current;
+    const { agencyInvoicePdfDataUrl } = await import("@/lib/admin-agency-invoice-pdf");
+    const client = state.clients.find((item) => item.id === invoice.clientId);
+    const receipt = await sendAgencyInvoiceEmail({
+      number: invoice.number,
+      client: client?.name || "",
+      ...mail,
+      pdf: await agencyInvoicePdfDataUrl(state, invoice),
+    });
+    await onChange({
+      invoices: state.invoices.map((item) =>
+        item.id === invoice.id ? { ...item, ...receipt } : item,
+      ),
+    });
+    setMailInvoiceId(null);
   }
 
   function deleteInvoice(invoice: AgencyInvoice) {
@@ -998,6 +1040,11 @@ function BillingSection({
                           Payée par carte le {formatShortDate(invoice.paidAt)}
                         </p>
                       ) : null}
+                      {invoice.emailedAt && invoice.emailedTo ? (
+                        <p className="mt-1 text-[11px] font-semibold text-slate-500">
+                          Envoyée le {formatShortDate(invoice.emailedAt)} à {invoice.emailedTo}
+                        </p>
+                      ) : null}
                     </td>
                     <td className="min-w-[13rem] px-3 py-2">
                       <InvoiceFollowUpCell
@@ -1009,14 +1056,14 @@ function BillingSection({
                       <div className="grid w-[9rem] grid-cols-2 gap-1">
                         <button
                           type="button"
-                          onClick={() => setPreviewId(invoice.id)}
+                          onClick={() => setPreviewId(withPayLink(invoice).id)}
                           className="h-7 rounded-md border border-slate-200 px-2 text-[11px] font-bold"
                         >
                           Voir
                         </button>
                         <button
                           type="button"
-                          onClick={() => void downloadAgencyInvoice(state, invoice)}
+                          onClick={() => void downloadAgencyInvoice(state, withPayLink(invoice))}
                           className="h-7 rounded-md border border-slate-200 px-2 text-[11px] font-bold"
                         >
                           PDF
@@ -1035,9 +1082,14 @@ function BillingSection({
                         >
                           Dupliquer
                         </button>
-                        {state.company === "bookea" &&
-                        invoice.status !== "Payée" &&
-                        invoice.status !== "Annulée" ? (
+                        <button
+                          type="button"
+                          onClick={() => openMail(invoice)}
+                          className="col-span-2 h-7 rounded-md border border-slate-200 px-2 text-[11px] font-bold"
+                        >
+                          Envoyer par mail
+                        </button>
+                        {isInvoicePayable(invoice) ? (
                           <button
                             type="button"
                             onClick={() => copyPayLink(invoice)}
@@ -1072,6 +1124,114 @@ function BillingSection({
           onClose={() => setPreviewId(null)}
         />
       ) : null}
+      {mailInvoice ? (
+        <SendInvoiceMailDialog
+          key={mailInvoice.id}
+          initial={defaultAgencyInvoiceMail(state, mailInvoice)}
+          number={mailInvoice.number}
+          onClose={() => setMailInvoiceId(null)}
+          onSend={(mail) => sendMail(mailInvoice, mail)}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+function SendInvoiceMailDialog({
+  initial,
+  number,
+  onClose,
+  onSend,
+}: {
+  initial: { to: string; subject: string; message: string };
+  number: string;
+  onClose: () => void;
+  onSend: (mail: { to: string; subject: string; message: string }) => Promise<void>;
+}) {
+  const [mail, setMail] = useState(initial);
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState("");
+
+  async function send() {
+    setSending(true);
+    setError("");
+    try {
+      await onSend({
+        to: mail.to.trim(),
+        subject: mail.subject.trim(),
+        message: mail.message.trim(),
+      });
+    } catch (sendError) {
+      setError(
+        sendError instanceof Error
+          ? sendError.message
+          : "L’envoi de la facture a échoué.",
+      );
+      setSending(false);
+    }
+  }
+
+  const fieldClass =
+    "mt-1 w-full rounded-xl border border-slate-200 px-3 text-sm font-semibold text-slate-800 outline-none focus:border-violet-400";
+
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/40 p-4">
+      <div className="max-h-[90vh] w-full max-w-xl overflow-y-auto rounded-2xl bg-white p-5 shadow-xl">
+        <p className="text-sm font-semibold uppercase tracking-[0.12em] text-slate-400">
+          Envoyer la facture {number}
+        </p>
+        <label className="mt-4 block text-xs font-bold uppercase text-slate-500">
+          À
+          <input
+            type="email"
+            value={mail.to}
+            onChange={(event) => setMail({ ...mail, to: event.target.value })}
+            placeholder="adresse@centre.fr"
+            className={`${fieldClass} h-10`}
+          />
+        </label>
+        <label className="mt-3 block text-xs font-bold uppercase text-slate-500">
+          Objet
+          <input
+            value={mail.subject}
+            onChange={(event) => setMail({ ...mail, subject: event.target.value })}
+            className={`${fieldClass} h-10`}
+          />
+        </label>
+        <label className="mt-3 block text-xs font-bold uppercase text-slate-500">
+          Message
+          <textarea
+            value={mail.message}
+            rows={10}
+            onChange={(event) => setMail({ ...mail, message: event.target.value })}
+            className={`${fieldClass} resize-y py-2 leading-6`}
+          />
+        </label>
+        <p className="mt-2 text-xs font-semibold text-slate-500">
+          La facture {number} est jointe en PDF.
+        </p>
+        {error ? (
+          <p className="mt-3 text-sm font-semibold text-rose-700">{error}</p>
+        ) : null}
+        <div className="mt-4 flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={sending}
+            className="h-10 rounded-xl border border-slate-200 px-4 text-sm font-semibold"
+          >
+            Annuler
+          </button>
+          <button
+            type="button"
+            onClick={() => void send()}
+            disabled={sending || !mail.to.trim() || !mail.subject.trim() || !mail.message.trim()}
+            className="h-10 rounded-xl bg-violet-600 px-4 text-sm font-semibold text-white disabled:opacity-50"
+          >
+            {sending ? "Envoi..." : "Envoyer"}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

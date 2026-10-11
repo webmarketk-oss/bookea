@@ -10,7 +10,7 @@ const {
   renewalReminderCopy,
 } = require("./_renewal");
 const { isStripeConfigured } = require("../center/_stripe-lib");
-const { reconcileCardPayments } = require("./_invoice-payment");
+const { COMPANIES, reconcileCardPayments } = require("./_invoice-payment");
 const { syncPendingCheckouts } = require("./_offer-checkout");
 const {
   invoiceCenterAlert,
@@ -188,9 +188,11 @@ module.exports = async function handler(req, res) {
         }
       }
     }
-    await reconcileCardPayments(supabase).catch((stripeError) =>
-      console.error("[billing/renewals] stripe", stripeError),
-    );
+    for (const company of COMPANIES) {
+      await reconcileCardPayments(supabase, company).catch((stripeError) =>
+        console.error("[billing/renewals] stripe", company, stripeError),
+      );
+    }
 
     return res.status(200).json({ ok: true, processed: results.length, results });
   } catch (error) {
