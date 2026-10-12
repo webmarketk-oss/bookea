@@ -6,6 +6,7 @@ const {
   ownershipFromRows,
   pickPhoneHome,
   planRehome,
+  rehomePhoneThread,
 } = require("./center-route");
 
 const clermont = "center-clermont";
@@ -122,4 +123,69 @@ test("si la fiche existe dans les deux centres, on ne déplace pas", () => {
     ownership,
   );
   assert.equal(planned.moved.length, 0);
+});
+
+test("déplacer un fil ne remet pas les anciens réglages Seya du centre", async () => {
+  const typed = [
+    { afterDays: 1, message: "Rebonjour {prenom}" },
+    { afterDays: 5, message: "" },
+    { afterDays: 14, message: "" },
+  ];
+  const rows = new Map([
+    [
+      gaillard,
+      {
+        seya: {
+          relances: [],
+          conversations: [
+            {
+              phone: "0611223344",
+              centerId: gaillard,
+              messages: [{ author: "lead", text: "hello", at: "2026-10-09T10:00:00.000Z" }],
+            },
+          ],
+        },
+      },
+    ],
+    [clermont, { seya: { conversations: [] } }],
+  ]);
+  const supabase = {
+    from() {
+      return {
+        select(columns) {
+          if (columns === "id,settings") {
+            const snapshot = [...rows].map(([id, settings]) => ({
+              id,
+              settings: structuredClone(settings),
+            }));
+            rows.get(gaillard).seya.relances = typed;
+            return Promise.resolve({ data: snapshot, error: null });
+          }
+          return {
+            eq: (_column, id) => ({
+              maybeSingle: async () => ({
+                data: { settings: structuredClone(rows.get(id)) },
+                error: null,
+              }),
+            }),
+          };
+        },
+        update(patch) {
+          return {
+            eq: async (_column, id) => {
+              rows.set(id, patch.settings);
+              return { error: null };
+            },
+          };
+        },
+      };
+    },
+  };
+
+  const planned = await rehomePhoneThread(supabase, "0611223344", clermont);
+
+  assert.equal(planned.moved.length, 1);
+  assert.deepEqual(rows.get(gaillard).seya.relances, typed);
+  assert.equal(rows.get(gaillard).seya.conversations.length, 0);
+  assert.equal(rows.get(clermont).seya.conversations.length, 1);
 });

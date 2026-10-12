@@ -335,17 +335,25 @@ async function loadCenterConversationLists(supabase) {
 
 async function applyRehomeUpdates(supabase, settingsById, planned) {
   for (const update of planned.updates) {
-    const current = settingsById.get(update.centerId);
-    if (!current) {
+    if (!settingsById.get(update.centerId)) {
       continue;
     }
+    const { data: fresh, error: readError } = await supabase
+      .from("centers")
+      .select("settings")
+      .eq("id", update.centerId)
+      .maybeSingle();
+    if (readError || !fresh) {
+      throw new Error(readError?.message || "center_not_found");
+    }
+    const settings = asRecord(fresh.settings);
     const { error: writeError } = await supabase
       .from("centers")
       .update({
         settings: {
-          ...current.settings,
+          ...settings,
           seya: {
-            ...current.seya,
+            ...asRecord(settings.seya),
             conversations: update.conversations,
           },
         },

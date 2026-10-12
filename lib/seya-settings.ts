@@ -1099,24 +1099,58 @@ export async function saveSeyaConversations(
   return next;
 }
 
+export function changedSeyaSettingKeys(
+  before: SeyaAgentSettings,
+  after: SeyaAgentSettings,
+) {
+  return (Object.keys(after) as (keyof SeyaAgentSettings)[]).filter(
+    (key) => JSON.stringify(before[key]) !== JSON.stringify(after[key]),
+  );
+}
+
+export function mergeSeyaSettingsPatch(
+  remote: Partial<SeyaAgentSettings> | null,
+  settings: SeyaAgentSettings,
+  changedKeys?: (keyof SeyaAgentSettings)[],
+) {
+  if (!changedKeys) {
+    return normalizeSeyaAgentSettings(settings);
+  }
+  const patch = Object.fromEntries(
+    changedKeys.map((key) => [key, settings[key]]),
+  ) as Partial<SeyaAgentSettings>;
+  return normalizeSeyaAgentSettings({
+    ...bindSeyaSettingsToCenter(remote, null),
+    ...patch,
+  });
+}
+
 export async function saveSeyaAgentSettings(
   settings: SeyaAgentSettings,
   expectedCenterId?: string,
+  changedKeys?: (keyof SeyaAgentSettings)[],
 ) {
   const context = await getActiveCenterContext();
   assertExpectedCenter(expectedCenterId, context.centerId);
-  const nextSettings = normalizeSeyaAgentSettings(settings);
-  writeLocalSeyaSettings(context.centerId, nextSettings);
 
   const supabase = createClient();
-  const { data } = await supabase
+  const { data, error: readError } = await supabase
     .from("centers")
     .select("settings")
     .eq("id", context.centerId)
     .maybeSingle();
+  if (readError || !data) {
+    throw new Error(readError?.message || "Centre introuvable.");
+  }
 
-  const currentSettings = asRecord(data?.settings);
+  const currentSettings = asRecord(data.settings);
   const currentSeya = asRecord(currentSettings.seya);
+  const nextSettings = mergeSeyaSettingsPatch(
+    currentSettings.seya ? (currentSeya as Partial<SeyaAgentSettings>) : null,
+    settings,
+    changedKeys,
+  );
+  writeLocalSeyaSettings(context.centerId, nextSettings);
   const { error } = await supabase.from("centers").update({
     settings: {
       ...currentSettings,

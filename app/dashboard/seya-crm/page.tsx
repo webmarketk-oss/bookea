@@ -34,6 +34,7 @@ import {
 } from "@/lib/seya-agent";
 import { applyCentreMessage } from "@/api/seya/conversation";
 import {
+  changedSeyaSettingKeys,
   defaultSeyaAgentSettings,
   emptySeyaCenterProfile,
   loadSeyaAgentSettings,
@@ -47,7 +48,6 @@ import {
   markSeyaHealthReviewed,
   sortSeyaInbox,
   writeLocalSeyaConversations,
-  writeLocalSeyaSettings,
   type SeyaAgentSettings,
   type SeyaCenterProfile,
   type SeyaConversation,
@@ -318,6 +318,7 @@ export default function SeyaCrmPage() {
   );
   const agentSettingsRef = useRef(agentSettings);
   agentSettingsRef.current = agentSettings;
+  const savedAgentSettingsRef = useRef<SeyaAgentSettings | null>(null);
   const persistSeqRef = useRef(0);
   const persistConversationsSeqRef = useRef(0);
   const [conversations, setConversations] = useState<SeyaConversation[]>([]);
@@ -423,6 +424,7 @@ export default function SeyaCrmPage() {
         }
         setCenterId(seya.centerId);
         setCenterName(seya.centerName);
+        savedAgentSettingsRef.current = seya.settings;
         setAgentSettings(seya.settings);
         setConversations(storedConversations);
         setSelectedConversationId((current) =>
@@ -578,11 +580,23 @@ export default function SeyaCrmPage() {
       setAgentFeedback("Centre introuvable : réglages non enregistrés.");
       return;
     }
-    writeLocalSeyaSettings(centerId, next);
+    const saved = savedAgentSettingsRef.current;
+    if (!saved) {
+      setAgentFeedback("Réglages en cours de chargement : réessayez dans un instant.");
+      return;
+    }
+    const changedKeys = changedSeyaSettingKeys(saved, next);
+    if (changedKeys.length === 0) {
+      return;
+    }
     const seq = ++persistSeqRef.current;
     setSavingAgent(true);
     try {
-      await saveSeyaAgentSettings(next, centerId);
+      await saveSeyaAgentSettings(next, centerId, changedKeys);
+      savedAgentSettingsRef.current = {
+        ...savedAgentSettingsRef.current,
+        ...Object.fromEntries(changedKeys.map((key) => [key, next[key]])),
+      } as SeyaAgentSettings;
       if (seq !== persistSeqRef.current) {
         return;
       }
