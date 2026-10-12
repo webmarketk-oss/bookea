@@ -86,10 +86,10 @@ async function loadOwnedPhones(supabase, centerId) {
       .select("phone")
       .eq("center_id", centerId)
       .is("merged_into_client_id", null),
-    supabase.from("leads").select("phone").eq("center_id", centerId),
+    supabase.from("leads").select("client_id,clients(phone)").eq("center_id", centerId),
   ]);
   const owned = new Set();
-  for (const row of [...(clients || []), ...(leads || [])]) {
+  for (const row of [...(clients || []), ...withClientPhone(leads, [])]) {
     const key = last9Phone(row.phone);
     if (key.length >= 9) {
       owned.add(key);
@@ -184,34 +184,51 @@ async function loadPhoneHomes(supabase, phone) {
   if (last9.length < 9) {
     return [];
   }
-  const query = phoneQuery(phone, last9);
-  const [{ data: clients, error: clientError }, { data: leads, error: leadError }] =
-    await Promise.all([
-      supabase
-        .from("clients")
-        .select("id,center_id,first_name,last_name,phone,updated_at")
-        .is("merged_into_client_id", null)
-        .or(query)
-        .limit(40),
-      supabase
-        .from("leads")
-        .select(
-          "id,center_id,client_id,status,next_action,recall_date,service_id,updated_at,last_activity_at,phone,campaigns(name)",
-        )
-        .or(query)
-        .limit(40),
-    ]);
+  const { data: clients, error: clientError } = await supabase
+    .from("clients")
+    .select("id,center_id,first_name,last_name,phone,updated_at")
+    .is("merged_into_client_id", null)
+    .or(phoneQuery(phone, last9))
+    .limit(40);
   if (clientError) {
     throw new Error(clientError.message);
   }
+  const matched = exactPhoneRows(clients, last9);
+  if (!matched.length) {
+    return [];
+  }
+  const { data: leads, error: leadError } = await supabase
+    .from("leads")
+    .select(
+      "id,center_id,client_id,status,next_action,recall_date,service_id,updated_at,last_activity_at,campaigns(name)",
+    )
+    .in(
+      "client_id",
+      matched.map((row) => row.id),
+    )
+    .limit(40);
   if (leadError) {
     throw new Error(leadError.message);
   }
   const index = ownershipFromRows({
-    clients: exactPhoneRows(clients, last9),
-    leads: exactPhoneRows(leads, last9),
+    clients: matched,
+    leads: withClientPhone(leads, matched),
   });
   return index.get(last9) || [];
+}
+
+// leads n’a pas de colonne phone : le numéro vit sur la fiche client.
+function withClientPhone(leads, clients) {
+  const phoneByClient = new Map(
+    (clients || []).map((row) => [String(row.id), row.phone || ""]),
+  );
+  return (leads || []).map((row) => ({
+    ...row,
+    phone:
+      phoneByClient.get(String(row.client_id || "")) ||
+      (Array.isArray(row.clients) ? row.clients[0]?.phone : row.clients?.phone) ||
+      "",
+  }));
 }
 
 async function resolveCenterFromPhone(supabase, phone) {
@@ -304,7 +321,7 @@ async function loadOwnershipIndex(supabase) {
         .is("merged_into_client_id", null),
       supabase
         .from("leads")
-        .select("id,center_id,client_id,phone,last_activity_at,updated_at"),
+        .select("id,center_id,client_id,last_activity_at,updated_at,clients(phone)"),
     ]);
   if (clientError) {
     throw new Error(clientError.message);
@@ -312,7 +329,7 @@ async function loadOwnershipIndex(supabase) {
   if (leadError) {
     throw new Error(leadError.message);
   }
-  return ownershipFromRows({ clients, leads });
+  return ownershipFromRows({ clients, leads: withClientPhone(leads, clients) });
 }
 
 async function loadCenterConversationLists(supabase) {

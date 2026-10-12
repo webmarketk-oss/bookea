@@ -293,6 +293,27 @@ async function readFreshConversation(supabase, centerId, conversation) {
   );
 }
 
+function markDelivery(messages, sendResults) {
+  const list = [...(messages || [])];
+  let cursor = list.length - 1;
+  for (let index = sendResults.length - 1; index >= 0; index -= 1) {
+    while (cursor >= 0 && list[cursor]?.author !== "seya") {
+      cursor -= 1;
+    }
+    if (cursor < 0) {
+      break;
+    }
+    const result = sendResults[index];
+    list[cursor] = {
+      ...list[cursor],
+      delivery: result?.sent ? "sent" : "failed",
+      waId: result?.id || null,
+    };
+    cursor -= 1;
+  }
+  return list;
+}
+
 function replaceDraftWithSent(conversation, sentTexts) {
   const outgoing = (sentTexts || []).filter(Boolean);
   if (!outgoing.length) {
@@ -459,8 +480,8 @@ function deliveryAlert(stage, detail) {
 async function handleIncomingQueued(supabase, incoming) {
   const key = last9Phone(incoming.phone) || String(incoming.phone || "");
   const run = (inboundLocks.get(key) || Promise.resolve()).then(
-    () => handleIncoming(supabase, incoming),
-    () => handleIncoming(supabase, incoming),
+    () => processInbound(supabase, incoming),
+    () => processInbound(supabase, incoming),
   );
   inboundLocks.set(
     key,
@@ -472,6 +493,174 @@ async function handleIncomingQueued(supabase, incoming) {
   return run;
 }
 
+function inboundLogFields(incoming) {
+  const digits = String(incoming?.phone || "").replace(/\D/g, "");
+  return {
+    phone: digits ? `…${digits.slice(-4)}` : "",
+    messageIds: incoming?.messageIds?.length
+      ? incoming.messageIds
+      : [incoming?.messageId].filter(Boolean),
+  };
+}
+
+function logInbound(incoming, result) {
+  const outcome = result?.sent
+    ? "replied"
+    : result?.skipped || result?.error || "no_reply";
+  console.info(
+    "[seya/inbound]",
+    JSON.stringify({
+      ...inboundLogFields(incoming),
+      centerId: result?.centerId || null,
+      route: result?.route || null,
+      outcome,
+      status: result?.status || null,
+      stage: result?.stage || null,
+      error: result?.errorDetail || null,
+    }),
+  );
+}
+
+async function processInbound(supabase, incoming, deps = {}) {
+  const handle = deps.handleIncoming || handleIncoming;
+  const attempts = deps.attempts ?? 2;
+  const trace = { stage: "start", centerId: null, sentTexts: [] };
+  let lastError = null;
+  for (let round = 0; round < attempts; round += 1) {
+    try {
+      const result = await handle(supabase, incoming, trace);
+      logInbound(incoming, result);
+      return result;
+    } catch (error) {
+      lastError = error;
+      console.error(
+        "[seya/inbound] failed",
+        JSON.stringify({
+          ...inboundLogFields(incoming),
+          stage: trace.stage,
+          round,
+          error: error instanceof Error ? error.message : String(error),
+        }),
+      );
+      if (trace.sentTexts.length || round === attempts - 1) {
+        break;
+      }
+      await wait(deps.retryDelayMs ?? 800);
+    }
+  }
+  const recorded = await recordFailedInbound(supabase, incoming, trace, lastError).catch(
+    (recordError) => {
+      console.error("[seya/inbound] record failed", recordError);
+      return null;
+    },
+  );
+  const result = {
+    phone: incoming.phone,
+    routed: Boolean(recorded),
+    centerId: recorded?.centerId || trace.centerId,
+    error: "inbound_failed",
+    stage: trace.stage,
+    errorDetail: lastError instanceof Error ? lastError.message : String(lastError || ""),
+    sent: trace.sentTexts.length > 0,
+  };
+  logInbound(incoming, result);
+  return result;
+}
+
+async function contextFromSeyaThread(supabase, phone) {
+  const key = last9Phone(phone);
+  if (key.length < 9) {
+    return null;
+  }
+  const { data, error } = await supabase.from("centers").select("id,settings");
+  if (error) {
+    throw new Error(error.message);
+  }
+  let best = null;
+  for (const center of data || []) {
+    const list = asRecord(asRecord(center.settings).seya).conversations;
+    for (const item of Array.isArray(list) ? list : []) {
+      if (last9Phone(item?.phone) !== key) {
+        continue;
+      }
+      const at = String(
+        item.updatedAt || [...(item.messages || [])].reverse()[0]?.at || "",
+      );
+      if (!best || at > best.at) {
+        best = { at, centerId: center.id, conversation: item };
+      }
+    }
+  }
+  if (!best) {
+    return null;
+  }
+  const thread = best.conversation;
+  return {
+    centerId: best.centerId,
+    clientId: null,
+    leadId: thread.leadId || null,
+    firstName: thread.firstName || "bonjour",
+    lastName: thread.lastName || "",
+    phone: thread.phone || phone,
+    treatment: thread.treatment || "",
+    campaign: thread.campaign || "",
+    status: "Nouveau",
+    recall_date: "",
+  };
+}
+
+async function resolveInboundContext(supabase, phone) {
+  try {
+    const context = await resolveCenterFromPhone(supabase, phone);
+    if (context) {
+      return { context, route: "crm" };
+    }
+  } catch (error) {
+    console.error("[seya/inbound] crm route failed", error);
+  }
+  const fromThread = await contextFromSeyaThread(supabase, phone);
+  return fromThread
+    ? { context: fromThread, route: "thread" }
+    : { context: null, route: "none" };
+}
+
+async function recordFailedInbound(supabase, incoming, trace, error) {
+  const centerId =
+    trace.centerId || (await contextFromSeyaThread(supabase, incoming.phone))?.centerId;
+  if (!centerId) {
+    return null;
+  }
+  const { seya } = await readCenterSeya(supabase, centerId);
+  const conversations = Array.isArray(seya.conversations) ? seya.conversations : [];
+  const key = last9Phone(incoming.phone);
+  const thread = conversations.find((item) => last9Phone(item.phone) === key);
+  if (!thread) {
+    return null;
+  }
+  const ids = [incoming.messageId, ...(incoming.messageIds || [])].filter(Boolean);
+  const messages = [...(thread.messages || [])];
+  const known = ids.some((id) => (thread.lastInboundIds || []).includes(id));
+  if (!known) {
+    messages.push(message("lead", incoming.text));
+  }
+  for (const text of trace.sentTexts) {
+    messages.push({ ...message("seya", text), delivery: "sent" });
+  }
+  const detail = error instanceof Error ? error.message : "erreur technique";
+  const next = {
+    ...thread,
+    messages,
+    lastInboundIds: [...new Set([...(thread.lastInboundIds || []), ...ids])].slice(-40),
+    sendError: trace.sentTexts.length ? null : deliveryAlert("generate", detail),
+    updatedAt: new Date().toISOString(),
+  };
+  await writeSeyaConversations(supabase, centerId, [
+    next,
+    ...conversations.filter((item) => !isSameSeyaConversation(item, next)),
+  ]);
+  return { centerId };
+}
+
 async function generateSeyaReplyWithRetry(args) {
   try {
     return await generateSeyaReply(args);
@@ -481,17 +670,29 @@ async function generateSeyaReplyWithRetry(args) {
   }
 }
 
-async function handleIncoming(supabase, incoming) {
-  const context = await resolveCenterFromPhone(supabase, incoming.phone);
+async function handleIncoming(
+  supabase,
+  incoming,
+  trace = { stage: "start", centerId: null, sentTexts: [] },
+) {
+  trace.stage = "route";
+  const { context, route } = await resolveInboundContext(supabase, incoming.phone);
   if (!context) {
-    return { phone: incoming.phone, routed: false, reason: "unknown_contact" };
+    return {
+      phone: incoming.phone,
+      routed: false,
+      route,
+      skipped: "unknown_contact",
+    };
   }
+  trace.centerId = context.centerId;
   await rehomePhoneThread(supabase, incoming.phone, context.centerId).catch(
     (error) => {
       console.error("[seya/whatsapp] rehome", error);
     },
   );
 
+  trace.stage = "load_center";
   const { data: center, error } = await supabase
     .from("centers")
     .select("id,name,email,settings,address_line1,city,postal_code")
@@ -567,13 +768,28 @@ async function handleIncoming(supabase, incoming) {
     treatment: existing.qualification?.need || context.treatment || "",
   };
 
+  const lastMessage = [...(existing.messages || [])].reverse()[0];
+  let recordedLead = null;
+  if (
+    existing.sendError &&
+    knownInboundId &&
+    lastMessage?.author === "lead" &&
+    String(lastMessage.text || "").trim() === String(incoming.text || "").trim()
+  ) {
+    recordedLead = lastMessage;
+    existing.messages = (existing.messages || []).slice(0, -1);
+    existing.sendError = null;
+  }
   if (existing.sendError && knownInboundId) {
-    const lastSeya = [...(existing.messages || [])]
-      .reverse()
-      .find((item) => item.author === "seya" && String(item.text || "").trim());
+    const lastSeya =
+      lastMessage?.author === "seya" && String(lastMessage.text || "").trim()
+        ? lastMessage
+        : null;
     if (lastSeya?.text) {
+      trace.stage = "send";
       const retried = await sendWithRetry(incoming.phone, lastSeya.text, sendExtras);
       if (retried.sent) {
+        trace.sentTexts.push(lastSeya.text);
         existing.sendError = null;
         existing.lastInboundIds = inboundIds;
         await writeSeyaConversations(supabase, center.id, [
@@ -617,8 +833,13 @@ async function handleIncoming(supabase, incoming) {
       ],
       updatedAt: new Date().toISOString(),
     };
+    trace.stage = "send";
     const sent = await sendWithRetry(incoming.phone, UNREADABLE_MEDIA_REPLY, sendExtras);
+    if (sent.sent) {
+      trace.sentTexts.push(UNREADABLE_MEDIA_REPLY);
+    }
     next.sendError = sent.sent ? null : deliveryAlert("send", sent.error || sent.reason);
+    trace.stage = "save";
     await writeSeyaConversations(supabase, center.id, [
       next,
       ...conversations.filter((item) => !isSameSeyaConversation(item, next)),
@@ -647,6 +868,7 @@ async function handleIncoming(supabase, incoming) {
   }
 
   let result;
+  trace.stage = "generate";
   try {
     result = await generateSeyaReplyWithRetry({
       conversation: existing,
@@ -685,9 +907,14 @@ async function handleIncoming(supabase, incoming) {
       sendExtras,
     );
     if (fallbackSent.sent) {
-      next.messages = [...next.messages, message("seya", EMPTY_SEYA_REPLY)];
+      trace.sentTexts.push(EMPTY_SEYA_REPLY);
+      next.messages = [
+        ...next.messages,
+        { ...message("seya", EMPTY_SEYA_REPLY), delivery: "sent" },
+      ];
       next.sendError = null;
     }
+    trace.stage = "save";
     await writeSeyaConversations(supabase, center.id, [
       next,
       ...conversations.filter((item) => !isSameSeyaConversation(item, next)),
@@ -704,6 +931,18 @@ async function handleIncoming(supabase, incoming) {
   }
 
   const next = result.conversation;
+  if (recordedLead) {
+    const leadIndex = (next.messages || [])
+      .map((item) => item.author)
+      .lastIndexOf("lead");
+    if (leadIndex >= 0) {
+      next.messages[leadIndex] = {
+        ...next.messages[leadIndex],
+        id: recordedLead.id,
+        at: recordedLead.at,
+      };
+    }
+  }
   next.lastRelanceAt = next.lastRelanceAt || existing.lastRelanceAt;
   next.relanceCount = 0;
   next.welcomeSendAt = null;
@@ -846,17 +1085,24 @@ async function handleIncoming(supabase, incoming) {
   }
   Object.assign(next, replaceDraftWithSent(next, uniqueOutgoing));
 
+  trace.stage = "send";
   const sendResults = [];
   for (const text of uniqueOutgoing) {
-    sendResults.push(await sendWithRetry(incoming.phone, text, {
+    const sent = await sendWithRetry(incoming.phone, text, {
       ...sendExtras,
       treatment: next.qualification?.need || sendExtras.treatment,
-    }));
+    });
+    sendResults.push(sent);
+    if (sent?.sent) {
+      trace.sentTexts.push(text);
+    }
   }
+  next.messages = markDelivery(next.messages, sendResults);
   const failed = sendResults.find((item) => !item?.sent);
   next.sendError = failed
     ? deliveryAlert("send", failed.error || failed.reason)
     : null;
+  trace.stage = "save";
 
   const saved = persistableConversations([
     next,
@@ -883,8 +1129,10 @@ async function handleIncoming(supabase, incoming) {
     centerName: center.name,
     leadId: context.leadId,
     status: next.status,
+    route,
     booked: Boolean(result.shouldBook),
     sent: sendResults.length ? sendResults.every((item) => item?.sent) : false,
+    skipped: uniqueOutgoing.length ? undefined : "lead_pause",
     error: next.sendError || null,
   };
 }
@@ -1614,6 +1862,10 @@ async function sendSharedWhatsApp(phone, text, extras = {}) {
 }
 
 handler.sendSharedWhatsApp = sendSharedWhatsApp;
+handler.handleIncoming = handleIncoming;
+handler.processInbound = processInbound;
+handler.contextFromSeyaThread = contextFromSeyaThread;
+handler.markDelivery = markDelivery;
 handler.previewWelcomeTemplateText = previewWelcomeTemplateText;
 handler.outgoingWhatsAppTexts = outgoingWhatsAppTexts;
 handler.replaceDraftWithSent = replaceDraftWithSent;
