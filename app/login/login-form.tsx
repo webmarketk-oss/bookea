@@ -152,9 +152,18 @@ export function LoginForm({ initialError }: LoginFormProps) {
     setFeedback(null);
 
     markPasswordRecoveryPending();
-    const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
-      redirectTo: buildPasswordRecoveryRedirectTo(window.location.origin),
-    });
+    const sentByBookea = await fetch("/api/auth/password-reset", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: email.trim() }),
+    })
+      .then((response) => response.ok)
+      .catch(() => false);
+    const { error } = sentByBookea
+      ? { error: null }
+      : await supabase.auth.resetPasswordForEmail(email.trim(), {
+          redirectTo: buildPasswordRecoveryRedirectTo(window.location.origin),
+        });
 
     setLoading(false);
 
@@ -170,7 +179,9 @@ export function LoginForm({ initialError }: LoginFormProps) {
     setFeedback({
       type: "success",
       message:
-        "Si un compte existe avec cet email, un lien de réinitialisation vient d'être envoyé. Ouvrez-le sur cet appareil, puis choisissez un nouveau mot de passe.",
+        sentByBookea
+          ? "Si un compte existe avec cet email, un lien de réinitialisation vient d'être envoyé. Ouvrez-le, puis choisissez un nouveau mot de passe."
+          : "Si un compte existe avec cet email, un lien de réinitialisation vient d'être envoyé. Ouvrez-le sur cet appareil, puis choisissez un nouveau mot de passe.",
     });
   }
 

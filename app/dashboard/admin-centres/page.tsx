@@ -5,6 +5,7 @@ import {
   Building2,
   CheckCircle2,
   ExternalLink,
+  KeyRound,
   Loader2,
   Mail,
   MapPin,
@@ -142,6 +143,7 @@ export default function AdminCentresPage() {
   const [saving, setSaving] = useState(false);
   const [attachingCenterId, setAttachingCenterId] = useState<string | null>(null);
   const [removingMemberKey, setRemovingMemberKey] = useState<string | null>(null);
+  const [resettingEmail, setResettingEmail] = useState<string | null>(null);
   const [togglingCenterId, setTogglingCenterId] = useState<string | null>(null);
   const [creditingCenterId, setCreditingCenterId] = useState<string | null>(null);
   const [savingSeyaCenterId, setSavingSeyaCenterId] = useState<string | null>(null);
@@ -406,6 +408,35 @@ export default function AdminCentresPage() {
       return { ok: false as const, error: message };
     } finally {
       setAttachingCenterId(null);
+    }
+  }
+
+  async function handleSendPasswordReset(email: string) {
+    setResettingEmail(email);
+    setNotice(null);
+    try {
+      const response = await fetch("/api/auth/password-reset", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email }),
+      });
+      if (!response.ok) {
+        throw new Error("Lien de réinitialisation non envoyé. Réessayez dans un instant.");
+      }
+      setNotice({
+        type: "success",
+        message: `Lien de nouveau mot de passe envoyé à ${email}. Il fonctionne sur n’importe quel appareil pendant 1 heure.`,
+      });
+    } catch (error) {
+      setNotice({
+        type: "error",
+        message:
+          error instanceof Error
+            ? error.message
+            : "Lien de réinitialisation non envoyé.",
+      });
+    } finally {
+      setResettingEmail(null);
     }
   }
 
@@ -986,6 +1017,8 @@ export default function AdminCentresPage() {
                   center={center}
                   attaching={attachingCenterId === center.id}
                   removingMemberKey={removingMemberKey}
+                  resettingEmail={resettingEmail}
+                  onSendPasswordReset={handleSendPasswordReset}
                   toggling={togglingCenterId === center.id}
                   crediting={creditingCenterId === center.id}
                   savingSeya={savingSeyaCenterId === center.id}
@@ -1016,6 +1049,8 @@ function CenterCard({
   center,
   attaching,
   removingMemberKey,
+  resettingEmail,
+  onSendPasswordReset,
   toggling,
   crediting,
   savingSeya,
@@ -1030,6 +1065,8 @@ function CenterCard({
   center: CenterCardData;
   attaching: boolean;
   removingMemberKey: string | null;
+  resettingEmail: string | null;
+  onSendPasswordReset: (email: string) => void;
   toggling: boolean;
   crediting: boolean;
   savingSeya: boolean;
@@ -1265,6 +1302,22 @@ function CenterCard({
                       <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-medium text-blue-700">
                         {member.role}
                       </span>
+                      {member.email ? (
+                        <button
+                          type="button"
+                          disabled={resettingEmail === member.email}
+                          onClick={() => onSendPasswordReset(member.email)}
+                          className="grid h-8 w-8 place-items-center rounded-lg text-slate-400 transition hover:bg-blue-50 hover:text-blue-700 disabled:opacity-50"
+                          title="Envoyer un lien de nouveau mot de passe"
+                          aria-label={`Envoyer un lien de nouveau mot de passe à ${member.email}`}
+                        >
+                          {resettingEmail === member.email ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <KeyRound className="h-4 w-4" />
+                          )}
+                        </button>
+                      ) : null}
                       <button
                         type="button"
                         disabled={removing}
