@@ -283,15 +283,22 @@ function careLabelForFamily(family) {
 
 function welcomeTemplateNames(family) {
   if (family === "minceur") {
-    return ["seya_accueil_minceur"];
+    return ["seya_accueil_minceur", "seya_acceuil_minceur"];
   }
   if (family === "epilation") {
-    return ["seya_accueil_laser", "seya_accueil_epilation", "seya_accueil_epil"];
+    return [
+      "seya_accueil_laser",
+      "seya_acceuil_laser",
+      "seya_accueil_epilation",
+      "seya_accueil_epil",
+    ];
   }
   if (family === "visage") {
     return [
       "seya_visage_accueil",
+      "seya_visage_acceuil",
       "seya_accueil_visage",
+      "seya_acceuil_visage",
       "seya_accueil_hydrafacial",
     ];
   }
@@ -306,7 +313,7 @@ function isGenericWelcomeTemplate(name) {
 
 function templateFitsFamily(name, family) {
   const needle = normalizeCare(name);
-  if (!family) {
+  if (!family || /relance/.test(needle)) {
     return false;
   }
   if (family === "minceur") {

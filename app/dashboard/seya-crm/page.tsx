@@ -307,6 +307,7 @@ type WaTemplate = {
   status: string;
   language: string;
   variables: number;
+  body?: string;
 };
 
 const WA_STATUS_LABELS: Record<string, string> = {
@@ -359,20 +360,32 @@ function OfferMapCheck({
       : auto
         ? { ok: true, text: `1er WhatsApp automatique : ${auto.name} (approuvé)` }
         : { ok: false, text: "Aucun modèle WhatsApp approuvé pour ce soin." };
+  const sent = found?.status === "APPROVED" ? found : auto;
+  const preview = String(sent?.body || "")
+    .replace(/\{\{1\}\}/g, "[prénom]")
+    .replace(/\{\{2\}\}/g, "[centre]")
+    .replace(/\{\{3\}\}/g, "[offre]");
 
   return (
-    <div className="flex flex-wrap gap-2 text-[11px] font-semibold md:col-span-4">
-      {[soin, modele].map((item) => (
-        <span
-          key={item.text}
-          className={`rounded-full px-2.5 py-1 ${
-            item.ok ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-800"
-          }`}
-        >
-          {item.ok ? "✓ " : "⚠ "}
-          {item.text}
-        </span>
-      ))}
+    <div className="grid gap-2 md:col-span-4">
+      <div className="flex flex-wrap gap-2 text-[11px] font-semibold">
+        {[soin, modele].map((item) => (
+          <span
+            key={item.text}
+            className={`rounded-full px-2.5 py-1 ${
+              item.ok ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-800"
+            }`}
+          >
+            {item.ok ? "✓ " : "⚠ "}
+            {item.text}
+          </span>
+        ))}
+      </div>
+      {preview ? (
+        <p className="rounded-xl bg-white px-3 py-2 text-xs font-medium leading-5 text-slate-500">
+          {preview}
+        </p>
+      ) : null}
     </div>
   );
 }

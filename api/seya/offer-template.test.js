@@ -25,3 +25,21 @@ test("ligne d’offre Visage sans le mot visage dans le texte : reste un soin vi
   assert.equal(inferFamily(seya, "", "Visage"), "visage");
   assert.equal(inferFamily(seya, "Bilanscan360", ""), "minceur");
 });
+
+test("choix automatique avec les vrais modèles Meta : jamais un modèle de relance en 1er message", () => {
+  const { pickApprovedTemplate } = require("./care-family");
+  const meta = [
+    "seya_scan",
+    "seya_relance_laser_aissellesoffertes",
+    "seya_relance_minceur_bilan_offert",
+    "seya_relance_visage_bilan_offert",
+    "seya_acceuil_laser",
+    "seya_acceuil_minceur",
+    "seya_visage_acceuil",
+    "hello_world",
+  ].map((name) => ({ name, status: "APPROVED" }));
+  assert.equal(pickApprovedTemplate(meta, "minceur").name, "seya_acceuil_minceur");
+  assert.equal(pickApprovedTemplate(meta, "epilation").name, "seya_acceuil_laser");
+  assert.equal(pickApprovedTemplate(meta, "visage").name, "seya_visage_acceuil");
+  assert.equal(pickApprovedTemplate(meta, "minceur", "seya_scan").name, "seya_scan");
+});

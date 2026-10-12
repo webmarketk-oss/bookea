@@ -79,6 +79,10 @@ async function handler(req, res) {
           status: String(item.status || "").toUpperCase(),
           language: item.language || "",
           variables: templateVarCount(item),
+          body:
+            (item.components || []).find(
+              (part) => String(part.type || "").toUpperCase() === "BODY",
+            )?.text || "",
         })),
       });
     }
