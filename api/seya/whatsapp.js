@@ -121,6 +121,7 @@ async function handler(req, res) {
         campaign: payload.campaign,
         offerLabel: payload.offerLabel,
         family: payload.family,
+        templateName: payload.templateName,
         preferTemplate: Boolean(payload.preferTemplate),
       });
       return res.status(result.sent ? 200 : 409).json(result);

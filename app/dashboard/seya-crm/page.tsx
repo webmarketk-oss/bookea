@@ -35,6 +35,7 @@ import {
 import { applyCentreMessage } from "@/api/seya/conversation";
 import {
   careLabelForFamily,
+  findOfferMap,
   inferCareFamily,
   pickApprovedTemplate,
 } from "@/api/seya/care-family";
@@ -799,6 +800,12 @@ export default function SeyaCrmPage() {
           "",
         campaign: conversation.campaign || "",
         offerLabel: conversation.offerLabel || "",
+        templateName:
+          findOfferMap(
+            agentSettingsRef.current,
+            conversation.campaign || "",
+            conversation.treatment || "",
+          )?.template || "",
         preferTemplate,
       }),
     });
