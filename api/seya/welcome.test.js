@@ -309,3 +309,50 @@ test("plafond Seya : un fil existant continue", async () => {
   assert.equal(result.skipped, "scheduled");
   assert.equal(supabase.stored().seya.conversations.length, 1);
 });
+
+test("le 1er WhatsApp part avec le modèle choisi sur la ligne d’offre du centre", async () => {
+  const { sendDueWelcomes } = require("./welcome");
+  const now = new Date("2026-10-12T08:00:00Z");
+  const supabase = mockCenterClient({
+    whatsappAgentEnabled: true,
+    autoMessageOnNewLead: true,
+    offerMaps: [
+      { match: "Laser", label: "bilan laser + test offerts", template: "seya_accueil_laser_gaillard" },
+      { match: "minceur", label: "Bilan minceur complet + séance découverte offerts" },
+    ],
+    conversations: [
+      {
+        leadId: "lead-laser",
+        phone: "0612345678",
+        firstName: "Léa",
+        campaign: "Laser",
+        treatment: "Épilation définitive",
+        status: "À envoyer",
+        welcomeSendAt: now.toISOString(),
+        messages: [{ author: "seya", text: "Bonjour Léa, c’est Seya." }],
+      },
+      {
+        leadId: "lead-minceur",
+        phone: "0698765432",
+        firstName: "Anne",
+        campaign: "minceur",
+        treatment: "Soin minceur",
+        status: "À envoyer",
+        welcomeSendAt: now.toISOString(),
+        messages: [{ author: "seya", text: "Bonjour Anne, c’est Seya." }],
+      },
+    ],
+  });
+  const extras = {};
+  await sendDueWelcomes(
+    supabase,
+    { id: "center-gaillard", name: "JFG Clinic Gaillard" },
+    async (phone, _text, options) => {
+      extras[phone] = options;
+      return { sent: true, via: "template" };
+    },
+    now,
+  );
+  assert.equal(extras["0612345678"].templateName, "seya_accueil_laser_gaillard");
+  assert.equal(extras["0698765432"].templateName, "");
+});

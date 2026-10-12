@@ -736,8 +736,10 @@ function inferFamily(seya, campaign, treatment) {
   if (fromCampaign) {
     return fromCampaign;
   }
-  const offer = resolveOfferLabel(seya, campaign, treatment);
-  const fromOffer = familyFromTreatment(offer);
+  const offer = findOfferMap(agentSettings(seya), campaign, treatment);
+  const fromOffer = familyFromTreatment(
+    offer ? `${offer.label || ""} ${offer.match || ""}` : "",
+  );
   if (fromOffer) {
     return fromOffer;
   }

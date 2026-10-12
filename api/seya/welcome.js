@@ -1,4 +1,5 @@
 const { familyFromTreatment, inferFamily, persistableConversations, startConversation } = require("./agent");
+const { findOfferMap } = require("./care-family");
 const { isSameSeyaConversation } = require("./conversation-key");
 const {
   isNewSeyaConversationBlocked,
@@ -151,6 +152,7 @@ async function sendDueWelcomes(
       familyFromTreatment(
         `${updated.campaign || ""} ${updated.treatment || ""} ${updated.offerLabel || ""}`,
       );
+    const offerMap = findOfferMap(again.seya, updated.campaign, updated.treatment);
     const result = await sendWhatsApp(updated.phone, opening, {
       firstName: updated.firstName,
       centerName: center.name,
@@ -158,6 +160,7 @@ async function sendDueWelcomes(
       campaign: updated.campaign || "",
       offerLabel: updated.offerLabel || "",
       family,
+      templateName: offerMap?.template || "",
       preferTemplate: true,
     });
 

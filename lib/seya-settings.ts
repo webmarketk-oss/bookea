@@ -103,6 +103,7 @@ export type SeyaTreatmentBrief = {
 export type SeyaOfferMap = {
   match: string;
   label: string;
+  template?: string;
 };
 
 export type SeyaCenterProfile = {
@@ -857,11 +858,13 @@ function normalizeOfferMaps(value?: SeyaOfferMap[] | null) {
   for (const item of value) {
     const match = String(item?.match || "").trim();
     const label = String(item?.label || "").trim();
+    const template = String(item?.template || "").trim();
+    const row = template ? { match, label, template } : { match, label };
     if (!match) {
-      emptyRows.push({ match: "", label });
+      emptyRows.push({ ...row, match: "" });
       continue;
     }
-    merged.set(normalizeTreatmentName(match), { match, label });
+    merged.set(normalizeTreatmentName(match), row);
   }
   return [...merged.values(), ...emptyRows];
 }

@@ -321,10 +321,17 @@ function templateFitsFamily(name, family) {
   return false;
 }
 
-function pickApprovedTemplate(templates, family) {
+function pickApprovedTemplate(templates, family, templateName = "") {
   const approved = (Array.isArray(templates) ? templates : []).filter(
     (item) => String(item?.status || "").toUpperCase() === "APPROVED",
   );
+  const wanted = String(templateName || "").trim();
+  if (wanted) {
+    const chosen = approved.find((item) => item.name === wanted);
+    if (chosen) {
+      return chosen;
+    }
+  }
   const preferred = welcomeTemplateNames(family);
   for (const name of preferred) {
     const exact = approved.find((item) => item.name === name);
@@ -402,7 +409,7 @@ function findOfferMap(seya, ...parts) {
     }
     if (score > bestScore) {
       bestScore = score;
-      best = { match, label };
+      best = { match, label, template: String(item?.template || "").trim() };
     }
   }
   return best;

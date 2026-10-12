@@ -34,6 +34,11 @@ import {
 } from "@/lib/seya-agent";
 import { applyCentreMessage } from "@/api/seya/conversation";
 import {
+  careLabelForFamily,
+  inferCareFamily,
+  pickApprovedTemplate,
+} from "@/api/seya/care-family";
+import {
   changedSeyaSettingKeys,
   defaultSeyaAgentSettings,
   emptySeyaCenterProfile,
@@ -297,6 +302,81 @@ function prefersWelcomeTemplate(conversation: SeyaConversation, _text: string) {
   return !(conversation.messages || []).some((item) => item.author === "lead");
 }
 
+type WaTemplate = {
+  name: string;
+  status: string;
+  language: string;
+  variables: number;
+};
+
+const WA_STATUS_LABELS: Record<string, string> = {
+  PENDING: "en attente de validation Meta",
+  REJECTED: "refusé par Meta",
+  PAUSED: "en pause chez Meta",
+  DISABLED: "désactivé chez Meta",
+};
+
+function OfferMapCheck({
+  offer,
+  briefs,
+  templates,
+}: {
+  offer: { match: string; label: string; template?: string };
+  briefs: { name: string }[];
+  templates: WaTemplate[] | null;
+}) {
+  if (!offer.match.trim()) {
+    return null;
+  }
+  const family = inferCareFamily(`${offer.label} ${offer.match}`);
+  const brief = family
+    ? briefs.find((item) => inferCareFamily(item.name) === family)
+    : null;
+  const wanted = String(offer.template || "").trim();
+  const found = wanted ? templates?.find((item) => item.name === wanted) : null;
+  const auto = templates ? pickApprovedTemplate(templates, family) : null;
+
+  const soin = !family
+    ? { ok: false, text: "Soin non reconnu : ajoute minceur, laser ou visage dans le texte." }
+    : !brief
+      ? { ok: false, text: `${careLabelForFamily(family)} : aucune fiche soin correspondante plus bas.` }
+      : { ok: true, text: `${careLabelForFamily(family)} → fiche « ${brief.name} »` };
+
+  const modele = !templates
+    ? { ok: false, text: "Modèles WhatsApp non vérifiés (Meta injoignable)." }
+    : wanted
+      ? !found
+        ? {
+            ok: false,
+            text: `« ${wanted} » introuvable chez Meta${auto ? ` : ${auto.name} partira à la place` : ""}.`,
+          }
+        : found.status !== "APPROVED"
+          ? {
+              ok: false,
+              text: `« ${wanted} » ${WA_STATUS_LABELS[found.status] || found.status.toLowerCase()}${auto ? ` : ${auto.name} partira en attendant` : ""}.`,
+            }
+          : { ok: true, text: `1er WhatsApp : ${wanted} (approuvé)` }
+      : auto
+        ? { ok: true, text: `1er WhatsApp automatique : ${auto.name} (approuvé)` }
+        : { ok: false, text: "Aucun modèle WhatsApp approuvé pour ce soin." };
+
+  return (
+    <div className="flex flex-wrap gap-2 text-[11px] font-semibold md:col-span-4">
+      {[soin, modele].map((item) => (
+        <span
+          key={item.text}
+          className={`rounded-full px-2.5 py-1 ${
+            item.ok ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-800"
+          }`}
+        >
+          {item.ok ? "✓ " : "⚠ "}
+          {item.text}
+        </span>
+      ))}
+    </div>
+  );
+}
+
 export default function SeyaCrmPage() {
   const [tasks, setTasks] = useState<SeyaTask[]>([]);
   const [prompt, setPrompt] = useState(
@@ -332,6 +412,7 @@ export default function SeyaCrmPage() {
     formatSharedWhatsAppNumber(BOOKEA_SHARED_WHATSAPP_NUMBER),
   );
   const [whatsappConnected, setWhatsappConnected] = useState(false);
+  const [waTemplates, setWaTemplates] = useState<WaTemplate[] | null>(null);
   const [replying, setReplying] = useState(false);
   const [notifyTesting, setNotifyTesting] = useState(false);
   const [notifyFeedback, setNotifyFeedback] = useState("");
@@ -523,6 +604,14 @@ export default function SeyaCrmPage() {
             : "Numéro Bookea unique",
         );
         setWhatsappConnected(Boolean(payload?.connected));
+      })
+      .catch(() => null);
+    void fetch("/api/seya/whatsapp?templates=1")
+      .then((response) => response.json())
+      .then((payload) => {
+        if (!cancelled && payload?.ok && Array.isArray(payload.templates)) {
+          setWaTemplates(payload.templates as WaTemplate[]);
+        }
       })
       .catch(() => null);
 
@@ -1420,12 +1509,14 @@ export default function SeyaCrmPage() {
             Laisse 1 ligne par code campagne (99€, 49€, offert…). Ces lignes
             valent seulement pour ce centre : Gap ne reprend jamais Clermont.
             Ne clique pas « Ajouter une offre » pour le prix : ça va plus bas.
+            Modèle WA : nom exact du modèle Meta du 1er message ({"{{1}}"} prénom,{" "}
+            {"{{2}}"} centre, {"{{3}}"} offre). Vide = choisi selon le soin.
           </p>
           <div className="mt-3 grid gap-3">
             {agentSettings.offerMaps.map((item, index) => (
               <div
                 key={`${item.match}-${index}`}
-                className="grid gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4 md:grid-cols-[180px_1fr_auto]"
+                className="grid gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4 md:grid-cols-[180px_1fr_220px_auto]"
               >
                 <input
                   value={item.match}
@@ -1459,6 +1550,23 @@ export default function SeyaCrmPage() {
                   placeholder="bilan + séance découverte offerte"
                   className="h-11 min-w-0 rounded-2xl border border-slate-200 bg-white px-3 text-sm font-medium outline-none focus:border-violet-500"
                 />
+                <input
+                  value={item.template || ""}
+                  onChange={(event) =>
+                    setAgentSettings((current) => ({
+                      ...current,
+                      offerMaps: current.offerMaps.map((offer, offerIndex) =>
+                        offerIndex === index
+                          ? { ...offer, template: event.target.value.trim() }
+                          : offer,
+                      ),
+                    }))
+                  }
+                  onBlur={persistCurrentAgentSettings}
+                  placeholder="modèle WA (ex. seya_accueil_minceur)"
+                  title="Nom exact du modèle WhatsApp envoyé en premier message pour cette offre"
+                  className="h-11 min-w-0 rounded-2xl border border-slate-200 bg-white px-3 font-mono text-xs font-medium outline-none focus:border-violet-500"
+                />
                 <button
                   type="button"
                   onMouseDown={(event) => event.preventDefault()}
@@ -1467,6 +1575,11 @@ export default function SeyaCrmPage() {
                 >
                   Retirer
                 </button>
+                <OfferMapCheck
+                  offer={item}
+                  briefs={agentSettings.treatmentBriefs}
+                  templates={waTemplates}
+                />
               </div>
             ))}
           </div>

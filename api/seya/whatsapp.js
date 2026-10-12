@@ -70,6 +70,19 @@ async function handler(req, res) {
       return res.status(200).send(challenge);
     }
 
+    if (firstQueryValue(req.query.templates)) {
+      const listed = await listTemplates().catch(() => ({ templates: [], error: true }));
+      return res.status(200).json({
+        ok: !listed.error,
+        templates: listed.templates.map((item) => ({
+          name: item.name,
+          status: String(item.status || "").toUpperCase(),
+          language: item.language || "",
+          variables: templateVarCount(item),
+        })),
+      });
+    }
+
     let graph = null;
     try {
       graph = await diagnoseGraph();
@@ -1452,7 +1465,7 @@ function pickWelcomeTemplate(templates, extras) {
     inferCareFamily(
       `${extras.treatment || ""} ${extras.campaign || ""} ${extras.offerLabel || ""}`,
     );
-  return pickApprovedTemplate(templates, family);
+  return pickApprovedTemplate(templates, family, extras.templateName);
 }
 
 async function sendTemplateMessage(phoneNumberId, token, intl, template, vars) {
