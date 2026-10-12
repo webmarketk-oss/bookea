@@ -813,6 +813,8 @@ export default function SeyaCrmPage() {
       sent?: boolean;
       reason?: string;
       error?: string;
+      via?: string;
+      text?: string;
     };
   }
 
@@ -832,6 +834,7 @@ export default function SeyaCrmPage() {
   async function deliverWhatsAppTexts(
     conversation: SeyaConversation,
     texts: string[],
+    onTemplateText?: (draft: string, sent: string) => void,
   ) {
     if (!conversation.phone.trim()) {
       setAgentFeedback("Ce prospect n’a pas de numéro WhatsApp.");
@@ -864,6 +867,9 @@ export default function SeyaCrmPage() {
           setAgentFeedback(explainWhatsAppFailure(payload));
           return false;
         }
+        if (payload.via === "template" && payload.text?.trim()) {
+          onTemplateText?.(text, payload.text.trim());
+        }
       }
       setAgentFeedback(
         `Message envoyé depuis ${formatSharedWhatsAppNumber()} (Bookea).`,
@@ -882,13 +888,23 @@ export default function SeyaCrmPage() {
       return;
     }
 
-    const sent = await deliverWhatsAppTexts(conversation, [message.text]);
+    let sentText = message.text;
+    const sent = await deliverWhatsAppTexts(
+      conversation,
+      [message.text],
+      (_draft, templateText) => {
+        sentText = templateText;
+      },
+    );
     if (!sent) {
       return;
     }
 
     const next: SeyaConversation = {
       ...conversation,
+      messages: conversation.messages.map((item) =>
+        item.id === message.id ? { ...item, text: sentText } : item,
+      ),
       status: conversation.status === "À envoyer" ? "En cours" : conversation.status,
       sendError: null,
       sentVia: "whatsapp",
@@ -900,7 +916,7 @@ export default function SeyaCrmPage() {
     try {
       await addCrmLeadActivity(
         conversation.leadId,
-        `Seya WhatsApp : ${message.text}`,
+        `Seya WhatsApp : ${sentText}`,
       );
       await updateCrmLeadNextAction(conversation.leadId, "Agent Seya WhatsApp");
       if (lead && lead.status === "Nouveau") {

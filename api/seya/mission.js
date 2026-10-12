@@ -150,11 +150,11 @@ function welcomeRelanceHandoffReply() {
 
 function fillRelanceTemplate(template, vars) {
   return String(template || "")
-    .replace(/\{prenom\}/gi, vars.prenom || "")
+    .replace(/\{prenom\}|\[pr[ée]nom\]/gi, vars.prenom || "")
     .replace(/\{firstName\}/gi, vars.prenom || "")
-    .replace(/\{centre\}/gi, vars.centre || "")
+    .replace(/\{centre\}|\[centre\]/gi, vars.centre || "")
     .replace(/\{center\}/gi, vars.centre || "")
-    .replace(/\{offre\}/gi, vars.offre || "")
+    .replace(/\{offre\}|\[offre\]/gi, vars.offre || "")
     .replace(/\{offer\}/gi, vars.offre || "")
     .replace(/Bonjour\s+,/g, "Bonjour,")
     .replace(/  +/g, " ")

@@ -43,3 +43,24 @@ test("choix automatique avec les vrais modèles Meta : jamais un modèle de rela
   assert.equal(pickApprovedTemplate(meta, "visage").name, "seya_visage_acceuil");
   assert.equal(pickApprovedTemplate(meta, "minceur", "seya_scan").name, "seya_scan");
 });
+
+test("premier message collé depuis l’aperçu : [prénom] et [centre] sont remplacés", () => {
+  const { startConversation } = require("./agent");
+  const seya = {
+    treatmentBriefs: [
+      {
+        name: "Soin minceur",
+        opening: "Bonjour [prénom] 😊 Ici Seya AI du centre [centre]. Et si c’était le bon moment pour reprendre votre projet minceur ?",
+      },
+    ],
+  };
+  const conversation = startConversation(
+    { leadId: "l1", firstName: "Karine", phone: "0612345678", treatment: "Soin minceur", campaign: "Relance minceur" },
+    "JFG Clinic Gaillard",
+    seya,
+  );
+  const text = conversation.messages[0].text;
+  assert.doesNotMatch(text, /\[pr[ée]nom\]|\[centre\]/);
+  assert.match(text, /Karine/);
+  assert.match(text, /JFG Clinic Gaillard/);
+});

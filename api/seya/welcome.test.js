@@ -131,6 +131,38 @@ test("au bout de 4 min le message part, pas avant", async () => {
   assert.equal(supabase.stored().seya.conversations[0].welcomeSendAt, null);
 });
 
+test("dès l’import, le CRM affiche le texte du modèle de la ligne d’offre", async () => {
+  const supabase = mockCenterClient({
+    whatsappAgentEnabled: true,
+    autoMessageOnNewLead: true,
+    offerMaps: [
+      { match: "Relance minceur", label: "bilan offert", template: "seya_relance_minceur_bilan_offert" },
+    ],
+    conversations: [],
+  });
+  const asked = [];
+  await welcomeNewLead(
+    supabase,
+    { id: "center-1", name: "JFG Clinic Gaillard" },
+    {
+      leadId: "lead-1",
+      phone: "0612345678",
+      firstName: "Nora",
+      treatment: "Soin minceur",
+      campaign: "Relance minceur",
+    },
+    new Date("2026-09-29T08:00:00Z"),
+    async (extras) => {
+      asked.push(extras.templateName);
+      return `Bonjour ${extras.firstName} 😊 Ici Seya AI du centre ${extras.centerName}.`;
+    },
+  );
+  assert.deepEqual(asked, ["seya_relance_minceur_bilan_offert"]);
+  const [queued] = supabase.stored().seya.conversations;
+  const seyaTexts = queued.messages.filter((item) => item.author === "seya").map((item) => item.text);
+  assert.deepEqual(seyaTexts, ["Bonjour Nora 😊 Ici Seya AI du centre JFG Clinic Gaillard."]);
+});
+
 test("le CRM affiche le texte du modèle WhatsApp réellement envoyé", async () => {
   const { sendDueWelcomes } = require("./welcome");
   const now = new Date("2026-09-29T08:00:00Z");

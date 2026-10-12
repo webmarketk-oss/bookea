@@ -1521,6 +1521,15 @@ async function sendTemplateMessage(phoneNumberId, token, intl, template, vars) {
   return sendGraphMessage(phoneNumberId, token, body);
 }
 
+async function previewWelcomeTemplateText(extras = {}) {
+  if (!process.env.WHATSAPP_TOKEN || !process.env.WHATSAPP_PHONE_NUMBER_ID) {
+    return "";
+  }
+  const listed = await listTemplates();
+  const template = pickWelcomeTemplate(listed.templates, extras);
+  return template ? renderTemplateText(template, welcomeTemplateVars(extras)).trim() : "";
+}
+
 async function sendSharedWhatsApp(phone, text, extras = {}) {
   const token = process.env.WHATSAPP_TOKEN;
   const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID;
@@ -1605,6 +1614,7 @@ async function sendSharedWhatsApp(phone, text, extras = {}) {
 }
 
 handler.sendSharedWhatsApp = sendSharedWhatsApp;
+handler.previewWelcomeTemplateText = previewWelcomeTemplateText;
 handler.outgoingWhatsAppTexts = outgoingWhatsAppTexts;
 handler.replaceDraftWithSent = replaceDraftWithSent;
 handler.holdOutgoingAfterPause = holdOutgoingAfterPause;

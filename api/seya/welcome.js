@@ -8,7 +8,7 @@ const {
   readCenterSeya,
   writeSeyaConversations,
 } = require("./store");
-const { sendSharedWhatsApp } = require("./whatsapp");
+const { previewWelcomeTemplateText, sendSharedWhatsApp } = require("./whatsapp");
 const {
   markLeadWhatsAppSent,
   markMessagedNouveauLeads,
@@ -17,7 +17,13 @@ const {
 const ACTIVE_THREAD_HOURS = 24;
 const WELCOME_DELAY_MS = 4 * 60 * 1000;
 
-async function welcomeNewLead(supabase, center, context, now = new Date()) {
+async function welcomeNewLead(
+  supabase,
+  center,
+  context,
+  now = new Date(),
+  previewTemplate = previewWelcomeTemplateText,
+) {
   if (!center?.id || !context?.phone) {
     return { sent: false, skipped: "no_phone" };
   }
@@ -62,6 +68,17 @@ async function welcomeNewLead(supabase, center, context, now = new Date()) {
     center.name,
     seya,
   );
+  const draft = [...(started.messages || [])]
+    .reverse()
+    .find((item) => item.author === "seya")?.text;
+  const preview = draft
+    ? await Promise.resolve(
+        previewTemplate(welcomeTemplateExtras(seya, started, center)),
+      ).catch(() => "")
+    : "";
+  if (preview) {
+    started.messages = replaceLastSeyaText(started.messages, draft, preview);
+  }
   const sendAt = new Date(now.getTime() + WELCOME_DELAY_MS).toISOString();
   const next = {
     ...started,
@@ -147,20 +164,8 @@ async function sendDueWelcomes(
       continue;
     }
 
-    const family =
-      inferFamily(again.seya, updated.campaign, updated.treatment) ||
-      familyFromTreatment(
-        `${updated.campaign || ""} ${updated.treatment || ""} ${updated.offerLabel || ""}`,
-      );
-    const offerMap = findOfferMap(again.seya, updated.campaign, updated.treatment);
     const result = await sendWhatsApp(updated.phone, opening, {
-      firstName: updated.firstName,
-      centerName: center.name,
-      treatment: updated.offerLabel || updated.treatment || "",
-      campaign: updated.campaign || "",
-      offerLabel: updated.offerLabel || "",
-      family,
-      templateName: offerMap?.template || "",
+      ...welcomeTemplateExtras(again.seya, updated, center),
       preferTemplate: true,
     });
 
@@ -209,6 +214,24 @@ async function sendDueWelcomes(
   await markMessagedNouveauLeads(supabase, center.id, nextConversations);
 
   return sent;
+}
+
+function welcomeTemplateExtras(seya, conversation, center) {
+  const family =
+    inferFamily(seya, conversation.campaign, conversation.treatment) ||
+    familyFromTreatment(
+      `${conversation.campaign || ""} ${conversation.treatment || ""} ${conversation.offerLabel || ""}`,
+    );
+  const offerMap = findOfferMap(seya, conversation.campaign, conversation.treatment);
+  return {
+    firstName: conversation.firstName,
+    centerName: center.name,
+    treatment: conversation.offerLabel || conversation.treatment || "",
+    campaign: conversation.campaign || "",
+    offerLabel: conversation.offerLabel || "",
+    family,
+    templateName: offerMap?.template || "",
+  };
 }
 
 function replaceLastSeyaText(messages, previousText, text) {

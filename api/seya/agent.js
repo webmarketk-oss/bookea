@@ -806,13 +806,14 @@ function defaultOpeningForFamily(family, mission) {
 
 function fillOpening(template, vars) {
   return String(template || "")
-    .replace(/\{prenom\}/gi, vars.prenom)
+    .replace(/\{prenom\}|\[pr[ée]nom\]/gi, vars.prenom)
     .replace(/\{firstName\}/gi, vars.prenom)
-    .replace(/\{centre\}/gi, vars.centre)
+    .replace(/\{centre\}|\[centre\]/gi, vars.centre)
     .replace(/\{center\}/gi, vars.centre)
-    .replace(/\{offre\}/gi, vars.offre || "")
+    .replace(/\{offre\}|\[offre\]/gi, vars.offre || "")
     .replace(/\{offer\}/gi, vars.offre || "")
     .replace(/Bonjour\s+,/g, "Bonjour,")
+    .replace(/Bonjour\s+😊/g, "Bonjour 😊")
     .replace(/\(\s*\)/g, "")
     .replace(/ pour \./g, ".")
     .replace(/demande pour\s+\./gi, "demande.")
