@@ -1473,16 +1473,32 @@ function pickWelcomeTemplate(templates, extras) {
   return pickApprovedTemplate(templates, family, extras.templateName);
 }
 
-async function sendTemplateMessage(phoneNumberId, token, intl, template, vars) {
+function templateParameters(template, vars) {
   const count = templateVarCount(template);
   const parameters = [vars.firstName, vars.centerName, vars.treatment]
     .map((value) => String(value || "").trim())
     .filter(Boolean);
-  const padded = [
+  return [
     parameters[0] || "bonjour",
     parameters[1] || "notre centre",
     parameters[2] || "votre soin",
   ].slice(0, Math.max(count, 0));
+}
+
+function renderTemplateText(template, vars) {
+  const body = (template?.components || []).find(
+    (item) => String(item.type || "").toUpperCase() === "BODY",
+  );
+  const params = templateParameters(template, vars);
+  return String(body?.text || "").replace(
+    /\{\{(\d+)\}\}/g,
+    (match, index) => params[Number(index) - 1] ?? match,
+  );
+}
+
+async function sendTemplateMessage(phoneNumberId, token, intl, template, vars) {
+  const count = templateVarCount(template);
+  const padded = templateParameters(template, vars);
 
   const body = {
     messaging_product: "whatsapp",
@@ -1573,6 +1589,7 @@ async function sendSharedWhatsApp(phone, text, extras = {}) {
       id: templateResult.data?.messages?.[0]?.id || null,
       via: "template",
       template: template.name,
+      text: renderTemplateText(template, vars),
       to: intl,
     };
   }

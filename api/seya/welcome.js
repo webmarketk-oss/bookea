@@ -165,6 +165,13 @@ async function sendDueWelcomes(
     });
 
     if (result.sent) {
+      if (result.via === "template" && String(result.text || "").trim()) {
+        updated.messages = replaceLastSeyaText(
+          updated.messages,
+          opening,
+          String(result.text).trim(),
+        );
+      }
       updated.status = "En cours";
       updated.welcomeSendAt = null;
       updated.sendError = null;
@@ -182,7 +189,7 @@ async function sendDueWelcomes(
           center_id: center.id,
           lead_id: updated.leadId,
           event_type: "system",
-          note: `Seya a envoyé le premier WhatsApp (${result.via || "whatsapp"}), 4 min après l’inscription.`,
+          note: `Seya a envoyé le premier WhatsApp (${result.template ? `modèle ${result.template}` : result.via || "whatsapp"}), 4 min après l’inscription.`,
         });
       }
     } else {
@@ -202,6 +209,17 @@ async function sendDueWelcomes(
   await markMessagedNouveauLeads(supabase, center.id, nextConversations);
 
   return sent;
+}
+
+function replaceLastSeyaText(messages, previousText, text) {
+  const list = [...(messages || [])];
+  for (let index = list.length - 1; index >= 0; index -= 1) {
+    if (list[index]?.author === "seya" && list[index].text === previousText) {
+      list[index] = { ...list[index], text };
+      break;
+    }
+  }
+  return list;
 }
 
 function isPendingWelcome(conversation) {

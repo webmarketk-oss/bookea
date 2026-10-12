@@ -131,6 +131,49 @@ test("au bout de 4 min le message part, pas avant", async () => {
   assert.equal(supabase.stored().seya.conversations[0].welcomeSendAt, null);
 });
 
+test("le CRM affiche le texte du modèle WhatsApp réellement envoyé", async () => {
+  const { sendDueWelcomes } = require("./welcome");
+  const now = new Date("2026-09-29T08:00:00Z");
+  const supabase = mockCenterClient({
+    whatsappAgentEnabled: true,
+    autoMessageOnNewLead: true,
+    conversations: [
+      {
+        leadId: "lead-1",
+        phone: "0612345678",
+        firstName: "Léa",
+        campaign: "Relance minceur",
+        status: "À envoyer",
+        welcomeSendAt: now.toISOString(),
+        messages: [
+          {
+            id: "m1",
+            author: "seya",
+            at: now.toISOString(),
+            text: "Bonjour Léa, vous avez fait une demande pour notre offre.",
+          },
+        ],
+      },
+    ],
+  });
+  await sendDueWelcomes(
+    supabase,
+    { id: "center-1", name: "JFG" },
+    async () => ({
+      sent: true,
+      via: "template",
+      template: "seya_relance_minceur_bilan_offert",
+      text: "Bonjour Léa 😊 Ici Seya AI du centre JFG. Vous nous aviez contactés il y a quelque temps.",
+    }),
+    now,
+  );
+  const [stored] = supabase.stored().seya.conversations;
+  assert.equal(
+    stored.messages[0].text,
+    "Bonjour Léa 😊 Ici Seya AI du centre JFG. Vous nous aviez contactés il y a quelque temps.",
+  );
+});
+
 test("un lead n’est pas contacté si Seya est off en base, même si le webhook a un vieux settings", async () => {
   const supabase = mockCenterClient({
     whatsappAgentEnabled: false,

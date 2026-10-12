@@ -144,7 +144,7 @@ function messageKey(item) {
 }
 
 function mergeMessageLists(left, right) {
-  const seen = new Set();
+  const seen = new Map();
   const merged = [];
   for (const item of [...(left || []), ...(right || [])]) {
     if (!item || typeof item !== "object") {
@@ -152,9 +152,12 @@ function mergeMessageLists(left, right) {
     }
     const key = messageKey(item);
     if (seen.has(key)) {
+      if (item.id) {
+        merged[seen.get(key)] = item;
+      }
       continue;
     }
-    seen.add(key);
+    seen.set(key, merged.length);
     merged.push(item);
   }
   return merged.sort((a, b) => String(a.at || "").localeCompare(String(b.at || "")));
