@@ -5,10 +5,7 @@ const {
 const { conversationsForCenter } = require("./center-route");
 const { missionForcesWelcome } = require("./mission");
 const { periodConversationCount } = require("../billing/_renewal");
-
-function asRecord(value) {
-  return value && typeof value === "object" ? value : {};
-}
+const { asRecord, patchCenterSeya } = require("./settings-write");
 
 function isExplicitFalse(value) {
   return value === false || value === "false" || value === 0 || value === "0";
@@ -98,30 +95,20 @@ function isNewSeyaConversationBlocked(settings, conversations, existing) {
 }
 
 async function writeSeyaConversations(supabase, centerId, conversations) {
-  const { settings, seya } = await readCenterSeya(supabase, centerId);
-  const existing = Array.isArray(seya.conversations) ? seya.conversations : [];
-  const next = persistableConversations(
-    mergeSeyaConversationLists(
-      conversationsForCenter(existing, centerId),
-      conversationsForCenter(conversations, centerId),
-    ),
-  );
-  const { error } = await supabase
-    .from("centers")
-    .update({
-      settings: {
-        ...settings,
-        seya: {
-          ...seya,
-          conversations: next,
-        },
-      },
-    })
-    .eq("id", centerId);
-  if (error) {
-    throw new Error(error.message);
-  }
-  return seya;
+  const result = await patchCenterSeya(supabase, centerId, (seya) => {
+    const existing = Array.isArray(seya.conversations) ? seya.conversations : [];
+    const next = persistableConversations(
+      mergeSeyaConversationLists(
+        conversationsForCenter(existing, centerId),
+        conversationsForCenter(conversations, centerId),
+      ),
+    );
+    return {
+      ...seya,
+      conversations: next,
+    };
+  });
+  return asRecord(result.settings.seya);
 }
 
 module.exports = {

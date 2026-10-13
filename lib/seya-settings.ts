@@ -20,6 +20,8 @@ import {
   normalizeSeyaRelances,
   resolveSeyaMission as resolveSeyaMissionFromRecord,
 } from "@/api/seya/mission";
+import { mergeTreatmentBriefLists as mergeTreatmentBriefListsFromPatch } from "@/api/seya/settings-patch";
+import { mutateCenterSettings } from "@/api/seya/settings-write";
 import { getActiveCenterContext } from "@/lib/center-access";
 import { sanitizePersonName } from "@/lib/seya-person-name";
 import { createClient } from "@/lib/supabase";
@@ -1082,24 +1084,32 @@ export async function saveSeyaConversations(
     return remoteConversations;
   }
   writeLocalSeyaConversations(context.centerId, next, { notify: false });
-  const { error } = await supabase
-    .from("centers")
-    .update({
-      settings: {
-        ...currentSettings,
-        seya: {
-          ...currentSeya,
-          conversations: next,
-        },
+  let saved = next;
+  await mutateCenterSettings(supabase, context.centerId, (latestSettings) => {
+    assertExpectedCenter(expectedCenterId, context.centerId);
+    const latestSeya = asRecord(latestSettings.seya);
+    const remoteConversations = Array.isArray(latestSeya.conversations)
+      ? (latestSeya.conversations as SeyaConversation[])
+      : [];
+    saved = filterOwnedConversations(
+      mergeSeyaConversations(remoteConversations, conversations),
+      context.centerId,
+      ownedPhones,
+    );
+    if (saved.length === 0 && remoteConversations.length > 0 && ownedPhones.size === 0) {
+      saved = remoteConversations;
+      return latestSettings;
+    }
+    return {
+      ...latestSettings,
+      seya: {
+        ...latestSeya,
+        conversations: saved,
       },
-    })
-    .eq("id", context.centerId);
+    };
+  });
 
-  if (error) {
-    throw new Error(error.message);
-  }
-
-  return next;
+  return saved;
 }
 
 export function changedSeyaSettingKeys(
@@ -1111,6 +1121,13 @@ export function changedSeyaSettingKeys(
   );
 }
 
+export function mergeTreatmentBriefLists(
+  remote: SeyaTreatmentBrief[] | null | undefined,
+  incoming: SeyaTreatmentBrief[] | null | undefined,
+) {
+  return mergeTreatmentBriefListsFromPatch(remote, incoming) as SeyaTreatmentBrief[];
+}
+
 export function mergeSeyaSettingsPatch(
   remote: Partial<SeyaAgentSettings> | null,
   settings: SeyaAgentSettings,
@@ -1119,11 +1136,20 @@ export function mergeSeyaSettingsPatch(
   if (!changedKeys) {
     return normalizeSeyaAgentSettings(settings);
   }
+  const base = bindSeyaSettingsToCenter(remote, null);
   const patch = Object.fromEntries(
-    changedKeys.map((key) => [key, settings[key]]),
+    changedKeys.map((key) => {
+      if (key === "treatmentBriefs") {
+        return [
+          key,
+          mergeTreatmentBriefLists(base.treatmentBriefs, settings.treatmentBriefs),
+        ];
+      }
+      return [key, settings[key]];
+    }),
   ) as Partial<SeyaAgentSettings>;
   return normalizeSeyaAgentSettings({
-    ...bindSeyaSettingsToCenter(remote, null),
+    ...base,
     ...patch,
   });
 }
@@ -1137,37 +1163,29 @@ export async function saveSeyaAgentSettings(
   assertExpectedCenter(expectedCenterId, context.centerId);
 
   const supabase = createClient();
-  const { data, error: readError } = await supabase
-    .from("centers")
-    .select("settings")
-    .eq("id", context.centerId)
-    .maybeSingle();
-  if (readError || !data) {
-    throw new Error(readError?.message || "Centre introuvable.");
-  }
-
-  const currentSettings = asRecord(data.settings);
-  const currentSeya = asRecord(currentSettings.seya);
-  const nextSettings = mergeSeyaSettingsPatch(
-    currentSettings.seya ? (currentSeya as Partial<SeyaAgentSettings>) : null,
-    settings,
-    changedKeys,
-  );
-  writeLocalSeyaSettings(context.centerId, nextSettings);
-  const { error } = await supabase.from("centers").update({
-    settings: {
+  let nextSettings: SeyaAgentSettings | null = null;
+  await mutateCenterSettings(supabase, context.centerId, (currentSettings) => {
+    const currentSeya = asRecord(currentSettings.seya);
+    nextSettings = mergeSeyaSettingsPatch(
+      currentSettings.seya ? (currentSeya as Partial<SeyaAgentSettings>) : null,
+      settings,
+      changedKeys,
+    );
+    return {
       ...currentSettings,
-        seya: {
-          ...currentSeya,
-          ...nextSettings,
-          conversations: currentSeya.conversations,
-        },
-    },
-  }).eq("id", context.centerId);
+      seya: {
+        ...currentSeya,
+        ...nextSettings,
+        // Toujours garder les conversations lues à cet instant (pas une copie périmée).
+        conversations: currentSeya.conversations,
+      },
+    };
+  });
 
-  if (error) {
-    throw new Error(error.message);
+  if (!nextSettings) {
+    throw new Error("Réglages non enregistrés.");
   }
+  writeLocalSeyaSettings(context.centerId, nextSettings);
 
   return {
     centerId: context.centerId,

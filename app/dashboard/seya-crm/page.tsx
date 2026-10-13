@@ -415,6 +415,8 @@ export default function SeyaCrmPage() {
   const savedAgentSettingsRef = useRef<SeyaAgentSettings | null>(null);
   const persistSeqRef = useRef(0);
   const persistConversationsSeqRef = useRef(0);
+  const loadSeqRef = useRef(0);
+  const settingsCenterIdRef = useRef("");
   const [conversations, setConversations] = useState<SeyaConversation[]>([]);
   const [selectedConversationId, setSelectedConversationId] = useState<string | null>(
     null,
@@ -485,12 +487,14 @@ export default function SeyaCrmPage() {
     let cancelled = false;
     let loaded = false;
     let refreshInFlight = false;
+    const loadSeq = ++loadSeqRef.current;
 
     const savedCenterId = readActiveCenterId();
     if (savedCenterId) {
       const localConversations = readLocalSeyaConversations(savedCenterId);
       if (localConversations.length > 0) {
         setCenterId(savedCenterId);
+        settingsCenterIdRef.current = savedCenterId;
         setConversations(localConversations);
         setSelectedConversationId(localConversations[0]?.id ?? null);
       }
@@ -504,7 +508,12 @@ export default function SeyaCrmPage() {
           body: "{}",
         }).catch(() => null);
         const seya = await loadSeyaAgentSettings();
-        if (cancelled) {
+        const activeId = readActiveCenterId();
+        if (
+          cancelled ||
+          loadSeq !== loadSeqRef.current ||
+          (seya.centerId && activeId && seya.centerId !== activeId)
+        ) {
           return;
         }
         const storedConversations = seya.conversations?.length
@@ -518,6 +527,7 @@ export default function SeyaCrmPage() {
           });
         }
         setCenterId(seya.centerId);
+        settingsCenterIdRef.current = seya.centerId;
         setCenterName(seya.centerName);
         savedAgentSettingsRef.current = seya.settings;
         setAgentSettings(seya.settings);
@@ -529,7 +539,7 @@ export default function SeyaCrmPage() {
         );
         loaded = true;
       } catch {
-        if (!cancelled) {
+        if (!cancelled && loadSeq === loadSeqRef.current) {
           setSummary("Impossible de charger les conversations Seya de ce centre.");
         }
       }
@@ -575,7 +585,15 @@ export default function SeyaCrmPage() {
       refreshInFlight = true;
       try {
         const seya = await loadSeyaAgentSettings();
-        if (cancelled || !seya.centerId) {
+        const activeId = readActiveCenterId();
+        if (
+          cancelled ||
+          loadSeq !== loadSeqRef.current ||
+          !seya.centerId ||
+          (activeId && seya.centerId !== activeId) ||
+          (settingsCenterIdRef.current &&
+            seya.centerId !== settingsCenterIdRef.current)
+        ) {
           return;
         }
         const next = seya.conversations || [];
@@ -603,6 +621,15 @@ export default function SeyaCrmPage() {
     const reloadOnCenterChange = () => {
       window.location.reload();
     };
+    const cancelPersistOnSwitch = () => {
+      persistSeqRef.current += 1;
+      loadSeqRef.current += 1;
+      setSavingAgent(false);
+      setAgentFeedback(
+        "Changement de centre : enregistrement interrompu pour éviter tout mélange.",
+      );
+    };
+    window.addEventListener("bookea-center-will-switch", cancelPersistOnSwitch);
     window.addEventListener("bookea-active-center-changed", reloadOnCenterChange);
     window.addEventListener("focus", refreshConversations);
     document.addEventListener("visibilitychange", refreshIfVisible);
@@ -632,6 +659,10 @@ export default function SeyaCrmPage() {
     return () => {
       cancelled = true;
       window.clearInterval(poll);
+      window.removeEventListener(
+        "bookea-center-will-switch",
+        cancelPersistOnSwitch,
+      );
       window.removeEventListener(
         "bookea-active-center-changed",
         reloadOnCenterChange,
@@ -679,8 +710,25 @@ export default function SeyaCrmPage() {
   async function persistAgentSettings(next: SeyaAgentSettings) {
     agentSettingsRef.current = next;
     setAgentSettings(next);
-    if (!centerId) {
+    const targetCenterId = centerId || settingsCenterIdRef.current;
+    if (!targetCenterId) {
       setAgentFeedback("Centre introuvable : réglages non enregistrés.");
+      return;
+    }
+    if (
+      settingsCenterIdRef.current &&
+      settingsCenterIdRef.current !== targetCenterId
+    ) {
+      setAgentFeedback(
+        "Centre différent de la fiche chargée : réglages non enregistrés.",
+      );
+      return;
+    }
+    const activeId = readActiveCenterId();
+    if (activeId && activeId !== targetCenterId) {
+      setAgentFeedback(
+        "Le centre actif a changé : réglages non enregistrés.",
+      );
       return;
     }
     const saved = savedAgentSettingsRef.current;
@@ -694,23 +742,31 @@ export default function SeyaCrmPage() {
     }
     const seq = ++persistSeqRef.current;
     setSavingAgent(true);
+    setAgentFeedback("Enregistrement…");
     try {
-      await saveSeyaAgentSettings(next, centerId, changedKeys);
-      savedAgentSettingsRef.current = {
-        ...savedAgentSettingsRef.current,
-        ...Object.fromEntries(changedKeys.map((key) => [key, next[key]])),
-      } as SeyaAgentSettings;
+      const result = await saveSeyaAgentSettings(next, targetCenterId, changedKeys);
       if (seq !== persistSeqRef.current) {
         return;
       }
+      if (result.centerId !== targetCenterId) {
+        setAgentFeedback(
+          "Centre différent après sauvegarde : modifications conservées dans le formulaire, rien n’a été mélangé.",
+        );
+        return;
+      }
+      savedAgentSettingsRef.current = result.settings;
+      setAgentSettings(result.settings);
+      agentSettingsRef.current = result.settings;
       setAgentFeedback(
-        `Réglages enregistrés pour ${centerName} uniquement.`,
+        `Enregistré pour ${result.centerName || centerName} uniquement.`,
       );
     } catch {
       if (seq !== persistSeqRef.current) {
         return;
       }
-      setAgentFeedback("Impossible d’enregistrer les réglages de l’agent.");
+      setAgentFeedback(
+        "Impossible d’enregistrer les réglages. Vos modifications restent dans le formulaire.",
+      );
     } finally {
       if (seq === persistSeqRef.current) {
         setSavingAgent(false);

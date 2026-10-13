@@ -1,4 +1,5 @@
 const { last9Phone, persistableConversations, mergeSeyaConversationLists } = require("./conversation-key");
+const { patchCenterSeya } = require("./settings-write");
 
 function asRecord(value) {
   return value && typeof value === "object" && !Array.isArray(value) ? value : {};
@@ -355,30 +356,10 @@ async function applyRehomeUpdates(supabase, settingsById, planned) {
     if (!settingsById.get(update.centerId)) {
       continue;
     }
-    const { data: fresh, error: readError } = await supabase
-      .from("centers")
-      .select("settings")
-      .eq("id", update.centerId)
-      .maybeSingle();
-    if (readError || !fresh) {
-      throw new Error(readError?.message || "center_not_found");
-    }
-    const settings = asRecord(fresh.settings);
-    const { error: writeError } = await supabase
-      .from("centers")
-      .update({
-        settings: {
-          ...settings,
-          seya: {
-            ...asRecord(settings.seya),
-            conversations: update.conversations,
-          },
-        },
-      })
-      .eq("id", update.centerId);
-    if (writeError) {
-      throw new Error(writeError.message);
-    }
+    await patchCenterSeya(supabase, update.centerId, (seya) => ({
+      ...seya,
+      conversations: update.conversations,
+    }));
   }
   return planned;
 }
