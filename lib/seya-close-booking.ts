@@ -1,7 +1,7 @@
 import { persistableConversations } from "@/api/seya/conversation-key";
 import {
   closeConversationsForBooking,
-  closeConversationsForCrmStatus,
+  syncConversationsCrmStatus,
 } from "@/api/seya/booking-close";
 import { patchCenterSeya } from "@/api/seya/settings-write";
 import {
@@ -81,10 +81,11 @@ export async function closeSeyaThreadsForCrmStatus(
   centerId: string,
   match: LeadMatch,
   crmStatus: string,
+  recallDate?: string | null,
 ) {
   try {
     await updateSeyaThreads(supabase, centerId, (conversations) =>
-      closeConversationsForCrmStatus(conversations, match, crmStatus),
+      syncConversationsCrmStatus(conversations, match, crmStatus, recallDate),
     );
   } catch (error) {
     console.error("[seya] close after CRM status skipped", error);

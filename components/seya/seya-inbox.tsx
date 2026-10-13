@@ -3,6 +3,7 @@
 import { CalendarCheck, MessageCircle, Search, Send, Users } from "lucide-react";
 import Link from "next/link";
 import { memo, useEffect, useMemo, useRef, useState } from "react";
+import { leadStatusClassName, normalizeLeadStatus } from "@/lib/lead-statuses";
 import { displayPersonName } from "@/lib/seya-person-name";
 import { seyaPlanningHref } from "@/lib/seya-agenda";
 import {
@@ -28,6 +29,70 @@ const tagStyles: Record<SeyaInboxTag, string> = {
 };
 
 type FilterId = "toutes" | "en_cours" | "agir" | "attente" | "fermees";
+
+type CrmView = { status: string; recallDate: string | null };
+
+function last9(value?: string | null) {
+  return String(value || "").replace(/\D/g, "").slice(-9);
+}
+
+function crmLeadFor(conversation: SeyaConversation, leads: Lead[]) {
+  const byId = leads.find((item) => item.id === conversation.leadId);
+  if (byId) {
+    return byId;
+  }
+  const phone = last9(conversation.phone);
+  if (phone.length < 9) {
+    return null;
+  }
+  return (
+    leads
+      .filter((item) => last9(item.phone) === phone)
+      .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)))[0] ||
+    null
+  );
+}
+
+function crmViewFor(conversation: SeyaConversation, lead: Lead | null): CrmView | null {
+  if (conversation.crmStatus) {
+    return {
+      status: normalizeLeadStatus(conversation.crmStatus),
+      recallDate: conversation.crmRecallDate || null,
+    };
+  }
+  if (lead) {
+    return { status: lead.status, recallDate: lead.reminderDate || null };
+  }
+  return null;
+}
+
+function frenchDay(day?: string | null) {
+  if (!day || !/^\d{4}-\d{2}-\d{2}/.test(day)) {
+    return "";
+  }
+  const [year, month, date] = day.slice(0, 10).split("-");
+  return `${date}/${month}/${year}`;
+}
+
+function CrmStatusBadge({ crm, size = "sm" }: { crm: CrmView; size?: "sm" | "md" }) {
+  const recall = frenchDay(crm.recallDate);
+  return (
+    <>
+      <span
+        className={`inline-flex rounded-full font-semibold ring-1 ${leadStatusClassName(crm.status)} ${
+          size === "md" ? "px-2 py-1 text-[11px]" : "px-2 py-0.5 text-[10px]"
+        }`}
+      >
+        {crm.status}
+      </span>
+      {recall ? (
+        <span className="text-[11px] font-medium text-slate-500">
+          Relance le {recall}
+        </span>
+      ) : null}
+    </>
+  );
+}
 
 function timeAgo(iso?: string | null) {
   if (!iso) return "";
@@ -78,10 +143,12 @@ function factualSummary(conversation: SeyaConversation) {
 
 const ConversationRow = memo(function ConversationRow({
   conversation,
+  crm,
   selected,
   onSelect,
 }: {
   conversation: SeyaConversation;
+  crm: CrmView | null;
   selected: boolean;
   onSelect: (id: string) => void;
 }) {
@@ -115,12 +182,16 @@ const ConversationRow = memo(function ConversationRow({
           {conversation.messages.length}
         </span>
       </div>
-      <div className="mt-1 flex items-center gap-2">
-        <span
-          className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${tagStyles[tag]}`}
-        >
-          {inboxTagLabel(tag)}
-        </span>
+      <div className="mt-1 flex flex-wrap items-center gap-2">
+        {crm ? (
+          <CrmStatusBadge crm={crm} />
+        ) : (
+          <span
+            className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${tagStyles[tag]}`}
+          >
+            {inboxTagLabel(tag)}
+          </span>
+        )}
         <span className="text-[11px] font-medium text-slate-400">
           {timeAgo(conversation.updatedAt)}
         </span>
@@ -210,9 +281,16 @@ export function SeyaInbox({
     node.scrollTop = node.scrollHeight;
   }, [selected?.id, selected?.messages?.length]);
 
-  const lead = selected
-    ? leads.find((item) => item.id === selected.leadId)
-    : null;
+  const crmViews = useMemo(() => {
+    const views = new Map<string, CrmView | null>();
+    for (const conversation of inbox) {
+      views.set(conversation.id, crmViewFor(conversation, crmLeadFor(conversation, leads)));
+    }
+    return views;
+  }, [inbox, leads]);
+
+  const lead = selected ? crmLeadFor(selected, leads) : null;
+  const selectedCrm = selected ? crmViews.get(selected.id) || crmViewFor(selected, lead) : null;
   const crmLeadHref = selected
     ? lead?.id || selected.leadId
       ? `/dashboard/crm-leads?lead=${encodeURIComponent(lead?.id || selected.leadId)}`
@@ -282,6 +360,7 @@ export function SeyaInbox({
                 <ConversationRow
                   key={conversation.id}
                   conversation={conversation}
+                  crm={crmViews.get(conversation.id) || null}
                   selected={selected?.id === conversation.id}
                   onSelect={onSelect}
                 />
@@ -300,11 +379,15 @@ export function SeyaInbox({
                       {displayPersonName(selected.firstName, selected.lastName) ||
                         selected.phone}
                     </h2>
-                    <span
-                      className={`inline-flex rounded-full px-2 py-1 text-[11px] font-semibold ${tagStyles[inboxTag(selected)]}`}
-                    >
-                      {inboxTagLabel(inboxTag(selected))}
-                    </span>
+                    {selectedCrm ? (
+                      <CrmStatusBadge crm={selectedCrm} size="md" />
+                    ) : (
+                      <span
+                        className={`inline-flex rounded-full px-2 py-1 text-[11px] font-semibold ${tagStyles[inboxTag(selected)]}`}
+                      >
+                        {inboxTagLabel(inboxTag(selected))}
+                      </span>
+                    )}
                     {selectedTag === "rdv" && planningHref ? (
                       <Link
                         href={planningHref}
@@ -476,8 +559,16 @@ export function SeyaInbox({
                   </div>
                   <div>
                     <dt className="text-[11px] font-medium text-slate-400">Statut</dt>
-                    <dd className="font-medium">{selected.status}</dd>
+                    <dd className="font-medium">{selectedCrm?.status || selected.status}</dd>
                   </div>
+                  {selectedCrm?.recallDate ? (
+                    <div className="col-span-2">
+                      <dt className="text-[11px] font-medium text-slate-400">
+                        Relance prévue
+                      </dt>
+                      <dd className="font-medium">{frenchDay(selectedCrm.recallDate)}</dd>
+                    </div>
+                  ) : null}
                 </dl>
               </section>
               {selected.healthReview?.status === "awaiting_human_health_review" ? (

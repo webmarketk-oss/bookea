@@ -12,6 +12,7 @@ const { sendDueWelcomes } = require("./welcome");
 const { sendSharedWhatsApp } = require("./whatsapp");
 const { isNearDuplicate } = require("./price");
 const {
+  closeConversationForCrmStatus,
   conversationHasStaffBooking,
   conversationMatchesBookedVisit,
   bookedVisitKeysFromAppointments,
@@ -35,6 +36,7 @@ const {
   loadRelanceHoldKeys,
   markMessagedNouveauLeads,
   syncCrmFromConversation,
+  withCrmSnapshot,
 } = require("./crm-sync");
 
 const MIN_RELANCE_GAP_HOURS = 12;
@@ -99,11 +101,12 @@ async function relanceCenter(supabase, center, now = new Date()) {
   const latest = await readCenterSeya(supabase, center.id);
   const seya = latest.seya;
   const agent = agentSettings(seya);
+  const conversations = Array.isArray(seya.conversations) ? seya.conversations : [];
   if (!agent.relanceEnabled || isSeyaOff(seya)) {
+    await syncCrmStatusOnly(supabase, center.id, conversations, now);
     return [];
   }
 
-  const conversations = Array.isArray(seya.conversations) ? seya.conversations : [];
   await markMessagedNouveauLeads(supabase, center.id, conversations);
   const nextConversations = [];
   const sent = [];
@@ -119,7 +122,10 @@ async function relanceCenter(supabase, center, now = new Date()) {
       crmHold,
     );
     let updated = { ...synced };
-    if (updated.status !== conversation.status) {
+    if (
+      updated.status !== conversation.status ||
+      crmSnapshotChanged(updated, conversation)
+    ) {
       closed = true;
     }
     const pause = activeLeadPause(conversation);
@@ -134,9 +140,10 @@ async function relanceCenter(supabase, center, now = new Date()) {
         threadHasConfirmedVisit(conversation) ||
         conversation?.bookingState?.appointmentStatus === "confirmed" ||
         Boolean(conversation?.bookedSlot);
-      const sealed = shouldSeal
-        ? sealConfirmedConversation(conversation)
-        : updated;
+      const sealed = withCrmSnapshot(
+        shouldSeal ? sealConfirmedConversation(conversation) : updated,
+        crmHold,
+      );
       if (sealed !== conversation) {
         closed = true;
       }
@@ -216,6 +223,32 @@ async function relanceCenter(supabase, center, now = new Date()) {
   }
 
   return sent;
+}
+
+function crmSnapshotChanged(next, previous) {
+  return (
+    next.crmStatus !== previous.crmStatus ||
+    (next.crmRecallDate || null) !== (previous.crmRecallDate || null)
+  );
+}
+
+async function syncCrmStatusOnly(supabase, centerId, conversations, now = new Date()) {
+  if (!conversations.length) {
+    return;
+  }
+  const crmHold = await loadRelanceHoldKeys(supabase, centerId, now);
+  let changed = false;
+  const next = conversations.map((conversation) => {
+    const stamped = withCrmSnapshot(conversation, crmHold);
+    const closed = closeConversationForCrmStatus(stamped, stamped?.crmStatus);
+    if (closed !== conversation) {
+      changed = true;
+    }
+    return closed;
+  });
+  if (changed) {
+    await writeSeyaConversations(supabase, centerId, persistableConversations(next));
+  }
 }
 
 function leadMessageCount(conversation) {

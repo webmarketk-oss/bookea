@@ -252,6 +252,9 @@ export type SeyaConversation = {
   relanceCount?: number;
   sendError?: string | null;
   sentVia?: string | null;
+  crmStatus?: string;
+  crmRecallDate?: string | null;
+  crmSyncedAt?: string;
 };
 
 export const defaultTreatmentBriefs: SeyaTreatmentBrief[] = [

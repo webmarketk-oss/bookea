@@ -252,6 +252,7 @@ async function resolveCenterFromPhone(supabase, phone) {
   let campaign = "";
   let status = "Nouveau";
   let recall_date = "";
+  let crmLoaded = false;
   let serviceId = null;
 
   if (home.clientId) {
@@ -271,14 +272,19 @@ async function resolveCenterFromPhone(supabase, phone) {
 
   const leadId = home.leadId;
   if (leadId) {
-    const { data: lead } = await supabase
+    const { data: lead, error: leadError } = await supabase
       .from("leads")
       .select(
-        "id,center_id,client_id,status,recall_date,service_id,phone,campaigns(name)",
+        "id,center_id,client_id,status,recall_date,service_id,campaigns(name),clients(phone)",
       )
       .eq("id", leadId)
+      .eq("center_id", home.centerId)
       .maybeSingle();
+    if (leadError) {
+      console.error("[seya/center-route] lead", leadId, leadError.message);
+    }
     if (lead) {
+      crmLoaded = true;
       status = lead.status || status;
       recall_date = lead.recall_date || "";
       serviceId = lead.service_id || null;
@@ -286,7 +292,9 @@ async function resolveCenterFromPhone(supabase, phone) {
         ? lead.campaigns[0]?.name || ""
         : lead.campaigns?.name || "";
       clientId = lead.client_id || clientId;
-      clientPhone = lead.phone || clientPhone;
+      clientPhone =
+        (Array.isArray(lead.clients) ? lead.clients[0]?.phone : lead.clients?.phone) ||
+        clientPhone;
     }
   }
 
@@ -310,6 +318,7 @@ async function resolveCenterFromPhone(supabase, phone) {
     campaign,
     status,
     recall_date,
+    crmLoaded,
   };
 }
 

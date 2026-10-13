@@ -8,7 +8,6 @@ import {
 } from "@/lib/crm-stats";
 import { belongsOnClientFiche, isHiddenAgendaBlockClient } from "@/lib/appointment-position-status";
 import { sanitizePersonName } from "@/lib/seya-person-name";
-import { seyaStatusForCrmStatus } from "@/api/seya/booking-close";
 import { leadImportToolFromEvents, leadSourceFromStored } from "@/lib/lead-offer";
 import {
   closeSeyaThreadsForBookedLead,
@@ -465,14 +464,14 @@ export async function updateCrmLeadStatus(
       leadId: lead.id,
       phone: lead.phone,
     });
-  } else if (seyaStatusForCrmStatus(status)) {
-    await closeSeyaThreadsForCrmStatus(
-      supabase,
-      centerId,
-      { leadId: lead.id, phone: lead.phone },
-      status,
-    );
   }
+  await closeSeyaThreadsForCrmStatus(
+    supabase,
+    centerId,
+    { leadId: lead.id, phone: lead.phone },
+    status,
+    consumedDueReminder ? null : toDateOnlyIso(lead.reminderDate) || null,
+  );
 }
 
 export async function addCrmLeadActivity(leadId: string, text: string) {
@@ -650,10 +649,27 @@ export async function updateCrmLeadAmount(leadId: string, amount: number) {
 }
 
 export async function updateCrmLeadReminder(leadId: string, reminderDate: string) {
-  await updateLeadFields(createClient(), leadId, {
+  const supabase = createClient();
+  await updateLeadFields(supabase, leadId, {
     recall_date: toDateOnlyIso(reminderDate) || null,
     updated_at: new Date().toISOString(),
   });
+  const { data: lead } = await supabase
+    .from("leads")
+    .select("center_id,status,clients(phone)")
+    .eq("id", leadId)
+    .maybeSingle();
+  if (!lead?.center_id) {
+    return;
+  }
+  const client = Array.isArray(lead.clients) ? lead.clients[0] : lead.clients;
+  await closeSeyaThreadsForCrmStatus(
+    supabase,
+    lead.center_id,
+    { leadId, phone: client?.phone || "" },
+    lead.status || "",
+    toDateOnlyIso(reminderDate) || null,
+  );
 }
 
 export async function updateCrmLeadNextAction(leadId: string, nextAction: string) {
@@ -769,14 +785,19 @@ export async function updateCrmLeadDetails(lead: Lead, input: NewCrmLeadInput) {
         leadId: lead.id,
         phone: input.phone || lead.phone,
       });
-    } else if (seyaStatusForCrmStatus(nextStatus)) {
-      await closeSeyaThreadsForCrmStatus(
-        supabase,
-        centerId,
-        { leadId: lead.id, phone: input.phone || lead.phone },
-        nextStatus,
-      );
     }
+  }
+  if (
+    statusChanged ||
+    (toDateOnlyIso(nextReminder) || null) !== (toDateOnlyIso(lead.reminderDate || "") || null)
+  ) {
+    await closeSeyaThreadsForCrmStatus(
+      supabase,
+      centerId,
+      { leadId: lead.id, phone: input.phone || lead.phone },
+      nextStatus,
+      toDateOnlyIso(nextReminder) || null,
+    );
   }
 }
 

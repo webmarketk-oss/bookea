@@ -284,5 +284,7 @@ test("passage relance : un lead déjà en Pas intéressé dans le CRM ferme sa c
   assert.equal(byPhone.status, "Pas intéressé");
 
   const other = { ...emma, leadId: "lead-autre", phone: "0611223344", messages: [] };
-  assert.equal(await syncCrmFromConversation(supabase, "center-1", other, hold), other);
+  const synced = await syncCrmFromConversation(supabase, "center-1", other, hold);
+  assert.equal(synced.status, other.status);
+  assert.equal(synced.crmStatus, "Message WhatsApp envoyé");
 });

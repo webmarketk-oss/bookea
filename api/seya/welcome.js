@@ -10,8 +10,11 @@ const {
 } = require("./store");
 const { previewWelcomeTemplateText, sendSharedWhatsApp } = require("./whatsapp");
 const {
+  conversationOnRelanceHold,
+  loadRelanceHoldKeys,
   markLeadWhatsAppSent,
   markMessagedNouveauLeads,
+  withCrmSnapshot,
 } = require("./crm-sync");
 
 const ACTIVE_THREAD_HOURS = 24;
@@ -135,15 +138,23 @@ async function sendDueWelcomes(
   const sent = [];
   const nextConversations = [];
   let changed = false;
+  let crmHold = null;
 
   for (const conversation of conversations) {
-    const updated = { ...conversation };
+    let updated = { ...conversation };
     if (!isWelcomeDue(updated, now)) {
       nextConversations.push(updated);
       continue;
     }
     if ((updated.messages || []).some((item) => item.author === "lead")) {
       updated.welcomeSendAt = null;
+      nextConversations.push(updated);
+      changed = true;
+      continue;
+    }
+    crmHold = crmHold || (await loadRelanceHoldKeys(supabase, center.id, now));
+    if (conversationOnRelanceHold(updated, crmHold)) {
+      updated = { ...withCrmSnapshot(updated, crmHold), welcomeSendAt: null };
       nextConversations.push(updated);
       changed = true;
       continue;

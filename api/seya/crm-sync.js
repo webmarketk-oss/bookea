@@ -1,9 +1,15 @@
 const { crmUpdateFromLeadMessage, lockedCrmStatuses } = require("./conversation");
-const { closeConversationForCrmStatus, seyaStatusForCrmStatus } = require("./booking-close");
+const {
+  closeConversationForCrmStatus,
+  crmStatusLabel,
+  seyaStatusForCrmStatus,
+  withCrmStatus,
+} = require("./booking-close");
 
 const WA_SENT_STATUS = "Message WhatsApp envoyé";
-const crmClosingStatuses = new WeakMap();
-const crmRecallDays = new WeakMap();
+const CRM_LEAD_COLUMNS = "id,client_id,status,recall_date,created_at,updated_at,clients(phone)";
+const CRM_PAGE_SIZE = 1000;
+const crmLeadIndexes = new WeakMap();
 
 function last9(value) {
   return String(value || "").replace(/\D/g, "").slice(-9);
@@ -89,14 +95,70 @@ async function markMessagedNouveauLeads(supabase, centerId, conversations) {
 }
 
 const CRM_HOLD_STATUS =
-  /reviendra vers nous|pas int[eé]ress|hors[- ]?zone|intraitable|contre[- ]?indication|revue sant[eé]|prospect perdu/i;
-const CRM_RELANCE_HOLD_STATUS = /en r[eé]flexion/i;
+  /reviendra vers nous|pas int[eé]ress|hors[- ]?zone|intraitable|contre[- ]?indication|revue sant[eé]|prospect perdu|client perdu|no[- ]?show|doublon|num[eé]ro invalide/i;
+const CRM_RELANCE_HOLD_STATUS =
+  /en r[eé]flexion|acompte|devis|vendu|rdv pris|rdv confirm|client converti/i;
+
+function crmStatusText(status) {
+  return `${String(status || "").trim()} | ${crmStatusLabel(status)}`;
+}
+
+function crmLeadRow(row) {
+  if (!row) {
+    return row;
+  }
+  const client = Array.isArray(row.clients) ? row.clients[0] : row.clients;
+  return { ...row, phone: row.phone || client?.phone || "" };
+}
+
+function newerLead(current, next) {
+  if (!current) {
+    return next;
+  }
+  const at = (row) => String(row.updated_at || row.created_at || "");
+  return at(next) > at(current) ? next : current;
+}
+
+function indexCrmLeads(rows) {
+  const byId = new Map();
+  const byClient = new Map();
+  const byPhone = new Map();
+  for (const raw of rows || []) {
+    const row = crmLeadRow(raw);
+    if (row?.id) {
+      byId.set(String(row.id), row);
+    }
+    if (row?.client_id) {
+      const key = String(row.client_id);
+      byClient.set(key, newerLead(byClient.get(key), row));
+    }
+    const phone = last9(row?.phone);
+    if (phone.length === 9) {
+      byPhone.set(phone, newerLead(byPhone.get(phone), row));
+    }
+  }
+  return { byId, byClient, byPhone };
+}
+
+function crmLeadFor(conversation, crmHold) {
+  const index = crmHold ? crmLeadIndexes.get(crmHold) : null;
+  if (!index || !conversation) {
+    return null;
+  }
+  const leadId = String(conversation.leadId || "");
+  const phone = last9(conversation.phone);
+  return (
+    (leadId && (index.byId.get(leadId) || index.byClient.get(leadId))) ||
+    (phone.length === 9 && index.byPhone.get(phone)) ||
+    null
+  );
+}
 
 function isCrmRelanceHold(row) {
   if (!row) {
     return false;
   }
-  if (CRM_HOLD_STATUS.test(String(row.status || ""))) {
+  if (CRM_HOLD_STATUS.test(crmStatusText(row.status))) {
     return true;
   }
   return Boolean(crmRecallDay(row));
@@ -120,7 +182,7 @@ function isCrmRelanceHeld(row, now = new Date()) {
   if (!row) {
     return false;
   }
-  const status = String(row.status || "");
+  const status = crmStatusText(row.status);
   if (CRM_HOLD_STATUS.test(status) || CRM_RELANCE_HOLD_STATUS.test(status)) {
     return true;
   }
@@ -130,40 +192,31 @@ function isCrmRelanceHeld(row, now = new Date()) {
 
 async function loadRelanceHoldKeys(supabase, centerId, now = new Date()) {
   const hold = new Set();
-  const closing = new Map();
-  const recalls = new Map();
-  crmClosingStatuses.set(hold, closing);
-  crmRecallDays.set(hold, recalls);
+  crmLeadIndexes.set(hold, { ...indexCrmLeads([]), now });
   if (!supabase?.from || !centerId) {
     return hold;
   }
 
   try {
-    const { data, error } = await supabase
-      .from("leads")
-      .select("id,phone,status,recall_date")
-      .eq("center_id", centerId);
-    if (error) {
-      return hold;
-    }
-    for (const row of data || []) {
-      const keys = leadRelanceKeys(row);
-      if (!isCrmRelanceHeld(row, now)) {
-        const recall = crmRecallDay(row);
-        for (const key of recall ? keys : []) {
-          recalls.set(key, recall);
-        }
-        continue;
+    const rows = [];
+    for (let from = 0; ; from += CRM_PAGE_SIZE) {
+      const query = supabase.from("leads").select(CRM_LEAD_COLUMNS).eq("center_id", centerId);
+      const paged = typeof query.range === "function";
+      const { data, error } = await (paged
+        ? query.order("id").range(from, from + CRM_PAGE_SIZE - 1)
+        : query);
+      if (error) {
+        console.error("[seya/crm-sync] leads", centerId, error.message);
+        return hold;
       }
-      const closes = Boolean(seyaStatusForCrmStatus(row.status));
-      for (const key of keys) {
-        hold.add(key);
-        if (closes) {
-          closing.set(key, row.status);
-        }
+      rows.push(...(data || []));
+      if (!paged || (data || []).length < CRM_PAGE_SIZE) {
+        break;
       }
     }
-  } catch {
+    crmLeadIndexes.set(hold, { ...indexCrmLeads(rows), now });
+  } catch (error) {
+    console.error("[seya/crm-sync] leads", centerId, error);
     return hold;
   }
 
@@ -171,16 +224,16 @@ async function loadRelanceHoldKeys(supabase, centerId, now = new Date()) {
 }
 
 function crmRecallDayFor(conversation, crmHold) {
-  const recalls = crmHold ? crmRecallDays.get(crmHold) : null;
-  if (!recalls || recalls.size === 0 || !conversation) {
-    return "";
+  const lead = crmLeadFor(conversation, crmHold);
+  return lead ? crmRecallDay(lead) : "";
+}
+
+function withCrmSnapshot(conversation, crmHold) {
+  const lead = crmLeadFor(conversation, crmHold);
+  if (!lead) {
+    return conversation;
   }
-  const phone = last9(conversation.phone);
-  return (
-    (conversation.leadId && recalls.get(`id:${conversation.leadId}`)) ||
-    (phone && recalls.get(`phone:${phone}`)) ||
-    ""
-  );
+  return withCrmStatus(conversation, lead.status, crmRecallDay(lead));
 }
 
 function leadRelanceKeys(row) {
@@ -196,23 +249,21 @@ function leadRelanceKeys(row) {
 }
 
 function isLockedCrmStatus(status) {
-  const current = String(status || "").toLowerCase();
-  return lockedCrmStatuses().some((item) => item.toLowerCase() === current);
+  const current = [String(status || ""), crmStatusLabel(status)].map((item) =>
+    item.toLowerCase(),
+  );
+  return lockedCrmStatuses().some((item) => current.includes(item.toLowerCase()));
 }
 
 function closeForCrmStatus(conversation, crmHold) {
-  const closing = crmHold ? crmClosingStatuses.get(crmHold) : null;
-  if (!closing || closing.size === 0 || !conversation) {
-    return conversation;
-  }
-  const phone = last9(conversation.phone);
-  const crmStatus =
-    (conversation.leadId && closing.get(`id:${conversation.leadId}`)) ||
-    (phone && closing.get(`phone:${phone}`));
-  return crmStatus ? closeConversationForCrmStatus(conversation, crmStatus) : conversation;
+  const lead = crmLeadFor(conversation, crmHold);
+  return lead && seyaStatusForCrmStatus(lead.status)
+    ? closeConversationForCrmStatus(conversation, lead.status)
+    : conversation;
 }
 
-async function syncCrmFromConversation(supabase, centerId, conversation, crmHold) {
+async function syncCrmFromConversation(supabase, centerId, original, crmHold) {
+  const conversation = withCrmSnapshot(original, crmHold);
   const closed = closeForCrmStatus(conversation, crmHold);
   if (closed !== conversation) {
     return closed;
@@ -242,16 +293,23 @@ async function syncCrmFromConversation(supabase, centerId, conversation, crmHold
   }
 
   try {
-    const { data: lead, error } = await supabase
+    const { data: row, error } = await supabase
       .from("leads")
-      .select("id,phone,status,recall_date")
+      .select(CRM_LEAD_COLUMNS)
       .eq("id", conversation.leadId)
       .eq("center_id", centerId)
       .maybeSingle();
-    if (error || !lead) {
+    if (error) {
+      console.error("[seya/crm-sync] lead", conversation.leadId, error.message);
+    }
+    if (error || !row) {
       return next;
     }
-    if (isLockedCrmStatus(lead.status) || isCrmRelanceHold(lead)) {
+    const lead = crmLeadRow(row);
+    next = withCrmStatus(next, lead.status, crmRecallDay(lead));
+    const crmChangedAfterLead =
+      Date.parse(lead.updated_at || "") > Date.parse(lastLead.at || "");
+    if (crmChangedAfterLead || isLockedCrmStatus(lead.status) || isCrmRelanceHold(lead)) {
       if (isCrmRelanceHeld(lead) && crmHold) {
         for (const key of leadRelanceKeys(lead)) {
           crmHold.add(key);
@@ -277,9 +335,14 @@ async function syncCrmFromConversation(supabase, centerId, conversation, crmHold
       .update(patch)
       .eq("id", lead.id)
       .eq("center_id", centerId);
-    if (!updateError && crmHold && isCrmRelanceHeld({ ...lead, ...patch })) {
-      for (const key of leadRelanceKeys(lead)) {
-        crmHold.add(key);
+    if (!updateError) {
+      const updated = { ...lead, ...patch };
+      next = withCrmStatus(next, updated.status, crmRecallDay(updated));
+      rememberCrmLead(crmHold, updated);
+      if (crmHold && isCrmRelanceHeld(updated)) {
+        for (const key of leadRelanceKeys(lead)) {
+          crmHold.add(key);
+        }
       }
     }
   } catch {
@@ -287,6 +350,21 @@ async function syncCrmFromConversation(supabase, centerId, conversation, crmHold
   }
 
   return next;
+}
+
+function rememberCrmLead(crmHold, row) {
+  const index = crmHold ? crmLeadIndexes.get(crmHold) : null;
+  if (!index || !row?.id) {
+    return;
+  }
+  index.byId.set(String(row.id), row);
+  if (row.client_id) {
+    index.byClient.set(String(row.client_id), row);
+  }
+  const phone = last9(row.phone);
+  if (phone.length === 9) {
+    index.byPhone.set(phone, row);
+  }
 }
 
 function conversationOnRelanceHold(conversation, hold) {
@@ -297,11 +375,15 @@ function conversationOnRelanceHold(conversation, hold) {
   ) {
     return true;
   }
-  if (!hold || hold.size === 0) {
+  if (!hold) {
     return false;
   }
   if (conversation?.leadId && hold.has(`id:${conversation.leadId}`)) {
     return true;
+  }
+  const lead = crmLeadFor(conversation, hold);
+  if (lead) {
+    return isCrmRelanceHeld(lead, crmLeadIndexes.get(hold)?.now);
   }
   const phone = last9(conversation?.phone);
   return Boolean(phone && hold.has(`phone:${phone}`));
@@ -318,4 +400,5 @@ module.exports = {
   markLeadWhatsAppSent,
   markMessagedNouveauLeads,
   syncCrmFromConversation,
+  withCrmSnapshot,
 };

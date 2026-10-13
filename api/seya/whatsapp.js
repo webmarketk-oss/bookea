@@ -32,6 +32,7 @@ const {
   lockedCrmStatuses,
 } = require("./conversation");
 const { isCrmRelanceHold } = require("./crm-sync");
+const { withCrmStatus } = require("./booking-close");
 const {
   isNewSeyaConversationBlocked,
   isSeyaOff,
@@ -741,6 +742,9 @@ async function handleIncoming(
     );
   }
   existing.centerId = center.id;
+  if (context.crmLoaded) {
+    existing = withCrmStatus(existing, context.status, context.recall_date);
+  }
   const inboundIds = [
     ...(existing.lastInboundIds || []),
     incoming.messageId,
@@ -1102,6 +1106,24 @@ async function handleIncoming(
   next.sendError = failed
     ? deliveryAlert("send", failed.error || failed.reason)
     : null;
+  if (!result.shouldBook) {
+    const crmPatch = await syncCrmFromSeyaIntent(
+      supabase,
+      center.id,
+      context,
+      incoming.text,
+    ).catch((crmError) => {
+      console.error("[seya/whatsapp] crm intent failed", crmError);
+      return null;
+    });
+    if (crmPatch && context.crmLoaded) {
+      Object.assign(
+        next,
+        withCrmStatus(next, crmPatch.status, crmPatch.recall_date || context.recall_date),
+      );
+    }
+  }
+
   trace.stage = "save";
 
   const saved = persistableConversations([
@@ -1110,17 +1132,6 @@ async function handleIncoming(
   ]);
 
   await writeSeyaConversations(supabase, center.id, saved);
-
-  if (!result.shouldBook) {
-    await syncCrmFromSeyaIntent(
-      supabase,
-      center.id,
-      context,
-      incoming.text,
-    ).catch((crmError) => {
-      console.error("[seya/whatsapp] crm intent failed", crmError);
-    });
-  }
 
   return {
     phone: incoming.phone,
@@ -1208,6 +1219,7 @@ async function syncCrmFromSeyaIntent(supabase, centerId, context, text) {
       ? `Seya WhatsApp · à recontacter le ${update.reminderDate}.`
       : "Seya WhatsApp.",
   });
+  return patch;
 }
 
 async function bookSeyaAppointment(supabase, centerId, context, conversation, slot, seya) {

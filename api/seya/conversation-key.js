@@ -99,6 +99,8 @@ function mergeConversationPair(current, next) {
   const newer = isFresherConversation(next, current) ? next : current;
   const older = newer === next ? current : next;
   const bookedSlot = newer.bookedSlot || older.bookedSlot;
+  const crm =
+    String(older.crmSyncedAt || "") > String(newer.crmSyncedAt || "") ? older : newer;
   const confirmed =
     newer.bookingState?.appointmentStatus === "confirmed" ||
     older.bookingState?.appointmentStatus === "confirmed" ||
@@ -112,6 +114,13 @@ function mergeConversationPair(current, next) {
     firstName: newer.firstName || older.firstName,
     lastName: newer.lastName || older.lastName,
     bookedSlot,
+    ...(crm.crmSyncedAt
+      ? {
+          crmStatus: crm.crmStatus,
+          crmRecallDate: crm.crmRecallDate ?? null,
+          crmSyncedAt: crm.crmSyncedAt,
+        }
+      : {}),
     status: preferredBookingStatus(newer.status, older.status),
     sendError: Object.prototype.hasOwnProperty.call(newer, "sendError")
       ? newer.sendError
