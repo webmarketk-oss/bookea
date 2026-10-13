@@ -241,6 +241,16 @@ export function duplicateLeadGroupKey(leads: Lead[]) {
   return [...new Set(leads.map((lead) => lead.id))].sort().join("-");
 }
 
+// Même téléphone mais emails différents : personnes distinctes possibles, jamais « confirmé ».
+function hasConflictingEmails(leads: Lead[]) {
+  const emails = new Set(
+    leads
+      .map((lead) => normalizeEmail(lead.email))
+      .filter((email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)),
+  );
+  return emails.size > 1;
+}
+
 export function findDuplicateLeadGroups(leads: Lead[]) {
   const groups = new Map<string, Lead[]>();
 
@@ -256,7 +266,9 @@ export function findDuplicateLeadGroups(leads: Lead[]) {
 
   const seenGroups = new Set<string>();
 
-  return [...groups.values()]
+  return [...groups.entries()]
+    .filter(([key, group]) => !key.startsWith("tel:") || !hasConflictingEmails(group))
+    .map(([, group]) => group)
     .filter((group) => group.length > 1)
     .map((group) =>
       group.filter(
@@ -430,8 +442,11 @@ export function leadsAreSureDuplicates(leads: Lead[]) {
   }
 
   const keySets = leads.map((lead) => new Set(sureIdentityKeys(lead)));
-  return [...keySets[0]].some((key) =>
-    keySets.every((keys) => keys.has(key))
+  const conflicting = hasConflictingEmails(leads);
+  return [...keySets[0]].some(
+    (key) =>
+      keySets.every((keys) => keys.has(key)) &&
+      !(key.startsWith("tel:") && conflicting)
   );
 }
 

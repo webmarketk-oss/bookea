@@ -58,6 +58,15 @@ module.exports = async function handler(req, res) {
     const origin = leadOrigin(
       resolveIncomingSource(payload, req.query, "Facebook", req),
       fields,
+      Boolean(
+        firstValue(
+          req.query?.source,
+          req.query?.origin,
+          payload?.source,
+          payload?.origin,
+          payload?.via,
+        ),
+      ),
     );
     const sourceName = origin.source;
     const received = recoverIncomingLead(mapIncomingLead(payload, req.query), fields);
@@ -91,6 +100,23 @@ module.exports = async function handler(req, res) {
       phone,
       email,
     };
+    const recentId = await findRecentSameSubmission(supabase, center.id, imported);
+    if (recentId) {
+      await supabase.from("lead_events").insert({
+        center_id: center.id,
+        lead_id: recentId,
+        event_type: "system",
+        note: `Même prospect reçu une seconde fois via ${sourceName}${origin.importTool ? ` (${origin.importTool})` : ""} : aucune nouvelle fiche créée.${imported.phone ? ` Téléphone reçu : ${imported.phone}.` : ""}`,
+      });
+      return res.status(200).json({
+        ok: true,
+        duplicate: true,
+        skipped: "recent_same_submission",
+        id: recentId,
+        center: center.slug,
+        center_name: center.name,
+      });
+    }
     const existingId = await findExistingLeadByPhone(
       supabase,
       center.id,
@@ -230,7 +256,7 @@ function extractLooseContact(text) {
   }
   const emailMatch = extractEmailFromBlob(raw);
   const phoneMatch = raw.match(
-    /(?:\+33|0033|0)\s*[1-9](?:[\s.-]*\d{2}){4}/,
+    /(?<!\d)(?:\+33|0033|0)\s*[1-9](?:[\s.-]*\d{2}){4}(?!\d)/,
   );
   let leftover = raw;
   if (emailMatch) {
@@ -657,17 +683,22 @@ function axisFromOffer(offer) {
 }
 
 function looksLikeSystemeIo(fields) {
-  return Object.keys(fields || {}).some((key) =>
-    /^payload_(member|affiliate|offer|contact)_|funnel/.test(key),
+  return (
+    Object.keys(fields || {}).some((key) =>
+      /^payload_(member|affiliate|offer|contact)_|funnel|^fields_fieldname$|^registeredat$/.test(key),
+    ) || /systeme\.io/i.test(String(fields?.sourceurl || fields?.source_url || ""))
   );
 }
 
-function leadOrigin(sourceLabel, fields) {
+function leadOrigin(sourceLabel, fields, explicit = true) {
   if (sourceLabel === "SaveMyLeads") {
     return {
       source: looksLikeSystemeIo(fields) ? "Systeme.io" : "Facebook",
       importTool: "SaveMyLeads",
     };
+  }
+  if (!explicit && sourceLabel === "Facebook" && looksLikeSystemeIo(fields)) {
+    return { source: "Systeme.io", importTool: "" };
   }
   return { source: sourceLabel, importTool: "" };
 }
@@ -838,6 +869,37 @@ async function findCenter(supabase, slug) {
     slug,
     "id,name,slug,settings,email,owner_profile_id",
   );
+}
+
+const SAME_SUBMISSION_MINUTES = 30;
+
+// Un même formulaire relayé par deux webhooks (Systeme.io + Make…) : même email, même centre, quelques minutes d’écart.
+async function findRecentSameSubmission(supabase, centerId, incoming, now = new Date()) {
+  const email = String(incoming?.email || "").trim().toLowerCase();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return null;
+  }
+  const since = new Date(now.getTime() - SAME_SUBMISSION_MINUTES * 60 * 1000).toISOString();
+  const { data: clients, error } = await supabase
+    .from("clients")
+    .select("id,email")
+    .eq("center_id", centerId)
+    .eq("email", email)
+    .gte("created_at", since)
+    .limit(5);
+  if (error || !clients?.length) {
+    return null;
+  }
+  const { data: lead } = await supabase
+    .from("leads")
+    .select("id")
+    .eq("center_id", centerId)
+    .in("client_id", clients.map((client) => client.id))
+    .gte("created_at", since)
+    .order("created_at", { ascending: true })
+    .limit(1)
+    .maybeSingle();
+  return lead?.id ?? null;
 }
 
 async function findExistingLeadByPhone(supabase, centerId, phone) {
@@ -1083,6 +1145,17 @@ function flattenFields(raw, prefix = "") {
     }
 
     for (const [key, value] of Object.entries(raw)) {
+      // Tags Systeme.io { id, name } : jamais lus comme nom du prospect.
+      if (normalizeFieldName(key) === "tags" && Array.isArray(value)) {
+        const tags = value
+          .map((tag) => (tag && typeof tag === "object" ? tag.name : tag))
+          .filter((tag) => tag != null && String(tag).trim())
+          .join(", ");
+        if (tags) {
+          result[normalizeFieldName(prefix ? `${prefix}.tags` : "tags")] = tags;
+        }
+        continue;
+      }
       Object.assign(result, flattenFields(value, prefix ? `${prefix}.${key}` : key));
       if (value != null && (typeof value === "string" || typeof value === "number")) {
         const text = skipPlaceholder(value);
@@ -1521,7 +1594,8 @@ function isFieldPair(item) {
 }
 
 function fieldPairName(item) {
-  const name = item.name ?? item.key ?? item.label ?? item.question ?? item.field;
+  const name =
+    item.slug ?? item.name ?? item.key ?? item.label ?? item.question ?? item.field ?? item.fieldName;
   return name == null ? "" : String(name).trim();
 }
 
@@ -1585,6 +1659,7 @@ module.exports.importPostedLead = importPostedLead;
 module.exports.incomingLeadFields = incomingLeadFields;
 module.exports.extractLooseContact = extractLooseContact;
 module.exports.payloadFromBody = payloadFromBody;
+module.exports.findRecentSameSubmission = findRecentSameSubmission;
 module.exports.unwrapLeadPayload = unwrapLeadPayload;
 module.exports.rejectOwnerEmail = rejectOwnerEmail;
 module.exports.ownerEmailsFromCenter = ownerEmailsFromCenter;
