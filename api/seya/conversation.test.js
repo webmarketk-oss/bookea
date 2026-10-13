@@ -96,7 +96,7 @@ test("20 questions imprévues : répondre à chacune sans ramener aux créneaux"
     ["C’est pour un homme aussi ?", /hommes/i],
     ["Vous êtes ouverts le samedi ?", /samedi/i],
     ["Il faut s’épiler avant ?", /bilan|consignes/i],
-    ["C’est adapté si j’allaite ?", /allaitement|équipe|vérifi/i],
+    ["C’est adapté pendant l’allaitement ?", /allaitement|équipe|vérifi/i],
     ["Arrête de me proposer des horaires", /rendez-vous|temps|d’accord/i],
   ];
 

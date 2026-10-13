@@ -1,6 +1,7 @@
 const { classifyPriceQuestion, isNearDuplicate, isPriceRepeatComplaint } = require("./price");
 const { axisClarifyQuestion, inferCareFamily, resolveActiveFamily } = require("./care-family");
 const { isWelcomeRelanceOnly, resolveSeyaMission } = require("./mission");
+const { classifyHealthMessage } = require("./health");
 
 function normalize(value) {
   return String(value || "")
@@ -380,7 +381,15 @@ function parseClockMinutes(text) {
     const dayAfterWeekday = new RegExp(
       `(lundi|mardi|mercredi|jeudi|vendredi|samedi|le|du|a partir du|des le)\\s+${hour}\\b`,
     ).test(value);
-    if (!looksLikeClock && (dayAfterWeekday || hasDayOfMonthRequest(text))) {
+    const followedByUnit =
+      !looksLikeClock &&
+      /^\s*(km|kilo|kg|min|minute|an\b|ans\b|mois|cm|%|€|euro|fois|seance|sceance|enfant|semaine|jour|taille|kilometre)/.test(
+        value.slice(match.index + token.length),
+      );
+    if (
+      followedByUnit ||
+      (!looksLikeClock && (dayAfterWeekday || hasDayOfMonthRequest(text)))
+    ) {
       match = pattern.exec(value);
       continue;
     }
@@ -1185,6 +1194,48 @@ function bookingOfferCta(conversation, durationMinutes) {
   return `Je peux vous proposer un premier rendez-vous${offerBit}.${durationBit} Quand seriez-vous disponible ?`;
 }
 
+function asksFeasibility(text) {
+  return /je (peux|pourrais|pourrai) (faire|traiter|le faire)|est-ce (que c['’]est )?possible|c['’]est possible|(ça|ca) (marche|fonctionne)|c['’]est efficace|vous (pouvez|pourriez) (traiter|faire|m['’]aider)|possible de (les |le |la )?(traiter|faire|enlever|retirer)/i.test(
+    String(text || ""),
+  );
+}
+
+function minceurGoalLabel(text) {
+  const value = normalize(text);
+  const kilos = value.match(/(\d+)\s*(kg|kilos?)\b/);
+  if (kilos && /perdre|en trop|maigrir|mincir|enlever/.test(value)) return `perdre ${kilos[1]} kilos`;
+  if (/perdre du poids|maigrir|mincir|kilos? en trop|kilos? a perdre/.test(value)) return "perdre du poids";
+  if (/cellulite|peau d['’ ]?orange/.test(value)) return "travailler la cellulite";
+  if (/graisse|capiton|bourrelet/.test(value)) return "réduire les graisses localisées";
+  if (/silhouette|affiner/.test(value)) return "affiner la silhouette";
+  return "";
+}
+
+function offerPhrase(offer) {
+  const value = String(offer || "")
+    .trim()
+    .replace(/^(?:(?:une|un|les|le|la|notre|nos)\s+|l['’]\s*)/i, "");
+  if (/^[A-ZÀ-Ý][a-zà-ÿ]/.test(value)) {
+    return `${value.charAt(0).toLowerCase()}${value.slice(1)}`;
+  }
+  return value;
+}
+
+// Répond à « est-ce possible ? » sans promettre de résultat ni sortir de l’offre du centre.
+function feasibilityAck(zoneLabel, conversation) {
+  const offer = offerPhrase(conversation?.offerLabel);
+  const subject = zoneLabel ? `Pour ${zoneLabel}, c’est` : "C’est";
+  return offer
+    ? `${subject} justement ce que l’on regarde avec vous pendant notre ${offer}.`
+    : `${subject} justement ce que l’équipe regarde avec vous.`;
+}
+
+function needAck(family, zoneLabel, conversation, text) {
+  return asksFeasibility(text) && !classifyHealthMessage(text).personal
+    ? feasibilityAck(zoneLabel, conversation)
+    : firstNeedAck(family, zoneLabel, conversation);
+}
+
 function firstNeedAck(family, zoneLabel, conversation) {
   const several = / et |, /.test(zoneLabel || "");
   if (family === "epilation") {
@@ -1204,7 +1255,7 @@ function firstNeedAck(family, zoneLabel, conversation) {
     return pickFresh(
       zoneLabel
         ? [
-            `${zoneLabel.charAt(0).toUpperCase()}${zoneLabel.slice(1)} est justement le genre d’objectif qu’on voit souvent. Le diagnostic permettra de choisir le soin le plus adapté à votre peau.`,
+            `${zoneLabel.charAt(0).toUpperCase()}${zoneLabel.slice(1)}, c’est justement le genre d’objectif qu’on voit souvent. Le diagnostic permettra de choisir le soin le plus adapté à votre peau.`,
             `Je note ${zoneLabel}. Le diagnostic permettra de déterminer le soin qui correspond le mieux à votre peau.`,
           ]
         : [
@@ -1249,7 +1300,12 @@ function extractConsultativeFields(current, text, conversation) {
     tried: String(current?.tried || "").trim(),
   };
   const raw = String(text || "").trim();
-  if (!raw || wantsSlots(text, conversation) || classifyPriceQuestion(text)) {
+  if (
+    !raw ||
+    wantsSlots(text, conversation) ||
+    classifyPriceQuestion(text) ||
+    classifyHealthMessage(text).personal
+  ) {
     return next;
   }
   if (!next.distance) {
@@ -1341,11 +1397,14 @@ function firstNeedReply(text, conversation, qualification, extras = {}) {
       `${qualification?.need || ""} ${qualification?.zone || ""} ${text || ""} ${conversation?.treatment || ""}`,
     ) ||
     "";
-  const zoneLabel = speakZoneList(qualification?.zone);
+  const zoneLabel =
+    speakZoneList(qualification?.zone) || (family === "minceur" ? minceurGoalLabel(text) : "");
   const needKnown = Boolean(qualification?.need || family);
   const detailKnown = Boolean(
     zoneLabel ||
-      (family === "visage" && /peau|visage|fermete|ride|acne/.test(normalize(text))),
+      (family === "visage" &&
+        /peau|visage|fermete|ride|ridule|acne|tache|eclat|relach|teint|cerne|pore/.test(normalize(text))) ||
+      (family === "epilation" && /\bpoil|pilosit/.test(normalize(text))),
   );
   const extracted = extractConsultativeFields(qualification, text, conversation);
   const consultative = {
@@ -1382,7 +1441,7 @@ function firstNeedReply(text, conversation, qualification, extras = {}) {
   }
 
   if (isWelcomeRelanceOnly(mission)) {
-    return firstNeedAck(family, zoneLabel, conversation);
+    return needAck(family, zoneLabel, conversation, text);
   }
 
   if (extras.skipConsultative) {
@@ -1405,11 +1464,19 @@ function firstNeedReply(text, conversation, qualification, extras = {}) {
     return availabilityCta(conversation, extras);
   }
 
+  const healthAside = classifyHealthMessage(text).personal;
+  if (!consultative.distance && healthAside && lastSeyaAskedDistance(conversation)) {
+    return distanceQuestion(extras.centerName);
+  }
+  if (!consultative.tried && consultative.distance && healthAside && lastSeyaAskedTried(conversation)) {
+    return triedQuestion(family);
+  }
+
   if (
     !consultative.distance &&
     !alreadyTold(conversation, "quelle distance|moins de \\d+")
   ) {
-    return `${firstNeedAck(family, zoneLabel, conversation)} ${distanceQuestion(extras.centerName)}`
+    return `${needAck(family, zoneLabel, conversation, text)} ${distanceQuestion(extras.centerName)}`
       .replace(/\s+/g, " ")
       .trim();
   }

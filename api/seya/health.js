@@ -72,33 +72,28 @@ function isGeneralHealthQuestion(value) {
   );
 }
 
+// Un objectif esthétique (rides, kilos, cellulite, poils, zone) n’est pas un signal de santé :
+// seule une condition médicale explicite ouvre une revue santé.
+const MEDICAL_CONDITION =
+  /pacemaker|stimulateur|defibrillateur|enceinte|grossesse|\ballaite|\ballaitement|cancer|chimio|radiotherap|tumeur|roaccutane|accutane|isotretinoine|implant|prothese|cardiaque|\bcoeur\b|maladie|diabet|insuline|thyroid|hypertension|\btension\b|epilep|anticoagul|phlebite|thrombose|varices|herpes|eczema|psoriasis|lupus|hepatite|insuffisance|\bopere|\boperation|chirurg|medicament|photosensibil|(probleme|souci|raison|etat|soucis|problemes) de sante|antecedent|allergi/;
+
+const MEDICAL_TREATMENT =
+  /\b(je prends|je suis sous|sous) (un |des )?traitements?\b|\btraitements? (medica\w*|en cours|hormona\w*|contre)\b|\bmon traitement\b|\bmes traitements\b|\bmon medecin\b|\bmon (dermato\w*|cardiologue|gyneco\w*)\b/;
+
+const OWN_SITUATION = /\bje\b|\bj[' ]|\bmon\b|\bma\b|\bmes\b|\bmoi\b/;
+
+const ASKS_IF_POSSIBLE =
+  /je (peux|puis)|c[' ]est possible|est-ce possible|puis-je|pose (pas )?de probleme|pas de probleme|compatible|autorise/;
+
 function isPersonalHealthSituation(value) {
   const current = withoutPastPregnancy(value);
-  const ownSituation =
-    /\bje (prends|suis|ai|fais)\b|\bj[' ]ai\b|\bmon (traitement|probleme|medecin|pacemaker)\b|\bavec mon\b|\bprobleme de sante\b|\bmes (traitements|medicaments)\b/.test(
-      current,
-    );
-  const namedCondition =
-    /pacemaker|stimulateur|enceinte|grossesse|cancer|chimio|roaccutane|accutane|implant|cardiaque|\bcoeur\b|maladie|traitement|medicament|diabete|insuline|thyroide|tension/.test(
-      current,
-    );
-  const asksIfPossible =
-    /je (peux|puis)|c[' ]est possible|est-ce possible|puis-je|je peux faire|pose (pas )?de probleme|pas de probleme/.test(
-      current,
-    );
-  if (ownSituation && namedCondition) {
+  if (MEDICAL_TREATMENT.test(current)) {
     return true;
   }
-  if (ownSituation && (asksIfPossible || /cryo|seance|soin|bilan/.test(current))) {
-    return true;
+  if (!MEDICAL_CONDITION.test(current)) {
+    return false;
   }
-  if (ownSituation && /sante|traitement|enceinte|grossesse/.test(current)) {
-    return true;
-  }
-  if (namedCondition && asksIfPossible) {
-    return true;
-  }
-  return false;
+  return OWN_SITUATION.test(current) || ASKS_IF_POSSIBLE.test(current);
 }
 
 function withoutPastPregnancy(value) {
@@ -208,7 +203,7 @@ function personalHealthReply(resolved) {
 }
 
 function awaitingHealthReply() {
-  return "L’équipe doit encore vérifier votre situation avant de confirmer une séance. En attendant je peux vous répondre sur le prix, l’adresse ou un horaire, sans réserver.";
+  return "L’équipe doit encore vérifier votre situation avant de confirmer une séance.";
 }
 
 function buildHealthTask(conversation, text, resolved, kind) {

@@ -412,6 +412,9 @@ function polishPrompt({
       : "Ton objectif est d’accompagner jusqu’à la prise de rendez-vous, sans insister et sans coller deux fois la même réponse.",
     "Avant de répondre, tu relis tout le fil (prospect + équipe + toi), le centre concerné et l’axe du prospect (laser, minceur ou visage), y compris une relance J+15, et tu t’y tiens. Les horaires écrits par l’équipe priment. Si elle a proposé 15h et que le prospect le choisit, tu confirmes 15h : interdit de dire que ce n’est pas disponible ou de proposer 11h30/12h. Si le prospect a dit qu’il reviendrait, qu’il n’a rien cette semaine, ou que l’info était claire, tu n’as plus à demander un jour. Si le prospect a corrigé le soin (visage, minceur, laser), tu restes sur CE soin et tu n’utilises que les réglages de CE soin dans CE centre. Interdit de revenir à la campagne d’origine. Interdit de parler minceur, analyse corporelle ou cures 500€ si le fil ou le centre est laser / Dépil. Si l’axe est flou, tu poses une question courte pour le clarifier.",
     "Tu réponds au dernier message, dans ce contexte. Interdit de reposer une question déjà traitée. Interdit de recoller le dernier message Seya.",
+    "Un objectif esthétique n’est pas une information de santé : rides, ridules, relâchement, taches, éclat (visage) ; kilos, ventre, graisses, cellulite, silhouette (minceur) ; zones, poils, pilosité (laser). Tu t’en sers pour qualifier le besoin et tu poursuis la mission. Interdit de transférer à l’équipe, de parler de contre-indication ou de « vérifier sa situation » pour ça. Seule une vraie information de santé (grossesse en cours, traitement médical, maladie, pacemaker…) suit les consignes santé de la fiche du soin, sans diagnostic ni verdict de compatibilité. Tu ne poses une question de santé que si elle figure dans la fiche du soin de CE centre.",
+    "Tu présentes uniquement l’offre, le prix, la durée et les modalités enregistrés pour CE centre et CE soin. Si une information manque, tu ne la prends jamais d’un autre centre et tu ne l’inventes pas.",
+    "Pas de phrase de remplissage du type « En attendant, si vous avez des questions sur le prix, l’adresse ou les horaires, n’hésitez pas ». Une seule question par message.",
     "Priorité absolue : tu réponds d’abord à ce que la personne vient de dire (question, précision, ville, demande de réfléchir). La trame commerciale passe toujours après. Si elle donne sa ville et qu’elle n’est pas celle du centre, tu dis où se trouve le centre et tu lui demandes si elle cherchait un centre dans sa ville. Interdit d’inventer un autre centre, une adresse ou un transfert.",
     "Si elle veut réfléchir, dit qu’elle reviendra vers vous, qu’elle recontactera ou « pas pour le moment » : tu respectes sa pause. Interdit de demander ses disponibilités, de proposer un créneau ou un rendez-vous. Ce n’est pas un refus définitif : tu restes chaleureuse et disponible pour ses questions.",
     conversation.leadPause
@@ -536,6 +539,9 @@ function lastSeyaText(conversation) {
 function pickSafeReply(draft, polished, bookingState, conversation) {
   const candidate = sanitizeReply(polished);
   if (!candidate || candidate.length < 8) {
+    return draft;
+  }
+  if (mentionsHealthHandoff(candidate) && !mentionsHealthHandoff(draft)) {
     return draft;
   }
   if (replyHasForbiddenSlots(candidate, bookingState)) {
@@ -860,12 +866,31 @@ function sealAiResult(conversationOrResult, bookingState, shouldBook = null) {
 }
 
 function sanitizeReply(value) {
-  return String(value || "")
-    .replace(/^["«\s]+|["»\s]+$/g, "")
-    .replace(/offre\s*\d+/gi, "")
-    .replace(/\s+/g, " ")
-    .trim()
-    .slice(0, 700);
+  return stripFillerSentences(
+    String(value || "")
+      .replace(/^["«\s]+|["»\s]+$/g, "")
+      .replace(/offre\s*\d+/gi, "")
+      .replace(/\s+/g, " ")
+      .trim(),
+  ).slice(0, 700);
+}
+
+const FILLER_SENTENCE =
+  /^(en attendant,?\s*)?(si vous avez (des|d['’]autres|la moindre|une) questions?|n['’]h[ée]sitez pas|je reste (à votre disposition|disponible) (pour|si)|je peux (aussi |également )?vous répondre sur le prix)/i;
+
+function stripFillerSentences(text) {
+  const sentences = String(text || "").match(/[^.!?]+[.!?]*\s*(?:[\u{1F300}-\u{1FAFF}\u2600-\u27BF]\s*)*/gu);
+  if (!sentences || sentences.length < 2) {
+    return String(text || "").trim();
+  }
+  const kept = sentences.filter((sentence) => !FILLER_SENTENCE.test(sentence.trim()));
+  return (kept.length ? kept : sentences).join("").replace(/\s+/g, " ").trim();
+}
+
+function mentionsHealthHandoff(text) {
+  return /v[ée]rifi\w* (votre|ta) situation|contre-indication|avis m[ée]dical|votre (sant[ée]|m[ée]decin)|transmet\w* votre question|raison m[ée]dicale/i.test(
+    String(text || ""),
+  );
 }
 
 function cleanField(value) {

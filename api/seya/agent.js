@@ -1082,11 +1082,23 @@ function matchProposedSlot(text, slots, options = {}) {
       }
     }
   }
+  const ordinal = value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[.!?]+$/g, "")
+    .replace(/\s+(svp|s'il vous plait|merci|stp)$/g, "")
+    .trim();
   if (
-    /^(le premier|premier)$/i.test(value) ||
+    /^(le |la )?premi?(er|ere)( creneau| horaire| option)?$/.test(ordinal) ||
     (options.confirmYes && isShortYes(text))
   ) {
     return slots[0];
+  }
+  if (/^(le |la )?(deuxieme|second|seconde)( creneau| horaire| option)?$/.test(ordinal)) {
+    return slots[1] || null;
+  }
+  if (/^(le |la )?dernier(e)?( creneau| horaire| option)?$/.test(ordinal)) {
+    return slots[slots.length - 1] || null;
   }
   return (
     slots.find((slot) => {
@@ -1782,7 +1794,22 @@ function applyLeadReply(conversation, text, seya, slots, extras = {}) {
 
   const health = classifyHealthMessage(text);
   const resolvedHealth = resolveHealthSheet(seya, conversation, text);
-  if (health.personal) {
+  // Mission rappel : l’info santé est notée pour l’équipe, la qualification continue.
+  if (health.personal && isQualifyCallback(settings) && !extras.healthNoted) {
+    const review = startHealthReview(
+      conversation,
+      text,
+      resolvedHealth,
+      health.mixed ? "mixed" : "personal",
+    );
+    const next = applyLeadReply(conversation, text, seya, slots, {
+      ...extras,
+      healthNoted: true,
+    });
+    return withCallbackHealthNote(next, review);
+  }
+
+  if (health.personal && !extras.healthNoted) {
     const parts = [];
     if (asksPrice(text) || classifyPriceQuestion(text)) {
       parts.push(
@@ -1821,7 +1848,7 @@ function applyLeadReply(conversation, text, seya, slots, extras = {}) {
     );
   }
 
-  if (isAwaitingHealthReview(conversation)) {
+  if (isAwaitingHealthReview(conversation) && !isQualifyCallback(settings)) {
     if (isOffTopicComplaint(text)) {
       return finishLeadReply(
         conversation,
@@ -1992,12 +2019,15 @@ function applyLeadReply(conversation, text, seya, slots, extras = {}) {
   }
 
   if (wantsSlots(intentText, conversation) && !canBookSeya(settings)) {
+    const knownDay = spokenCallbackDay(bookingState);
     return finishLeadReply(
       conversation,
       qualification,
       qualification.need ? "Qualifié" : "En cours",
       text,
-      "Parfait. Vous êtes plutôt disponible en début de semaine, ou plutôt en fin de semaine ?",
+      knownDay
+        ? `C’est noté pour ${knownDay}. À quelle heure souhaitez-vous que l’on vous rappelle ?`
+        : "Parfait. Vous êtes plutôt disponible en début de semaine, ou plutôt en fin de semaine ?",
       bookingState,
     );
   }
@@ -2166,7 +2196,7 @@ function applyLeadReply(conversation, text, seya, slots, extras = {}) {
   if (isOffTopicComplaint(text)) {
     const previous = lastSubstantiveLeadText(conversation, text);
     const previousHealth = classifyHealthMessage(previous);
-    if (previousHealth.personal) {
+    if (previousHealth.personal && !isQualifyCallback(settings)) {
       const resolved = resolveHealthSheet(seya, conversation, previous);
       const review = startHealthReview(conversation, previous, resolved, "personal");
       return finishLeadReply(
@@ -2269,6 +2299,54 @@ function withRereadPrefix(_reread, text) {
   return String(text || "").trim();
 }
 
+function withCallbackHealthNote(result, review) {
+  const messages = [...(result.conversation?.messages || [])];
+  const index = messages.map((item) => item.author).lastIndexOf("seya");
+  if (index >= 0) {
+    const rest = String(messages[index].text || "")
+      .replace(/^(Merci( beaucoup)?[,.!]?\s*)/i, "")
+      .trim();
+    messages[index] = {
+      ...messages[index],
+      text: `Merci de me l’avoir précisé, je le note pour l’équipe : elle en tiendra compte lors du rappel. ${rest}`.trim(),
+    };
+  }
+  return {
+    ...result,
+    shouldBook: null,
+    conversation: {
+      ...result.conversation,
+      status:
+        result.conversation?.status === "Revue santé"
+          ? "Qualifié"
+          : result.conversation?.status,
+      healthReview: review.healthReview,
+      healthTask: review.healthTask,
+      messages,
+    },
+  };
+}
+
+function spokenCallbackDay(bookingState) {
+  const iso = String(bookingState?.requestedDate || "").slice(0, 10);
+  const parsed = new Date(`${iso}T12:00:00`);
+  if (!iso || Number.isNaN(parsed.getTime())) {
+    return "";
+  }
+  const weekdays = ["dimanche", "lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi"];
+  const dd = String(parsed.getDate()).padStart(2, "0");
+  const mm = String(parsed.getMonth() + 1).padStart(2, "0");
+  const part =
+    bookingState?.dayPart === "morning"
+      ? " matin"
+      : bookingState?.dayPart === "afternoon"
+        ? " après-midi"
+        : bookingState?.dayPart === "evening"
+          ? " en fin de journée"
+          : "";
+  return `${weekdays[parsed.getDay()]} ${dd}/${mm}${part}`;
+}
+
 function callbackSlotFromThread(conversation, text, bookingState, chosenSlot) {
   const date = String(chosenSlot?.date || bookingState?.requestedDate || "").slice(0, 10);
   const time = String(
@@ -2342,7 +2420,9 @@ function fallbackAfterNote(qualification, conversation, text) {
     });
   }
   if (qualification?.need) {
-    return "Vous voulez que je vous propose un créneau, ou vous avez une autre question ?";
+    return isQualifyCallback(conversation?._seya)
+      ? "Vous avez une autre question, ou vous souhaitez que l’équipe vous rappelle ?"
+      : "Vous voulez que je vous propose un créneau, ou vous avez une autre question ?";
   }
   return (
     axisClarifyQuestion(conversation?._seya) ||
