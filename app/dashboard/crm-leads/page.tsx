@@ -30,6 +30,7 @@ import {
   deleteCrmLeadActivity,
   loadCrmLeads,
   mergeCrmDuplicateLeads,
+  setCrmLeadImportOrigin,
   updateCrmLeadAmount,
   updateCrmLeadDetails,
   updateCrmLeadReminder,
@@ -76,7 +77,8 @@ const emptyLeadForm = {
   reminderDate: "",
 };
 
-type CRMTab = "prospects" | "kpi";
+type CRMTab = "prospects" | "imports" | "kpi";
+type KpiScope = "campaigns" | "imports";
 type FicheBox = {
   top: number;
   left: number;
@@ -170,6 +172,7 @@ export default function CRMLeadsPage() {
   );
   const [newLeadForm, setNewLeadForm] = useState(emptyLeadForm);
   const [activeTab, setActiveTab] = useState<CRMTab>("prospects");
+  const [kpiScope, setKpiScope] = useState<KpiScope>("campaigns");
   const [quickDateFilter, setQuickDateFilter] =
     useState<QuickDateFilter>("Tous");
   const centerNameRef = useRef("");
@@ -354,8 +357,12 @@ export default function CRMLeadsPage() {
     const status = searchParams.get("status");
     const quick = searchParams.get("quick");
 
-    if (status && isLeadStatusFilter(status)) {
+    if (searchParams.get("tab") === "imports") {
       // eslint-disable-next-line react-hooks/set-state-in-effect
+      setActiveTab("imports");
+    }
+
+    if (status && isLeadStatusFilter(status)) {
       setActiveTab("prospects");
       setQuickDateFilter("Tous");
       setFilters((currentFilters) => ({
@@ -398,13 +405,28 @@ export default function CRMLeadsPage() {
     }
 
     openedLeadFromQuery.current = true;
-    setActiveTab("prospects");
+    setActiveTab(match.imported ? "imports" : "prospects");
     setSelectedLeadId(match.id);
     setIsLeadDetailsOpen(true);
   }, [leadList]);
 
+  const campaignLeads = useMemo(
+    () => leadList.filter((lead) => !lead.imported),
+    [leadList],
+  );
+  const importedLeads = useMemo(
+    () => leadList.filter((lead) => lead.imported),
+    [leadList],
+  );
+  const importCandidates = useMemo(
+    () => campaignLeads.filter((lead) => lead.importCandidate),
+    [campaignLeads],
+  );
+  const scopeLeads = activeTab === "imports" ? importedLeads : campaignLeads;
   const selectedLead =
-    leadList.find((lead) => lead.id === selectedLeadId) ?? leadList[0];
+    scopeLeads.find((lead) => lead.id === selectedLeadId) ??
+    scopeLeads[0] ??
+    leadList[0];
   const newLeadSourceOptions = useMemo(
     () =>
       Array.from(
@@ -434,7 +456,7 @@ export default function CRMLeadsPage() {
     [leadList],
   );
 
-  const filteredLeads = leadList.filter((lead) => {
+  const filteredLeads = scopeLeads.filter((lead) => {
     const search = filters.search.trim().toLowerCase();
     const matchesSearch =
       search.length === 0 ||
@@ -671,6 +693,37 @@ export default function CRMLeadsPage() {
         error instanceof Error
           ? error.message
           : "Le commentaire n'a pas pu être enregistré."
+      );
+      await refreshCrmLeads();
+    }
+  }
+
+  async function handleImportOrigin(leadIds: string[], imported: boolean) {
+    const ids = new Set(leadIds);
+    setLeadList((currentLeads) =>
+      currentLeads.map((lead) =>
+        ids.has(lead.id)
+          ? { ...lead, imported, importCandidate: undefined }
+          : lead
+      )
+    );
+
+    try {
+      await trackSave(async () => {
+        for (const leadId of leadIds) {
+          await setCrmLeadImportOrigin(leadId, imported);
+        }
+      });
+      setCrmNotice(
+        imported
+          ? `${leadIds.length} prospect${leadIds.length > 1 ? "s" : ""} classé${leadIds.length > 1 ? "s" : ""} dans CRM Imports.`
+          : `${leadIds.length} prospect${leadIds.length > 1 ? "s" : ""} laissé${leadIds.length > 1 ? "s" : ""} dans CRM Leads.`
+      );
+    } catch (error) {
+      setCrmError(
+        error instanceof Error
+          ? error.message
+          : "Le classement n'a pas pu être enregistré."
       );
       await refreshCrmLeads();
     }
@@ -1112,9 +1165,22 @@ export default function CRMLeadsPage() {
         <div className="flex flex-wrap items-center gap-2 border-b border-slate-200">
           <CRMTabButton
             active={activeTab === "prospects"}
-            onClick={() => setActiveTab("prospects")}
+            onClick={() => {
+              setActiveTab("prospects");
+              setIsLeadDetailsOpen(false);
+            }}
           >
             Prospects
+          </CRMTabButton>
+          <CRMTabButton
+            active={activeTab === "imports"}
+            onClick={() => {
+              setActiveTab("imports");
+              setIsLeadDetailsOpen(false);
+            }}
+          >
+            CRM Imports
+            {importedLeads.length > 0 ? ` (${importedLeads.length})` : ""}
           </CRMTabButton>
           <CRMTabButton
             active={activeTab === "kpi"}
@@ -1124,10 +1190,33 @@ export default function CRMLeadsPage() {
           </CRMTabButton>
         </div>
 
-        {activeTab === "prospects" ? (
+        {activeTab === "prospects" && importCandidates.length > 0 ? (
+          <p className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-800">
+            {importCandidates.length} prospect{importCandidates.length > 1 ? "s" : ""} ressemble{importCandidates.length > 1 ? "nt" : ""} à d’anciens imports, sans origine d’import enregistrée.{" "}
+            <button
+              type="button"
+              className="font-black underline"
+              onClick={() => {
+                setActiveTab("imports");
+                setIsLeadDetailsOpen(false);
+              }}
+            >
+              Les vérifier dans CRM Imports
+            </button>
+          </p>
+        ) : null}
+
+        {activeTab === "imports" && importCandidates.length > 0 ? (
+          <ImportCandidatesPanel
+            leads={importCandidates}
+            onClassify={handleImportOrigin}
+          />
+        ) : null}
+
+        {activeTab === "prospects" || activeTab === "imports" ? (
           <>
             <DashboardCards
-              leads={leadList}
+              leads={scopeLeads}
               activeStatus={filters.status}
               activeQuickFilter={quickDateFilter}
               onQuickFilter={(quickFilter) => {
@@ -1182,7 +1271,17 @@ export default function CRMLeadsPage() {
                   Bookea récupère les prospects du centre.
                 </p>
               </div>
-            ) : leadList.length === 0 ? (
+            ) : activeTab === "imports" && importedLeads.length === 0 ? (
+              <div className="rounded-2xl border border-slate-200 bg-white p-8 text-center shadow-sm">
+                <p className="text-lg font-black text-slate-950">
+                  Aucun prospect importé pour le moment
+                </p>
+                <p className="mt-2 text-sm font-semibold text-slate-500">
+                  Les prospects ajoutés par import de fichier apparaîtront ici,
+                  séparés des prospects des campagnes.
+                </p>
+              </div>
+            ) : scopeLeads.length === 0 ? (
               <div className="rounded-2xl border border-slate-200 bg-white p-8 text-center shadow-sm">
                 <p className="text-lg font-black text-slate-950">
                   Aucun prospect pour le moment
@@ -1314,7 +1413,33 @@ export default function CRMLeadsPage() {
             )}
           </>
         ) : (
-          <KPIDashboard leads={leadList} />
+          <div className="space-y-4">
+            <div className="inline-flex rounded-xl border border-slate-200 bg-white p-1 shadow-sm">
+              {(
+                [
+                  ["campaigns", "Campagnes"],
+                  ["imports", "Imports"],
+                ] as const
+              ).map(([scope, label]) => (
+                <button
+                  key={scope}
+                  type="button"
+                  onClick={() => setKpiScope(scope)}
+                  className={
+                    kpiScope === scope
+                      ? "rounded-lg bg-violet-600 px-3 py-1.5 text-sm font-bold text-white"
+                      : "rounded-lg px-3 py-1.5 text-sm font-bold text-slate-500 hover:text-slate-900"
+                  }
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <KPIDashboard
+              key={kpiScope}
+              leads={kpiScope === "imports" ? importedLeads : campaignLeads}
+            />
+          </div>
         )}
       </div>
 
@@ -1540,6 +1665,75 @@ function CRMTabButton({
     >
       {children}
     </button>
+  );
+}
+
+function ImportCandidatesPanel({
+  leads,
+  onClassify,
+}: {
+  leads: Lead[];
+  onClassify: (leadIds: string[], imported: boolean) => void;
+}) {
+  return (
+    <section className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-slate-900 shadow-sm">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="text-sm font-black uppercase text-amber-700">
+            À vérifier avant classement
+          </p>
+          <p className="mt-1 max-w-2xl text-sm font-semibold text-slate-600">
+            Ces prospects ressemblent à d’anciens imports, mais aucune origine
+            d’import n’a été enregistrée pour eux. Ils restent dans CRM Leads
+            tant que vous ne les avez pas classés.
+          </p>
+        </div>
+        <Button
+          type="button"
+          onClick={() => onClassify(leads.map((lead) => lead.id), true)}
+        >
+          Tout classer dans Imports ({leads.length})
+        </Button>
+      </div>
+      <ul className="mt-3 max-h-72 divide-y divide-amber-100 overflow-y-auto rounded-xl bg-white">
+        {leads.map((lead) => (
+          <li
+            key={lead.id}
+            className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 text-sm"
+          >
+            <span className="min-w-0">
+              <span className="font-bold text-slate-900">
+                {lead.firstName} {lead.lastName}
+              </span>
+              <span className="text-slate-500">
+                {lead.phone ? ` · ${lead.phone}` : ""} · reçu le {lead.createdAt}
+                {lead.campaign ? ` · ${lead.campaign}` : ""}
+              </span>
+              <span className="block text-xs font-semibold text-amber-700">
+                {lead.importCandidate}
+              </span>
+            </span>
+            <span className="flex shrink-0 gap-2">
+              <Button
+                type="button"
+                size="sm"
+                onClick={() => onClassify([lead.id], true)}
+              >
+                Classer dans Imports
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => onClassify([lead.id], false)}
+              >
+                Laisser dans Leads
+              </Button>
+            </span>
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }
 

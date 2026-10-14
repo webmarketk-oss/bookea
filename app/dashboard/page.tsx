@@ -116,8 +116,9 @@ export default function DashboardPage() {
   const yesterday = addDaysIso(today, -1);
   const monthStart = monthStartIso(today);
 
-  const todayLeads = leads.filter((lead) => isLeadCreatedOn(lead, today));
-  const yesterdayLeads = leads.filter((lead) => isLeadCreatedOn(lead, yesterday));
+  const campaignLeads = leads.filter((lead) => !lead.imported);
+  const todayLeads = campaignLeads.filter((lead) => isLeadCreatedOn(lead, today));
+  const yesterdayLeads = campaignLeads.filter((lead) => isLeadCreatedOn(lead, yesterday));
   const todayAppointments = appointments
     .filter(isCountableAppointment)
     .filter((appointment) => appointment.date === today)

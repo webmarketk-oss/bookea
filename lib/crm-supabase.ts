@@ -10,6 +10,11 @@ import { belongsOnClientFiche, isHiddenAgendaBlockClient } from "@/lib/appointme
 import { sanitizePersonName } from "@/lib/seya-person-name";
 import { leadImportToolFromEvents, leadSourceFromStored } from "@/lib/lead-offer";
 import {
+  IMPORT_ORIGIN_EVENT,
+  importOriginNote,
+  leadImportOrigin,
+} from "@/lib/lead-import-origin";
+import {
   closeSeyaThreadsForBookedLead,
   closeSeyaThreadsForCrmStatus,
 } from "@/lib/seya-close-booking";
@@ -499,6 +504,16 @@ export async function addCrmLeadActivity(leadId: string, text: string) {
   await insertLeadEvent(supabase, centerId, leadId, {
     event_type: "comment",
     note: text,
+  });
+}
+
+export async function setCrmLeadImportOrigin(leadId: string, imported: boolean) {
+  const supabase = createClient();
+  const centerId = await getLeadCenterId(supabase, leadId);
+  await insertLeadEvent(supabase, centerId, leadId, {
+    event_type: IMPORT_ORIGIN_EVENT,
+    to_value: imported ? "import" : "campaign",
+    note: importOriginNote(imported),
   });
 }
 
@@ -1513,6 +1528,7 @@ function toLead(row: LeadRow): Lead {
     leadSource?.name,
     events.filter((event) => event.event_type === "system").map((event) => event.note),
   );
+  const importOrigin = leadImportOrigin(leadSource?.name, events);
   const activityLog: LeadActivity[] = events
     .slice()
     .sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at))
@@ -1521,7 +1537,10 @@ function toLead(row: LeadRow): Lead {
       const type = normalizeEventType(event.event_type);
       const isComment =
         type === "comment" ||
-        (type === "system" && isUserFacingComment(event.note) && !event.from_value);
+        (type === "system" &&
+          event.event_type !== IMPORT_ORIGIN_EVENT &&
+          isUserFacingComment(event.note) &&
+          !event.from_value);
 
       return {
         id: event.id,
@@ -1576,6 +1595,8 @@ function toLead(row: LeadRow): Lead {
     treatment: service?.name || "Soin à préciser",
     source,
     importTool: importTool || undefined,
+    imported: importOrigin.imported,
+    importCandidate: importOrigin.candidate || undefined,
     campaign: campaign?.name?.trim() || "",
     status: normalizeLeadStatus(row.status),
     dealAmount: Number(row.amount_cure_ttc ?? 0),

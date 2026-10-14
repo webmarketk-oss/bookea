@@ -19,6 +19,7 @@ const SOURCE_ALIASES = {
   savemyleads: "savemyleads",
   facebook: "facebook",
   meta: "facebook",
+  import: "import",
 };
 
 function canonicalLeadSource(query) {

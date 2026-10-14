@@ -127,6 +127,7 @@ module.exports = async function handler(req, res) {
       sourceName,
       importTool: origin.importTool,
       fields,
+      fileImport: isFileImport(payload, req.query),
     });
 
     let whatsapp = { sent: false, skipped: "no_phone" };
@@ -858,6 +859,15 @@ async function importPostedLead(supabase, centerId, mapped, options = {}) {
       note: String(mapped.comment).trim(),
     });
   }
+  if (options.fileImport) {
+    events.push({
+      center_id: centerId,
+      lead_id: crmLead.id,
+      event_type: "import_origin",
+      to_value: "import",
+      note: "Origine : import de fichier.",
+    });
+  }
   await supabase.from("lead_events").insert(events);
 
   return crmLead.id;
@@ -1173,6 +1183,19 @@ function flattenFields(raw, prefix = "") {
   }
 
   return result;
+}
+
+function isFileImport(payload, query) {
+  const flag = String(firstValue(query?.import, payload?.import) || "").trim().toLowerCase();
+  if (["1", "true", "oui", "fichier", "file"].includes(flag)) {
+    return true;
+  }
+  const raw = String(
+    firstValue(query?.source, query?.origin, payload?.source, payload?.origin) || "",
+  )
+    .trim()
+    .toLowerCase();
+  return /^import\b/.test(raw);
 }
 
 function resolveIncomingSource(payload, query, fallback = "Facebook", req) {
@@ -1664,3 +1687,4 @@ module.exports.unwrapLeadPayload = unwrapLeadPayload;
 module.exports.rejectOwnerEmail = rejectOwnerEmail;
 module.exports.ownerEmailsFromCenter = ownerEmailsFromCenter;
 module.exports.ownerEmailsFromPayload = ownerEmailsFromPayload;
+module.exports.isFileImport = isFileImport;

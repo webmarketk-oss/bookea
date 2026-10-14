@@ -5,6 +5,7 @@ const {
   applyCenterOfferRoute,
   importPostedLead,
   incomingLeadFields,
+  isFileImport,
   leadOrigin,
   mapIncomingLead,
   payloadFromBody,
@@ -254,6 +255,35 @@ test("prospect test Systeme.io : source, axe et offre du tunnel enregistrés", a
   assert.doesNotMatch(note, /Import :/);
   assert.match(note, /Tunnel \/ page reçus : .*payload_offer_reference = minceur-vichy/);
   assert.doesNotMatch(note, /webmarket/);
+});
+
+test("import de fichier : l’origine d’import est enregistrée dans l’historique, pas pour une campagne", async () => {
+  assert.equal(isFileImport({}, { source: "import" }), true);
+  assert.equal(isFileImport({}, { source: "facebook", import: "1" }), true);
+  assert.equal(isFileImport({}, { source: "systeme.io" }), false);
+  assert.equal(isFileImport({ source: "Facebook" }, {}), false);
+
+  const imported = fakeSupabase();
+  const { origin, mapped, fields } = importLead(
+    payloadFromBody(SYSTEME_IO_MEMBER),
+    { center: "depil-tech-vichy", source: "import" },
+    {},
+  );
+  await importPostedLead(imported, "center-vichy", mapped, {
+    sourceName: origin.source,
+    fields,
+    fileImport: true,
+  });
+  const marks = imported.inserts.lead_events[0].filter((event) => event.event_type === "import_origin");
+  assert.equal(marks.length, 1);
+  assert.equal(marks[0].to_value, "import");
+
+  const campaign = fakeSupabase();
+  await importPostedLead(campaign, "center-vichy", mapped, { sourceName: "Facebook", fields });
+  assert.equal(
+    campaign.inserts.lead_events[0].some((event) => event.event_type === "import_origin"),
+    false,
+  );
 });
 
 test("CRM : un ancien prospect SaveMyLeads s’affiche en Facebook, l’axe seul n’est pas une offre", () => {

@@ -123,11 +123,14 @@ export default function StatisticsPage() {
       (!appointment.kind || appointment.kind === "Rendez-vous") &&
       appointment.status !== "Annulation",
   );
-  const leadCount = leads.length;
-  const rdvLeads = leads.filter(isLeadWithBookedRdv).length;
-  const soldLeads = leads.filter((lead) => soldStatuses.includes(lead.status)).length;
-  const redLeads = leads.filter((lead) => redStatuses.includes(lead.status)).length;
-  const revenue = leads.reduce((total, lead) => total + lead.dealAmount, 0);
+  const campaignLeads = leads.filter((lead) => !lead.imported);
+  const importedLeads = leads.filter((lead) => lead.imported);
+  const leadCount = campaignLeads.length;
+  const rdvLeads = campaignLeads.filter(isLeadWithBookedRdv).length;
+  const soldLeads = campaignLeads.filter((lead) => soldStatuses.includes(lead.status)).length;
+  const redLeads = campaignLeads.filter((lead) => redStatuses.includes(lead.status)).length;
+  const revenue = campaignLeads.reduce((total, lead) => total + lead.dealAmount, 0);
+  const importedRdv = importedLeads.filter(isLeadWithBookedRdv).length;
   const totalAppointmentMinutes = todayAppointments.reduce(
     (total, appointment) => total + appointment.duration,
     0,
@@ -145,8 +148,8 @@ export default function StatisticsPage() {
   const attendanceRate = attendanceRateFromAppointments(appointments);
   const conversionRate = ratio(soldLeads, leadCount);
   const noShowRate = ratio(redLeads, leadCount);
-  const sourceRows = groupByLeadField(leads, "source");
-  const campaignRows = groupByLeadField(leads, "campaign");
+  const sourceRows = groupByLeadField(campaignLeads, "source");
+  const campaignRows = groupByLeadField(campaignLeads, "campaign");
   const organicAppointments = appointments.filter(
     (appointment) => appointment.source === "Organique" || appointment.source === "Seya",
   );
@@ -539,8 +542,9 @@ export default function StatisticsPage() {
         ) : (
           <>
 
-        <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-9">
-          <MetricCard title="Leads CRM" value={leadCount} detail="Prospects ajoutés ou reçus" icon={<Users />} color="text-blue-600" />
+        <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+          <MetricCard title="Leads CRM" value={leadCount} detail="Prospects des campagnes, hors imports" icon={<Users />} color="text-blue-600" />
+          <MetricCard title="Prospects importés" value={importedLeads.length} detail={`${importedRdv} passé${importedRdv > 1 ? "s" : ""} en RDV · détail dans CRM > KPI > Imports`} icon={<Users />} color="text-slate-600" />
           <MetricCard title="RDV via leads" value={rdvLeads} detail="Leads passés en RDV" icon={<CalendarClock />} color="text-violet-600" />
           <MetricCard title="Organique Bookea" value={organicBookings} detail="Réservations directes" icon={<MousePointerClick />} color="text-cyan-600" />
           <MetricCard

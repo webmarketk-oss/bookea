@@ -40,6 +40,8 @@ export interface Lead {
   treatment: string;
   source: string;
   importTool?: string;
+  imported?: boolean;
+  importCandidate?: string;
   campaign: string;
   status: LeadStatus;
   dealAmount: number;
