@@ -2405,6 +2405,42 @@ test("consigne du soin « Termine par : « … » » : Seya conclut avec la phra
   assert.equal(conversation.status, "À recontacter");
 });
 
+test("« Termine par » : propre au centre et à la famille du soin, jamais repris ailleurs", async () => {
+  const closingText = "Phrase de fin réservée à l’épilation du centre A.";
+  const centerA = {
+    ...seya,
+    seyaMission: "qualify_callback",
+    bookAppointment: false,
+    treatmentBriefs: [{ name: "Épilation définitive", brief: `Termine par : « ${closingText} »` }],
+  };
+  const centerB = { ...seya, seyaMission: "qualify_callback", bookAppointment: false };
+  const run = async (settings, centerName, treatment) => {
+    let conversation = startConversation(
+      { leadId: `lead-${centerName}-${treatment}`, centerId: centerName, firstName: "Léa", phone: "0611223344", treatment },
+      centerName,
+      settings,
+    );
+    for (const text of ["Je veux un rendez-vous", "Jeudi à 15h"]) {
+      conversation = (
+        await generateSeyaReply({
+          conversation,
+          text,
+          seya: settings,
+          appointments: [],
+          hours: hours(),
+          centerName,
+          centerId: centerName,
+          now: NOW,
+        })
+      ).conversation;
+    }
+    return lastSeya(conversation);
+  };
+  assert.equal(await run(centerA, "Centre A", "Épilation définitive"), closingText);
+  assert.doesNotMatch(await run(centerA, "Centre A", "Soin minceur"), /réservée à l’épilation/);
+  assert.doesNotMatch(await run(centerB, "Centre B", "Épilation définitive"), /réservée à l’épilation/);
+});
+
 test("accueil + relances + prise de rendez-vous : elle peut booker", async () => {
   const bundled = { ...seya, seyaMission: "welcome_relance_book", bookAppointment: true };
   let conversation = startConversation(

@@ -3,6 +3,21 @@ const assert = require("node:assert/strict");
 
 delete process.env.OPENAI_API_KEY;
 
+let aiReply = "";
+const openaiPath = require.resolve("openai");
+require.cache[openaiPath] = {
+  id: openaiPath,
+  filename: openaiPath,
+  loaded: true,
+  exports: class {
+    constructor() {
+      this.chat = {
+        completions: { create: async () => ({ choices: [{ message: { content: aiReply } }] }) },
+      };
+    }
+  },
+};
+
 const { generateSeyaReply } = require("./ai");
 const { relanceCopy, startConversation } = require("./agent");
 const { centerNotifyCopy } = require("./center-notify");
@@ -117,6 +132,43 @@ test("Gaillard : informations déjà données, pas de question répétée", asyn
   );
   assert.match(lastSeya(conversation), /expert ou une experte minceur du centre vous rappellera/);
   assert.equal(conversation.messages.filter((item) => /objectif|déjà testé/i.test(item.text)).length, 0);
+});
+
+test("Gaillard minceur : perte de poids, Seya demande combien de kilos", async () => {
+  let conversation = open("Soin minceur");
+  conversation = await say(conversation, "Je voudrais perdre du poids");
+  assert.match(lastSeya(conversation), /Combien de kilos aimeriez-vous perdre \?/);
+  conversation = await say(conversation, "Une dizaine");
+  assert.match(lastSeya(conversation), /déjà testé/i);
+  conversation = await say(conversation, "non jamais");
+  assert.equal(conversation.status, "À recontacter");
+  assert.match(conversation.teamNotes.need, /kilos : Une dizaine/);
+  assert.equal(conversation.messages.filter((item) => /combien de kilos/i.test(item.text)).length, 1);
+});
+
+test("Gaillard minceur : kilos déjà précisés, pas de question sur les kilos", async () => {
+  let conversation = open("Soin minceur");
+  conversation = await say(conversation, "J'aimerais perdre 8 kilos");
+  assert.match(lastSeya(conversation), /déjà testé/i);
+  assert.equal(conversation.messages.filter((item) => /combien de kilos/i.test(item.text)).length, 0);
+});
+
+test("Gaillard : reformulation IA rejetée, la réponse de remplacement ne repose pas une question déjà répondue", async () => {
+  process.env.OPENAI_API_KEY = "test";
+  try {
+    let conversation = open("Soin visage");
+    aiReply = "Quel est votre objectif ? Quand seriez-vous disponible ?";
+    conversation = await say(conversation, "J'ai des taches et la peau terne");
+    assert.match(lastSeya(conversation), /déjà testé/i);
+    assert.doesNotMatch(lastSeya(conversation), /objectif|disponible/i);
+
+    aiReply = "D’accord. Quelles zones souhaitez-vous traiter ?";
+    conversation = await say(conversation, "Le soleil, c'est grave ?");
+    assert.doesNotMatch(lastSeya(conversation), /quelles zones|préoccupe/i);
+  } finally {
+    delete process.env.OPENAI_API_KEY;
+    aiReply = "";
+  }
 });
 
 test("Gaillard : disponibilité spontanée gardée pour l’équipe, sans promesse de rappel à cette heure", async () => {

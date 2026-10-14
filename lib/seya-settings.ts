@@ -252,6 +252,14 @@ export type SeyaConversation = {
   relanceCount?: number;
   sendError?: string | null;
   sentVia?: string | null;
+  teamHandoff?: {
+    status: "sent" | "failed";
+    reason?: string;
+    error?: string;
+    attempts?: number;
+    sentAt?: string;
+    lastAttemptAt?: string;
+  };
   crmStatus?: string;
   crmRecallDate?: string | null;
   crmSyncedAt?: string;

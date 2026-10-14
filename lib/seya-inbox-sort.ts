@@ -12,6 +12,7 @@ export type SeyaInboxItem = {
   status?: string;
   bookedSlot?: unknown;
   sendError?: string | null;
+  teamHandoff?: { status?: string };
   messages?: Array<{ author?: string; at?: string; text?: string }>;
   updatedAt?: string;
 };
@@ -146,7 +147,7 @@ export function inboxTag(conversation: SeyaInboxItem): SeyaInboxTag {
   }
 
   const status = conversation.status;
-  if (conversation.sendError) {
+  if (conversation.sendError || conversation.teamHandoff?.status === "failed") {
     return "humain";
   }
   if (hasBookedAppointment(conversation)) {

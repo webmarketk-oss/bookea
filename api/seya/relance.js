@@ -30,6 +30,7 @@ const {
 const { isSeyaOff, readCenterSeya, writeSeyaConversations } = require("./store");
 const { isSameSeyaConversation } = require("./conversation-key");
 const { activeLeadPause, withLeadPause } = require("./lead-pause");
+const { sendCallbackHandoff, teamHandoffRetryDue } = require("./center-notify");
 const {
   conversationOnRelanceHold,
   crmRecallDayFor,
@@ -59,7 +60,7 @@ module.exports = async function handler(req, res) {
     const supabase = createServiceClient();
     const { data: centers, error } = await supabase
       .from("centers")
-      .select("id,name,settings");
+      .select("id,name,email,settings");
     if (error) {
       throw new Error(error.message);
     }
@@ -102,9 +103,15 @@ async function relanceCenter(supabase, center, now = new Date()) {
   const latest = await readCenterSeya(supabase, center.id);
   const seya = latest.seya;
   const agent = agentSettings(seya);
-  const conversations = Array.isArray(seya.conversations) ? seya.conversations : [];
+  const retried = await retryTeamHandoffs(
+    center,
+    seya,
+    Array.isArray(seya.conversations) ? seya.conversations : [],
+    now,
+  );
+  const conversations = retried.conversations;
   if (!agent.relanceEnabled || isSeyaOff(seya)) {
-    await syncCrmStatusOnly(supabase, center.id, conversations, now);
+    await syncCrmStatusOnly(supabase, center.id, conversations, now, retried.changed);
     return [];
   }
 
@@ -114,7 +121,7 @@ async function relanceCenter(supabase, center, now = new Date()) {
   const bookedKeys = await loadBookedVisitKeys(supabase, center.id);
   const crmHold = await loadRelanceHoldKeys(supabase, center.id, now);
   await markSeyaBookedLeads(supabase, center.id, crmHold, now);
-  let closed = false;
+  let closed = retried.changed;
 
   for (const conversation of conversations) {
     const synced = await syncCrmFromConversation(
@@ -234,13 +241,27 @@ function crmSnapshotChanged(next, previous) {
   );
 }
 
-async function syncCrmStatusOnly(supabase, centerId, conversations, now = new Date()) {
+async function retryTeamHandoffs(center, seya, conversations, now = new Date()) {
+  let changed = false;
+  const next = [];
+  for (const conversation of conversations) {
+    if (!teamHandoffRetryDue(conversation, now)) {
+      next.push(conversation);
+      continue;
+    }
+    next.push(await sendCallbackHandoff({ center, seya, conversation, now }));
+    changed = true;
+  }
+  return { conversations: next, changed };
+}
+
+async function syncCrmStatusOnly(supabase, centerId, conversations, now = new Date(), force = false) {
   const crmHold = await loadRelanceHoldKeys(supabase, centerId, now);
   await markSeyaBookedLeads(supabase, centerId, crmHold, now);
   if (!conversations.length) {
     return;
   }
-  let changed = false;
+  let changed = force;
   const next = conversations.map((conversation) => {
     const stamped = withCrmSnapshot(conversation, crmHold);
     const closed = closeConversationForCrmStatus(stamped, stamped?.crmStatus);
@@ -271,9 +292,14 @@ function stillDueForRelance(seya, conversation, crmHold) {
   );
 }
 
+const HEALTH_REVIEWED_NOTE = /^Vérification santé faite\. Seya peut reprendre la conversation\.$/;
+
 function shouldSkipRelance(conversation, extras = {}) {
   const status = String(conversation?.status || "");
   if (activeLeadPause(conversation)) {
+    return true;
+  }
+  if (conversation?.teamHandoff?.status === "failed") {
     return true;
   }
   if (conversationOnRelanceHold(conversation, extras.crmHold)) {
@@ -282,7 +308,11 @@ function shouldSkipRelance(conversation, extras = {}) {
   const messages = conversation?.messages || [];
   const lastHuman = [...messages]
     .reverse()
-    .find((item) => item.author === "lead" || item.author === "centre");
+    .find(
+      (item) =>
+        item.author === "lead" ||
+        (item.author === "centre" && !HEALTH_REVIEWED_NOTE.test(String(item.text || ""))),
+    );
   if (lastHuman?.author === "centre") {
     return true;
   }

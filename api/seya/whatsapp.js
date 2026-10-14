@@ -3,7 +3,7 @@ const { createClient } = require("@supabase/supabase-js");
 const { generateSeyaReply, hasAiKey } = require("./ai");
 const { inferCareFamily, pickApprovedTemplate, resolveActiveFamily } = require("./care-family");
 const { pickBookingResources } = require("./axis-resources");
-const { notifyCenterSeyaAction } = require("./center-notify");
+const { notifyCenterSeyaAction, sendCallbackHandoff } = require("./center-notify");
 const { isNearDuplicate } = require("./price");
 const {
   BILAN_DURATION_MINUTES,
@@ -1057,19 +1057,9 @@ async function handleIncoming(
     next.bookingState?.pendingQuestion === "callback" &&
     existing.bookingState?.pendingQuestion !== "callback"
   ) {
-    const callbackMail = await notifyCenterSeyaAction({
-      center,
-      seya,
-      conversation: next,
-      kind: "callback",
-      slot: next.bookingState?.callbackSlot || null,
-    }).catch((error) => {
-      console.error("[seya/whatsapp] center notify callback", error);
-      return { conversation: next };
-    });
-    if (callbackMail?.conversation?.centerNotifyKey) {
-      next.centerNotifyKey = callbackMail.conversation.centerNotifyKey;
-    }
+    Object.assign(next, await sendCallbackHandoff({ center, seya, conversation: next }));
+  } else if (next.teamHandoff?.status === "failed" && next.status === "À recontacter") {
+    next.status = next.qualification?.need ? "Qualifié" : "En cours";
   }
 
   let uniqueOutgoing = outgoingWhatsAppTexts(

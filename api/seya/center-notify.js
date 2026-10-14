@@ -111,6 +111,9 @@ function centerNotifyCopy({ kind, centerName, conversation, slot }) {
         `Soin : ${care}`,
         `Besoin : ${String(notes.need || "").trim() || "à préciser lors du rappel"}`,
         `Déjà testé : ${String(notes.tried || "").trim() || "non précisé"}`,
+        String(conversation?.healthReview?.note || "").trim()
+          ? `Information santé donnée par le prospect (à vérifier par l’équipe) : « ${String(conversation.healthReview.note).trim()} »`
+          : "",
         preferences.length
           ? `Préférence donnée spontanément : ${preferences.join(" ; ")}. Aucun rappel ni rendez-vous n’a été promis à cette heure.`
           : "Aucune disponibilité demandée au prospect.",
@@ -368,6 +371,67 @@ function callbackNotifySlot(conversation) {
   return conversation?.bookingState?.callbackSlot || null;
 }
 
+const HANDOFF_RETRY_MS = 10 * 60 * 1000;
+
+function handoffErrorMessage(reason, detail) {
+  if (reason === "no_email") return "Aucun email du centre n’est renseigné.";
+  if (reason === "missing_brevo") return "La clé d’envoi Brevo manque.";
+  if (reason === "missing_sender") return "L’expéditeur des notifications n’est pas connecté.";
+  return detail ? `L’envoi du mail a échoué (${detail}).` : "L’envoi du mail a échoué.";
+}
+
+// « À recontacter » seulement si l’équipe a réellement reçu la transmission.
+function withTeamHandoffResult(conversation, mail, now = new Date()) {
+  const at = now.toISOString();
+  const attempts = Number(asRecord(conversation?.teamHandoff).attempts || 0) + 1;
+  if (mail?.sent || mail?.reason === "already") {
+    return {
+      ...conversation,
+      centerNotifyKey: mail?.conversation?.centerNotifyKey || conversation?.centerNotifyKey,
+      status: "À recontacter",
+      teamHandoff: { status: "sent", sentAt: at, attempts },
+      updatedAt: at,
+    };
+  }
+  const reason = String(mail?.reason || "send_failed");
+  const detail = (mail?.results || []).find((item) => item?.error)?.error || mail?.error || "";
+  return {
+    ...conversation,
+    status: conversation?.qualification?.need ? "Qualifié" : "En cours",
+    teamHandoff: {
+      status: "failed",
+      reason,
+      error: handoffErrorMessage(reason, detail),
+      attempts,
+      lastAttemptAt: at,
+    },
+    updatedAt: at,
+  };
+}
+
+function teamHandoffRetryDue(conversation, now = new Date()) {
+  const handoff = asRecord(conversation?.teamHandoff);
+  if (handoff.status !== "failed") {
+    return false;
+  }
+  const last = Date.parse(String(handoff.lastAttemptAt || ""));
+  return !Number.isFinite(last) || now.getTime() - last >= HANDOFF_RETRY_MS;
+}
+
+async function sendCallbackHandoff({ center, seya, conversation, now = new Date() }) {
+  const mail = await notifyCenterSeyaAction({
+    center,
+    seya,
+    conversation,
+    kind: "callback",
+    slot: callbackNotifySlot(conversation),
+  }).catch((error) => {
+    console.error("[seya/notify] callback", error);
+    return { sent: false, reason: "send_failed", error: String(error?.message || error) };
+  });
+  return withTeamHandoffResult(conversation, mail, now);
+}
+
 module.exports = {
   callbackNotifySlot,
   centerNotifyCopy,
@@ -378,5 +442,8 @@ module.exports = {
   notifyMailStatus,
   resolveNotifySender,
   sendBrevoToCenter,
+  sendCallbackHandoff,
   sendCenterNotifyTest,
+  teamHandoffRetryDue,
+  withTeamHandoffResult,
 };

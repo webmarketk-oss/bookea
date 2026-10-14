@@ -749,7 +749,12 @@ function briefClosing(seya, conversation, extraText = "") {
       `${conversation?.qualification?.need || ""} ${conversation?.treatment || ""}`,
       family,
     ) || findTreatmentBrief(seya, conversation?.treatment, family);
-  return closingFromBrief(brief?.brief) || closingFromBrief(agentSettings(seya).brief);
+  const briefFamily = brief ? inferCareFamily(brief.name) : "";
+  const sameFamily = !family || !briefFamily || briefFamily === family;
+  return (
+    (sameFamily ? closingFromBrief(brief?.brief) : "") ||
+    closingFromBrief(agentSettings(seya).brief)
+  );
 }
 
 function inferFamily(seya, campaign, treatment) {
@@ -2316,6 +2321,31 @@ function gaillardDetailKnown(family, qualification, leadTexts) {
   return Boolean(pattern && leadTexts.some((value) => pattern.test(value)));
 }
 
+const GAILLARD_WEIGHT_LOSS =
+  /perdre (du |de |des |quelques )?(poids|kilos?|kg)|maigrir|perte de poids|kilos? en trop|mincir/;
+const GAILLARD_KILOS_GIVEN = /\d+\s*(kg|kilos?)\b|(un|deux|trois|quatre|cinq|six|sept|huit|neuf|dix|quinze|vingt|trente) (kg|kilos?)\b/;
+
+function gaillardNextQuestion(family, qualification, leadTexts, seya) {
+  if (!family) {
+    return { step: "axis", text: axisClarifyQuestion(seya) || gaillard.needQuestion("") };
+  }
+  if (!gaillardDetailKnown(family, qualification, leadTexts)) {
+    return { step: "need", text: gaillard.needQuestion(family) };
+  }
+  if (
+    family === "minceur" &&
+    !qualification.kilos &&
+    leadTexts.some((value) => GAILLARD_WEIGHT_LOSS.test(value)) &&
+    !leadTexts.some((value) => GAILLARD_KILOS_GIVEN.test(value))
+  ) {
+    return { step: "kilos", text: gaillard.kilosQuestion() };
+  }
+  if (!qualification.tried && !leadTexts.some((value) => GAILLARD_TRIED.test(value))) {
+    return { step: "tried", text: gaillard.triedQuestion(family) };
+  }
+  return null;
+}
+
 function withGaillardText(result, family, fallback) {
   const messages = [...(result.conversation?.messages || [])];
   const index = messages.map((item) => item.author).lastIndexOf("seya");
@@ -2356,6 +2386,7 @@ function gaillardLeadReply(conversation, text, seya, slots, extras = {}) {
   const base = { ...withStaffOfferedSlots(conversation, extras.now), _seya: seya };
   const thread = understandThread(base, text);
   const merged = {
+    ...(base.qualification || {}),
     ...mergeQualification(
       { ...(base.qualification || {}), ...(thread.need ? { need: thread.need } : {}) },
       text,
@@ -2376,11 +2407,18 @@ function gaillardLeadReply(conversation, text, seya, slots, extras = {}) {
     : merged.need
       ? "Qualifié"
       : "En cours";
+  const followUp = () => {
+    if (handedOff) {
+      return gaillard.afterHandoffReply();
+    }
+    const pending = gaillardNextQuestion(family, merged, gaillardLeadTexts(base, text), seya);
+    return pending ? `C’est noté 😊 ${pending.text}` : "C’est noté 😊";
+  };
   const delegate = (fallback) => {
     const inner = withGaillardText(
       applyLeadReply(base, text, seya, slots, { ...extras, gaillardInner: true }),
       family,
-      fallback || (handedOff ? gaillard.afterHandoffReply() : "C’est noté 😊"),
+      fallback || followUp(),
     );
     const innerStatus = inner.conversation.status;
     return {
@@ -2389,6 +2427,7 @@ function gaillardLeadReply(conversation, text, seya, slots, extras = {}) {
         ...inner.conversation,
         status: handedOff && /^(Qualifié|En cours)$/.test(innerStatus) ? status : innerStatus,
         qualification: {
+          ...merged,
           ...(inner.conversation.qualification || {}),
           tried: merged.tried,
           distance: merged.distance,
@@ -2523,10 +2562,15 @@ function gaillardLeadReply(conversation, text, seya, slots, extras = {}) {
   ) {
     qualification.tried = answer;
   }
+  if (
+    gaillard.lastSeyaAskedKilos(base) &&
+    !qualification.kilos &&
+    (/\d/.test(text) || (!mentionsAvailability && gaillard.isAnswerLike(text)))
+  ) {
+    qualification.kilos = answer;
+  }
   const leadTexts = gaillardLeadTexts(base, text);
-  const detailKnown = gaillardDetailKnown(family, qualification, leadTexts);
-  const triedKnown =
-    Boolean(qualification.tried) || leadTexts.some((value) => GAILLARD_TRIED.test(value));
+  const nextQuestion = gaillardNextQuestion(family, qualification, leadTexts, seya);
   const prefix = mentionsAvailability ? gaillard.preferenceNotedPrefix() : "";
   const ask = (question) =>
     ({
@@ -2541,14 +2585,12 @@ function gaillardLeadReply(conversation, text, seya, slots, extras = {}) {
       shouldBook: null,
     });
 
-  if (!family) {
-    return ask(axisClarifyQuestion(seya) || gaillard.needQuestion(""));
-  }
-  if (!detailKnown) {
-    return ask(gaillard.needQuestion(family));
-  }
-  if (!triedKnown) {
-    return ask(`${prefix ? "" : "C’est noté. "}${gaillard.triedQuestion(family)}`);
+  if (nextQuestion) {
+    return ask(
+      nextQuestion.step === "need" || nextQuestion.step === "axis" || prefix
+        ? nextQuestion.text
+        : `C’est noté. ${nextQuestion.text}`,
+    );
   }
 
   next = {
@@ -2556,7 +2598,13 @@ function gaillardLeadReply(conversation, text, seya, slots, extras = {}) {
     teamNotes: {
       ...(next.teamNotes || {}),
       family,
-      need: [qualification.zone, qualification.detail].filter(Boolean).join(" · "),
+      need: [
+        qualification.zone,
+        qualification.detail,
+        qualification.kilos ? `kilos : ${qualification.kilos}` : "",
+      ]
+        .filter(Boolean)
+        .join(" · "),
       tried: qualification.tried || "",
       handedOffAt: at,
     },

@@ -113,6 +113,30 @@ function lastSeyaAskedTried(conversation) {
   return /d[ée]j[àa] (test[ée]|essay[ée])/i.test(lastSeyaQuestion(conversation));
 }
 
+const STEP_QUESTIONS = [
+  /quel est votre objectif|quelles? zones?|qu['’]est-ce qui vous pr[ée]occupe/i,
+  /d[ée]j[àa] (test|essay)/i,
+  /combien de kilos/i,
+];
+
+function changesStep(draft, polished) {
+  const asked = String(polished || "");
+  if (!asked.includes("?")) {
+    return false;
+  }
+  return STEP_QUESTIONS.some(
+    (pattern) => pattern.test(asked) && !pattern.test(String(draft || "")),
+  );
+}
+
+function kilosQuestion() {
+  return "Combien de kilos aimeriez-vous perdre ?";
+}
+
+function lastSeyaAskedKilos(conversation) {
+  return /combien de kilos/i.test(lastSeyaQuestion(conversation));
+}
+
 function isAnswerLike(text) {
   const value = normalize(text)
     .replace(/[!.,;:?…)(-]+/g, " ")
@@ -256,7 +280,7 @@ function promptRules(family) {
   return [
     `Mission de ${GAILLARD_NAME} : recueillir les informations puis transmettre à l’équipe. Un expert ou une experte du centre rappelle ensuite le prospect.`,
     "Interdit de demander des disponibilités (ni pour venir au centre, ni pour un rappel), de proposer un créneau, de prendre ou confirmer un rendez-vous.",
-    "Parcours : 1) comprendre le besoin (minceur : objectif et zones ; épilation : zones à traiter ; visage : préoccupations et attentes), 2) demander s’il a déjà testé une solution, 3) conclure. Une seule question à la fois, jamais une question à laquelle il a déjà répondu.",
+    "Parcours : 1) comprendre le besoin (minceur : objectif et zones, et si la personne veut perdre du poids sans avoir précisé combien, « Combien de kilos aimeriez-vous perdre ? » ; épilation : zones à traiter ; visage : préoccupations et attentes), 2) demander s’il a déjà testé une solution, 3) conclure. Une seule question à la fois, jamais une question à laquelle il a déjà répondu.",
     `Conclusion, une fois les informations recueillies : « ${closingReply(family)} »`,
     "Si le prospect donne spontanément un jour ou une heure, tu dis seulement que tu transmets sa préférence à l’équipe. Tu ne promets aucun rappel à cette heure, tu ne confirmes aucun rendez-vous, tu ne transformes pas une disponibilité pour venir en disponibilité pour un appel.",
     "Tu dis « un expert ou une experte du centre », jamais « une opératrice ».",
@@ -274,6 +298,7 @@ module.exports = {
   availabilityContext,
   availabilityMention,
   breaksGaillardRules,
+  changesStep,
   closingReply,
   durationReply,
   expertLabel,
@@ -281,6 +306,8 @@ module.exports = {
   isAnswerLike,
   isGaillardCenter,
   lastSeyaAskedNeed,
+  kilosQuestion,
+  lastSeyaAskedKilos,
   lastSeyaAskedTried,
   missingPriceReply,
   modalityReply,

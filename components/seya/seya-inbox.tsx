@@ -128,6 +128,9 @@ function factualSummary(conversation: SeyaConversation) {
       conversation.status === "À recontacter"
         ? "Une conseillère doit recontacter."
         : "",
+      conversation.teamHandoff?.status === "failed"
+        ? "Transmission à l’équipe en échec."
+        : "",
       conversation.healthReview?.status === "awaiting_human_health_review"
         ? "Vérification santé en attente."
         : "",
@@ -178,7 +181,7 @@ const ConversationRow = memo(function ConversationRow({
             conversation.phone}
         </p>
         <span className="shrink-0 text-[11px] font-medium text-slate-400">
-          {conversation.sendError ? "⚠️ " : ""}
+          {conversation.sendError || conversation.teamHandoff?.status === "failed" ? "⚠️ " : ""}
           {conversation.messages.length}
         </span>
       </div>
@@ -423,6 +426,17 @@ export function SeyaInbox({
                 <p className="bg-rose-50 px-5 py-2 text-sm font-medium text-rose-800">
                   Seya n’a pas pu répondre sur WhatsApp. {selected.sendError}{" "}
                   L’équipe peut reprendre le fil ici.
+                </p>
+              ) : null}
+              {selected.teamHandoff?.status === "failed" ? (
+                <p className="bg-rose-50 px-5 py-2 text-sm font-medium text-rose-800">
+                  La demande n’a pas pu être transmise à l’équipe.{" "}
+                  {selected.teamHandoff.error}{" "}
+                  Nouvelle tentative automatique toutes les 10 minutes
+                  {selected.teamHandoff.attempts
+                    ? ` (${selected.teamHandoff.attempts} essai${selected.teamHandoff.attempts > 1 ? "s" : ""})`
+                    : ""}
+                  .
                 </p>
               ) : null}
               {feedback ? (

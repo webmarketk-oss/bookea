@@ -310,7 +310,10 @@ async function generateCoreReply({
       bookingState,
       draft,
     });
-    if (gaillard.isGaillardCenter(centerName) && gaillard.breaksGaillardRules(polished)) {
+    if (
+      gaillard.isGaillardCenter(centerName) &&
+      (gaillard.breaksGaillardRules(polished) || gaillard.changesStep(draft, polished))
+    ) {
       return { ...settled, via: "rules" };
     }
     return {
