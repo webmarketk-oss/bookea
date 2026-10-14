@@ -960,7 +960,20 @@ async function handleIncoming(
   const wantedSlot = result.shouldBook;
   if (wantedSlot) {
     try {
-      await bookSeyaAppointment(supabase, center.id, context, next, wantedSlot, seya);
+      const booking = await bookSeyaAppointment(
+        supabase,
+        center.id,
+        context,
+        next,
+        wantedSlot,
+        seya,
+      );
+      if (booking?.leadId) {
+        next.leadId = next.leadId || booking.leadId;
+        if (booking.leadStatus) {
+          Object.assign(next, withCrmStatus(next, booking.leadStatus, null));
+        }
+      }
       next.status = "RDV confirmé";
       next.bookedSlot = wantedSlot;
       next.proposedSlots = [];
@@ -1222,7 +1235,101 @@ async function syncCrmFromSeyaIntent(supabase, centerId, context, text) {
   return patch;
 }
 
+// Mêmes statuts que lib/appointment-lead-status.ts : un RDV ne fait pas reculer ces fiches.
+function shouldMarkLeadAsBooked(status) {
+  return ![
+    "RDV pris",
+    "RDV confirmé",
+    "Acompte envoyé",
+    "Acompte reçu",
+    "Acompte en attente",
+    "Devis",
+    "Vendu",
+    "Client converti",
+  ].includes(status);
+}
+
+async function resolveBookingLead(supabase, centerId, context, conversation) {
+  const ids = [...new Set([conversation?.leadId, context.leadId].filter(Boolean).map(String))];
+  if (ids.length) {
+    const { data, error } = await supabase
+      .from("leads")
+      .select("id,client_id,status")
+      .eq("center_id", centerId)
+      .in("id", ids);
+    if (error) {
+      console.error("[seya/whatsapp] booking lead", error.message);
+    }
+    for (const id of ids) {
+      const row = (data || []).find((item) => String(item.id) === id);
+      if (row && !/^doublon$/i.test(String(row.status || "").trim())) {
+        return row;
+      }
+    }
+  }
+  if (!context.clientId) {
+    return null;
+  }
+  const { data: rows, error } = await supabase
+    .from("leads")
+    .select("id,client_id,status,created_at")
+    .eq("center_id", centerId)
+    .eq("client_id", context.clientId)
+    .order("created_at", { ascending: false })
+    .limit(10);
+  if (error) {
+    console.error("[seya/whatsapp] booking lead by client", error.message);
+    return null;
+  }
+  return (rows || []).find((row) => !/^doublon$/i.test(String(row.status || "").trim())) || null;
+}
+
+async function markLeadBookedBySeya(supabase, centerId, lead, slot, moved) {
+  if (!lead?.id) {
+    return null;
+  }
+  const current = String(lead.status || "").trim();
+  const status = shouldMarkLeadAsBooked(current) ? "RDV pris" : current;
+  if (status !== current) {
+    const now = new Date().toISOString();
+    const { data, error } = await supabase
+      .from("leads")
+      .update({
+        status,
+        next_action: "RDV Seya à confirmer",
+        last_activity_at: now,
+        updated_at: now,
+      })
+      .eq("id", lead.id)
+      .eq("center_id", centerId)
+      .select("id");
+    if (error || !data?.length) {
+      console.error(
+        "[seya/whatsapp] lead RDV pris non enregistré",
+        lead.id,
+        error?.message || "aucune ligne",
+      );
+      return null;
+    }
+  }
+  await supabase.from("lead_events").insert({
+    center_id: centerId,
+    lead_id: lead.id,
+    event_type: "status",
+    from_value: current,
+    to_value: status,
+    note: moved ? `RDV Seya décalé au ${slot.label}.` : `RDV Seya posé le ${slot.label}.`,
+  });
+  return status;
+}
+
 async function bookSeyaAppointment(supabase, centerId, context, conversation, slot, seya) {
+  const bookingLead = await resolveBookingLead(supabase, centerId, context, conversation).catch(
+    (error) => {
+      console.error("[seya/whatsapp] booking lead", error);
+      return null;
+    },
+  );
   const [{ data: rooms }, { data: practitioners }, { data: services }] = await Promise.all([
     supabase.from("rooms").select("id,name").eq("center_id", centerId),
     supabase.from("practitioners").select("id,first_name,last_name").eq("center_id", centerId),
@@ -1323,8 +1430,8 @@ async function bookSeyaAppointment(supabase, centerId, context, conversation, sl
   } else {
     const { error } = await supabase.from("appointments").insert({
       center_id: centerId,
-      client_id: context.clientId || null,
-      lead_id: context.leadId || null,
+      client_id: context.clientId || bookingLead?.client_id || null,
+      lead_id: bookingLead?.id || null,
       service_id: resources.service?.id || null,
       room_id: resources.room?.id || rooms?.[0]?.id || null,
       practitioner_id: resources.practitioner?.id || practitioners?.[0]?.id || null,
@@ -1342,28 +1449,17 @@ async function bookSeyaAppointment(supabase, centerId, context, conversation, sl
     }
   }
 
-  if (context.leadId) {
-    await supabase
-      .from("leads")
-      .update({
-        status: "RDV pris",
-        next_action: "RDV Seya à confirmer",
-        last_activity_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", context.leadId);
-
-    await supabase.from("lead_events").insert({
-      center_id: centerId,
-      lead_id: context.leadId,
-      event_type: "status",
-      from_value: context.status || "",
-      to_value: "RDV pris",
-      note: own?.id
-        ? `RDV Seya décalé au ${slot.label}.`
-        : `RDV Seya posé le ${slot.label}.`,
-    });
-  }
+  const leadStatus = await markLeadBookedBySeya(
+    supabase,
+    centerId,
+    bookingLead,
+    slot,
+    Boolean(own?.id),
+  ).catch((error) => {
+    console.error("[seya/whatsapp] lead RDV pris", error);
+    return null;
+  });
+  return { leadId: bookingLead?.id || null, leadStatus };
 }
 
 function asRecord(value) {
@@ -1890,4 +1986,6 @@ handler.alreadyHandledInbound = alreadyHandledInbound;
 handler.inboundTextFromWhatsApp = inboundTextFromWhatsApp;
 handler.sendWithRetry = sendWithRetry;
 handler.isRetryableSend = isRetryableSend;
+handler.resolveBookingLead = resolveBookingLead;
+handler.markLeadBookedBySeya = markLeadBookedBySeya;
 module.exports = handler;

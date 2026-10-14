@@ -115,8 +115,92 @@ function newerLead(current, next) {
   if (!current) {
     return next;
   }
-  const at = (row) => String(row.updated_at || row.created_at || "");
+  const doublon = (row) => crmStatusLabel(row.status) === "Doublon";
+  if (doublon(current) !== doublon(next)) {
+    return doublon(current) ? next : current;
+  }
+  const at = (row) => String(row.created_at || row.updated_at || "");
   return at(next) > at(current) ? next : current;
+}
+
+const BEFORE_BOOKING_STATUSES = new Set([
+  "Nouveau",
+  "Apl en abs",
+  "À relancer",
+  "En réflexion",
+  "Message WhatsApp envoyé",
+  "SMS envoyé",
+  "Message vocal envoyé",
+  "Mail envoyé",
+  "Mail/SMS Injoignable",
+  "Message vocal",
+]);
+
+async function markSeyaBookedLeads(supabase, centerId, crmHold, now = new Date()) {
+  const index = crmHold ? crmLeadIndexes.get(crmHold) : null;
+  if (!supabase?.from || !centerId || !index || index.byId.size === 0) {
+    return 0;
+  }
+  const today = parisToday(now);
+  let marked = 0;
+  try {
+    const { data, error } = await supabase
+      .from("appointments")
+      .select("id,lead_id,client_id,status,appointment_date,origin")
+      .eq("center_id", centerId)
+      .eq("origin", "seya")
+      .gte("appointment_date", today);
+    if (error) {
+      console.error("[seya/crm-sync] seya appointments", centerId, error.message);
+      return 0;
+    }
+    for (const row of data || []) {
+      if (/cancel|no_show/i.test(String(row.status || ""))) {
+        continue;
+      }
+      const lead =
+        (row.lead_id && index.byId.get(String(row.lead_id))) ||
+        (row.client_id && index.byClient.get(String(row.client_id))) ||
+        null;
+      const current = lead ? crmStatusLabel(lead.status) : "";
+      if (!lead || !BEFORE_BOOKING_STATUSES.has(current)) {
+        continue;
+      }
+      const at = new Date().toISOString();
+      const { data: updated, error: updateError } = await supabase
+        .from("leads")
+        .update({
+          status: "RDV pris",
+          next_action: "RDV Seya à confirmer",
+          last_activity_at: at,
+          updated_at: at,
+        })
+        .eq("id", lead.id)
+        .eq("center_id", centerId)
+        .select("id");
+      if (updateError || !updated?.length) {
+        console.error(
+          "[seya/crm-sync] RDV pris",
+          lead.id,
+          updateError?.message || "aucune ligne",
+        );
+        continue;
+      }
+      await supabase.from("lead_events").insert({
+        center_id: centerId,
+        lead_id: lead.id,
+        event_type: "status",
+        from_value: lead.status || "",
+        to_value: "RDV pris",
+        note: `RDV Seya du ${row.appointment_date} : fiche passée en RDV pris.`,
+      });
+      rememberCrmLead(crmHold, { ...lead, status: "RDV pris", updated_at: at });
+      marked += 1;
+    }
+  } catch (error) {
+    console.error("[seya/crm-sync] seya appointments", centerId, error);
+  }
+  return marked;
 }
 
 function indexCrmLeads(rows) {
@@ -399,6 +483,7 @@ module.exports = {
   loadRelanceHoldKeys,
   markLeadWhatsAppSent,
   markMessagedNouveauLeads,
+  markSeyaBookedLeads,
   syncCrmFromConversation,
   withCrmSnapshot,
 };

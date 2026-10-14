@@ -155,6 +155,15 @@ function planRehome(centerLists, ownership) {
   return { updates, moved };
 }
 
+// Une cliente peut avoir plusieurs fiches : on garde la fiche en cours (hors Doublon, la plus récente).
+function currentLeadFirst(a, b) {
+  const doublon = (row) => (/^doublon$/i.test(String(row?.status || "").trim()) ? 1 : 0);
+  if (doublon(a) !== doublon(b)) {
+    return doublon(a) - doublon(b);
+  }
+  return String(b?.created_at || "").localeCompare(String(a?.created_at || ""));
+}
+
 function ownershipFromRows({ clients, leads } = {}) {
   const index = new Map();
   for (const row of clients || []) {
@@ -167,7 +176,7 @@ function ownershipFromRows({ clients, leads } = {}) {
       row,
     });
   }
-  for (const row of leads || []) {
+  for (const row of [...(leads || [])].sort(currentLeadFirst)) {
     const last9 = last9Phone(row.phone);
     addHome(index, last9, {
       centerId: row.center_id,
@@ -201,7 +210,7 @@ async function loadPhoneHomes(supabase, phone) {
   const { data: leads, error: leadError } = await supabase
     .from("leads")
     .select(
-      "id,center_id,client_id,status,next_action,recall_date,service_id,updated_at,last_activity_at,campaigns(name)",
+      "id,center_id,client_id,status,next_action,recall_date,service_id,created_at,updated_at,last_activity_at,campaigns(name)",
     )
     .in(
       "client_id",
@@ -331,7 +340,7 @@ async function loadOwnershipIndex(supabase) {
         .is("merged_into_client_id", null),
       supabase
         .from("leads")
-        .select("id,center_id,client_id,last_activity_at,updated_at,clients(phone)"),
+        .select("id,center_id,client_id,status,created_at,last_activity_at,updated_at,clients(phone)"),
     ]);
   if (clientError) {
     throw new Error(clientError.message);

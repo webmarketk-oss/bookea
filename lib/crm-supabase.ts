@@ -752,7 +752,7 @@ export async function updateCrmLeadDetails(lead: Lead, input: NewCrmLeadInput) {
     source_id: sourceId,
     campaign_id: campaignId,
     service_id: serviceId,
-    status: nextStatus,
+    ...(statusChanged ? { status: nextStatus } : {}),
     recall_date: toDateOnlyIso(nextReminder) || null,
     next_action: input.nextAction.trim() || "À contacter",
     amount_cure_ttc: input.dealAmount || 0,

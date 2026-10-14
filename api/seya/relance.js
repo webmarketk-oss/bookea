@@ -35,6 +35,7 @@ const {
   crmRecallDayFor,
   loadRelanceHoldKeys,
   markMessagedNouveauLeads,
+  markSeyaBookedLeads,
   syncCrmFromConversation,
   withCrmSnapshot,
 } = require("./crm-sync");
@@ -112,6 +113,7 @@ async function relanceCenter(supabase, center, now = new Date()) {
   const sent = [];
   const bookedKeys = await loadBookedVisitKeys(supabase, center.id);
   const crmHold = await loadRelanceHoldKeys(supabase, center.id, now);
+  await markSeyaBookedLeads(supabase, center.id, crmHold, now);
   let closed = false;
 
   for (const conversation of conversations) {
@@ -233,10 +235,11 @@ function crmSnapshotChanged(next, previous) {
 }
 
 async function syncCrmStatusOnly(supabase, centerId, conversations, now = new Date()) {
+  const crmHold = await loadRelanceHoldKeys(supabase, centerId, now);
+  await markSeyaBookedLeads(supabase, centerId, crmHold, now);
   if (!conversations.length) {
     return;
   }
-  const crmHold = await loadRelanceHoldKeys(supabase, centerId, now);
   let changed = false;
   const next = conversations.map((conversation) => {
     const stamped = withCrmSnapshot(conversation, crmHold);
