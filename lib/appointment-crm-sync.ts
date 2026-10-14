@@ -1,5 +1,5 @@
-import { Appointment, AppointmentStatus } from "@/types/agenda";
-import { Lead, LeadStatus } from "@/types/lead";
+import type { Appointment, AppointmentStatus } from "@/types/agenda";
+import type { Lead, LeadStatus } from "@/types/lead";
 
 export const APPOINTMENT_STATUS_UPDATED_EVENT =
   "bookea-appointment-status-updated";
@@ -64,7 +64,11 @@ export function applyAppointmentStatusOverrides(
   return leads.map((lead) => {
     const override = overrides.find((item) => doesOverrideMatchLead(item, lead));
 
-    if (!override || lead.status === override.leadStatus) {
+    if (
+      !override ||
+      lead.status === override.leadStatus ||
+      crmStatusChangedAfter(lead, override.updatedAt)
+    ) {
       return lead;
     }
 
@@ -91,6 +95,18 @@ export function applyAppointmentStatusOverrides(
           ],
     };
   });
+}
+
+export function crmStatusChangedAfter(lead: Lead, at: string) {
+  const since = Date.parse(at);
+  if (!Number.isFinite(since)) {
+    return false;
+  }
+  return lead.activityLog.some(
+    (activity) =>
+      activity.type === "status" &&
+      Date.parse(activity.occurredAt ?? "") > since,
+  );
 }
 
 function mapAppointmentStatusToLeadStatus(

@@ -1,5 +1,6 @@
 import { Appointment } from "@/types/agenda";
 import { Lead } from "@/types/lead";
+import { crmStatusChangedAfter } from "@/lib/appointment-crm-sync";
 
 export const PUBLIC_BOOKINGS_STORAGE_KEY = "bookea-public-bookings";
 export const PUBLIC_BOOKINGS_UPDATED_EVENT = "bookea-public-bookings-updated";
@@ -175,7 +176,9 @@ export function mergePublicBookingIntoLeads(
       treatment: booking.treatment,
       source: "Organique",
       campaign: "Bookea organique",
-      status: "RDV confirmé",
+      status: crmStatusChangedAfter(lead, booking.createdAt)
+        ? lead.status
+        : "RDV confirmé",
       nextAction: `RDV confirmé ${formatDisplayDate(booking.date)} à ${
         booking.start
       }`,

@@ -27,8 +27,9 @@ import {
 import {
   addCrmLeadActivity,
   createCrmLead,
-  deleteCrmLeadActivity,
+  deleteCrmLeadComment,
   loadCrmLeads,
+  loadCrmWhatsAppThreads,
   mergeCrmDuplicateLeads,
   readCrmLeadsSnapshot,
   saveCrmLeadsSnapshot,
@@ -62,6 +63,8 @@ import {
   commercialSelectOptions,
   loadTeamPlanning,
 } from "@/lib/team-planning";
+import { SEYA_CONVERSATIONS_UPDATED_EVENT } from "@/lib/seya-settings";
+import { leadWhatsAppSummaries, type WhatsAppThread } from "@/lib/lead-whatsapp";
 import { Lead, LeadStatus } from "@/types/lead";
 
 const emptyLeadForm = {
@@ -88,6 +91,24 @@ type FicheBox = {
 };
 
 const FICHE_BOTTOM_GAP = 12;
+const CATEGORY_KEEP_SELECTOR = [
+  "[data-lead-fiche]",
+  "[data-lead-row]",
+  "[data-lead-form]",
+  "table",
+  "button",
+  "a",
+  "input",
+  "select",
+  "textarea",
+  "label",
+  "[role='button']",
+  "[role='listbox']",
+  "[role='option']",
+  "[role='dialog']",
+  "[role='alert']",
+  "[contenteditable='true']",
+].join(",");
 const CRM_DISMISSED_DUPLICATES_KEY = "bookea-crm-dismissed-duplicates";
 
 function readDismissedDuplicateKeys() {
@@ -171,6 +192,7 @@ export default function CRMLeadsPage() {
   const [isLoadingCrm, setIsLoadingCrm] = useState(!initialSnapshot);
   const [crmError, setCrmError] = useState<string | null>(null);
   const [crmNotice, setCrmNotice] = useState<string | null>(null);
+  const [statusSaveError, setStatusSaveError] = useState<string | null>(null);
   const [isLeadDetailsOpen, setIsLeadDetailsOpen] = useState(false);
   const [isNewLeadOpen, setIsNewLeadOpen] = useState(false);
   const [isMergingDuplicates, setIsMergingDuplicates] = useState(false);
@@ -184,9 +206,19 @@ export default function CRMLeadsPage() {
     useState<QuickDateFilter>("Tous");
   const centerNameRef = useRef(initialSnapshot?.centerName ?? "");
   const centerIdRef = useRef(initialSnapshot?.centerId ?? "");
+  const [leadsCenterId, setLeadsCenterId] = useState(
+    initialSnapshot?.centerId ?? "",
+  );
+  const [whatsAppThreads, setWhatsAppThreads] = useState<{
+    centerId: string;
+    threads: WhatsAppThread[];
+  } | null>(null);
+  const [whatsAppLoadFailed, setWhatsAppLoadFailed] = useState(false);
+  const whatsAppSeqRef = useRef(0);
   const refreshesInFlightRef = useRef(0);
   const lastRefreshAtRef = useRef(0);
   const ficheRef = useRef<HTMLElement>(null);
+  const mainRef = useRef<HTMLElement>(null);
   const ficheColumnRef = useRef<HTMLDivElement>(null);
   const [ficheBox, setFicheBox] = useState<FicheBox | null>(null);
   const openedLeadFromQuery = useRef(false);
@@ -233,6 +265,7 @@ export default function CRMLeadsPage() {
     const editSeqAtStart = editSeqRef.current;
     refreshesInFlightRef.current += 1;
     lastRefreshAtRef.current = Date.now();
+    void refreshWhatsAppThreads();
 
     try {
       const { leads: loadedLeads, center } = await loadCrmLeads();
@@ -261,6 +294,7 @@ export default function CRMLeadsPage() {
           : [];
 
       setLeadList(nextLeads);
+      setLeadsCenterId(center.centerId);
       setSelectedLeadId((currentId) => {
         if (nextLeads.some((lead) => lead.id === currentId)) {
           return currentId;
@@ -277,6 +311,22 @@ export default function CRMLeadsPage() {
     } finally {
       refreshesInFlightRef.current -= 1;
       setIsLoadingCrm(false);
+    }
+  }
+
+  async function refreshWhatsAppThreads() {
+    const seq = ++whatsAppSeqRef.current;
+    try {
+      const result = await loadCrmWhatsAppThreads();
+      if (seq !== whatsAppSeqRef.current) {
+        return;
+      }
+      setWhatsAppThreads(result);
+      setWhatsAppLoadFailed(false);
+    } catch {
+      if (seq === whatsAppSeqRef.current) {
+        setWhatsAppLoadFailed(true);
+      }
     }
   }
 
@@ -370,6 +420,10 @@ export default function CRMLeadsPage() {
       syncAppointmentStatuses
     );
     window.addEventListener("storage", syncPublicBookings);
+    window.addEventListener(
+      SEYA_CONVERSATIONS_UPDATED_EVENT,
+      refreshWhatsAppThreads,
+    );
     window.addEventListener("focus", refreshOnReturn);
     document.addEventListener("visibilitychange", refreshIfVisible);
 
@@ -383,6 +437,10 @@ export default function CRMLeadsPage() {
         syncAppointmentStatuses
       );
       window.removeEventListener("storage", syncPublicBookings);
+      window.removeEventListener(
+        SEYA_CONVERSATIONS_UPDATED_EVENT,
+        refreshWhatsAppThreads,
+      );
       window.removeEventListener("focus", refreshOnReturn);
       document.removeEventListener("visibilitychange", refreshIfVisible);
     };
@@ -463,6 +521,36 @@ export default function CRMLeadsPage() {
     scopeLeads.find((lead) => lead.id === selectedLeadId) ??
     scopeLeads[0] ??
     leadList[0];
+  const centerWhatsAppThreads =
+    whatsAppThreads && whatsAppThreads.centerId === leadsCenterId
+      ? whatsAppThreads.threads
+      : null;
+  const whatsAppByLead = useMemo(
+    () =>
+      centerWhatsAppThreads
+        ? leadWhatsAppSummaries(leadList, centerWhatsAppThreads)
+        : new Map(),
+    [leadList, centerWhatsAppThreads],
+  );
+  const isRecontactCategory = filters.status === "À relancer";
+  const whatsAppState = centerWhatsAppThreads
+    ? "ready"
+    : whatsAppLoadFailed
+      ? "error"
+      : "loading";
+
+  useEffect(() => {
+    if (!isRecontactCategory) {
+      return;
+    }
+    // Seya envoie aussi depuis le serveur : on relit les messages tant que la catégorie est ouverte.
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === "visible") {
+        void refreshWhatsAppThreads();
+      }
+    }, 30000);
+    return () => window.clearInterval(timer);
+  }, [isRecontactCategory]);
   const newLeadSourceOptions = useMemo(
     () =>
       Array.from(
@@ -643,6 +731,58 @@ export default function CRMLeadsPage() {
     };
   }, [isLeadDetailsOpen]);
 
+  const isCategorySelected =
+    filters.status !== "Tous" || quickDateFilter !== "Tous";
+
+  useEffect(() => {
+    if (!isCategorySelected || activeTab === "kpi" || isNewLeadOpen) {
+      return;
+    }
+
+    let pressedTarget: EventTarget | null = null;
+
+    function rememberPressedTarget(event: PointerEvent) {
+      pressedTarget = event.target;
+    }
+
+    // « click » plutôt que « pointerdown » : faire défiler au doigt ne doit pas vider la catégorie.
+    function clearCategoryOnEmptySpace(event: MouseEvent) {
+      const target = event.target;
+
+      if (
+        event.button !== 0 ||
+        target !== pressedTarget ||
+        !(target instanceof HTMLElement) ||
+        !mainRef.current?.contains(target) ||
+        target.closest(CATEGORY_KEEP_SELECTOR)
+      ) {
+        return;
+      }
+
+      // Clic sur la barre de défilement d’un bloc : ce n’est pas une zone vide.
+      if (
+        event.offsetX > target.clientWidth ||
+        event.offsetY > target.clientHeight
+      ) {
+        return;
+      }
+
+      setQuickDateFilter("Tous");
+      setFilters((currentFilters) =>
+        currentFilters.status === "Tous"
+          ? currentFilters
+          : { ...currentFilters, status: "Tous" },
+      );
+    }
+
+    document.addEventListener("pointerdown", rememberPressedTarget);
+    document.addEventListener("click", clearCategoryOnEmptySpace);
+    return () => {
+      document.removeEventListener("pointerdown", rememberPressedTarget);
+      document.removeEventListener("click", clearCategoryOnEmptySpace);
+    };
+  }, [isCategorySelected, activeTab, isNewLeadOpen]);
+
   async function handleStatusChange(leadId: string, status: LeadStatus) {
     const leadBeforeUpdate = leadList.find((lead) => lead.id === leadId);
 
@@ -682,18 +822,25 @@ export default function CRMLeadsPage() {
 
     try {
       await trackSave(() => updateCrmLeadStatus(leadBeforeUpdate, status));
+      setStatusSaveError(null);
       setCrmNotice(
         ["Vendu", "Client converti"].includes(status)
           ? "Statut enregistré et fiche client synchronisée."
           : "Statut enregistré."
       );
     } catch (error) {
-      setCrmError(
+      const message =
         error instanceof Error
           ? error.message
-          : "Le statut n'a pas pu être enregistré."
-      );
+          : "Le statut n'a pas pu être enregistré.";
+      setCrmNotice(null);
+      // Le rechargement efface crmError : l’erreur est posée après.
       await refreshCrmLeads();
+      setCrmError(message);
+      setStatusSaveError(
+        `Échec de l'enregistrement du statut « ${status} » pour ${leadBeforeUpdate.firstName} ${leadBeforeUpdate.lastName}`.trim() +
+          ` : ${message}`,
+      );
     }
   }
 
@@ -724,13 +871,17 @@ export default function CRMLeadsPage() {
       await trackSave(() => addCrmLeadActivity(leadId, text));
       setCrmNotice(text.startsWith("SMS envoyé") ? "SMS envoyé." : "Commentaire enregistré.");
       await refreshCrmLeads();
+      return true;
     } catch (error) {
-      setCrmError(
+      const message =
         error instanceof Error
           ? error.message
-          : "Le commentaire n'a pas pu être enregistré."
-      );
+          : "Le commentaire n'a pas pu être enregistré.";
+      setCrmNotice(null);
       await refreshCrmLeads();
+      setCrmError(message);
+      setStatusSaveError(`Commentaire non enregistré : ${message}`);
+      return false;
     }
   }
 
@@ -765,41 +916,51 @@ export default function CRMLeadsPage() {
     }
   }
 
-  function handleQuickComment(leadId: string, text: string) {
+  async function handleQuickComment(leadId: string, text: string) {
     const comment = text.trim();
 
     if (!comment) {
-      return;
+      return true;
     }
 
-    handleAddActivity(leadId, comment);
+    return handleAddActivity(leadId, comment);
   }
 
   async function handleDeleteActivity(leadId: string, activityId: string) {
     setLeadList((currentLeads) =>
-      currentLeads.map((lead) =>
-        lead.id === leadId
-          ? {
-              ...lead,
-              updatedDate: todayIso(),
-              activityLog: lead.activityLog.filter(
-                (activity) => activity.id !== activityId
-              ),
-            }
-          : lead
-      )
+      currentLeads.map((lead) => {
+        if (lead.id !== leadId) {
+          return lead;
+        }
+        const activityLog = lead.activityLog.filter(
+          (activity) => activity.id !== activityId
+        );
+        return {
+          ...lead,
+          updatedDate: todayIso(),
+          activityLog,
+          latestComment:
+            activityLog.find(
+              (activity) => activity.type === "comment" && activity.text.trim()
+            )?.text ?? "",
+        };
+      })
     );
 
     try {
-      await trackSave(() => deleteCrmLeadActivity(activityId));
+      await trackSave(() => deleteCrmLeadComment(leadId, activityId));
       setCrmNotice("Activité supprimée.");
+      return true;
     } catch (error) {
-      setCrmError(
+      const message =
         error instanceof Error
           ? error.message
-          : "L'activité n'a pas pu être supprimée."
-      );
+          : "L'activité n'a pas pu être supprimée.";
+      setCrmNotice(null);
       await refreshCrmLeads();
+      setCrmError(message);
+      setStatusSaveError(`Commentaire non supprimé : ${message}`);
+      return false;
     }
   }
 
@@ -995,14 +1156,24 @@ export default function CRMLeadsPage() {
           enabled: Boolean(patch.birthDate),
         }).catch(() => null);
       }
+      if (statusChanged) {
+        setStatusSaveError(null);
+      }
       setCrmNotice("Fiche prospect enregistrée.");
     } catch (error) {
-      setCrmError(
+      const message =
         error instanceof Error
           ? error.message
-          : "La fiche n'a pas pu être enregistrée."
-      );
+          : "La fiche n'a pas pu être enregistrée.";
+      setCrmNotice(null);
       await refreshCrmLeads();
+      setCrmError(message);
+      if (statusChanged) {
+        setStatusSaveError(
+          `Échec de l'enregistrement du statut « ${nextStatus} » pour ${leadBeforeUpdate.firstName} ${leadBeforeUpdate.lastName}`.trim() +
+            ` : ${message}`,
+        );
+      }
       throw error;
     }
   }
@@ -1160,7 +1331,11 @@ export default function CRMLeadsPage() {
   }
 
   return (
-    <main className="min-h-screen bg-slate-100" data-sidebar-collapse-area="true">
+    <main
+      ref={mainRef}
+      className="min-h-screen bg-slate-100"
+      data-sidebar-collapse-area="true"
+    >
       <div className="w-full space-y-6 px-2 py-4 lg:px-2 lg:pt-5 lg:pb-3">
         <CRMHeader onNewLead={openNewLeadModal} />
 
@@ -1412,6 +1587,11 @@ export default function CRMLeadsPage() {
                   onReminderDateChange={handleReminderDateChange}
                   onCommercialChange={handleCommercialChange}
                   commercialOptions={commercialOptions}
+                  whatsApp={
+                    isRecontactCategory
+                      ? { state: whatsAppState, byLead: whatsAppByLead }
+                      : undefined
+                  }
                 />
               </section>
 
@@ -1440,6 +1620,11 @@ export default function CRMLeadsPage() {
                     onUpdateLead={handleUpdateLead}
                     onClose={() => setIsLeadDetailsOpen(false)}
                     commercialOptions={commercialOptions}
+                    whatsAppMessages={
+                      whatsAppState === "ready"
+                        ? whatsAppByLead.get(selectedLead.id)?.messages ?? []
+                        : whatsAppState
+                    }
                   />
                 </aside>
               </div>
@@ -1676,6 +1861,23 @@ export default function CRMLeadsPage() {
           </form>
         </div>
       )}
+
+      {statusSaveError ? (
+        <div
+          role="alert"
+          className="fixed bottom-4 right-4 z-[300] flex max-w-sm items-start gap-3 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-bold text-rose-700 shadow-xl"
+        >
+          <p className="flex-1">{statusSaveError}</p>
+          <button
+            type="button"
+            aria-label="Fermer"
+            onClick={() => setStatusSaveError(null)}
+            className="shrink-0 text-rose-500 hover:text-rose-700"
+          >
+            ×
+          </button>
+        </div>
+      ) : null}
     </main>
   );
 }

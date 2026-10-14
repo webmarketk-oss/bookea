@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Table,
   TableBody,
@@ -13,13 +13,24 @@ import { AdaptiveSelect } from "@/components/ui/adaptive-select";
 import { isOpenReminderDue, toDateOnlyIso } from "@/lib/crm-stats";
 import { leadOfferLabel } from "@/lib/lead-offer";
 import {
+  formatWhatsAppDate,
+  type LeadWhatsAppSummary,
+} from "@/lib/lead-whatsapp";
+import {
   isInactiveLeadStatus,
   leadStatusClassName,
   leadStatusSelectOptions,
 } from "@/lib/lead-statuses";
 import { cn } from "@/lib/utils";
 import { Lead, LeadStatus } from "@/types/lead";
-import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Globe } from "lucide-react";
+import {
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  ChevronUp,
+  Globe,
+  PanelRightOpen,
+} from "lucide-react";
 
 interface ProspectsTableProps {
   leads: Lead[];
@@ -28,13 +39,19 @@ interface ProspectsTableProps {
   isLeadDetailsOpen?: boolean;
   onSelectLead: (lead: Lead) => void;
   onStatusChange: (leadId: string, status: LeadStatus) => void;
-  onCommentAdd: (leadId: string, text: string) => void;
-  onCommentDelete: (leadId: string, activityId: string) => void;
+  onCommentAdd: (leadId: string, text: string) => void | Promise<boolean>;
+  onCommentDelete: (leadId: string, activityId: string) => void | Promise<boolean>;
   onDealAmountChange: (leadId: string, amount: number) => void;
   onReminderDateChange: (leadId: string, date: string) => void;
   onCommercialChange: (leadId: string, commercial: string) => void;
   commercialOptions?: string[];
+  whatsApp?: ProspectsWhatsApp;
 }
+
+export type ProspectsWhatsApp = {
+  state: "loading" | "ready" | "error";
+  byLead: Map<string, LeadWhatsAppSummary>;
+};
 
 export default function ProspectsTable({
   leads,
@@ -49,9 +66,11 @@ export default function ProspectsTable({
   onReminderDateChange,
   onCommercialChange,
   commercialOptions = [],
+  whatsApp,
 }: ProspectsTableProps) {
   const [commentsOpen, setCommentsOpen] = useState(true);
   const [dateSort, setDateSort] = useState<"desc" | "asc">("desc");
+  const pressStartedOnControlRef = useRef(false);
 
   useEffect(() => {
     setDateSort("desc");
@@ -113,6 +132,9 @@ export default function ProspectsTable({
             </TableHead>
             <TableHead>Rappel</TableHead>
             <TableHead className="w-[9.25rem] min-w-[9.25rem]">Statut</TableHead>
+            {whatsApp ? (
+              <TableHead className="w-[15rem] min-w-[15rem]">Dernier WhatsApp</TableHead>
+            ) : null}
             <TableHead>Commercial</TableHead>
             <TableHead>Montant</TableHead>
             <TableHead>Source</TableHead>
@@ -168,9 +190,20 @@ export default function ProspectsTable({
               key={lead.id}
               data-lead-id={lead.id}
               data-lead-row="true"
-              onClick={() => onSelectLead(lead)}
+              onPointerDown={(event) => {
+                pressStartedOnControlRef.current = isOnRowControl(event.target);
+              }}
+              onDoubleClick={(event) => {
+                // Une sélection de texte commencée dans un champ se termine parfois hors du champ.
+                if (pressStartedOnControlRef.current || isOnRowControl(event.target)) {
+                  pressStartedOnControlRef.current = false;
+                  return;
+                }
+                window.getSelection()?.removeAllRanges();
+                onSelectLead(lead);
+              }}
               className={cn(
-                "min-h-20 cursor-pointer transition-all hover:bg-slate-50",
+                "min-h-20 transition-all hover:bg-slate-50",
                 isInactive && "bg-slate-50 hover:bg-slate-100",
                 isOpenReminderDue(lead) &&
                   !isInactive &&
@@ -181,14 +214,26 @@ export default function ProspectsTable({
               )}
             >
               <TableCell>
-                <div>
-                  <p className="font-semibold">
-                    {lead.firstName} {lead.lastName}
-                  </p>
-                  <p className="text-sm text-slate-500">{lead.phone}</p>
-                  {lead.email ? (
-                    <p className="truncate text-sm text-slate-500">{lead.email}</p>
-                  ) : null}
+                <div className="flex items-start gap-2">
+                  <div className="min-w-0">
+                    <p className="font-semibold">
+                      {lead.firstName} {lead.lastName}
+                    </p>
+                    <p className="text-sm text-slate-500">{lead.phone}</p>
+                    {lead.email ? (
+                      <p className="truncate text-sm text-slate-500">{lead.email}</p>
+                    ) : null}
+                  </div>
+                  <button
+                    type="button"
+                    aria-label={`Ouvrir la fiche de ${lead.firstName} ${lead.lastName}`.trim()}
+                    aria-expanded={isLeadDetailsOpen && selectedLead.id === lead.id}
+                    title="Ouvrir la fiche"
+                    onClick={() => onSelectLead(lead)}
+                    className="ml-auto inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-blue-50 hover:text-blue-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+                  >
+                    <PanelRightOpen className="h-4 w-4" />
+                  </button>
                 </div>
               </TableCell>
 
@@ -243,6 +288,15 @@ export default function ProspectsTable({
                 />
               </TableCell>
 
+              {whatsApp ? (
+                <TableCell className="w-[15rem] min-w-[15rem] max-w-[15rem] whitespace-normal">
+                  <WhatsAppCell
+                    state={whatsApp.state}
+                    summary={whatsApp.byLead.get(lead.id)}
+                  />
+                </TableCell>
+              ) : null}
+
               <TableCell>
                 <AdaptiveSelect
                   ariaLabel="Commercial"
@@ -281,6 +335,8 @@ export default function ProspectsTable({
               </TableCell>
 
               <TableCell
+                data-comment-zone="true"
+                onClick={(event) => event.stopPropagation()}
                 className={cn(
                   "sticky right-0 z-10 whitespace-normal border-l border-slate-200 bg-white shadow-[-8px_0_12px_rgba(15,23,42,0.06)]",
                   isInactive && "bg-slate-50",
@@ -295,15 +351,16 @@ export default function ProspectsTable({
                   <QuickComment
                     key={`${lead.id}-comment`}
                     saved={latestComment?.text ?? ""}
-                    onSave={(value) => {
+                    onSave={async (value) => {
                       if (!value && latestComment) {
-                        onCommentDelete(lead.id, latestComment.id);
-                        return;
+                        return (await onCommentDelete(lead.id, latestComment.id)) !== false;
                       }
 
                       if (value && value !== latestComment?.text) {
-                        onCommentAdd(lead.id, value);
+                        return (await onCommentAdd(lead.id, value)) !== false;
                       }
+
+                      return true;
                     }}
                   />
                 ) : null}
@@ -317,36 +374,126 @@ export default function ProspectsTable({
   );
 }
 
+function WhatsAppCell({
+  state,
+  summary,
+}: {
+  state: ProspectsWhatsApp["state"];
+  summary?: LeadWhatsAppSummary;
+}) {
+  if (state === "loading" && !summary) {
+    return <p className="text-xs font-semibold text-slate-400">Chargement…</p>;
+  }
+  if (state === "error" && !summary) {
+    return <p className="text-xs font-semibold text-rose-600">Messages indisponibles</p>;
+  }
+
+  const lastSent = summary?.lastSent ?? null;
+  const lastAttempt = summary?.lastAttempt ?? null;
+  const problem =
+    lastAttempt && lastAttempt.delivery !== "sent" ? lastAttempt : null;
+
+  if (!lastSent && !problem) {
+    return <p className="text-xs font-semibold text-slate-400">Aucun message envoyé</p>;
+  }
+
+  return (
+    <div className="space-y-1 text-xs">
+      {lastSent ? (
+        <div title={lastSent.text}>
+          <p className="font-bold text-emerald-700">
+            Envoyé par {lastSent.from === "seya" ? "Seya" : "l'équipe"} ·{" "}
+            {formatWhatsAppDate(lastSent.at)}
+          </p>
+          <p className="line-clamp-2 font-medium text-slate-600">{lastSent.text}</p>
+        </div>
+      ) : null}
+      {problem ? (
+        <p
+          title={problem.text}
+          className={cn(
+            "font-bold",
+            problem.delivery === "failed" ? "text-rose-600" : "text-amber-600",
+          )}
+        >
+          {problem.delivery === "failed" ? "Échec d'envoi" : "En attente d'envoi"} ·{" "}
+          {formatWhatsAppDate(problem.at)}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+const ROW_CONTROL_SELECTOR = [
+  "[data-comment-zone]",
+  "input",
+  "select",
+  "textarea",
+  "button",
+  "a",
+  "label",
+  "[role='button']",
+  "[role='combobox']",
+  "[role='listbox']",
+  "[role='option']",
+  "[role='checkbox']",
+  "[contenteditable='true']",
+].join(",");
+
+function isOnRowControl(target: EventTarget | null) {
+  return target instanceof Element && Boolean(target.closest(ROW_CONTROL_SELECTOR));
+}
+
 function QuickComment({
   saved,
   onSave,
 }: {
   saved: string;
-  onSave: (value: string) => void;
+  onSave: (value: string) => Promise<boolean>;
 }) {
   const [draft, setDraft] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
 
   return (
-    <textarea
-      value={draft ?? saved}
-      placeholder="Ajouter un commentaire..."
-      rows={2}
-      onClick={(event) => event.stopPropagation()}
-      onFocus={() => setDraft(saved)}
-      onChange={(event) => setDraft(event.target.value)}
-      onBlur={(event) => {
-        const value = event.currentTarget.value.trim();
-        setDraft(null);
-        onSave(value);
-      }}
-      onKeyDown={(event) => {
-        if (event.key === "Enter" && !event.shiftKey) {
-          event.preventDefault();
-          event.currentTarget.blur();
-        }
-      }}
-      className="min-h-14 min-w-0 w-full max-h-32 resize-y overflow-y-auto rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold leading-5 text-slate-800 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
-    />
+    <div>
+      <textarea
+        value={draft ?? saved}
+        placeholder="Ajouter un commentaire..."
+        rows={2}
+        onClick={(event) => event.stopPropagation()}
+        onFocus={() => setDraft((current) => current ?? saved)}
+        onChange={(event) => setDraft(event.target.value)}
+        onBlur={async (event) => {
+          const value = event.currentTarget.value.trim();
+          if (value === saved.trim()) {
+            setDraft(null);
+            setFailed(false);
+            return;
+          }
+          // Le texte reste affiché tant que la base n’a pas confirmé l’enregistrement.
+          const ok = await onSave(value);
+          setFailed(!ok);
+          if (ok) {
+            setDraft((current) => (current?.trim() === value ? null : current));
+          }
+        }}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" && !event.shiftKey) {
+            event.preventDefault();
+            event.currentTarget.blur();
+          }
+        }}
+        className={cn(
+          "min-h-14 min-w-0 w-full max-h-32 resize-y overflow-y-auto rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold leading-5 text-slate-800 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100",
+          failed && "border-rose-400 bg-rose-50",
+        )}
+      />
+      {failed ? (
+        <p className="mt-1 text-xs font-bold text-rose-600">
+          Non enregistré. Cliquez dans le champ puis à côté pour réessayer.
+        </p>
+      ) : null}
+    </div>
   );
 }
 

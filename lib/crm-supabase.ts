@@ -20,6 +20,7 @@ import {
 } from "@/lib/seya-close-booking";
 import { createClient } from "@/lib/supabase";
 import { normalizeLeadStatus } from "@/lib/lead-statuses";
+import type { WhatsAppThread } from "@/lib/lead-whatsapp";
 import type {
   Lead,
   LeadActivity,
@@ -329,6 +330,29 @@ export async function loadCrmLeads() {
   };
 }
 
+export async function loadCrmWhatsAppThreads(): Promise<{
+  centerId: string;
+  threads: WhatsAppThread[];
+}> {
+  const supabase = createClient();
+  const context = await getCrmCenterContext(supabase);
+  const { data, error } = await supabase
+    .from("centers")
+    .select("conversations:settings->seya->conversations")
+    .eq("id", context.centerId)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  const threads = (data as { conversations?: unknown } | null)?.conversations;
+  return {
+    centerId: context.centerId,
+    threads: Array.isArray(threads) ? (threads as WhatsAppThread[]) : [],
+  };
+}
+
 const appointmentOutcomeByStatus: Record<string, LeadAppointmentOutcome> = {
   quote: "Devis",
   sold: "Vendu",
@@ -476,7 +500,27 @@ async function createCrmLeadRecord(input: NewCrmLeadInput) {
   };
 }
 
-export async function updateCrmLeadStatus(
+const leadWriteQueues = new Map<string, Promise<unknown>>();
+
+// Deux changements rapprochés sur une fiche doivent arriver en base dans l’ordre choisi.
+function queueLeadWrite<T>(leadId: string, work: () => Promise<T>): Promise<T> {
+  const previous = leadWriteQueues.get(leadId) ?? Promise.resolve();
+  const next = previous.then(work);
+  const settled = next.catch(() => undefined);
+  leadWriteQueues.set(leadId, settled);
+  void settled.then(() => {
+    if (leadWriteQueues.get(leadId) === settled) {
+      leadWriteQueues.delete(leadId);
+    }
+  });
+  return trackCrmWrite(next);
+}
+
+export function updateCrmLeadStatus(lead: Lead, status: LeadStatus) {
+  return queueLeadWrite(lead.id, () => writeCrmLeadStatus(lead, status));
+}
+
+async function writeCrmLeadStatus(
   lead: Lead,
   status: LeadStatus,
 ) {
@@ -488,10 +532,15 @@ export async function updateCrmLeadStatus(
   );
   const consumedDueReminder = isReminderDueOn(lead.reminderDate) && !nextReminder;
 
-  await updateLeadFields(supabase, lead.id, {
-    status,
-    ...(consumedDueReminder ? { recall_date: null } : {}),
-  });
+  await updateLeadFields(
+    supabase,
+    lead.id,
+    {
+      status,
+      ...(consumedDueReminder ? { recall_date: null } : {}),
+    },
+    { requireRow: true },
+  );
 
   await insertLeadEvent(supabase, centerId, lead.id, {
     event_type: "status",
@@ -554,6 +603,40 @@ export async function setCrmLeadImportOrigin(leadId: string, imported: boolean) 
     event_type: IMPORT_ORIGIN_EVENT,
     to_value: imported ? "import" : "campaign",
     note: importOriginNote(imported),
+  });
+}
+
+// Le dernier commentaire est aussi stocké sur la fiche : sans mise à jour, il réapparaît au rechargement.
+export async function deleteCrmLeadComment(leadId: string, activityId: string) {
+  const supabase = createClient();
+
+  if (!activityId.endsWith("-latest-comment")) {
+    const { error } = await supabase
+      .from("lead_events")
+      .delete()
+      .eq("id", activityId)
+      .eq("lead_id", leadId);
+
+    if (error) {
+      throw new Error(error.message);
+    }
+  }
+
+  const { data, error } = await supabase
+    .from("lead_events")
+    .select("note")
+    .eq("lead_id", leadId)
+    .in("event_type", ["comment", "commentaire", "note", "notes"])
+    .order("created_at", { ascending: false })
+    .limit(1);
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  const previous = String(data?.[0]?.note || "").trim();
+  await updateLeadFields(supabase, leadId, {
+    latest_comment: previous || null,
   });
 }
 
@@ -735,7 +818,11 @@ export async function updateCrmLeadNextAction(leadId: string, nextAction: string
   });
 }
 
-export async function updateCrmLeadDetails(lead: Lead, input: NewCrmLeadInput) {
+export function updateCrmLeadDetails(lead: Lead, input: NewCrmLeadInput) {
+  return queueLeadWrite(lead.id, () => writeCrmLeadDetails(lead, input));
+}
+
+async function writeCrmLeadDetails(lead: Lead, input: NewCrmLeadInput) {
   if (!isPersistedLeadId(lead.id)) {
     return;
   }
@@ -803,21 +890,26 @@ export async function updateCrmLeadDetails(lead: Lead, input: NewCrmLeadInput) {
     input.commercial,
   );
 
-  await updateLeadFields(supabase, lead.id, {
-    source_id: sourceId,
-    campaign_id: campaignId,
-    service_id: serviceId,
-    ...(statusChanged ? { status: nextStatus } : {}),
-    recall_date: toDateOnlyIso(nextReminder) || null,
-    next_action: input.nextAction.trim() || "À contacter",
-    amount_cure_ttc: input.dealAmount || 0,
-    ...(assignedToProfileId !== undefined
-      ? { assigned_to_profile_id: assignedToProfileId }
-      : {}),
-    ...(consumedDueReminder
-      ? {}
-      : { updated_at: now, last_activity_at: now }),
-  });
+  await updateLeadFields(
+    supabase,
+    lead.id,
+    {
+      source_id: sourceId,
+      campaign_id: campaignId,
+      service_id: serviceId,
+      ...(statusChanged ? { status: nextStatus } : {}),
+      recall_date: toDateOnlyIso(nextReminder) || null,
+      next_action: input.nextAction.trim() || "À contacter",
+      amount_cure_ttc: input.dealAmount || 0,
+      ...(assignedToProfileId !== undefined
+        ? { assigned_to_profile_id: assignedToProfileId }
+        : {}),
+      ...(consumedDueReminder
+        ? {}
+        : { updated_at: now, last_activity_at: now }),
+    },
+    { requireRow: statusChanged },
+  );
 
   if (nextStatus !== lead.status) {
     await insertLeadEvent(supabase, centerId, lead.id, {
@@ -1211,13 +1303,29 @@ async function updateLeadFields(
   supabase: SupabaseClient,
   leadId: string,
   fields: Record<string, unknown>,
+  options: { requireRow?: boolean } = {},
 ) {
   return trackCrmWrite(
     (async () => {
-      const { error } = await supabase.from("leads").update(fields).eq("id", leadId);
+      const query = supabase.from("leads").update(fields).eq("id", leadId);
 
+      if (!options.requireRow) {
+        const { error } = await query;
+        if (error) {
+          throw new Error(error.message);
+        }
+        return;
+      }
+
+      // Sans ligne renvoyée, la base a refusé la modification sans erreur (droits ou fiche supprimée).
+      const { data, error } = await query.select("id");
       if (error) {
         throw new Error(error.message);
+      }
+      if (!data?.length) {
+        throw new Error(
+          "Le statut n'a pas été enregistré : fiche introuvable ou accès refusé.",
+        );
       }
     })(),
   );

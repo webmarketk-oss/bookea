@@ -27,6 +27,10 @@ import {
 } from "@/lib/sms-settings";
 import { sendBookeaSms } from "@/lib/send-sms";
 import { reminderDateAfterStatusChange } from "@/lib/crm-stats";
+import {
+  formatWhatsAppDate,
+  type LeadWhatsAppMessage,
+} from "@/lib/lead-whatsapp";
 import { Lead, LeadStatus } from "@/types/lead";
 import {
   Calendar,
@@ -67,7 +71,7 @@ type LeadInfoForm = {
 
 interface LeadDetailsProps {
   lead: Lead;
-  onAddActivity: (leadId: string, text: string) => void;
+  onAddActivity: (leadId: string, text: string) => void | Promise<boolean | void>;
   onDeleteActivity: (leadId: string, activityId: string) => void;
   onUpdateLead: (
     leadId: string,
@@ -75,6 +79,7 @@ interface LeadDetailsProps {
   ) => void | Promise<void>;
   onClose: () => void;
   commercialOptions?: string[];
+  whatsAppMessages?: LeadWhatsAppMessage[] | "loading" | "error";
 }
 
 const leadSources: Lead["source"][] = [
@@ -116,14 +121,18 @@ export default function LeadDetails({
   onUpdateLead,
   onClose,
   commercialOptions = [],
+  whatsAppMessages,
 }: LeadDetailsProps) {
   const fullName = `${lead.firstName} ${lead.lastName}`;
   const [commentDraft, setCommentDraft] = useState("");
+  const [commentSaving, setCommentSaving] = useState(false);
   const [infoForm, setInfoForm] = useState<LeadInfoForm>(() => leadToInfoForm(lead));
   const infoFormRef = useRef(infoForm);
   const [infoSaving, setInfoSaving] = useState(false);
   const [infoError, setInfoError] = useState("");
   const infoSavingRef = useRef(false);
+  const infoResaveRef = useRef(false);
+  const saveLeadInfoRef = useRef<() => Promise<void>>(async () => {});
   const [activeTab, setActiveTab] = useState<LeadDetailsTab>("information");
   const [isMoreOpen, setIsMoreOpen] = useState(false);
   const [depositLinks, setDepositLinks] =
@@ -251,15 +260,19 @@ export default function LeadDetails({
     smsTemplateId,
   ]);
 
-  function addComment() {
+  async function addComment() {
     const text = commentDraft.trim();
 
-    if (!text) {
+    if (!text || commentSaving) {
       return;
     }
 
-    onAddActivity(lead.id, text);
-    setCommentDraft("");
+    setCommentSaving(true);
+    const saved = await Promise.resolve(onAddActivity(lead.id, text));
+    setCommentSaving(false);
+    if (saved !== false) {
+      setCommentDraft((current) => (current.trim() === text ? "" : current));
+    }
   }
 
   async function saveLeadInfo() {
@@ -304,6 +317,7 @@ export default function LeadDetails({
     }
 
     if (infoSavingRef.current) {
+      infoResaveRef.current = true;
       return;
     }
 
@@ -314,6 +328,7 @@ export default function LeadDetails({
     try {
       await Promise.resolve(onUpdateLead(lead.id, nextForm));
     } catch (error) {
+      infoResaveRef.current = false;
       setInfoError(
         error instanceof Error
           ? error.message
@@ -323,7 +338,12 @@ export default function LeadDetails({
       infoSavingRef.current = false;
       setInfoSaving(false);
     }
+    if (infoResaveRef.current) {
+      infoResaveRef.current = false;
+      void saveLeadInfoRef.current();
+    }
   }
+  saveLeadInfoRef.current = saveLeadInfo;
 
   function openRdvInAgenda() {
     const params = new URLSearchParams({
@@ -610,11 +630,11 @@ export default function LeadDetails({
 
                 <Button
                   size="sm"
-                  onClick={addComment}
-                  disabled={commentDraft.trim().length === 0}
+                  onClick={() => void addComment()}
+                  disabled={commentDraft.trim().length === 0 || commentSaving}
                   className="shrink-0"
                 >
-                  Ajouter
+                  {commentSaving ? "Enregistrement..." : "Ajouter"}
                 </Button>
               </div>
             </div>
@@ -829,12 +849,15 @@ export default function LeadDetails({
                   ariaLabel="Statut"
                   value={infoForm.status}
                   options={leadStatusSelectOptions(infoForm.status)}
-                  onChange={(status) =>
-                    setInfoForm((form) => ({
-                      ...form,
+                  onChange={(status) => {
+                    const nextForm = {
+                      ...infoFormRef.current,
                       status: status as LeadStatus,
-                    }))
-                  }
+                    };
+                    infoFormRef.current = nextForm;
+                    setInfoForm(nextForm);
+                    void saveLeadInfo();
+                  }}
                   className={`h-8 w-full rounded-full border-0 px-3 text-xs font-semibold outline-none ring-1 ${leadStatusClassName(infoForm.status)}`}
                 />
               </label>
@@ -895,6 +918,9 @@ export default function LeadDetails({
 
           {activeTab === "history" && (
             <div className="space-y-3">
+            {whatsAppMessages !== undefined ? (
+              <WhatsAppHistory messages={whatsAppMessages} />
+            ) : null}
             {lead.activityLog.map((activity) => (
               <TimelineItem
                 key={activity.id}
@@ -1136,6 +1162,74 @@ function CommentCard({
 
       <p className="text-sm leading-6 text-slate-600">{text}</p>
     </article>
+  );
+}
+
+const whatsAppDeliveryLabels: Record<LeadWhatsAppMessage["delivery"], string> = {
+  sent: "Envoyé",
+  failed: "Échec d'envoi",
+  pending: "En attente d'envoi",
+  received: "Reçu",
+};
+
+const whatsAppDeliveryClasses: Record<LeadWhatsAppMessage["delivery"], string> = {
+  sent: "bg-emerald-100 text-emerald-700",
+  failed: "bg-rose-100 text-rose-700",
+  pending: "bg-amber-100 text-amber-700",
+  received: "bg-slate-200 text-slate-700",
+};
+
+function WhatsAppHistory({
+  messages,
+}: {
+  messages: LeadWhatsAppMessage[] | "loading" | "error";
+}) {
+  return (
+    <div className="rounded-xl border border-emerald-100 bg-emerald-50/50 p-3">
+      <p className="mb-2 flex items-center gap-2 text-xs font-black uppercase text-emerald-800">
+        <MessageCircle className="h-4 w-4" />
+        Messages WhatsApp
+      </p>
+      {messages === "loading" ? (
+        <p className="text-sm font-semibold text-slate-500">Chargement…</p>
+      ) : messages === "error" ? (
+        <p className="text-sm font-semibold text-rose-600">
+          Messages WhatsApp indisponibles pour le moment.
+        </p>
+      ) : messages.length === 0 ? (
+        <p className="text-sm font-semibold text-slate-500">Aucun message WhatsApp.</p>
+      ) : (
+        <div className="max-h-80 space-y-2 overflow-y-auto pr-1">
+          {messages.map((message) => (
+            <div
+              key={message.id}
+              className={`rounded-lg p-2.5 ${
+                message.from === "prospect" ? "bg-white" : "bg-emerald-100/60"
+              }`}
+            >
+              <div className="mb-1 flex flex-wrap items-center gap-2 text-[11px] font-bold text-slate-500">
+                <span>
+                  {message.from === "seya"
+                    ? "Seya"
+                    : message.from === "equipe"
+                      ? "Équipe"
+                      : "Prospect"}
+                </span>
+                <span>{formatWhatsAppDate(message.at)}</span>
+                <span
+                  className={`rounded-full px-2 py-0.5 ${whatsAppDeliveryClasses[message.delivery]}`}
+                >
+                  {whatsAppDeliveryLabels[message.delivery]}
+                </span>
+              </div>
+              <p className="whitespace-pre-wrap break-words text-sm font-medium text-slate-700">
+                {message.text}
+              </p>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 

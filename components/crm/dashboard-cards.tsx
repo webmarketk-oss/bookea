@@ -20,6 +20,7 @@ import {
   CircleCheck,
   CircleX,
   History,
+  Hourglass,
   Phone,
   Sparkles,
   Users,
@@ -158,6 +159,14 @@ export default function DashboardCards({
       status: "À relancer",
     },
     {
+      title: "Reviendra vers nous",
+      value: leads.filter((lead) => lead.status === "Reviendra vers nous").length,
+      subtitle: "Pas de relance, on attend leur retour",
+      icon: Hourglass,
+      color: "text-indigo-600",
+      status: "Reviendra vers nous",
+    },
+    {
       title: "Acompte reçu aujd",
       value: leads.filter((lead) => isLeadAcompteReceivedOn(lead, today)).length,
       icon: CircleCheck,
@@ -194,7 +203,7 @@ export default function DashboardCards({
           renderStatCard(stat, activeStatus, activeQuickFilter, onStatusFilter, onQuickFilter)
         }
       </StatGroup>
-      <StatGroup title="Suivi" cards={followUpStats} columns="xl:grid-cols-4">
+      <StatGroup title="Suivi" cards={followUpStats} columns="xl:grid-cols-5">
         {(stat) =>
           renderStatCard(stat, activeStatus, activeQuickFilter, onStatusFilter, onQuickFilter)
         }
