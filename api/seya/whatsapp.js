@@ -27,11 +27,8 @@ const {
 } = require("./center-route");
 const { findOwnSeyaAppointment, slotDate, slotTime } = require("./own-appointment");
 const { appointmentSlot } = require("../appointments/token-utils");
-const {
-  crmUpdateFromLeadMessage,
-  lockedCrmStatuses,
-} = require("./conversation");
-const { isCrmRelanceHold } = require("./crm-sync");
+const { crmStatusFromLeadMessage } = require("./conversation");
+const { canSeyaSetCrmStatus } = require("./crm-sync");
 const { withCrmStatus } = require("./booking-close");
 const {
   isNewSeyaConversationBlocked,
@@ -1184,19 +1181,14 @@ async function loadCenterAppointments(supabase, centerId) {
 }
 
 async function syncCrmFromSeyaIntent(supabase, centerId, context, text) {
-  const update = crmUpdateFromLeadMessage(text, new Date());
+  const update = crmStatusFromLeadMessage(text, new Date());
   if (!update || !context.leadId) {
     return;
   }
   const current = String(context.status || "");
   if (
-    lockedCrmStatuses().some(
-      (status) => status.toLowerCase() === current.toLowerCase(),
-    ) ||
-    isCrmRelanceHold({
-      status: current,
-      recall_date: context.recall_date,
-    })
+    !context.crmLoaded ||
+    !canSeyaSetCrmStatus({ status: current, recall_date: context.recall_date }, update)
   ) {
     return;
   }

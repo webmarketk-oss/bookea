@@ -924,6 +924,30 @@ function crmUpdateFromLeadMessage(text, now, extras = {}) {
   return null;
 }
 
+// Statut CRM à poser après un message du prospect (n’influence pas la réponse de Seya).
+function crmStatusFromLeadMessage(text, now, extras = {}) {
+  const update = crmUpdateFromLeadMessage(text, now, extras);
+  if (update) {
+    return update;
+  }
+  if (isThinkingItOver(text) && !isServiceAsk(text)) {
+    return {
+      status: "En réflexion",
+      conversationStatus: null,
+      reminderDate: null,
+    };
+  }
+  return null;
+}
+
+function isThinkingItOver(text) {
+  const value = normalize(text);
+  if (/j[' ]?ai (bien |deja )?reflechi/.test(value)) {
+    return false;
+  }
+  return /\breflechi(r|s|t)\b|\breflexion\b/.test(value);
+}
+
 function isAwayForNow(text) {
   const value = normalize(text);
   if (asksForHelpNow(text)) {
@@ -1662,6 +1686,7 @@ module.exports = {
   isMessageTimeMention,
   parseNextWeekdayIso,
   isLeadRefusal,
+  crmStatusFromLeadMessage,
   crmUpdateFromLeadMessage,
   lockedCrmStatuses,
   isShortYes,

@@ -1,4 +1,4 @@
-const { crmUpdateFromLeadMessage, lockedCrmStatuses } = require("./conversation");
+const { crmStatusFromLeadMessage, lockedCrmStatuses } = require("./conversation");
 const {
   closeConversationForCrmStatus,
   crmStatusLabel,
@@ -126,8 +126,6 @@ function newerLead(current, next) {
 const BEFORE_BOOKING_STATUSES = new Set([
   "Nouveau",
   "Apl en abs",
-  "À relancer",
-  "En réflexion",
   "Message WhatsApp envoyé",
   "SMS envoyé",
   "Message vocal envoyé",
@@ -236,6 +234,32 @@ function crmLeadFor(conversation, crmHold) {
     (phone.length === 9 && index.byPhone.get(phone)) ||
     null
   );
+}
+
+const SEYA_PROSPECT_STATUSES = new Set([
+  "Pas intéressé",
+  "Hors zone",
+  "En réflexion",
+  "Reviendra vers nous",
+]);
+const STAFF_ONLY_STATUS =
+  /intraitable|prospect perdu|client perdu|no[- ]?show|doublon|num[eé]ro invalide|contre[- ]?indication|revue sant[eé]/i;
+
+function canSeyaSetCrmStatus(row, intent) {
+  if (!row || !intent?.status) {
+    return false;
+  }
+  const current = crmStatusLabel(row.status);
+  if (isLockedCrmStatus(row.status) || STAFF_ONLY_STATUS.test(crmStatusText(row.status))) {
+    return false;
+  }
+  if (current === intent.status && !intent.reminderDate) {
+    return false;
+  }
+  if (SEYA_PROSPECT_STATUSES.has(intent.status)) {
+    return true;
+  }
+  return !isCrmRelanceHold(row);
 }
 
 function isCrmRelanceHold(row) {
@@ -359,7 +383,7 @@ async function syncCrmFromConversation(supabase, centerId, original, crmHold) {
     return conversation;
   }
 
-  const intent = crmUpdateFromLeadMessage(lastLead.text, new Date());
+  const intent = crmStatusFromLeadMessage(lastLead.text, new Date());
   if (!intent) {
     return conversation;
   }
@@ -393,7 +417,7 @@ async function syncCrmFromConversation(supabase, centerId, original, crmHold) {
     next = withCrmStatus(next, lead.status, crmRecallDay(lead));
     const crmChangedAfterLead =
       Date.parse(lead.updated_at || "") > Date.parse(lastLead.at || "");
-    if (crmChangedAfterLead || isLockedCrmStatus(lead.status) || isCrmRelanceHold(lead)) {
+    if (crmChangedAfterLead || !canSeyaSetCrmStatus(lead, intent)) {
       if (isCrmRelanceHeld(lead) && crmHold) {
         for (const key of leadRelanceKeys(lead)) {
           crmHold.add(key);
@@ -475,6 +499,7 @@ function conversationOnRelanceHold(conversation, hold) {
 
 module.exports = {
   WA_SENT_STATUS,
+  canSeyaSetCrmStatus,
   conversationHasSentSeyaMessage,
   conversationOnRelanceHold,
   crmRecallDayFor,

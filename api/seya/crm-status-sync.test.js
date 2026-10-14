@@ -313,3 +313,32 @@ test("libellés CRM identiques entre Seya et lib/lead-statuses.ts", () => {
   assert.equal(crmStatusLabel("pi"), "Pas intéressé");
   assert.equal(crmStatusLabel("Perdu"), "Prospect perdu");
 });
+
+test("Seya met à jour le CRM entre PI, En réflexion, Reviendra vers nous et Hors zone", () => {
+  const { canSeyaSetCrmStatus } = require("./crm-sync");
+  const { crmStatusFromLeadMessage } = require("./conversation");
+  const when = new Date("2026-10-14T08:00:00Z");
+  assert.equal(crmStatusFromLeadMessage("Je vais réfléchir", when).status, "En réflexion");
+  assert.equal(crmStatusFromLeadMessage("laissez moi réfléchir merci", when).status, "En réflexion");
+  assert.equal(crmStatusFromLeadMessage("Je reviendrai vers vous", when).status, "Reviendra vers nous");
+  assert.equal(crmStatusFromLeadMessage("C est trop loin pour moi", when).status, "Hors zone");
+  assert.equal(crmStatusFromLeadMessage("pas intéressée merci", when).status, "Pas intéressé");
+  assert.equal(crmStatusFromLeadMessage("J'ai réfléchi, c'est bon pour moi", when), null);
+  assert.equal(require("./conversation").crmUpdateFromLeadMessage("Je vais réfléchir", when), null);
+
+  const prospect = ["Pas intéressé", "En réflexion", "Reviendra vers nous", "Hors zone"];
+  for (const from of [...prospect, "Nouveau", "Message WhatsApp envoyé", "À relancer"]) {
+    for (const to of prospect) {
+      const expected = from !== to;
+      assert.equal(
+        canSeyaSetCrmStatus({ status: from, recall_date: "2026-11-01" }, { status: to }),
+        expected,
+        `${from} → ${to}`,
+      );
+    }
+  }
+  for (const from of ["RDV pris", "RDV confirmé", "Devis", "Vendu", "Acompte reçu", "Doublon", "Numéro invalide", "Intraitable", "Prospect perdu", "No show"]) {
+    assert.equal(canSeyaSetCrmStatus({ status: from }, { status: "Pas intéressé" }), false, from);
+  }
+  assert.equal(canSeyaSetCrmStatus({ status: "Reviendra vers nous" }, { status: "À relancer", reminderDate: null }), false);
+});
