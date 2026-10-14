@@ -196,12 +196,42 @@ export default function CRMLeadsPage() {
     [dismissedDuplicateKeys, duplicateLeadGroups]
   );
 
+  const editSeqRef = useRef(0);
+  const pendingSavesRef = useRef(0);
+  const refreshAfterSavesRef = useRef(false);
+
+  async function trackSave<T>(save: () => Promise<T>) {
+    editSeqRef.current += 1;
+    pendingSavesRef.current += 1;
+    try {
+      return await save();
+    } finally {
+      pendingSavesRef.current -= 1;
+      editSeqRef.current += 1;
+      if (pendingSavesRef.current === 0 && refreshAfterSavesRef.current) {
+        refreshAfterSavesRef.current = false;
+        void refreshCrmLeads();
+      }
+    }
+  }
+
   async function refreshCrmLeads() {
     setCrmError(null);
+    const editSeqAtStart = editSeqRef.current;
 
     try {
       const { leads: loadedLeads, center } = await loadCrmLeads();
       centerNameRef.current = center.centerName;
+
+      // Une liste lue avant une modification de l’équipe écraserait le statut ou le commentaire saisi.
+      if (pendingSavesRef.current > 0) {
+        refreshAfterSavesRef.current = true;
+        return;
+      }
+      if (editSeqRef.current !== editSeqAtStart) {
+        void refreshCrmLeads();
+        return;
+      }
 
       const nextLeads =
         loadedLeads.length > 0
@@ -593,7 +623,7 @@ export default function CRMLeadsPage() {
     }
 
     try {
-      await updateCrmLeadStatus(leadBeforeUpdate, status);
+      await trackSave(() => updateCrmLeadStatus(leadBeforeUpdate, status));
       setCrmNotice(
         ["Vendu", "Client converti"].includes(status)
           ? "Statut enregistré et fiche client synchronisée."
@@ -633,7 +663,7 @@ export default function CRMLeadsPage() {
     );
 
     try {
-      await addCrmLeadActivity(leadId, text);
+      await trackSave(() => addCrmLeadActivity(leadId, text));
       setCrmNotice(text.startsWith("SMS envoyé") ? "SMS envoyé." : "Commentaire enregistré.");
       await refreshCrmLeads();
     } catch (error) {
@@ -672,7 +702,7 @@ export default function CRMLeadsPage() {
     );
 
     try {
-      await deleteCrmLeadActivity(activityId);
+      await trackSave(() => deleteCrmLeadActivity(activityId));
       setCrmNotice("Activité supprimée.");
     } catch (error) {
       setCrmError(
@@ -694,7 +724,7 @@ export default function CRMLeadsPage() {
     );
 
     try {
-      await updateCrmLeadAmount(leadId, amount);
+      await trackSave(() => updateCrmLeadAmount(leadId, amount));
       setCrmNotice("Montant enregistré.");
     } catch (error) {
       setCrmError(
@@ -720,7 +750,7 @@ export default function CRMLeadsPage() {
     );
 
     try {
-      await updateCrmLeadReminder(leadId, reminderDate);
+      await trackSave(() => updateCrmLeadReminder(leadId, reminderDate));
       setCrmNotice("Rappel enregistré.");
     } catch (error) {
       setCrmError(
@@ -744,7 +774,7 @@ export default function CRMLeadsPage() {
     if (!lead) {
       return;
     }
-    void updateCrmLeadDetails(lead, {
+    void trackSave(() => updateCrmLeadDetails(lead, {
       firstName: lead.firstName,
       lastName: lead.lastName,
       phone: lead.phone,
@@ -757,7 +787,7 @@ export default function CRMLeadsPage() {
       dealAmount: lead.dealAmount,
       nextAction: lead.nextAction,
       reminderDate: lead.reminderDate,
-    }).catch((error) => {
+    })).catch((error) => {
       setCrmError(
         error instanceof Error
           ? error.message
@@ -848,7 +878,7 @@ export default function CRMLeadsPage() {
     );
 
     try {
-      await updateCrmLeadDetails(leadBeforeUpdate, {
+      await trackSave(() => updateCrmLeadDetails(leadBeforeUpdate, {
         firstName: patch.firstName,
         lastName: patch.lastName,
         phone: patch.phone,
@@ -866,7 +896,7 @@ export default function CRMLeadsPage() {
         dealAmount: Number.isFinite(dealAmount) ? dealAmount : leadBeforeUpdate.dealAmount,
         nextAction: patch.nextAction,
         reminderDate: nextReminder || "",
-      });
+      }));
       if (patch.phone) {
         void syncBirthdaySms({
           birthDate: patch.birthDate,

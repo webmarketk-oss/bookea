@@ -292,15 +292,10 @@ export default function ProspectsTable({
                 )}
               >
                 {commentsOpen ? (
-                  <textarea
-                    key={latestComment?.id ?? `${lead.id}-empty-comment`}
-                    defaultValue={latestComment?.text ?? ""}
-                    placeholder="Ajouter un commentaire..."
-                    rows={2}
-                    onClick={(event) => event.stopPropagation()}
-                    onBlur={(event) => {
-                      const value = event.currentTarget.value.trim();
-
+                  <QuickComment
+                    key={`${lead.id}-comment`}
+                    saved={latestComment?.text ?? ""}
+                    onSave={(value) => {
                       if (!value && latestComment) {
                         onCommentDelete(lead.id, latestComment.id);
                         return;
@@ -310,13 +305,6 @@ export default function ProspectsTable({
                         onCommentAdd(lead.id, value);
                       }
                     }}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter" && !event.shiftKey) {
-                        event.preventDefault();
-                        event.currentTarget.blur();
-                      }
-                    }}
-                    className="min-h-14 min-w-0 w-full max-h-32 resize-y overflow-y-auto rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold leading-5 text-slate-800 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
                   />
                 ) : null}
               </TableCell>
@@ -326,6 +314,39 @@ export default function ProspectsTable({
         </TableBody>
       </Table>
     </div>
+  );
+}
+
+function QuickComment({
+  saved,
+  onSave,
+}: {
+  saved: string;
+  onSave: (value: string) => void;
+}) {
+  const [draft, setDraft] = useState<string | null>(null);
+
+  return (
+    <textarea
+      value={draft ?? saved}
+      placeholder="Ajouter un commentaire..."
+      rows={2}
+      onClick={(event) => event.stopPropagation()}
+      onFocus={() => setDraft(saved)}
+      onChange={(event) => setDraft(event.target.value)}
+      onBlur={(event) => {
+        const value = event.currentTarget.value.trim();
+        setDraft(null);
+        onSave(value);
+      }}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" && !event.shiftKey) {
+          event.preventDefault();
+          event.currentTarget.blur();
+        }
+      }}
+      className="min-h-14 min-w-0 w-full max-h-32 resize-y overflow-y-auto rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold leading-5 text-slate-800 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+    />
   );
 }
 
