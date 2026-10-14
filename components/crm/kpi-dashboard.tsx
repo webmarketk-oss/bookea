@@ -118,7 +118,13 @@ export default function KPIDashboard({ leads }: KPIDashboardProps) {
   ).length;
   const revenue = soldLeads.reduce((total, lead) => total + lead.dealAmount, 0);
 
-  const conversionRate = Math.min(100, ratio(soldCount, totalProspects));
+  const conversionSalesCount = soldLeads.filter(
+    (lead) => !(lead.dealAmount > 0) || lead.dealAmount >= 100,
+  ).length;
+  const conversionRate = ratio(
+    conversionSalesCount,
+    devisCount + conversionSalesCount,
+  );
   const rdvRate = Math.min(100, ratio(rdvCount, totalProspects));
   const attendanceRate = ratio(presentCount, presentCount + lostCountByNoShow(periodLeads));
   const depositRate = ratio(depositCount, Math.max(soldCount + rdvCount, 1));
