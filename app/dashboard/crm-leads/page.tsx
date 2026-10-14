@@ -30,6 +30,8 @@ import {
   deleteCrmLeadActivity,
   loadCrmLeads,
   mergeCrmDuplicateLeads,
+  readCrmLeadsSnapshot,
+  saveCrmLeadsSnapshot,
   setCrmLeadImportOrigin,
   updateCrmLeadAmount,
   updateCrmLeadDetails,
@@ -159,9 +161,14 @@ const statusGroups: Partial<Record<LeadStatus, LeadStatus[]>> = {
 };
 
 export default function CRMLeadsPage() {
-  const [leadList, setLeadList] = useState<Lead[]>([]);
-  const [selectedLeadId, setSelectedLeadId] = useState("");
-  const [isLoadingCrm, setIsLoadingCrm] = useState(true);
+  const [initialSnapshot] = useState(readCrmLeadsSnapshot);
+  const [leadList, setLeadList] = useState<Lead[]>(
+    () => initialSnapshot?.leads ?? [],
+  );
+  const [selectedLeadId, setSelectedLeadId] = useState(
+    () => initialSnapshot?.leads[0]?.id ?? "",
+  );
+  const [isLoadingCrm, setIsLoadingCrm] = useState(!initialSnapshot);
   const [crmError, setCrmError] = useState<string | null>(null);
   const [crmNotice, setCrmNotice] = useState<string | null>(null);
   const [isLeadDetailsOpen, setIsLeadDetailsOpen] = useState(false);
@@ -175,7 +182,10 @@ export default function CRMLeadsPage() {
   const [kpiScope, setKpiScope] = useState<KpiScope>("campaigns");
   const [quickDateFilter, setQuickDateFilter] =
     useState<QuickDateFilter>("Tous");
-  const centerNameRef = useRef("");
+  const centerNameRef = useRef(initialSnapshot?.centerName ?? "");
+  const centerIdRef = useRef(initialSnapshot?.centerId ?? "");
+  const refreshesInFlightRef = useRef(0);
+  const lastRefreshAtRef = useRef(0);
   const ficheRef = useRef<HTMLElement>(null);
   const ficheColumnRef = useRef<HTMLDivElement>(null);
   const [ficheBox, setFicheBox] = useState<FicheBox | null>(null);
@@ -221,10 +231,13 @@ export default function CRMLeadsPage() {
   async function refreshCrmLeads() {
     setCrmError(null);
     const editSeqAtStart = editSeqRef.current;
+    refreshesInFlightRef.current += 1;
+    lastRefreshAtRef.current = Date.now();
 
     try {
       const { leads: loadedLeads, center } = await loadCrmLeads();
       centerNameRef.current = center.centerName;
+      centerIdRef.current = center.centerId;
 
       // Une liste lue avant une modification de l’équipe écraserait le statut ou le commentaire saisi.
       if (pendingSavesRef.current > 0) {
@@ -262,9 +275,32 @@ export default function CRMLeadsPage() {
           : "Impossible de charger les prospects CRM."
       );
     } finally {
+      refreshesInFlightRef.current -= 1;
       setIsLoadingCrm(false);
     }
   }
+
+  function refreshOnReturn() {
+    // Retour sur l’onglet : focus et visibilitychange arrivent ensemble.
+    if (
+      refreshesInFlightRef.current > 0 ||
+      Date.now() - lastRefreshAtRef.current < 2000
+    ) {
+      return;
+    }
+    void refreshCrmLeads();
+  }
+
+  useEffect(() => {
+    if (!centerIdRef.current) {
+      return;
+    }
+    saveCrmLeadsSnapshot({
+      centerId: centerIdRef.current,
+      centerName: centerNameRef.current,
+      leads: leadList,
+    });
+  }, [leadList]);
 
   function scrollToLeadList() {
     window.setTimeout(() => {
@@ -324,7 +360,7 @@ export default function CRMLeadsPage() {
 
     function refreshIfVisible() {
       if (document.visibilityState === "visible") {
-        void refreshCrmLeads();
+        refreshOnReturn();
       }
     }
 
@@ -334,7 +370,7 @@ export default function CRMLeadsPage() {
       syncAppointmentStatuses
     );
     window.addEventListener("storage", syncPublicBookings);
-    window.addEventListener("focus", refreshCrmLeads);
+    window.addEventListener("focus", refreshOnReturn);
     document.addEventListener("visibilitychange", refreshIfVisible);
 
     return () => {
@@ -347,7 +383,7 @@ export default function CRMLeadsPage() {
         syncAppointmentStatuses
       );
       window.removeEventListener("storage", syncPublicBookings);
-      window.removeEventListener("focus", refreshCrmLeads);
+      window.removeEventListener("focus", refreshOnReturn);
       document.removeEventListener("visibilitychange", refreshIfVisible);
     };
   }, []);

@@ -1,4 +1,4 @@
-import { getActiveCenterContext } from "@/lib/center-access";
+import { getActiveCenterContext, readActiveCenterId } from "@/lib/center-access";
 import { invoicePaymentAmounts } from "@/lib/client-balance";
 import {
   isReminderDueOn,
@@ -239,10 +239,39 @@ export function flushCrmWrites() {
   return crmWriteQueue;
 }
 
+type CrmLeadsSnapshot = {
+  centerId: string;
+  centerName: string;
+  leads: Lead[];
+};
+
+let crmLeadsSnapshot: CrmLeadsSnapshot | null = null;
+let crmLeadsSnapshotWatchesSignOut = false;
+
+export function readCrmLeadsSnapshot() {
+  if (!crmLeadsSnapshot || crmLeadsSnapshot.centerId !== readActiveCenterId()) {
+    return null;
+  }
+  return crmLeadsSnapshot;
+}
+
+export function saveCrmLeadsSnapshot(snapshot: CrmLeadsSnapshot) {
+  crmLeadsSnapshot = snapshot;
+  if (!crmLeadsSnapshotWatchesSignOut) {
+    crmLeadsSnapshotWatchesSignOut = true;
+    createClient().auth.onAuthStateChange((event) => {
+      if (event === "SIGNED_OUT") {
+        crmLeadsSnapshot = null;
+      }
+    });
+  }
+}
+
 export async function loadCrmLeads() {
   const supabase = createClient();
   const context = await getCrmCenterContext(supabase);
 
+  const appointmentsQuery = loadCenterAppointments(supabase, context.centerId);
   const { data, error } = await supabase
     .from("leads")
     .select(
@@ -284,9 +313,8 @@ export async function loadCrmLeads() {
   }
 
   const rows = (data ?? []) as unknown as LeadRow[];
-  const appointmentsByLead = await loadLeadAppointments(
-    supabase,
-    context.centerId,
+  const appointmentsByLead = groupLeadAppointments(
+    await appointmentsQuery,
     rows,
   );
 
@@ -308,9 +336,33 @@ const appointmentOutcomeByStatus: Record<string, LeadAppointmentOutcome> = {
   no_show: "PVPP",
 };
 
-async function loadLeadAppointments(
+type CenterAppointmentRow = {
+  id: string;
+  lead_id: string | null;
+  client_id: string | null;
+  created_at: string;
+  appointment_date: string | null;
+  status: string | null;
+  notes: string | null;
+};
+
+async function loadCenterAppointments(
   supabase: SupabaseClient,
   centerId: string,
+): Promise<CenterAppointmentRow[]> {
+  try {
+    const { data, error } = await supabase
+      .from("appointments")
+      .select("id,lead_id,client_id,created_at,appointment_date,status,notes")
+      .eq("center_id", centerId);
+    return error ? [] : ((data ?? []) as CenterAppointmentRow[]);
+  } catch {
+    return [];
+  }
+}
+
+function groupLeadAppointments(
+  appointments: CenterAppointmentRow[],
   leads: LeadRow[],
 ) {
   const byLead = new Map<string, LeadAppointment[]>();
@@ -324,35 +376,23 @@ async function loadLeadAppointments(
     }
   }
 
-  try {
-    const { data, error } = await supabase
-      .from("appointments")
-      .select("id,lead_id,client_id,created_at,appointment_date,status,notes")
-      .eq("center_id", centerId);
-    if (error) {
-      return byLead;
+  for (const row of appointments) {
+    if (!belongsOnClientFiche({ notes: row.notes })) {
+      continue;
     }
-
-    for (const row of data ?? []) {
-      if (!belongsOnClientFiche({ notes: row.notes })) {
-        continue;
-      }
-      const ownerIds = row.lead_id
-        ? [String(row.lead_id)]
-        : leadsByClient.get(String(row.client_id || "")) ?? [];
-      if (ownerIds.length !== 1) {
-        continue;
-      }
-      const appointment: LeadAppointment = {
-        id: String(row.id),
-        bookedOn: toLocalIsoDate(String(row.created_at)),
-        date: String(row.appointment_date || "").slice(0, 10),
-        outcome: appointmentOutcomeByStatus[String(row.status || "")],
-      };
-      byLead.set(ownerIds[0], [...(byLead.get(ownerIds[0]) ?? []), appointment]);
+    const ownerIds = row.lead_id
+      ? [String(row.lead_id)]
+      : leadsByClient.get(String(row.client_id || "")) ?? [];
+    if (ownerIds.length !== 1) {
+      continue;
     }
-  } catch {
-    return byLead;
+    const appointment: LeadAppointment = {
+      id: String(row.id),
+      bookedOn: toLocalIsoDate(String(row.created_at)),
+      date: String(row.appointment_date || "").slice(0, 10),
+      outcome: appointmentOutcomeByStatus[String(row.status || "")],
+    };
+    byLead.set(ownerIds[0], [...(byLead.get(ownerIds[0]) ?? []), appointment]);
   }
 
   return byLead;
