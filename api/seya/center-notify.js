@@ -96,6 +96,30 @@ function centerNotifyCopy({ kind, centerName, conversation, slot }) {
     };
   }
 
+  const notes = asRecord(conversation?.teamNotes);
+  if (notes.handedOffAt) {
+    const preferences = (Array.isArray(notes.preferences) ? notes.preferences : [])
+      .map((item) => `« ${String(item?.text || "").trim()} » (${item?.context || "contexte non précisé"})`)
+      .filter((item) => !item.startsWith("«  »"));
+    return {
+      subject: `Seya : à rappeler — ${name}`,
+      text: [
+        `Seya a recueilli la demande d’un prospect pour ${centre}. Un expert ou une experte doit le rappeler.`,
+        "",
+        `Prospect : ${name}`,
+        `Téléphone : ${phone}`,
+        `Soin : ${care}`,
+        `Besoin : ${String(notes.need || "").trim() || "à préciser lors du rappel"}`,
+        `Déjà testé : ${String(notes.tried || "").trim() || "non précisé"}`,
+        preferences.length
+          ? `Préférence donnée spontanément : ${preferences.join(" ; ")}. Aucun rappel ni rendez-vous n’a été promis à cette heure.`
+          : "Aucune disponibilité demandée au prospect.",
+        "",
+        "Aucun rendez-vous n’a été posé dans l’agenda.",
+      ].join("\n"),
+    };
+  }
+
   return {
     subject: `Seya : à rappeler — ${name}`,
     text: [

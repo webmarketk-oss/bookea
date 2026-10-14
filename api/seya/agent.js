@@ -75,7 +75,10 @@ const {
   willCallBackReply,
   slotsFromStaffThread,
   hasDayOfMonthRequest,
+  isOutOfZone,
+  isWillCallBack,
 } = require("./conversation");
+const gaillard = require("./gaillard");
 const {
   axisClarifyQuestion,
   briefsForFamily,
@@ -729,6 +732,24 @@ function resolveOfferLabel(seya, campaign, treatment) {
 function resolveTreatmentBrief(seya, treatment) {
   const family = inferCareFamily(treatment);
   return String(findTreatmentBrief(seya, treatment, family)?.brief || "").trim();
+}
+
+function closingFromBrief(text) {
+  const match = String(text || "").match(
+    /\b(?:termine[rsz]?|finis|finir|conclus|conclure)\s+(?:toujours\s+|la conversation\s+|chaque conversation\s+)?(?:par|avec)\s*:?\s*(?:«\s*([\s\S]+?)\s*»|"([^"]+)"|“([^”]+)”)/i,
+  );
+  return String(match?.[1] || match?.[2] || match?.[3] || "").trim();
+}
+
+function briefClosing(seya, conversation, extraText = "") {
+  const family = resolveActiveFamily(seya, conversation, extraText);
+  const brief =
+    findTreatmentBrief(
+      seya,
+      `${conversation?.qualification?.need || ""} ${conversation?.treatment || ""}`,
+      family,
+    ) || findTreatmentBrief(seya, conversation?.treatment, family);
+  return closingFromBrief(brief?.brief) || closingFromBrief(agentSettings(seya).brief);
 }
 
 function inferFamily(seya, campaign, treatment) {
@@ -1559,6 +1580,9 @@ function defaultHours() {
 }
 
 function applyLeadReply(conversation, text, seya, slots, extras = {}) {
+  if (gaillard.isGaillardCenter(extras.centerName) && !extras.gaillardInner) {
+    return gaillardLeadReply(conversation, text, seya, slots, extras);
+  }
   const settings = agentSettings(seya);
   conversation = withStaffOfferedSlots(conversation, extras.now);
   const previousLead = lastSubstantiveLeadText(conversation, text);
@@ -1979,7 +2003,7 @@ function applyLeadReply(conversation, text, seya, slots, extras = {}) {
         qualification,
         "À recontacter",
         text,
-        welcomeRelanceHandoffReply(),
+        briefClosing(seya, conversation, intentText) || welcomeRelanceHandoffReply(),
         bookingState,
       );
     }
@@ -2006,7 +2030,7 @@ function applyLeadReply(conversation, text, seya, slots, extras = {}) {
         qualification,
         "À recontacter",
         text,
-        operatorCallbackReply(callbackSlot),
+        briefClosing(seya, conversation, intentText) || operatorCallbackReply(callbackSlot),
         {
           ...bookingState,
           pendingQuestion: "callback",
@@ -2259,6 +2283,305 @@ function applyLeadReply(conversation, text, seya, slots, extras = {}) {
   );
 }
 
+const GAILLARD_MINCEUR_GOAL =
+  /perdre|maigrir|mincir|kilos?|\bkg\b|cellulite|peau d'orange|graisse|bourrelet|capiton|silhouette|affiner|tonifier|raffermir|fermete|ventre|cuisse|hanche|fesse|bras|culotte de cheval|poignee d'amour/;
+const GAILLARD_VISAGE_CONCERN =
+  /ride|ridule|acne|bouton|tache|eclat|relach|teint|cerne|pore|fermete|hydrat|rajeun|terne|peau (seche|grasse|sensible)|rougeur|cicatrice|double menton|ovale/;
+const GAILLARD_EPILATION_ZONE =
+  /jambe|maillot|aisselle|bras|levre|menton|visage|dos|fesse|ventre|cuisse|torse|barbe|sourcil|nuque|epaule|pied|main|sillon|integral|bresilien|corps entier|joue|favori/;
+const GAILLARD_TRIED =
+  /deja (fait|essaye|teste)|jamais (fait|essaye|teste)|premiere fois|rien (essaye|teste)|aucun(e)? (soin|solution|methode|traitement)|j'ai (fait|essaye|teste) (des?|du|de la|un|une|le|la|plusieurs) (regime|soin|seance|laser|cryo|epil|cire|massage|traitement|methode|solution|lumiere|presso|radiofrequence)/;
+
+function gaillardLeadTexts(conversation, text) {
+  return [
+    ...(conversation?.messages || [])
+      .filter((item) => item.author === "lead")
+      .map((item) => String(item.text || "")),
+    String(text || ""),
+  ].map(normalize);
+}
+
+function gaillardDetailKnown(family, qualification, leadTexts) {
+  if (qualification.zone || qualification.detail) {
+    return true;
+  }
+  const pattern =
+    family === "minceur"
+      ? GAILLARD_MINCEUR_GOAL
+      : family === "visage"
+        ? GAILLARD_VISAGE_CONCERN
+        : family === "epilation"
+          ? GAILLARD_EPILATION_ZONE
+          : null;
+  return Boolean(pattern && leadTexts.some((value) => pattern.test(value)));
+}
+
+function withGaillardText(result, family, fallback) {
+  const messages = [...(result.conversation?.messages || [])];
+  const index = messages.map((item) => item.author).lastIndexOf("seya");
+  if (index >= 0) {
+    const safe = gaillard.safeGaillardText(messages[index].text, family) || fallback;
+    messages[index] = { ...messages[index], text: safe };
+  }
+  return {
+    ...result,
+    shouldBook: null,
+    conversation: { ...result.conversation, messages },
+  };
+}
+
+function withEpilationPrice(result) {
+  const messages = [...(result.conversation?.messages || [])];
+  const index = messages.map((item) => item.author).lastIndexOf("seya");
+  if (index < 0) {
+    return result;
+  }
+  const current = String(messages[index].text || "").trim();
+  const base =
+    !current || current === unknownPriceReply() || /pas ce tarif en fiche/i.test(current)
+      ? gaillard.missingPriceReply()
+      : current;
+  const text = /promotion/i.test(base) ? base : `${base} ${gaillard.promoSentence()}`;
+  messages[index] = { ...messages[index], text };
+  return {
+    ...result,
+    locked: true,
+    conversation: { ...result.conversation, messages },
+  };
+}
+
+// Gaillard : recueil du besoin, puis « déjà testé ? », puis rappel par un expert ou une experte, sans jamais demander de disponibilités.
+function gaillardLeadReply(conversation, text, seya, slots, extras = {}) {
+  const at = (extras.now instanceof Date ? extras.now : new Date()).toISOString();
+  const base = { ...withStaffOfferedSlots(conversation, extras.now), _seya: seya };
+  const thread = understandThread(base, text);
+  const merged = {
+    ...mergeQualification(
+      { ...(base.qualification || {}), ...(thread.need ? { need: thread.need } : {}) },
+      text,
+      base.treatment,
+      base,
+    ),
+    tried: base.qualification?.tried || "",
+    distance: base.qualification?.distance || "",
+  };
+  const family =
+    resolveActiveFamily(seya, { ...base, qualification: merged }, text) ||
+    inferCareFamily(`${merged.need || ""} ${base.treatment || ""} ${text || ""}`) ||
+    "";
+  const bookingState = base.bookingState || emptyBookingState(extras.centerId || base.centerId);
+  const handedOff = Boolean(base.teamNotes?.handedOffAt);
+  const status = handedOff
+    ? base.status || "À recontacter"
+    : merged.need
+      ? "Qualifié"
+      : "En cours";
+  const delegate = (fallback) => {
+    const inner = withGaillardText(
+      applyLeadReply(base, text, seya, slots, { ...extras, gaillardInner: true }),
+      family,
+      fallback || (handedOff ? gaillard.afterHandoffReply() : "C’est noté 😊"),
+    );
+    const innerStatus = inner.conversation.status;
+    return {
+      ...inner,
+      conversation: {
+        ...inner.conversation,
+        status: handedOff && /^(Qualifié|En cours)$/.test(innerStatus) ? status : innerStatus,
+        qualification: {
+          ...(inner.conversation.qualification || {}),
+          tried: merged.tried,
+          distance: merged.distance,
+        },
+      },
+    };
+  };
+  const fixed = (next, nextStatus, reply, state = bookingState) => ({
+    ...finishLeadReply(next, merged, nextStatus, text, reply, state),
+    shouldBook: null,
+    locked: true,
+  });
+
+  if (
+    isOptOut(text) ||
+    isWrongCenter(text) ||
+    isOutOfZone(text) ||
+    isThreadComplaint(text) ||
+    isAlreadyBookedElsewhere(text) ||
+    isWillComeBack(text) ||
+    isWillCallBack(text)
+  ) {
+    return delegate();
+  }
+
+  if (gaillard.asksIfAi(text, isIdentityQuestion)) {
+    return fixed(base, status, gaillard.identityReply());
+  }
+
+  const health = classifyHealthMessage(text);
+  if (health.personal && !extras.healthNoted) {
+    const review = startHealthReview(
+      base,
+      text,
+      resolveHealthSheet(seya, base, text),
+      health.mixed ? "mixed" : "personal",
+    );
+    const next = gaillardLeadReply(conversation, text, seya, slots, {
+      ...extras,
+      healthNoted: true,
+    });
+    return withCallbackHealthNote(
+      next,
+      review,
+      "Je note cette information pour l’équipe, elle en tiendra compte lors de votre échange.",
+    );
+  }
+  if (health.general && !extras.healthNoted) {
+    return delegate();
+  }
+
+  if (
+    asksPrice(text) ||
+    classifyPriceQuestion(text) ||
+    isPriceRepeatComplaint(text)
+  ) {
+    const priced = delegate();
+    return family === "epilation" ? withEpilationPrice(priced) : priced;
+  }
+
+  if (gaillard.modalityTopic(text)) {
+    const brief =
+      findTreatmentBrief(seya, `${merged.need || ""} ${base.treatment || ""}`, family) ||
+      findTreatmentBrief(seya, base.treatment, family);
+    const validated = gaillard.validatedModality(text, [
+      brief?.brief,
+      seya?.brief,
+      agentSettings(seya).centerProfile?.extras,
+    ]);
+    return fixed(base, status, validated || gaillard.modalityReply());
+  }
+
+  if (
+    /combien de temps|ca dure|duree|dure (le )?(rdv|bilan|rendez-vous)/.test(normalize(text)) &&
+    !/resultat/.test(normalize(text))
+  ) {
+    const spoken = gaillard.durationReply(family);
+    return spoken ? fixed(base, status, spoken) : delegate();
+  }
+
+  if (asksLocation(normalize(text)) || asksAccess(normalize(text))) {
+    return fixed(base, status, centerPlaceReply(normalize(text), extras, seya));
+  }
+
+  if (
+    serviceOfferReply(text, seya) ||
+    (/\?|combien|est[- ]ce|comment|quel/.test(normalize(text)) &&
+      faqReply(text, { seya, conversation: { ...base, qualification: merged } })) ||
+    isThanks(text, base) ||
+    isHesitation(text) ||
+    refusesSlots(text)
+  ) {
+    return delegate();
+  }
+
+  const mentionsAvailability = gaillard.availabilityMention(text);
+  let next = mentionsAvailability ? gaillard.withPreference(base, text, at) : base;
+  if (!mentionsAvailability && crmUpdateFromLeadMessage(text, extras.now, extras)) {
+    return delegate();
+  }
+
+  if (handedOff) {
+    if (mentionsAvailability) {
+      return fixed(next, status, gaillard.preferenceReply());
+    }
+    if (asksOpenQuestion(text)) {
+      return fixed(
+        next,
+        status,
+        "Un expert ou une experte du centre pourra vous répondre en détail lors de votre échange 😊",
+      );
+    }
+    return fixed(next, status, gaillard.afterHandoffReply());
+  }
+
+  const qualification = { ...merged };
+  const answer = String(text || "").trim().slice(0, 160);
+  if (
+    gaillard.lastSeyaAskedNeed(base) &&
+    !qualification.zone &&
+    !qualification.detail &&
+    !mentionsAvailability &&
+    gaillard.isAnswerLike(text)
+  ) {
+    qualification.detail = answer;
+  }
+  if (
+    gaillard.lastSeyaAskedTried(base) &&
+    !qualification.tried &&
+    (/^(oui|non)\b/.test(normalize(text)) ||
+      (!mentionsAvailability && gaillard.isAnswerLike(text)))
+  ) {
+    qualification.tried = answer;
+  }
+  const leadTexts = gaillardLeadTexts(base, text);
+  const detailKnown = gaillardDetailKnown(family, qualification, leadTexts);
+  const triedKnown =
+    Boolean(qualification.tried) || leadTexts.some((value) => GAILLARD_TRIED.test(value));
+  const prefix = mentionsAvailability ? gaillard.preferenceNotedPrefix() : "";
+  const ask = (question) =>
+    ({
+      ...finishLeadReply(
+        next,
+        qualification,
+        status,
+        text,
+        [prefix, question].filter(Boolean).join(" "),
+        bookingState,
+      ),
+      shouldBook: null,
+    });
+
+  if (!family) {
+    return ask(axisClarifyQuestion(seya) || gaillard.needQuestion(""));
+  }
+  if (!detailKnown) {
+    return ask(gaillard.needQuestion(family));
+  }
+  if (!triedKnown) {
+    return ask(`${prefix ? "" : "C’est noté. "}${gaillard.triedQuestion(family)}`);
+  }
+
+  next = {
+    ...next,
+    teamNotes: {
+      ...(next.teamNotes || {}),
+      family,
+      need: [qualification.zone, qualification.detail].filter(Boolean).join(" · "),
+      tried: qualification.tried || "",
+      handedOffAt: at,
+    },
+  };
+  return {
+    ...finishLeadReply(
+      next,
+      qualification,
+      "À recontacter",
+      text,
+      mentionsAvailability ? gaillard.preferenceReply() : gaillard.closingReply(family),
+      {
+        ...bookingState,
+        pendingQuestion: "callback",
+        appointmentStatus: "none",
+        callbackSlot: null,
+        lastOfferedSlots: [],
+      },
+      { proposedSlots: [] },
+    ),
+    shouldBook: null,
+    locked: true,
+  };
+}
+
 function lastOtherLeadText(conversation, current) {
   return (
     [...(conversation?.messages || [])]
@@ -2299,16 +2622,16 @@ function withRereadPrefix(_reread, text) {
   return String(text || "").trim();
 }
 
-function withCallbackHealthNote(result, review) {
+function withCallbackHealthNote(result, review, note = "") {
   const messages = [...(result.conversation?.messages || [])];
   const index = messages.map((item) => item.author).lastIndexOf("seya");
   if (index >= 0) {
-    const rest = String(messages[index].text || "")
-      .replace(/^(Merci( beaucoup)?[,.!]?\s*)/i, "")
-      .trim();
+    const current = String(messages[index].text || "").trim();
     messages[index] = {
       ...messages[index],
-      text: `Merci de me l’avoir précisé, je le note pour l’équipe : elle en tiendra compte lors du rappel. ${rest}`.trim(),
+      text: note
+        ? `${note} ${current}`.trim()
+        : `Merci de me l’avoir précisé, je le note pour l’équipe : elle en tiendra compte lors du rappel. ${current.replace(/^(Merci( beaucoup)?[,.!]?\s*)/i, "")}`.trim(),
     };
   }
   return {
@@ -2561,6 +2884,16 @@ function relanceCopy(conversation, round = 1, centerName = "", seya) {
   const crmOffer = crmOfferForRelance(conversation, seya);
   const settings = seya ? agentSettings(seya) : null;
   const custom = String(settings?.relances?.[Number(round) - 1]?.message || "").trim();
+  if (gaillard.isGaillardCenter(centerName)) {
+    return gaillard.relanceText(
+      round,
+      firstName,
+      care,
+      custom
+        ? fillRelanceTemplate(custom, { prenom: firstName, centre, offre: crmOffer || care || "" })
+        : "",
+    );
+  }
   if (custom) {
     return fillRelanceTemplate(custom, {
       prenom: firstName,
@@ -2804,6 +3137,8 @@ function readHours(settings) {
 }
 
 module.exports = {
+  briefClosing,
+  closingFromBrief,
   agentSettings,
   canBookSeya,
   resolveSeyaMission,

@@ -30,6 +30,8 @@ const {
   resolveTreatmentBrief,
   resolveTreatmentPrice,
   threadHasMedical,
+  briefClosing,
+  closingFromBrief,
 } = require("./agent");
 const {
   enforceOutgoingText,
@@ -55,7 +57,7 @@ const {
   withStaffOfferedSlots,
   hasDayOfMonthRequest,
 } = require("./conversation");
-const { understandThread } = require("./care-family");
+const { resolveActiveFamily, understandThread } = require("./care-family");
 const {
   activeLeadPause,
   cityFromAddress,
@@ -77,6 +79,7 @@ const {
   resolveSeyaMission,
   seyaMissionPrompt,
 } = require("./mission");
+const gaillard = require("./gaillard");
 
 function seyaModel() {
   const requested = String(process.env.OPENAI_MODEL || "").trim();
@@ -128,7 +131,9 @@ async function generateSeyaReply(input) {
   const { text, centerAddress } = input;
   const at = (input.now instanceof Date ? input.now : new Date()).toISOString();
   let conversation = input.conversation;
-  const centerCity = cityFromAddress(centerAddress);
+  const centerCity = gaillard.isGaillardCenter(input.centerName)
+    ? ""
+    : cityFromAddress(centerAddress);
 
   const pendingCity = conversation.locationCheck?.leadCity || "";
   if (pendingCity) {
@@ -259,8 +264,10 @@ async function generateCoreReply({
   const fallback = applyLeadReply(conversationWithState, text, seya, resolvedSlots, extras);
   const draft = lastSeyaText(fallback.conversation);
   const previousSeya = lastSeyaText(conversation);
+  const { locked, ...settled } = fallback;
   if (
     !hasAiKey() ||
+    locked ||
     health.personal ||
     fallback.shouldBook ||
     isOptOut(text) ||
@@ -282,10 +289,11 @@ async function generateCoreReply({
     /opératrice vous rappellera|transmets votre demande à l’équipe/i.test(
       draft || "",
     ) ||
+    isBriefClosing(draft, seya, conversationWithState, text) ||
     isWelcomeRelanceOnly(seya) ||
     (replyClosesThread(previousSeya) && !replyClosesThread(draft))
   ) {
-    return { ...fallback, via: fallback.shouldBook ? "book" : "rules" };
+    return { ...settled, via: fallback.shouldBook ? "book" : "rules" };
   }
 
   try {
@@ -302,14 +310,22 @@ async function generateCoreReply({
       bookingState,
       draft,
     });
+    if (gaillard.isGaillardCenter(centerName) && gaillard.breaksGaillardRules(polished)) {
+      return { ...settled, via: "rules" };
+    }
     return {
-      ...withPolishedText(fallback, polished, bookingState),
+      ...withPolishedText(settled, polished, bookingState),
       via: "ai",
     };
   } catch (error) {
     console.error("[seya/ai]", error);
-    return { ...fallback, via: "rules" };
+    return { ...settled, via: "rules" };
   }
+}
+
+function isBriefClosing(draft, seya, conversation, text) {
+  const closing = briefClosing(seya, conversation, text);
+  return Boolean(closing && String(draft || "").includes(closing));
 }
 
 async function polishSeyaText({
@@ -397,51 +413,78 @@ function polishPrompt({
   centerAddress,
   bookingState,
 }) {
-  const allowedSlots = (slots || [])
+  const atGaillard = gaillard.isGaillardCenter(centerName);
+  const allowedSlots = (atGaillard ? [] : slots || [])
     .map((slot) => slot.label)
     .filter(Boolean)
     .join(" · ");
   const centerCard = formatCenterProfilePrompt(settings.centerProfile);
+  const bookingOnly = (line) => (atGaillard ? "" : line);
+  const centerBrief = atGaillard
+    ? String(settings.brief || seya.brief || "")
+        .split(/\n\s*\n/)
+        .filter((part) => !/distance|disponibilit|cr[ée]neau|r[ée]serv|horaire|relance/i.test(part))
+        .join("\n\n")
+        .trim()
+    : settings.brief || seya.brief;
+  const closing = atGaillard
+    ? ""
+    : closingFromBrief(brief) || closingFromBrief(settings.brief || seya.brief);
 
   return [
     "Tu es Seya, au standard WhatsApp. Chaleureuse, naturelle, claire, vouvoiement. Tu parles comme une réceptionniste au téléphone, 1 à 3 phrases.",
-    seyaMissionPrompt(settings),
+    brief
+      ? `Consignes du centre pour ce soin (prioritaires sur les règles générales ci-dessous ; seuls les faits, prix, créneaux et la santé restent cadrés par Bookea) : ${brief}`
+      : "",
+    closing
+      ? `Quand tu conclus l’échange, ta dernière phrase est exactement : « ${closing} ». Cette conclusion remplace toute autre formule de fin (opératrice, conseillère, experte).`
+      : "",
+    atGaillard
+      ? gaillard.promptRules(resolveActiveFamily(seya, conversation, ""))
+      : seyaMissionPrompt(settings),
+    atGaillard ||
     resolveSeyaMission(settings) === "welcome_relance" ||
     resolveSeyaMission(settings) === "qualify_callback"
       ? "Tu restes sur cette mission. Interdit d’improviser une autre."
       : "Ton objectif est d’accompagner jusqu’à la prise de rendez-vous, sans insister et sans coller deux fois la même réponse.",
-    "Avant de répondre, tu relis tout le fil (prospect + équipe + toi), le centre concerné et l’axe du prospect (laser, minceur ou visage), y compris une relance J+15, et tu t’y tiens. Les horaires écrits par l’équipe priment. Si elle a proposé 15h et que le prospect le choisit, tu confirmes 15h : interdit de dire que ce n’est pas disponible ou de proposer 11h30/12h. Si le prospect a dit qu’il reviendrait, qu’il n’a rien cette semaine, ou que l’info était claire, tu n’as plus à demander un jour. Si le prospect a corrigé le soin (visage, minceur, laser), tu restes sur CE soin et tu n’utilises que les réglages de CE soin dans CE centre. Interdit de revenir à la campagne d’origine. Interdit de parler minceur, analyse corporelle ou cures 500€ si le fil ou le centre est laser / Dépil. Si l’axe est flou, tu poses une question courte pour le clarifier.",
+    atGaillard
+      ? "Avant chaque réponse, tu relis tout le fil (prospect + équipe + toi) et l’axe du prospect (laser, minceur ou visage). Tu réponds à sa dernière demande et tu gardes les informations déjà données. Tu ne recommences pas la qualification et tu n’enchaînes pas plusieurs questions. Si le prospect a corrigé le soin, tu restes sur CE soin. Si l’axe est flou, tu poses une question courte pour le clarifier."
+      : "Avant de répondre, tu relis tout le fil (prospect + équipe + toi), le centre concerné et l’axe du prospect (laser, minceur ou visage), y compris une relance J+15, et tu t’y tiens. Les horaires écrits par l’équipe priment. Si elle a proposé 15h et que le prospect le choisit, tu confirmes 15h : interdit de dire que ce n’est pas disponible ou de proposer 11h30/12h. Si le prospect a dit qu’il reviendrait, qu’il n’a rien cette semaine, ou que l’info était claire, tu n’as plus à demander un jour. Si le prospect a corrigé le soin (visage, minceur, laser), tu restes sur CE soin et tu n’utilises que les réglages de CE soin dans CE centre. Interdit de revenir à la campagne d’origine. Interdit de parler minceur, analyse corporelle ou cures 500€ si le fil ou le centre est laser / Dépil. Si l’axe est flou, tu poses une question courte pour le clarifier.",
     "Tu réponds au dernier message, dans ce contexte. Interdit de reposer une question déjà traitée. Interdit de recoller le dernier message Seya.",
     "Un objectif esthétique n’est pas une information de santé : rides, ridules, relâchement, taches, éclat (visage) ; kilos, ventre, graisses, cellulite, silhouette (minceur) ; zones, poils, pilosité (laser). Tu t’en sers pour qualifier le besoin et tu poursuis la mission. Interdit de transférer à l’équipe, de parler de contre-indication ou de « vérifier sa situation » pour ça. Seule une vraie information de santé (grossesse en cours, traitement médical, maladie, pacemaker…) suit les consignes santé de la fiche du soin, sans diagnostic ni verdict de compatibilité. Tu ne poses une question de santé que si elle figure dans la fiche du soin de CE centre.",
     "Tu présentes uniquement l’offre, le prix, la durée et les modalités enregistrés pour CE centre et CE soin. Si une information manque, tu ne la prends jamais d’un autre centre et tu ne l’inventes pas.",
     "Pas de phrase de remplissage du type « En attendant, si vous avez des questions sur le prix, l’adresse ou les horaires, n’hésitez pas ». Une seule question par message.",
-    "Priorité absolue : tu réponds d’abord à ce que la personne vient de dire (question, précision, ville, demande de réfléchir). La trame commerciale passe toujours après. Si elle donne sa ville et qu’elle n’est pas celle du centre, tu dis où se trouve le centre et tu lui demandes si elle cherchait un centre dans sa ville. Interdit d’inventer un autre centre, une adresse ou un transfert.",
+    atGaillard
+      ? "Priorité absolue : tu réponds d’abord à ce que la personne vient de dire (question, précision, demande de réfléchir). La trame passe toujours après. Interdit d’inventer un autre centre, une adresse ou un transfert."
+      : "Priorité absolue : tu réponds d’abord à ce que la personne vient de dire (question, précision, ville, demande de réfléchir). La trame commerciale passe toujours après. Si elle donne sa ville et qu’elle n’est pas celle du centre, tu dis où se trouve le centre et tu lui demandes si elle cherchait un centre dans sa ville. Interdit d’inventer un autre centre, une adresse ou un transfert.",
     "Si elle veut réfléchir, dit qu’elle reviendra vers vous, qu’elle recontactera ou « pas pour le moment » : tu respectes sa pause. Interdit de demander ses disponibilités, de proposer un créneau ou un rendez-vous. Ce n’est pas un refus définitif : tu restes chaleureuse et disponible pour ses questions.",
     conversation.leadPause
       ? "Le prospect a demandé une pause : tu réponds seulement à son message, sans aucune question sur ses disponibilités et sans proposer de créneau, tant qu’elle ne redemande pas elle-même un rendez-vous."
       : "",
     "Le texte Bookea est une fiche de faits autorisés, pas un script. Si Bookea propose un créneau ou pose une question alors que la cliente n’a pas demandé ça, tu ne le recopies pas.",
-    resolveSeyaMission(settings) === "qualify_callback"
-      ? "Tu ne clôtures pas tant qu’il manque le jour ou l’heure. Dès que les deux sont connus, la seule conclusion autorisée est : « Une opératrice vous rappellera [jour] à [heure]. » Interdit de poser un RDV agenda."
+    atGaillard
+      ? ""
+      : resolveSeyaMission(settings) === "qualify_callback"
+      ? `Tu ne clôtures pas tant qu’il manque le jour ou l’heure. Dès que les deux sont connus, la seule conclusion autorisée est : « ${closing || "Une opératrice vous rappellera [jour] à [heure]."} » Interdit de poser un RDV agenda.`
       : "Tu ne mets jamais fin à la conversation. Interdit : « écrivez-moi quand vous voulez reprendre », « je vous prie », « je reviendrai vers vous », « une conseillère vous recontacte », « préférez-vous en rester là », « vous préférez rester là », « Avec plaisir, à bientôt » si elle n’a pas dit merci après un rendez-vous confirmé. Si elle confirme qu’elle est au bon centre (Dépil, Vichy), tu continues sur sa vraie demande (prix, créneau), tu ne clôtures pas.",
-    canBookSeya(settings)
+    !atGaillard && canBookSeya(settings)
       ? "Tu ne pousses jamais à sortir du circuit. Pas de question fermée du type rester là / arrêter / clore. Tu restes gentiment sur la prise de rendez-vous."
       : "Interdit de proposer, confirmer ou bloquer un créneau agenda.",
-    "Si elle dit aujourd’hui, un jour, 9h, oui merci, oui toujours, fin de journée, après-midi, ou « relis ce que je t’ai demandé », tu réponds à ÇA : un horaire déjà proposé, ou de nouveaux créneaux autorisés. Tu ne redemandes pas la zone.",
-    "Tu ne dis jamais qu’il n’y a plus de créneau si des horaires autorisés sont listés plus bas.",
-    "Si elle choisit 9h / 9h00 alors que 09h00 a été proposé, tu confirmes ce créneau.",
-    "Si elle dit oui toujours après « l’horaire vous convient », tu confirmes l’horaire déjà vu. Tu ne clôtures pas.",
-    "Si elle dit oui, ok, d’accord ou merci après qu’on lui a proposé de regarder les disponibilités, tu proposes des créneaux autorisés. Tu ne répètes pas « plus de place ».",
-    "Si elle dit fin de journée, tu proposes des horaires en fin de journée parmi les créneaux autorisés, pas 12h.",
-    "Si elle dit qu’elle ne veut pas qu’on la recontacte mais demande un créneau, une proposition ou un prix, tu réponds à ÇA. Tu ne clôtures pas.",
+    bookingOnly("Si elle dit aujourd’hui, un jour, 9h, oui merci, oui toujours, fin de journée, après-midi, ou « relis ce que je t’ai demandé », tu réponds à ÇA : un horaire déjà proposé, ou de nouveaux créneaux autorisés. Tu ne redemandes pas la zone."),
+    bookingOnly("Tu ne dis jamais qu’il n’y a plus de créneau si des horaires autorisés sont listés plus bas."),
+    bookingOnly("Si elle choisit 9h / 9h00 alors que 09h00 a été proposé, tu confirmes ce créneau."),
+    bookingOnly("Si elle dit oui toujours après « l’horaire vous convient », tu confirmes l’horaire déjà vu. Tu ne clôtures pas."),
+    bookingOnly("Si elle dit oui, ok, d’accord ou merci après qu’on lui a proposé de regarder les disponibilités, tu proposes des créneaux autorisés. Tu ne répètes pas « plus de place »."),
+    bookingOnly("Si elle dit fin de journée, tu proposes des horaires en fin de journée parmi les créneaux autorisés, pas 12h."),
+    bookingOnly("Si elle dit qu’elle ne veut pas qu’on la recontacte mais demande un créneau, une proposition ou un prix, tu réponds à ÇA. Tu ne clôtures pas."),
     "Si elle a réfléchi et demande le prix, tu donnes le tarif autorisé. Tu n’envoies pas « écrivez-moi quand vous voulez reprendre ».",
-    "Après le message d’accueil (ne le réécris pas), tu lis sa réponse et tu t’intéresses à ELLE. Une phrase qui reprend ce qu’elle vient de dire, puis UNE seule question. Minceur / laser / visage : 1) reconnaître la zone ou l’objectif, 2) demander la distance par rapport au centre, 3) demander ce qu’elle a déjà essayé (régime, techno, première fois), 4) seulement ensuite demander les disponibilités. Tu ne sautes une étape que si elle l’a déjà donnée, ou si elle demande déjà un jour / un horaire. Tu ne promets pas de résultat. Tu ne cites que les soins de CE centre.",
-    "Quand le besoin est compris, tu demandes les disponibilités simplement. Mission rappel experte : « Envoyez-moi vos disponibilités et une de nos expertes vous recontactera. » Mission prise de rendez-vous : tu cherches un créneau autorisé. Si elle a déjà donné un jour ou une heure, tu n’y reviens pas.",
-    "Si elle refuse l’horaire posé ou demande à modifier, tu ne dis jamais que tu vas décaler sans que Bookea lance vraiment le nouveau créneau. « Midi » = 12h00. Interdit de clore par « à bientôt » si l’heure n’a pas été changée.",
+    bookingOnly("Après le message d’accueil (ne le réécris pas), tu lis sa réponse et tu t’intéresses à ELLE. Une phrase qui reprend ce qu’elle vient de dire, puis UNE seule question. Minceur / laser / visage : 1) reconnaître la zone ou l’objectif, 2) demander la distance par rapport au centre, 3) demander ce qu’elle a déjà essayé (régime, techno, première fois), 4) seulement ensuite demander les disponibilités. Tu ne sautes une étape que si elle l’a déjà donnée, ou si elle demande déjà un jour / un horaire. Tu ne promets pas de résultat. Tu ne cites que les soins de CE centre."),
+    bookingOnly("Quand le besoin est compris, tu demandes les disponibilités simplement. Mission rappel experte : « Envoyez-moi vos disponibilités et une de nos expertes vous recontactera. » Mission prise de rendez-vous : tu cherches un créneau autorisé. Si elle a déjà donné un jour ou une heure, tu n’y reviens pas."),
+    bookingOnly("Si elle refuse l’horaire posé ou demande à modifier, tu ne dis jamais que tu vas décaler sans que Bookea lance vraiment le nouveau créneau. « Midi » = 12h00. Interdit de clore par « à bientôt » si l’heure n’a pas été changée."),
     "Si elle demande si vous faites une prestation (yoga face, massage, etc.), tu réponds d’abord à ÇA. Si ce n’est pas dans les soins du centre, tu dis non, clairement. Interdit de répondre « je reste là si une question vous vient » alors qu’elle vient de poser une question.",
     "Si elle dit qu’elle a déjà pris le rendez-vous, qu’elle vient de réserver, ou qu’elle a booké sur Planity ou un autre agenda, tu confirmes que c’est noté et tu n’offres plus aucun créneau. Tu ne redemandes pas un jour ni un horaire.",
     "Si elle préfère recontacter elle-même, sans autre demande, tu dis seulement : « D’accord, aucun souci, je vous laisse revenir vers nous quand ça sera le moment pour vous. Je vous souhaite une belle journée / une bonne soirée :) ». Pas de créneau, pas de jour.",
-    "Si Bookea cite des horaires ou demande un jour, tu gardes cette étape. Tu ne remplaces jamais ça par un au revoir.",
+    bookingOnly("Si Bookea cite des horaires ou demande un jour, tu gardes cette étape. Tu ne remplaces jamais ça par un au revoir."),
     "Tu ne changes aucun fait. Tu n’inventes ni jour, ni heure, ni prix, ni adresse, ni résultat médical.",
     "Pas de liste 1) 2) 3). Pas de « Lead Meta ». Un smiley au plus, pas à chaque message. Tu ne termines pas chaque phrase par une question.",
     `Centre : ${centerName || "le centre"}.`,
@@ -450,12 +493,11 @@ function polishPrompt({
     careUrl
       ? `Lien du soin (seulement si on te le demande, jamais dans le premier message) : ${careUrl}`
       : "",
-    settings.brief || seya.brief ? `Consignes du centre : ${settings.brief || seya.brief}` : "",
+    centerBrief ? `Consignes du centre : ${centerBrief}` : "",
     centerCard
       ? `Fiche de CE centre uniquement (jamais JFG Clinic ni un autre établissement) :\n${centerCard}`
       : "Aucune fiche centre : tu ne parles que du nom et de l’adresse fournis. Interdit d’inventer une enseigne, un parking, un concept ou une autre clinique.",
     "Tu n’énumères pas cette fiche. Tu t’en sers seulement si on te pose une question sur le centre, l’accès, le concept, ou pour rassurer avant le rendez-vous.",
-    brief ? `Consignes pour ce soin : ${brief}` : "",
     price ? `Tarif autorisé (seulement si le brouillon en parle) : ${price}` : "Aucun tarif. N’en invente pas.",
     centerAddress
       ? `Adresse autorisée (seulement si le brouillon en parle) : ${centerAddress}.`
