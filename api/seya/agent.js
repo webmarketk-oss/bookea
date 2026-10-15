@@ -2395,8 +2395,10 @@ function applyLeadReply(conversation, text, seya, slots, extras = {}) {
   );
 }
 
-const GAILLARD_MINCEUR_GOAL =
-  /perdre|maigrir|mincir|kilos?|\bkg\b|cellulite|peau d'orange|graisse|bourrelet|capiton|silhouette|affiner|tonifier|raffermir|fermete|ventre|cuisse|hanche|fesse|bras|culotte de cheval|poignee d'amour/;
+const GAILLARD_MINCEUR_OBJECTIF =
+  /perdre|maigrir|mincir|kilos?|\bkg\b|cellulite|peau d'orange|graisse|bourrelet|capiton|affiner|tonifier|raffermir|fermete|silhouette/;
+const GAILLARD_MINCEUR_ZONE =
+  /ventre|cuisse|hanche|fesse|bras|culotte de cheval|poignee d'amour|dos|jambes?/;
 const GAILLARD_VISAGE_CONCERN =
   /ride|ridule|acne|bouton|tache|eclat|relach|teint|cerne|pore|fermete|hydrat|rajeun|terne|peau (seche|grasse|sensible)|rougeur|cicatrice|double menton|ovale/;
 const GAILLARD_EPILATION_ZONE =
@@ -2413,18 +2415,37 @@ function gaillardLeadTexts(conversation, text) {
   ].map(normalize);
 }
 
+function gaillardMinceurZonesKnown(qualification, leadTexts) {
+  if (qualification.zone && GAILLARD_MINCEUR_ZONE.test(normalize(qualification.zone))) {
+    return true;
+  }
+  return leadTexts.some((value) => GAILLARD_MINCEUR_ZONE.test(value));
+}
+
+function gaillardMinceurObjectifKnown(qualification, leadTexts) {
+  const detail = normalize(qualification.detail || "");
+  if (detail && GAILLARD_MINCEUR_OBJECTIF.test(detail)) {
+    return true;
+  }
+  return leadTexts.some((value) => GAILLARD_MINCEUR_OBJECTIF.test(value));
+}
+
 function gaillardDetailKnown(family, qualification, leadTexts) {
+  if (family === "minceur") {
+    return (
+      gaillardMinceurZonesKnown(qualification, leadTexts) &&
+      gaillardMinceurObjectifKnown(qualification, leadTexts)
+    );
+  }
   if (qualification.zone || qualification.detail) {
     return true;
   }
   const pattern =
-    family === "minceur"
-      ? GAILLARD_MINCEUR_GOAL
-      : family === "visage"
-        ? GAILLARD_VISAGE_CONCERN
-        : family === "epilation"
-          ? GAILLARD_EPILATION_ZONE
-          : null;
+    family === "visage"
+      ? GAILLARD_VISAGE_CONCERN
+      : family === "epilation"
+        ? GAILLARD_EPILATION_ZONE
+        : null;
   return Boolean(pattern && leadTexts.some((value) => pattern.test(value)));
 }
 
@@ -2436,7 +2457,19 @@ function gaillardNextQuestion(family, qualification, leadTexts, seya) {
   if (!family) {
     return { step: "axis", text: axisClarifyQuestion(seya) || gaillard.needQuestion("") };
   }
-  if (!gaillardDetailKnown(family, qualification, leadTexts)) {
+  if (family === "minceur") {
+    const hasZones = gaillardMinceurZonesKnown(qualification, leadTexts);
+    const hasObjectif = gaillardMinceurObjectifKnown(qualification, leadTexts);
+    if (!hasZones && !hasObjectif) {
+      return { step: "need", text: gaillard.needQuestion("minceur") };
+    }
+    if (!hasObjectif) {
+      return { step: "need", text: gaillard.needQuestion("minceur", "objectif") };
+    }
+    if (!hasZones) {
+      return { step: "need", text: gaillard.needQuestion("minceur", "zones") };
+    }
+  } else if (!gaillardDetailKnown(family, qualification, leadTexts)) {
     return { step: "need", text: gaillard.needQuestion(family) };
   }
   if (
@@ -2713,6 +2746,8 @@ function gaillardLeadReply(conversation, text, seya, slots, extras = {}) {
           bookingState,
         ),
         shouldBook: null,
+        // Verrouillé : le polish IA ne doit pas remplacer une question ouverte par « un expert rappellera ».
+        locked: true,
       });
 
     if (nextQuestion) {
@@ -2787,6 +2822,13 @@ function gaillardLeadReply(conversation, text, seya, slots, extras = {}) {
 
   if (mentionsAvailability) {
     return fixed(next, status, gaillard.preferenceReply());
+  }
+  // Dernière chance : question matériel / déroulement documentée dans la fiche.
+  if (gaillard.asksTechnology(text) || /appareil|equipement|technologie|machine|cryo|radiofrequ/.test(normalize(text))) {
+    return fixed(next, status, gaillard.technologyReply(text, sourceBag));
+  }
+  if (gaillard.asksProcess(text)) {
+    return fixed(next, status, gaillard.processReply(family, sourceBag));
   }
   if (asksOpenQuestion(text)) {
     return fixed(next, status, gaillard.missingPracticalReply("cette précision"));

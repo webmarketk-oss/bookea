@@ -133,11 +133,13 @@ function asksProcess(text) {
 function asksTechnology(text) {
   const value = normalize(text);
   return (
-    /technologie|machines?|appareils?|materiel|lumiere pulsee|c[' ]est (du |de la )?laser/.test(
+    /technologie|machines?|appareils?|equipements?|materiel|cryolipolyse|cryo|radiofrequ|ultrasons?|lumiere pulsee|c[' ]est (du |de la )?laser/.test(
       value,
     ) &&
-    (/\?|quoi|quelles|avez|utilisez|presentes|faisiez|faites/.test(value) ||
-      /lumiere pulsee/.test(value))
+    (/\?|quoi|quelles|avez|utilisez|utilises|presentes|faisiez|faites|pour (la |le )?minceur|pour (l[' ]|la )?epilation/.test(
+      value,
+    ) ||
+      /lumiere pulsee|cryolipolyse|radiofrequ/.test(value))
   );
 }
 
@@ -173,7 +175,7 @@ function technologyReply(text, sources = []) {
   const value = normalize(text);
   const blob = sources.map((item) => String(item || "").trim()).filter(Boolean).join("\n");
   const sentences = blob
-    .split(/(?<=[.!?])\s+|\n+/)
+    .split(/(?<=[.!?])\s+|\n+|;\s+|\s+[-–—]\s+/)
     .map((item) => item.trim())
     .filter(Boolean);
   if (/lumiere pulsee/.test(value)) {
@@ -185,13 +187,14 @@ function technologyReply(text, sources = []) {
     }
     return "Je n’ai pas en fiche si l’épilation du centre est en lumière pulsée ou en laser. L’équipe pourra vous le confirmer.";
   }
-  const tech = sentences.find((sentence) =>
-    /technologie|machine|appareil|laser|cryo|radiofrequ|ultrasons|ipl|lumiere pulsee/.test(
-      normalize(sentence),
-    ),
-  );
+  const techPattern =
+    /technologie|machine|appareil|equipement|laser|cryo|radiofrequ|ultrasons|ipl|lumiere pulsee/;
+  const tech = sentences.find((sentence) => techPattern.test(normalize(sentence)));
   if (tech) {
     return tech;
+  }
+  if (techPattern.test(normalize(blob))) {
+    return blob.split(/\n+/).map((item) => item.trim()).filter(Boolean)[0] || blob.trim();
   }
   return "Je n’ai pas la liste des machines renseignée pour ce centre. L’équipe pourra vous préciser les technologies utilisées.";
 }
@@ -221,8 +224,14 @@ function missingPracticalReply(topic) {
   return `Je n’ai pas ${label} en fiche pour le centre. L’équipe pourra vous le confirmer lors de votre échange.`;
 }
 
-function needQuestion(family) {
+function needQuestion(family, missing = "") {
   if (family === "minceur") {
+    if (missing === "objectif") {
+      return "Quel est votre objectif pour ce soin minceur ?";
+    }
+    if (missing === "zones") {
+      return "Quelles zones aimeriez-vous travailler ?";
+    }
     return "Quel est votre objectif, et quelles zones aimeriez-vous travailler ?";
   }
   if (family === "epilation") {
@@ -268,13 +277,24 @@ const STEP_QUESTIONS = [
   /combien de kilos/i,
 ];
 
+function looksLikeHandoffClose(text) {
+  return /rappellera|transmets (votre |sa )?preference|transmets (votre demande )?a l['’ ]equipe|c['’ ]est bien note, je le transmets/i.test(
+    normalize(text),
+  );
+}
+
 function changesStep(draft, polished) {
   const asked = String(polished || "");
+  const previous = String(draft || "");
+  // Une conclusion « expert rappellera » ne doit jamais remplacer une question encore ouverte.
+  if (previous.includes("?") && looksLikeHandoffClose(asked) && !asked.includes("?")) {
+    return true;
+  }
   if (!asked.includes("?")) {
     return false;
   }
   return STEP_QUESTIONS.some(
-    (pattern) => pattern.test(asked) && !pattern.test(String(draft || "")),
+    (pattern) => pattern.test(asked) && !pattern.test(previous),
   );
 }
 
@@ -467,6 +487,7 @@ module.exports = {
   kilosQuestion,
   lastSeyaAskedKilos,
   lastSeyaAskedTried,
+  looksLikeHandoffClose,
   missingPracticalReply,
   missingPriceReply,
   modalityReply,

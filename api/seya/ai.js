@@ -317,7 +317,12 @@ async function generateCoreReply({
     });
     if (
       gaillard.isGaillardCenter(centerName) &&
-      (gaillard.breaksGaillardRules(polished) || gaillard.changesStep(draft, polished))
+      (gaillard.breaksGaillardRules(polished) ||
+        gaillard.changesStep(draft, polished) ||
+        // Interdit d’annoncer un rappel/transfert si les règles n’ont pas clos la qualification.
+        (gaillard.looksLikeHandoffClose(polished) &&
+          !conversationWithState?.teamNotes?.handedOffAt &&
+          String(draft || "").includes("?")))
     ) {
       return { ...settled, via: "rules" };
     }

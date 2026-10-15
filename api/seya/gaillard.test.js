@@ -134,9 +134,30 @@ test("Gaillard : informations déjà données, pas de question répétée", asyn
   assert.equal(conversation.messages.filter((item) => /objectif|déjà testé/i.test(item.text)).length, 0);
 });
 
-test("Gaillard minceur : perte de poids, Seya demande combien de kilos", async () => {
+test("Gaillard minceur : zones seules → objectif, puis déjà testé (pas de clôture anticipée)", async () => {
+  let conversation = open("Soin minceur");
+  conversation = await say(conversation, "Le ventre et les hanches.");
+  assert.match(lastSeya(conversation), /objectif/i);
+  assert.doesNotMatch(lastSeya(conversation), /rappellera/i);
+  assert.equal(Boolean(conversation.teamNotes?.handedOffAt), false);
+  conversation = await say(conversation, "Affiner ma silhouette");
+  assert.match(lastSeya(conversation), /déjà testé/i);
+  conversation = await say(
+    conversation,
+    "Quel appareil utilisez-vous pour la minceur ?",
+  );
+  assert.match(lastSeya(conversation), /fiche|machines|équipe|cryo|radio|technologie/i);
+  assert.doesNotMatch(
+    lastSeya(conversation),
+    /C’est bien noté, je le transmets à l’équipe/,
+  );
+});
+
+test("Gaillard minceur : perte de poids, zones puis kilos", async () => {
   let conversation = open("Soin minceur");
   conversation = await say(conversation, "Je voudrais perdre du poids");
+  assert.match(lastSeya(conversation), /zones/i);
+  conversation = await say(conversation, "Le ventre");
   assert.match(lastSeya(conversation), /Combien de kilos aimeriez-vous perdre \?/);
   conversation = await say(conversation, "Une dizaine");
   assert.match(lastSeya(conversation), /déjà testé/i);
@@ -146,11 +167,29 @@ test("Gaillard minceur : perte de poids, Seya demande combien de kilos", async (
   assert.equal(conversation.messages.filter((item) => /combien de kilos/i.test(item.text)).length, 1);
 });
 
-test("Gaillard minceur : kilos déjà précisés, pas de question sur les kilos", async () => {
+test("Gaillard minceur : kilos déjà précisés, zones encore demandées", async () => {
   let conversation = open("Soin minceur");
   conversation = await say(conversation, "J'aimerais perdre 8 kilos");
-  assert.match(lastSeya(conversation), /déjà testé/i);
+  assert.match(lastSeya(conversation), /zones/i);
   assert.equal(conversation.messages.filter((item) => /combien de kilos/i.test(item.text)).length, 0);
+  conversation = await say(conversation, "Ventre et hanches");
+  assert.match(lastSeya(conversation), /déjà testé/i);
+});
+
+test("Gaillard : polish IA ne remplace pas une question ouverte par un rappel expert", async () => {
+  process.env.OPENAI_API_KEY = "test";
+  try {
+    aiReply =
+      "Merci pour ces précisions 😊 Un expert ou une experte minceur du centre vous rappellera pour échanger sur votre besoin et convenir de votre rendez-vous.";
+    let conversation = open("Soin minceur");
+    conversation = await say(conversation, "Le ventre et les hanches.");
+    assert.match(lastSeya(conversation), /objectif/i);
+    assert.doesNotMatch(lastSeya(conversation), /rappellera/i);
+    assert.equal(Boolean(conversation.teamNotes?.handedOffAt), false);
+  } finally {
+    delete process.env.OPENAI_API_KEY;
+    aiReply = "";
+  }
 });
 
 test("Gaillard : reformulation IA rejetée, la réponse de remplacement ne repose pas une question déjà répondue", async () => {
@@ -329,6 +368,8 @@ test("Gaillard : après rappel, les questions pratiques restent traitées sans r
   };
   let conversation = open("Soin minceur", GAILLARD, priced);
   conversation = await say(conversation, "Bonsoir le ventre et les poignées d amour", GAILLARD, priced);
+  assert.match(lastSeya(conversation), /objectif/i);
+  conversation = await say(conversation, "Affiner ma silhouette", GAILLARD, priced);
   assert.match(lastSeya(conversation), /déjà (testé|essayé)/i);
   conversation = await say(conversation, "Oui mais pas de résultats", GAILLARD, priced);
   assert.match(lastSeya(conversation), /expert ou une experte minceur.*rappellera/i);
@@ -351,6 +392,7 @@ test("Gaillard : après rappel, les questions pratiques restent traitées sans r
     ["Ça coûte cher?", /offert|gratuit/i],
     ["Et après c est quoi vos prix ?", /500 euros|10x/i],
     ["Vous utilisez quoi comme technologie ?", /cryolipolyse|radiofréquence|Technologies minceur/i],
+    ["Quel appareil utilisez-vous pour la minceur ?", /cryolipolyse|radiofréquence|Technologies minceur/i],
     ["Je veux faire épiler les jambes entières ça coute combien ?", /63 €|épilation|bilan pilaire/i],
     ["Oui mais pour l épilation laser ?", /63 €/i],
   ];
@@ -364,7 +406,7 @@ test("Gaillard : après rappel, les questions pratiques restent traitées sans r
     );
     assert.doesNotMatch(
       lastSeya(conversation),
-      /^Un expert ou une experte du centre pourra vous répondre en détail/,
+      /^Un expert ou une experte du centre pourra vous répondre en détail|C’est bien noté, je le transmets à l’équipe/,
       `réponse générique bloquée pour « ${message} »`,
     );
   }
