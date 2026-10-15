@@ -927,7 +927,11 @@ function defaultOpeningForFamily(family, mission) {
 }
 
 function fillOpening(template, vars) {
-  return String(template || "")
+  const repaired = String(template || "")
+    .replace(/notre offre\s+\{centre\}/gi, "notre offre {offre}")
+    .replace(/votre demande pour\s+\{centre\}/gi, "votre demande pour {offre}")
+    .replace(/pour (?:notre |l['’])?offre\s+\{centre\}/gi, "pour notre offre {offre}");
+  return repaired
     .replace(/\{prenom\}|\[pr[ée]nom\]/gi, vars.prenom)
     .replace(/\{firstName\}/gi, vars.prenom)
     .replace(/\{centre\}|\[centre\]/gi, vars.centre)

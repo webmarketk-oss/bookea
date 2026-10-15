@@ -6,6 +6,33 @@ function normalizeTreatmentName(value) {
     .replace(/[\u0300-\u036f]/g, "");
 }
 
+function mergePricing(previous, incoming) {
+  if (incoming === undefined) {
+    return previous;
+  }
+  if (incoming === null) {
+    return null;
+  }
+  const base =
+    previous && typeof previous === "object" && !Array.isArray(previous)
+      ? previous
+      : {};
+  const next =
+    incoming && typeof incoming === "object" && !Array.isArray(incoming)
+      ? incoming
+      : {};
+  const keys = new Set([...Object.keys(base), ...Object.keys(next)]);
+  const merged = {};
+  for (const key of keys) {
+    if (Object.prototype.hasOwnProperty.call(next, key) && next[key] !== undefined) {
+      merged[key] = next[key];
+    } else {
+      merged[key] = base[key];
+    }
+  }
+  return merged;
+}
+
 function mergeTreatmentBriefLists(remote, incoming) {
   const remoteList = Array.isArray(remote) ? remote : [];
   const incomingList = Array.isArray(incoming) ? incoming : [];
@@ -14,10 +41,15 @@ function mergeTreatmentBriefLists(remote, incoming) {
       .filter((item) => String(item?.name || "").trim())
       .map((item) => [normalizeTreatmentName(item.name), item]),
   );
+  const seen = new Set();
 
-  return incomingList.map((item) => {
+  const merged = incomingList.map((item) => {
     const name = String(item?.name || "").trim();
-    const previous = remoteByName.get(normalizeTreatmentName(name));
+    const key = normalizeTreatmentName(name);
+    if (key) {
+      seen.add(key);
+    }
+    const previous = remoteByName.get(key);
     if (!previous) {
       return item;
     }
@@ -30,7 +62,7 @@ function mergeTreatmentBriefLists(remote, incoming) {
       brief: item.brief !== undefined ? item.brief : previous.brief,
       opening: item.opening !== undefined ? item.opening : previous.opening,
       price: item.price !== undefined ? item.price : previous.price,
-      pricing: item.pricing !== undefined ? item.pricing : previous.pricing,
+      pricing: mergePricing(previous.pricing, item.pricing),
       durationMinutes:
         item.durationMinutes !== undefined
           ? item.durationMinutes
@@ -38,6 +70,17 @@ function mergeTreatmentBriefLists(remote, incoming) {
       health: item.health !== undefined ? item.health : previous.health,
     };
   });
+
+  // Conserver les prestations absentes du formulaire / de la requête.
+  for (const previous of remoteList) {
+    const key = normalizeTreatmentName(previous?.name);
+    if (!key || seen.has(key)) {
+      continue;
+    }
+    merged.push(previous);
+  }
+
+  return merged;
 }
 
 function applySettingsPatch(base, settings, changedKeys) {
@@ -53,6 +96,9 @@ function applySettingsPatch(base, settings, changedKeys) {
       );
       continue;
     }
+    if (!(key in settings) || settings[key] === undefined) {
+      continue;
+    }
     next[key] = settings[key];
   }
   return next;
@@ -60,6 +106,7 @@ function applySettingsPatch(base, settings, changedKeys) {
 
 module.exports = {
   applySettingsPatch,
+  mergePricing,
   mergeTreatmentBriefLists,
   normalizeTreatmentName,
 };

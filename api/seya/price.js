@@ -375,7 +375,22 @@ function genericPriceReply(policy, options = {}) {
   const parts = [];
   if (family === "epilation") {
     if (isFree(policy.bilan) || isFree(policy.discovery)) {
-      parts.push("Le bilan pilaire est offert, c’est gratuit.");
+      const freeBits = [];
+      if (policy.bilan) {
+        freeBits.push(
+          /sans engagement/i.test(policy.bilan)
+            ? `Le bilan pilaire est ${policy.bilan}.`
+            : "Le bilan pilaire est offert, c’est gratuit.",
+        );
+      }
+      if (policy.discovery && !isNearDuplicate(policy.discovery, policy.bilan)) {
+        freeBits.push(
+          /test laser|sans engagement/i.test(policy.discovery)
+            ? `La séance découverte : ${policy.discovery}.`
+            : "La séance découverte est offerte.",
+        );
+      }
+      parts.push(freeBits.join(" ") || "Le bilan pilaire est offert, c’est gratuit.");
     } else if (policy.bilan) {
       parts.push(`Le bilan pilaire : ${policy.bilan}.`);
     } else if (!policy.session && !policy.package) {
@@ -383,6 +398,10 @@ function genericPriceReply(policy, options = {}) {
     }
     if (policy.session && ["fixed", "from", "range"].includes(policy.sessionPolicy)) {
       parts.push(announceSession(policy));
+    } else if (policy.package) {
+      parts.push(
+        `Je n’ai pas de tarif fixe à la séance. ${packageSentence(policy.package)}`,
+      );
     } else {
       parts.push(
         "On y analyse la pilosité et on vous établit un devis personnalisé pour la zone.",
@@ -436,7 +455,14 @@ function announceSession(policy) {
 
 function packageSentence(value) {
   const text = String(value || "").trim();
-  if (/^nos cures|^les cures|^cures/i.test(text)) {
+  if (!text) {
+    return "";
+  }
+  if (
+    /^nos cures|^les cures|^cures|^programme|séance|seance|forfait|grille|zone|aisselle/i.test(
+      text,
+    )
+  ) {
     return text.endsWith(".") ? text : `${text}.`;
   }
   return `Nos cures commencent ${/à partir|a partir/i.test(text) ? text : `à partir de ${text}`}.`.replace(

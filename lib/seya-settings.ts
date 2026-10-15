@@ -22,6 +22,7 @@ import {
 } from "@/api/seya/mission";
 import { mergeTreatmentBriefLists as mergeTreatmentBriefListsFromPatch } from "@/api/seya/settings-patch";
 import { mutateCenterSettings } from "@/api/seya/settings-write";
+import { repairGaillardLaserSettings } from "@/api/seya/gaillard-laser-pricing";
 import { getActiveCenterContext } from "@/lib/center-access";
 import { sanitizePersonName } from "@/lib/seya-person-name";
 import { createClient } from "@/lib/supabase";
@@ -630,7 +631,11 @@ function fillSeyaTemplate(
   template: string,
   vars: { prenom: string; centre: string; offre: string },
 ) {
-  return template
+  const repaired = String(template || "")
+    .replace(/notre offre\s+\{centre\}/gi, "notre offre {offre}")
+    .replace(/votre demande pour\s+\{centre\}/gi, "votre demande pour {offre}")
+    .replace(/pour (?:notre |l['’])?offre\s+\{centre\}/gi, "pour notre offre {offre}");
+  return repaired
     .replace(/\{prenom\}/gi, vars.prenom)
     .replace(/\{firstName\}/gi, vars.prenom)
     .replace(/\{centre\}/gi, vars.centre)
@@ -830,18 +835,22 @@ function normalizePricePolicy(
   const legacy = String(fallbackPrice || "").trim();
   const allowed = ["fixed", "from", "range", "after_bilan", "callback"] as const;
   const sessionPolicy = current.sessionPolicy;
+  // Ne jamais inventer un forfait « 500 € » à la normalisation des réglages :
+  // ça mélangeait les fiches (ex. laser) et écrasait les grilles centre.
   return {
-    bilan: String(current.bilan || (/bilan/i.test(legacy) && /gratuit|offert/i.test(legacy) ? "offert" : "")).trim(),
+    bilan: String(
+      current.bilan ||
+        (/bilan/i.test(legacy) && /gratuit|offert/i.test(legacy) ? "offert" : ""),
+    ).trim(),
     discovery: String(
       current.discovery ||
-        (/découverte|decouverte/i.test(legacy) && /gratuit|offert/i.test(legacy)
+        (/découverte|decouverte|test laser/i.test(legacy) &&
+        /gratuit|offert/i.test(legacy)
           ? "offerte"
           : ""),
     ).trim(),
     session: String(current.session || "").trim(),
-    package: String(
-      current.package || (/500/.test(legacy) ? "à partir de 500€, payable jusqu’en 10 fois" : ""),
-    ).trim(),
+    package: String(current.package || "").trim(),
     sessionPolicy:
       sessionPolicy && allowed.includes(sessionPolicy)
         ? sessionPolicy
@@ -1002,10 +1011,24 @@ export async function loadSeyaAgentSettings() {
   const ownedPhones = await loadOwnedPhones(supabase, context.centerId).catch(
     () => new Set<string>(),
   );
-  const settings = bindSeyaSettingsToCenter(
+  let settings = bindSeyaSettingsToCenter(
     hasRemote ? (remote as Partial<SeyaAgentSettings>) : null,
     localSettings,
   );
+  const repaired = repairGaillardLaserSettings(
+    settings,
+    context.centerName,
+    context.centerId,
+  );
+  if (repaired.changed) {
+    settings = repaired.settings as SeyaAgentSettings;
+    // Persistance ciblée Gaillard laser uniquement, sans toucher aux autres centres.
+    try {
+      await saveSeyaAgentSettings(settings, context.centerId, ["treatmentBriefs"]);
+    } catch (error) {
+      console.error("[seya] gaillard laser repair save skipped", error);
+    }
+  }
 
   writeLocalSeyaSettings(context.centerId, settings);
 
@@ -1177,11 +1200,20 @@ export async function saveSeyaAgentSettings(
   let nextSettings: SeyaAgentSettings | null = null;
   await mutateCenterSettings(supabase, context.centerId, (currentSettings) => {
     const currentSeya = asRecord(currentSettings.seya);
-    nextSettings = mergeSeyaSettingsPatch(
+    let merged = mergeSeyaSettingsPatch(
       currentSettings.seya ? (currentSeya as Partial<SeyaAgentSettings>) : null,
       settings,
       changedKeys,
     );
+    const repaired = repairGaillardLaserSettings(
+      merged,
+      context.centerName,
+      context.centerId,
+    );
+    if (repaired.changed) {
+      merged = repaired.settings as SeyaAgentSettings;
+    }
+    nextSettings = merged;
     return {
       ...currentSettings,
       seya: {

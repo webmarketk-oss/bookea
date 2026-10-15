@@ -40,7 +40,12 @@ const {
   slotAllowed,
 } = require("./booking-state");
 const { classifyHealthMessage, isAwaitingHealthReview } = require("./health");
-const { classifyPriceQuestion, isPriceRepeatComplaint, isNearDuplicate } = require("./price");
+const {
+  classifyPriceQuestion,
+  isPriceRepeatComplaint,
+  isNearDuplicate,
+  resolvePricePolicy,
+} = require("./price");
 const {
   asksOtherDay,
   isRereadAsk,
@@ -355,7 +360,18 @@ async function polishSeyaText({
     thread.need || conversation.qualification?.need || conversation.treatment,
   );
   const brief = resolveTreatmentBrief(seya, careHint);
-  const price = resolveTreatmentPrice(seya, careHint, conversation);
+  const pricePolicy = resolvePricePolicy(seya, conversation, text);
+  const priceCard = [
+    resolveTreatmentPrice(seya, careHint, conversation),
+    pricePolicy?.bilan ? `Bilan : ${pricePolicy.bilan}` : "",
+    pricePolicy?.discovery ? `Découverte : ${pricePolicy.discovery}` : "",
+    pricePolicy?.session ? `Séance : ${pricePolicy.session}` : "",
+    pricePolicy?.package ? `Forfait : ${pricePolicy.package}` : "",
+    brief ? `Consignes prestation : ${String(brief).slice(0, 500)}` : "",
+  ]
+    .filter(Boolean)
+    .join(" · ");
+  const price = priceCard;
   const client = new OpenAI({
     apiKey: process.env.OPENAI_API_KEY,
     timeout: 6000,

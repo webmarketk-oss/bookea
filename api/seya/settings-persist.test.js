@@ -91,6 +91,45 @@ test("un patch brief ne remplace pas les fiches soin", () => {
   assert.equal(merged.treatmentBriefs[0].opening, "O visage");
 });
 
+test("un patch partiel de pricing conserve bilan et brief", () => {
+  const merged = mergeTreatmentBriefLists(
+    [
+      {
+        name: "Épilation définitive",
+        brief: "Consignes laser",
+        pricing: {
+          bilan: "offert et sans engagement",
+          discovery: "test laser offert",
+          session: "",
+          package: "grille A",
+        },
+      },
+    ],
+    [
+      {
+        name: "Épilation définitive",
+        pricing: { package: "grille B" },
+      },
+    ],
+  );
+  assert.equal(merged[0].brief, "Consignes laser");
+  assert.equal(merged[0].pricing.bilan, "offert et sans engagement");
+  assert.equal(merged[0].pricing.discovery, "test laser offert");
+  assert.equal(merged[0].pricing.package, "grille B");
+});
+
+test("une prestation absente de la requête reste en base", () => {
+  const merged = mergeTreatmentBriefLists(
+    [
+      { name: "Soin minceur", brief: "M" },
+      { name: "Soin visage", brief: "V" },
+    ],
+    [{ name: "Soin minceur", brief: "M2" }],
+  );
+  assert.equal(merged.find((item) => item.name === "Soin visage")?.brief, "V");
+  assert.equal(merged.find((item) => item.name === "Soin minceur")?.brief, "M2");
+});
+
 test("Clermont et Gaillard restent isolés dans le merge", () => {
   const clermont = {
     treatmentBriefs: [
