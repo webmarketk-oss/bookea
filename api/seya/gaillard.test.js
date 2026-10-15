@@ -222,10 +222,14 @@ test("Gaillard : modalité validée dans la fiche du soin, elle est reprise tell
   assert.equal(lastSeya(conversation), "Un short jetable est fourni pour la séance.");
 });
 
-test("Gaillard : bilan et découverte minceur, environ 1 h 30", async () => {
+test("Gaillard : bilan et découverte minceur, environ 1 h 30 au total, découverte ~20 min", async () => {
   let conversation = open("Soin minceur");
   conversation = await say(conversation, "Ça dure combien de temps le bilan ?");
   assert.match(lastSeya(conversation), /environ 1 h 30/);
+  assert.match(lastSeya(conversation), /20 minutes/);
+  conversation = await say(conversation, "La séance découverte dure combien de temps ?");
+  assert.match(lastSeya(conversation), /20 minutes/);
+  assert.doesNotMatch(lastSeya(conversation), /1 h 30/);
 });
 
 test("Gaillard épilation : prix demandé sans tarif en fiche, rien d’inventé, promotions à voir au centre", async () => {
@@ -255,7 +259,7 @@ test("Gaillard : question IA, réponse transparente", async () => {
   conversation = await say(conversation, "Vous êtes une IA ?");
   assert.equal(
     lastSeya(conversation),
-    "Oui, je suis Seya, l’assistante virtuelle du centre JFG Clinic Gaillard 😊 Je recueille les informations sur votre demande, puis un expert ou une experte du centre vous rappelle pour vous accompagner.",
+    "Je suis Seya, l’assistante virtuelle du centre JFG Clinic Gaillard 😊 Je recueille les informations sur votre demande, puis un expert ou une experte du centre vous rappelle pour vous accompagner.",
   );
 });
 
@@ -294,4 +298,115 @@ test("Clermont n’est pas concerné : la mission rappel garde son fonctionnemen
     relanceCopy(conversation, 1, clermont, seya),
     "Bonjour Léa, je reviens vers vous. Quand seriez-vous disponible pour qu’une opératrice vous rappelle ?",
   );
+});
+
+test("Gaillard : après rappel, les questions pratiques restent traitées sans réponse générique", async () => {
+  const priced = {
+    ...seya,
+    treatmentBriefs: [
+      {
+        name: "Soin minceur",
+        brief:
+          "Analyse corporelle puis séance découverte. Technologies minceur : cryolipolyse et radiofréquence.",
+        pricing: {
+          bilan: "offert",
+          discovery: "offerte",
+          sessionPolicy: "after_bilan",
+          package: "à partir de 500 euros. Paiement jusqu'à 10x possible",
+        },
+      },
+      {
+        name: "Épilation définitive",
+        brief: "Épilation laser. Consignes au bilan pilaire.",
+        pricing: { session: "63 €", sessionPolicy: "from" },
+      },
+      { name: "Soin visage", brief: "Diagnostic peau." },
+    ],
+    centerProfile: {
+      activity: "Technologies minceur et épilation laser",
+      extras: "Un enfant peut attendre en salle d’attente accompagné d’un adulte.",
+    },
+  };
+  let conversation = open("Soin minceur", GAILLARD, priced);
+  conversation = await say(conversation, "Bonsoir le ventre et les poignées d amour", GAILLARD, priced);
+  assert.match(lastSeya(conversation), /déjà (testé|essayé)/i);
+  conversation = await say(conversation, "Oui mais pas de résultats", GAILLARD, priced);
+  assert.match(lastSeya(conversation), /expert ou une experte minceur.*rappellera/i);
+  assert.equal(conversation.status, "À recontacter");
+  assert.ok(conversation.teamNotes?.handedOffAt);
+
+  const turns = [
+    ["Je peux pas prendre rdv tout de suite ?", /réservation se fait avec l’équipe|convenir de votre rendez-vous/i],
+    ["J ai vu que vous faisiez l épilation c est de la lumière pulsée ?", /laser|lumière pulsée|fiche/i],
+    ["J ai eu un cancer il y a 2 ans je peux faire vos machines ?", /validation médicale/i],
+    ["Et les soins visage vous faites ?", /proposons/i],
+    ["Tu es pas un humain ?", /assistante virtuelle/i],
+    ["Le prix c est quoi ?", /tarif|fiche|offert|gratuit|diagnostic|équipe/i],
+    ["Combien de temps dure le bilan minceur ?", /1 h 30|20 minutes/i],
+    ["Comment se déroule un bilan ?", /analyse corporelle|séance découverte/i],
+    ["Vous êtes situés où ?", /58 rue de la Libération/i],
+    ["En France ou en suisse ?", /France.*Gaillard|frontière suisse/i],
+    ["Je peux venir avec mon enfant lors du rdv ?", /enfant|salle d’attente/i],
+    ["Est ce que ça fait mal ?", /indolore/i],
+    ["Ça coûte cher?", /offert|gratuit/i],
+    ["Et après c est quoi vos prix ?", /500 euros|10x/i],
+    ["Vous utilisez quoi comme technologie ?", /cryolipolyse|radiofréquence|Technologies minceur/i],
+    ["Je veux faire épiler les jambes entières ça coute combien ?", /63 €|épilation|bilan pilaire/i],
+    ["Oui mais pour l épilation laser ?", /63 €/i],
+  ];
+
+  for (const [message, expected] of turns) {
+    conversation = await say(conversation, message, GAILLARD, priced);
+    assert.match(
+      lastSeya(conversation),
+      expected,
+      `« ${message} » → ${lastSeya(conversation)}`,
+    );
+    assert.doesNotMatch(
+      lastSeya(conversation),
+      /^Un expert ou une experte du centre pourra vous répondre en détail/,
+      `réponse générique bloquée pour « ${message} »`,
+    );
+  }
+});
+
+test("Centre en mode prise de rendez-vous : une demande de créneau reste active", async () => {
+  const booker = {
+    seyaMission: "book",
+    bookAppointment: true,
+    askForAppointment: true,
+    handoffToHuman: true,
+    treatmentBriefs: [
+      {
+        name: "Soin minceur",
+        brief: "Réceptionniste.",
+        pricing: { bilan: "offert", discovery: "offerte", sessionPolicy: "after_bilan" },
+      },
+    ],
+  };
+  const center = "JFG Clinic Test Book";
+  let conversation = startConversation(
+    {
+      leadId: "lead-book-mode",
+      centerId: "test-book",
+      firstName: "Léa",
+      phone: "0611223344",
+      treatment: "Soin minceur",
+    },
+    center,
+    booker,
+  );
+  const result = await generateSeyaReply({
+    conversation,
+    text: "Je veux un rendez-vous jeudi après-midi",
+    seya: booker,
+    appointments: [],
+    hours: hours(),
+    centerName: center,
+    centerAddress: "1 rue Test, 75001 Paris",
+    centerId: "test-book",
+    now: NOW,
+  });
+  assert.match(lastSeya(result.conversation), /jeudi|créneau|disponible|propose/i);
+  assert.notEqual(result.conversation.status, "À recontacter");
 });

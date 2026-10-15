@@ -53,7 +53,7 @@ function modalityReply() {
 }
 
 function identityReply() {
-  return `Oui, je suis Seya, l’assistante virtuelle du centre ${GAILLARD_NAME} 😊 Je recueille les informations sur votre demande, puis un expert ou une experte du centre vous rappelle pour vous accompagner.`;
+  return `Je suis Seya, l’assistante virtuelle du centre ${GAILLARD_NAME} 😊 Je recueille les informations sur votre demande, puis un expert ou une experte du centre vous rappelle pour vous accompagner.`;
 }
 
 function promoSentence() {
@@ -61,15 +61,164 @@ function promoSentence() {
 }
 
 function missingPriceReply() {
-  return "Je n’ai pas encore le tarif de cette zone dans la fiche du centre : un expert ou une experte vous le précisera lors de votre échange.";
+  return "Je n’ai pas encore le tarif de cette zone dans la fiche du centre : l’équipe pourra vous le confirmer.";
 }
 
-function durationReply(family) {
+function healthNotedReply() {
+  return "Je note cette information pour l’équipe. Une validation médicale est nécessaire avant toute séance : l’équipe vérifiera si le soin est adapté à votre situation.";
+}
+
+function durationReply(family, text = "") {
   const minutes = GAILLARD_VISIT_MINUTES[family];
   if (!minutes) {
     return "";
   }
-  return "Le bilan et la séance découverte durent environ 1 h 30.";
+  const value = normalize(text);
+  if (/decouverte|seance decouverte|test/.test(value) && !/bilan/.test(value)) {
+    return "La séance découverte dure environ 20 minutes.";
+  }
+  if (/bilan/.test(value) && !/decouverte|ensemble|total/.test(value)) {
+    return "Le bilan et la séance découverte durent environ 1 h 30 au total. La séance découverte seule dure environ 20 minutes.";
+  }
+  return "Le bilan et la séance découverte durent environ 1 h 30 au total. La séance découverte seule dure environ 20 minutes.";
+}
+
+function bookingCapabilityReply() {
+  return "Je ne peux pas bloquer un créneau moi-même : la réservation se fait avec l’équipe. Un expert ou une experte du centre vous rappellera pour convenir de votre rendez-vous.";
+}
+
+function countryReply(address, centerName) {
+  const raw = String(address || "").trim();
+  const hay = normalize(`${raw} ${centerName || ""}`);
+  if (!hay) {
+    return "";
+  }
+  if (/\bsuisse\b|\bswitzerland\b|\bch-\d{4}\b/.test(hay)) {
+    return "Nous sommes en Suisse.";
+  }
+  if (/\bfrance\b/.test(hay) || /\b\d{5}\b/.test(raw) || /\bgaillard\b/.test(hay)) {
+    if (/\bgaillard\b/.test(hay)) {
+      return "Nous sommes en France, à Gaillard (Haute-Savoie), près de la frontière suisse.";
+    }
+    return "Nous sommes en France.";
+  }
+  return "";
+}
+
+function asksCountry(text) {
+  const value = normalize(text);
+  return (
+    /\b(france|suisse|switzerland|pays)\b/.test(value) &&
+    (/\?|ou |etes|êtes|c[' ]est/.test(value) || /france.*suisse|suisse.*france/.test(value))
+  );
+}
+
+function asksBookingNow(text) {
+  const value = normalize(text);
+  return (
+    /prendre (un )?rdv|prendre (un )?rendez|reserver|je (peux|puis) (pas )?(prendre|venir)|tout de suite|maintenant/.test(
+      value,
+    ) &&
+    (/rdv|rendez|creneau|venir|reserver/.test(value) || /\?/.test(String(text || "")))
+  );
+}
+
+function asksProcess(text) {
+  const value = normalize(text);
+  return /comment (se )?deroule|c[' ]est quoi (un |le )?bilan|en quoi consiste|deroulement|comment ca se passe/.test(
+    value,
+  );
+}
+
+function asksTechnology(text) {
+  const value = normalize(text);
+  return (
+    /technologie|machines?|appareils?|materiel|lumiere pulsee|c[' ]est (du |de la )?laser/.test(
+      value,
+    ) &&
+    (/\?|quoi|quelles|avez|utilisez|presentes|faisiez|faites/.test(value) ||
+      /lumiere pulsee/.test(value))
+  );
+}
+
+function asksChildCompanion(text) {
+  const value = normalize(text);
+  return /enfant|bebe|nourrisson|avec mon fils|avec ma fille/.test(value);
+}
+
+function processReply(family, sources = []) {
+  const blob = sources.map((item) => String(item || "").trim()).filter(Boolean).join(" ");
+  const sentences = blob
+    .split(/(?<=[.!?])\s+|\n+/)
+    .map((item) => item.trim())
+    .filter((sentence) =>
+      /deroule|consiste|bilan|analyse|decouverte|protocole|etape/.test(normalize(sentence)),
+    );
+  if (sentences[0]) {
+    return sentences[0];
+  }
+  if (family === "minceur") {
+    return "Le bilan commence par une analyse corporelle, puis une séance découverte. On vous explique ensuite le protocole adapté à vos objectifs et un devis personnalisé.";
+  }
+  if (family === "epilation") {
+    return "Le bilan pilaire permet d’analyser la pilosité et la peau, puis de vous proposer un protocole et un devis pour la zone.";
+  }
+  if (family === "visage") {
+    return "Le diagnostic visage permet de faire le point sur la peau, puis de vous proposer un protocole adapté.";
+  }
+  return "Le déroulement exact dépend de la prestation : l’équipe vous l’explique lors de votre échange.";
+}
+
+function technologyReply(text, sources = []) {
+  const value = normalize(text);
+  const blob = sources.map((item) => String(item || "").trim()).filter(Boolean).join("\n");
+  const sentences = blob
+    .split(/(?<=[.!?])\s+|\n+/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+  if (/lumiere pulsee/.test(value)) {
+    const found = sentences.find((sentence) =>
+      /lumiere pulsee|ipl|laser/.test(normalize(sentence)),
+    );
+    if (found) {
+      return found;
+    }
+    return "Je n’ai pas en fiche si l’épilation du centre est en lumière pulsée ou en laser. L’équipe pourra vous le confirmer.";
+  }
+  const tech = sentences.find((sentence) =>
+    /technologie|machine|appareil|laser|cryo|radiofrequ|ultrasons|ipl|lumiere pulsee/.test(
+      normalize(sentence),
+    ),
+  );
+  if (tech) {
+    return tech;
+  }
+  return "Je n’ai pas la liste des machines renseignée pour ce centre. L’équipe pourra vous préciser les technologies utilisées.";
+}
+
+function childCompanionReply(sources = []) {
+  const blob = sources.map((item) => String(item || "").trim()).filter(Boolean).join("\n");
+  const found = blob
+    .split(/(?<=[.!?])\s+|\n+/)
+    .map((item) => item.trim())
+    .find((sentence) => /enfant|accompagn|bebe/.test(normalize(sentence)));
+  if (found) {
+    return found;
+  }
+  return "Je n’ai pas cette consigne en fiche. L’équipe pourra vous confirmer si vous pouvez venir avec votre enfant.";
+}
+
+function serviceOfferedReply(offered, askedLabel) {
+  const label = String(askedLabel || "cette prestation").trim();
+  if (offered) {
+    return `Oui, nous proposons ${label}.`;
+  }
+  return `Non, nous ne faisons pas ${label}.`;
+}
+
+function missingPracticalReply(topic) {
+  const label = String(topic || "cette information").trim();
+  return `Je n’ai pas ${label} en fiche pour le centre. L’équipe pourra vous le confirmer lors de votre échange.`;
 }
 
 function needQuestion(family) {
@@ -294,14 +443,23 @@ function promptRules(family) {
 module.exports = {
   GAILLARD_VISIT_MINUTES,
   afterHandoffReply,
+  asksBookingNow,
+  asksChildCompanion,
+  asksCountry,
   asksIfAi,
+  asksProcess,
+  asksTechnology,
   availabilityContext,
   availabilityMention,
+  bookingCapabilityReply,
   breaksGaillardRules,
   changesStep,
+  childCompanionReply,
   closingReply,
+  countryReply,
   durationReply,
   expertLabel,
+  healthNotedReply,
   identityReply,
   isAnswerLike,
   isGaillardCenter,
@@ -309,16 +467,20 @@ module.exports = {
   kilosQuestion,
   lastSeyaAskedKilos,
   lastSeyaAskedTried,
+  missingPracticalReply,
   missingPriceReply,
   modalityReply,
   modalityTopic,
   needQuestion,
   preferenceNotedPrefix,
   preferenceReply,
+  processReply,
   promoSentence,
   promptRules,
   relanceText,
   safeGaillardText,
+  serviceOfferedReply,
+  technologyReply,
   triedQuestion,
   validatedModality,
   withPreference,

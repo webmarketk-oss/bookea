@@ -65,6 +65,7 @@ const {
   isWillComeBack,
   isThreadComplaint,
   isServiceAsk,
+  askedServiceName,
   asksOpenQuestion,
   isWaitUntilLater,
   isRescheduleAsk,
@@ -88,8 +89,10 @@ const {
   resolveActiveFamily,
   understandThread,
   naturalOfferPhrase,
+  phraseAskedService,
   phraseConfiguredOffer,
   phraseFromCareTitle,
+  serviceIsOffered,
   serviceOfferReply,
 } = require("./care-family");
 const { pickBookingResources, pickCatalogService } = require("./axis-resources");
@@ -274,7 +277,12 @@ function faqReply(text, extras = {}) {
   if (/gratuit|offert/.test(value) && /bilan|decouverte|seance/.test(value)) {
     return "";
   }
-  if (/resultat/.test(value) || /combien de temps.*result/.test(value)) {
+  if (
+    (/resultat/.test(value) &&
+      (/\?/.test(String(text || "")) ||
+        /combien de temps|quand|au bout|en combien|ca marche/.test(value))) ||
+    /combien de temps.*result/.test(value)
+  ) {
     return "Les résultats dépendent de la zone et du protocole. On vous les explique au bilan.";
   }
   if (/combien de temps|ca dure|duree|dure (le )?(rdv|bilan|rendez-vous)/.test(value)) {
@@ -286,6 +294,67 @@ function faqReply(text, extras = {}) {
   }
   if (/fait mal|douloureux|douleur/.test(value)) {
     return "Le bilan est indolore. Pour une séance, ça dépend de la zone, on vous l’explique sur place.";
+  }
+  if (/enfant|bebe|nourrisson|avec mon fils|avec ma fille/.test(value)) {
+    const extrasText = normalizeCenterProfile(
+      extras?.centerProfile || agentSettings(extras.seya).centerProfile,
+    ).extras;
+    const found = String(extrasText || "")
+      .split(/(?<=[.!?])\s+|\n+/)
+      .map((item) => item.trim())
+      .find((sentence) => /enfant|accompagn|bebe/.test(normalize(sentence)));
+    return (
+      found ||
+      "Je n’ai pas cette consigne en fiche. L’équipe pourra vous confirmer si vous pouvez venir avec votre enfant."
+    );
+  }
+  if (/comment (se )?deroule|c[' ]est quoi (un |le )?bilan|en quoi consiste|comment ca se passe/.test(value)) {
+    const family =
+      resolveActiveFamily(extras.seya, extras.conversation, text) ||
+      inferCareFamily(`${extras.conversation?.treatment || ""} ${text || ""}`);
+    if (family === "minceur") {
+      return "Le bilan commence par une analyse corporelle, puis une séance découverte. On vous explique ensuite le protocole adapté à vos objectifs et un devis personnalisé.";
+    }
+    if (family === "epilation") {
+      return "Le bilan pilaire permet d’analyser la pilosité et la peau, puis de vous proposer un protocole et un devis pour la zone.";
+    }
+    if (family === "visage") {
+      return "Le diagnostic visage permet de faire le point sur la peau, puis de vous proposer un protocole adapté.";
+    }
+    return "Le déroulement exact dépend de la prestation : l’équipe vous l’explique lors de votre échange.";
+  }
+  if (
+    /technologie|machines?|appareils?|materiel/.test(value) &&
+    (/\?|quoi|quelles|avez|utilisez|presentes/.test(value) || /c[' ]est (du |de la )?/.test(value))
+  ) {
+    const profile = normalizeCenterProfile(
+      extras?.centerProfile || agentSettings(extras.seya).centerProfile,
+    );
+    const family =
+      resolveActiveFamily(extras.seya, extras.conversation, text) ||
+      inferCareFamily(`${extras.conversation?.treatment || ""} ${text || ""}`);
+    const brief =
+      findTreatmentBrief(
+        extras.seya,
+        `${extras.conversation?.qualification?.need || ""} ${extras.conversation?.treatment || ""}`,
+        family,
+      ) || findTreatmentBrief(extras.seya, extras.conversation?.treatment, family);
+    const sources = [brief?.brief, profile.activity, profile.extras, extras.seya?.brief];
+    const hit = sources
+      .flatMap((source) =>
+        String(source || "")
+          .split(/(?<=[.!?])\s+|\n+/)
+          .map((item) => item.trim()),
+      )
+      .find((sentence) =>
+        /technologie|machine|appareil|laser|cryo|radiofrequ|ultrasons|ipl|lumiere pulsee/.test(
+          normalize(sentence),
+        ),
+      );
+    return (
+      hit ||
+      "Je n’ai pas la liste des machines renseignée pour ce centre. L’équipe pourra vous préciser les technologies utilisées."
+    );
   }
   return "";
 }
@@ -333,8 +402,10 @@ function formatCenterProfilePrompt(profile) {
 }
 
 function asksLocation(text) {
-  return /ou (etes|etes[- ]vous|se trouve)|situ[eé]|adresse|\bc['’]est ou\b|vous etes ou|tu es (ou|situ)/i.test(
-    String(text || ""),
+  return (
+    /ou (etes|etes[- ]vous|se trouve)|situ[eé]|adresse|\bc['’]est ou\b|vous etes ou|tu es (ou|situ)/i.test(
+      String(text || ""),
+    ) || gaillard.asksCountry(text)
   );
 }
 
@@ -360,6 +431,14 @@ function centerPlaceReply(text, extras, seya) {
   );
   const address = String(extras?.centerAddress || "").trim();
   const centerName = String(extras?.centerName || "").trim();
+  if (gaillard.asksCountry(text)) {
+    return (
+      gaillard.countryReply(address, centerName) ||
+      (address
+        ? `Nous sommes au ${address}. L’équipe pourra vous confirmer le pays si besoin.`
+        : "Je vérifie le pays exact avec l’équipe et je vous le confirme.")
+    );
+  }
   if (asksAccess(text) && profile.extras) {
     if (asksLocation(text) && address) {
       return `Nous sommes au ${address}. ${profile.extras}`;
@@ -490,24 +569,41 @@ function displayCareLabel(qualification, conversation) {
 }
 
 function priceReply(seya, qualification, conversation, text) {
-  const built = buildPriceReply(
-    text || conversation?.bookingState?.lastLeadPriceText || "c’est combien",
-    seya,
-    { ...applyCareSwitch(conversation, qualification), qualification },
-  );
+  const intentText =
+    text || conversation?.bookingState?.lastLeadPriceText || "c’est combien";
+  const spokenFamily = inferCareFamily(intentText);
+  const switched = applyCareSwitch(conversation, qualification);
+  const pricedConversation = spokenFamily
+    ? {
+        ...switched,
+        treatment: careLabelForFamily(spokenFamily),
+        campaign: "",
+        offerLabel: "",
+        _seya: seya || conversation?._seya,
+      }
+    : { ...switched, _seya: seya || conversation?._seya };
+  const pricedQualification = spokenFamily
+    ? { ...qualification, need: careLabelForFamily(spokenFamily) }
+    : qualification;
+  const built = buildPriceReply(intentText, seya, {
+    ...pricedConversation,
+    qualification: pricedQualification,
+  });
   if (built) {
     return built;
   }
   const price = resolveTreatmentPrice(
     seya,
-    `${qualification?.need || ""} ${qualification?.zone || ""} ${conversation?.treatment || ""}`,
+    `${pricedQualification?.need || ""} ${pricedQualification?.zone || ""} ${pricedConversation?.treatment || ""}`,
+    pricedConversation,
   );
   if (
     price &&
     /analyse corporelle|devis personnalise|devis personnalisé/i.test(price) &&
-    inferCareFamily(
-      `${qualification?.need || ""} ${conversation?.treatment || ""} ${text || ""}`,
-    ) === "minceur"
+    (spokenFamily ||
+      inferCareFamily(
+        `${qualification?.need || ""} ${conversation?.treatment || ""} ${intentText}`,
+      )) === "minceur"
   ) {
     return price;
   }
@@ -2465,46 +2561,76 @@ function gaillardLeadReply(conversation, text, seya, slots, extras = {}) {
       resolveHealthSheet(seya, base, text),
       health.mixed ? "mixed" : "personal",
     );
+    // Après transmission, on note la santé sans bloquer plus tard les questions pratiques.
+    // Pendant la qualification, on continue le parcours en préfixant la note santé.
+    if (handedOff) {
+      const noted = fixed(base, status, gaillard.healthNotedReply());
+      return {
+        ...noted,
+        conversation: {
+          ...noted.conversation,
+          healthReview: review.healthReview,
+          healthTask: review.healthTask,
+        },
+      };
+    }
     const next = gaillardLeadReply(conversation, text, seya, slots, {
       ...extras,
       healthNoted: true,
     });
-    return withCallbackHealthNote(
-      next,
-      review,
-      "Je note cette information pour l’équipe, elle en tiendra compte lors de votre échange.",
-    );
+    return withCallbackHealthNote(next, review, gaillard.healthNotedReply());
   }
   if (health.general && !extras.healthNoted) {
     return delegate();
   }
 
+  const profile = normalizeCenterProfile(
+    extras?.centerProfile || agentSettings(seya).centerProfile,
+  );
+  const brief =
+    findTreatmentBrief(seya, `${merged.need || ""} ${base.treatment || ""}`, family) ||
+    findTreatmentBrief(seya, base.treatment, family);
+  const sourceBag = [brief?.brief, seya?.brief, profile.activity, profile.extras];
+  const priceFamily =
+    inferCareFamily(text) ||
+    family ||
+    inferCareFamily(`${merged.need || ""} ${base.treatment || ""}`);
+
+  const priceFollowUp =
+    handedOff &&
+    /pour l[' ]epilation|pour le laser|et (pour )?l[' ]epilation|epilation laser/.test(
+      normalize(text),
+    ) &&
+    (asksPrice(lastOtherLeadText(base, text)) ||
+      classifyPriceQuestion(lastOtherLeadText(base, text)));
   if (
     asksPrice(text) ||
     classifyPriceQuestion(text) ||
-    isPriceRepeatComplaint(text)
+    isPriceRepeatComplaint(text) ||
+    priceFollowUp
   ) {
-    const priced = delegate();
-    return family === "epilation" ? withEpilationPrice(priced) : priced;
+    const priceText = priceFollowUp
+      ? `${text} c'est combien`
+      : text;
+    const reply = priceReply(seya, merged, { ...base, _seya: seya }, priceText);
+    const priced = fixed(base, status, reply);
+    return (inferCareFamily(priceText) || priceFamily) === "epilation"
+      ? withEpilationPrice(priced)
+      : priced;
   }
 
   if (gaillard.modalityTopic(text)) {
-    const brief =
-      findTreatmentBrief(seya, `${merged.need || ""} ${base.treatment || ""}`, family) ||
-      findTreatmentBrief(seya, base.treatment, family);
-    const validated = gaillard.validatedModality(text, [
-      brief?.brief,
-      seya?.brief,
-      agentSettings(seya).centerProfile?.extras,
-    ]);
+    const validated = gaillard.validatedModality(text, sourceBag);
     return fixed(base, status, validated || gaillard.modalityReply());
   }
 
   if (
-    /combien de temps|ca dure|duree|dure (le )?(rdv|bilan|rendez-vous)/.test(normalize(text)) &&
+    /combien de temps|ca dure|duree|dure (le |la )?(rdv|bilan|rendez-vous|decouverte|seance)/.test(
+      normalize(text),
+    ) &&
     !/resultat/.test(normalize(text))
   ) {
-    const spoken = gaillard.durationReply(family);
+    const spoken = gaillard.durationReply(family, text);
     return spoken ? fixed(base, status, spoken) : delegate();
   }
 
@@ -2512,15 +2638,20 @@ function gaillardLeadReply(conversation, text, seya, slots, extras = {}) {
     return fixed(base, status, centerPlaceReply(normalize(text), extras, seya));
   }
 
-  if (
-    serviceOfferReply(text, seya) ||
-    (/\?|combien|est[- ]ce|comment|quel/.test(normalize(text)) &&
-      faqReply(text, { seya, conversation: { ...base, qualification: merged } })) ||
-    isThanks(text, base) ||
-    isHesitation(text) ||
-    refusesSlots(text)
-  ) {
-    return delegate();
+  if (gaillard.asksChildCompanion(text)) {
+    return fixed(base, status, gaillard.childCompanionReply(sourceBag));
+  }
+
+  if (gaillard.asksBookingNow(text)) {
+    return fixed(base, status, gaillard.bookingCapabilityReply());
+  }
+
+  if (gaillard.asksProcess(text)) {
+    return fixed(base, status, gaillard.processReply(family, sourceBag));
+  }
+
+  if (gaillard.asksTechnology(text)) {
+    return fixed(base, status, gaillard.technologyReply(text, sourceBag));
   }
 
   const mentionsAvailability = gaillard.availabilityMention(text);
@@ -2529,105 +2660,127 @@ function gaillardLeadReply(conversation, text, seya, slots, extras = {}) {
     return delegate();
   }
 
-  if (handedOff) {
-    if (mentionsAvailability) {
-      return fixed(next, status, gaillard.preferenceReply());
+  // Pendant la qualification, les réponses au parcours passent avant FAQ / services.
+  if (!handedOff) {
+    const qualification = { ...merged };
+    const answer = String(text || "").trim().slice(0, 160);
+    if (
+      gaillard.lastSeyaAskedNeed(base) &&
+      !qualification.zone &&
+      !qualification.detail &&
+      !mentionsAvailability &&
+      gaillard.isAnswerLike(text)
+    ) {
+      qualification.detail = answer;
     }
-    if (asksOpenQuestion(text)) {
-      return fixed(
-        next,
-        status,
-        "Un expert ou une experte du centre pourra vous répondre en détail lors de votre échange 😊",
+    if (
+      gaillard.lastSeyaAskedTried(base) &&
+      !qualification.tried &&
+      (/^(oui|non)\b/.test(normalize(text)) ||
+        (!mentionsAvailability && gaillard.isAnswerLike(text)))
+    ) {
+      qualification.tried = answer;
+    }
+    if (
+      gaillard.lastSeyaAskedKilos(base) &&
+      !qualification.kilos &&
+      (/\d/.test(text) || (!mentionsAvailability && gaillard.isAnswerLike(text)))
+    ) {
+      qualification.kilos = answer;
+    }
+    const leadTexts = gaillardLeadTexts(base, text);
+    const nextQuestion = gaillardNextQuestion(family, qualification, leadTexts, seya);
+    const prefix = mentionsAvailability ? gaillard.preferenceNotedPrefix() : "";
+    const ask = (question) =>
+      ({
+        ...finishLeadReply(
+          next,
+          qualification,
+          status,
+          text,
+          [prefix, question].filter(Boolean).join(" "),
+          bookingState,
+        ),
+        shouldBook: null,
+      });
+
+    if (nextQuestion) {
+      return ask(
+        nextQuestion.step === "need" || nextQuestion.step === "axis" || prefix
+          ? nextQuestion.text
+          : `C’est noté. ${nextQuestion.text}`,
       );
     }
-    return fixed(next, status, gaillard.afterHandoffReply());
-  }
 
-  const qualification = { ...merged };
-  const answer = String(text || "").trim().slice(0, 160);
-  if (
-    gaillard.lastSeyaAskedNeed(base) &&
-    !qualification.zone &&
-    !qualification.detail &&
-    !mentionsAvailability &&
-    gaillard.isAnswerLike(text)
-  ) {
-    qualification.detail = answer;
-  }
-  if (
-    gaillard.lastSeyaAskedTried(base) &&
-    !qualification.tried &&
-    (/^(oui|non)\b/.test(normalize(text)) ||
-      (!mentionsAvailability && gaillard.isAnswerLike(text)))
-  ) {
-    qualification.tried = answer;
-  }
-  if (
-    gaillard.lastSeyaAskedKilos(base) &&
-    !qualification.kilos &&
-    (/\d/.test(text) || (!mentionsAvailability && gaillard.isAnswerLike(text)))
-  ) {
-    qualification.kilos = answer;
-  }
-  const leadTexts = gaillardLeadTexts(base, text);
-  const nextQuestion = gaillardNextQuestion(family, qualification, leadTexts, seya);
-  const prefix = mentionsAvailability ? gaillard.preferenceNotedPrefix() : "";
-  const ask = (question) =>
-    ({
+    next = {
+      ...next,
+      teamNotes: {
+        ...(next.teamNotes || {}),
+        family,
+        need: [
+          qualification.zone,
+          qualification.detail,
+          qualification.kilos ? `kilos : ${qualification.kilos}` : "",
+        ]
+          .filter(Boolean)
+          .join(" · "),
+        tried: qualification.tried || "",
+        handedOffAt: at,
+      },
+    };
+    return {
       ...finishLeadReply(
         next,
         qualification,
-        status,
+        "À recontacter",
         text,
-        [prefix, question].filter(Boolean).join(" "),
-        bookingState,
+        mentionsAvailability ? gaillard.preferenceReply() : gaillard.closingReply(family),
+        {
+          ...bookingState,
+          pendingQuestion: "callback",
+          appointmentStatus: "none",
+          callbackSlot: null,
+          lastOfferedSlots: [],
+        },
+        { proposedSlots: [] },
       ),
       shouldBook: null,
-    });
+      locked: true,
+    };
+  }
 
-  if (nextQuestion) {
-    return ask(
-      nextQuestion.step === "need" || nextQuestion.step === "axis" || prefix
-        ? nextQuestion.text
-        : `C’est noté. ${nextQuestion.text}`,
+  if (isServiceAsk(text)) {
+    const asked = askedServiceName(text) || "cette prestation";
+    return fixed(
+      base,
+      status,
+      gaillard.serviceOfferedReply(
+        serviceIsOffered(asked, seya),
+        phraseAskedService(asked),
+      ),
     );
   }
 
-  next = {
-    ...next,
-    teamNotes: {
-      ...(next.teamNotes || {}),
-      family,
-      need: [
-        qualification.zone,
-        qualification.detail,
-        qualification.kilos ? `kilos : ${qualification.kilos}` : "",
-      ]
-        .filter(Boolean)
-        .join(" · "),
-      tried: qualification.tried || "",
-      handedOffAt: at,
-    },
-  };
-  return {
-    ...finishLeadReply(
-      next,
-      qualification,
-      "À recontacter",
-      text,
-      mentionsAvailability ? gaillard.preferenceReply() : gaillard.closingReply(family),
-      {
-        ...bookingState,
-        pendingQuestion: "callback",
-        appointmentStatus: "none",
-        callbackSlot: null,
-        lastOfferedSlots: [],
-      },
-      { proposedSlots: [] },
-    ),
-    shouldBook: null,
-    locked: true,
-  };
+  const faq = faqReply(text, {
+    seya,
+    conversation: { ...base, qualification: merged },
+    centerProfile: profile,
+  });
+  if (faq) {
+    return fixed(base, status, faq);
+  }
+
+  if (isThanks(text, base) || isHesitation(text) || refusesSlots(text)) {
+    return delegate();
+  }
+
+  if (mentionsAvailability) {
+    return fixed(next, status, gaillard.preferenceReply());
+  }
+  if (asksOpenQuestion(text)) {
+    return fixed(next, status, gaillard.missingPracticalReply("cette précision"));
+  }
+  return fixed(next, status, gaillard.afterHandoffReply());
 }
 
 function lastOtherLeadText(conversation, current) {

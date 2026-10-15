@@ -149,7 +149,10 @@ export default function DashboardPage() {
   );
   const contactsToHandle = leads
     .filter((lead) => {
-      if (inactiveLeadStatuses.includes(lead.status)) {
+      if (
+        inactiveLeadStatuses.includes(lead.status) ||
+        lead.status === "Reviendra vers nous"
+      ) {
         return false;
       }
 

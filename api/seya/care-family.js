@@ -7,12 +7,12 @@ function normalizeCare(value) {
 }
 
 const FAMILY_TOKEN =
-  "epilation|laser|definitive|depil|aisselle|maillot|bikini|pilosit|visage|hydrafacial|acne|glow|fermete|rides?|taches?|cernes?|pores?|relachement|minceur|mincir|maigrir|cryo|ventre|poids|graisse|cellulite";
+  "epilation|epiler|epil|laser|definitive|depil|aisselle|maillot|bikini|pilosit|visage|hydrafacial|acne|glow|fermete|rides?|taches?|cernes?|pores?|relachement|minceur|mincir|maigrir|cryo|ventre|poids|graisse|cellulite";
 
 function familyFromToken(value) {
   const needle = normalizeCare(value);
   if (
-    /epilation|laser|definitive|depil|aisselle|maillot|bikini|pilosit/.test(
+    /epilation|\bepiler\b|\bepil\b|laser|definitive|depil|aisselle|maillot|bikini|pilosit/.test(
       needle,
     )
   ) {
@@ -38,7 +38,7 @@ function inferCareFamily(text) {
   }
 
   const wanted = needle.match(
-    /(?:(?:^| )(?:plutot|cest pour|je (?:veux|voudrais|cherche))|(?:^| )non pour)(?:\s+\w+){0,4}?\s+(?:pour |du |de la |des |le |la |un |une )?(?:le |la |l[' ]|les )?(visage|hydrafacial|minceur|cryo|laser|epilation|aisselle|maillot|peau)/,
+    /(?:(?:^| )(?:plutot|cest pour|je (?:veux|voudrais|cherche)|faire)|(?:^| )non pour)(?:\s+\w+){0,4}?\s+(?:pour |du |de la |des |le |la |un |une )?(?:le |la |l[' ]|les )?(visage|hydrafacial|minceur|cryo|laser|epilation|epiler|aisselle|maillot|peau)/,
   );
   if (wanted) {
     return familyFromToken(wanted[1]) || familyFromToken(needle);
@@ -548,6 +548,12 @@ function phraseAskedService(asked) {
   }
   if (/^(le |la |l'|les |un |une )/i.test(value)) {
     return value;
+  }
+  if (/^soins?\b/i.test(value)) {
+    return /^soins\b/i.test(value) ? `les ${value}` : `un ${value}`;
+  }
+  if (/^epilation\b/i.test(value)) {
+    return `l’${value}`;
   }
   return `le ${value}`;
 }

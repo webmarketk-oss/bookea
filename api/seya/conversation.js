@@ -751,9 +751,21 @@ function askedServiceName(text) {
     .replace(/\s+/g, " ")
     .trim();
   const match = value.match(
-    /(?:faites|proposez|offrez|avez)(?:[- ]vous)?(?: aussi)?(?: le | la | l'| les | de | du | des | un | une )(.+)$/,
+    /(?:faites|faisiez|proposez|offrez|avez)(?:[- ]vous)?(?: aussi)?(?: le | la | l'| les | de | du | des | un | une )(.+)$/,
   );
-  return String(match?.[1] || "")
+  if (match?.[1]) {
+    return String(match[1]).replace(/\s+/g, " ").trim();
+  }
+  const inverted = value.match(
+    /(?:le |la |l'|les |un |une |de l[' ]|de la |du |des )?(soins?(?: visage| minceur)?|epilation(?: laser| definitive)?|laser|minceur|visage|lumiere pulsee).{0,30}vous (?:faites|faisiez|proposez|avez|offrez)/,
+  );
+  if (inverted?.[1]) {
+    return String(inverted[1]).replace(/\s+/g, " ").trim();
+  }
+  const seen = value.match(
+    /j[' ]ai vu que vous (?:faisiez|faites|proposiez|proposez|aviez|avez)(?: aussi)?(?: le | la | l'| les | de | du | des | un | une )?(.+)$/,
+  );
+  return String(seen?.[1] || "")
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -763,8 +775,14 @@ function isServiceAsk(text) {
   if (askedServiceName(text)) {
     return true;
   }
-  return /est[- ]ce que vous (faites|proposez|avez|offrez)|vous (faites|proposez) (le |la |l'|les |un |une )/.test(
-    value,
+  return (
+    /est[- ]ce que vous (faites|faisiez|proposez|avez|offrez)|vous (faites|faisiez|proposez) (le |la |l'|les |un |une )/.test(
+      value,
+    ) ||
+    /(soin|soins|epilation|laser|minceur|visage|lumiere pulsee).{0,40}vous (faites|faisiez|proposez|avez|offrez)/.test(
+      value,
+    ) ||
+    /j[' ]ai vu que vous (faisiez|faites|propos)/.test(value)
   );
 }
 
