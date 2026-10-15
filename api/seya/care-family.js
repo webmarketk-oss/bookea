@@ -85,8 +85,8 @@ function understandThread(conversation, extraText) {
     .filter((item) => item.text);
   const latest = String(extraText || "").replace(/\s+/g, " ").trim();
   if (latest) {
-    const last = lines[lines.length - 1];
-    if (!(last?.author === "lead" && last.text === latest)) {
+    const lastLead = [...lines].reverse().find((item) => item.author !== "seya");
+    if (!(lastLead?.author === "lead" && lastLead.text === latest)) {
       lines.push({ author: "lead", text: latest });
     }
   }
@@ -539,6 +539,15 @@ function serviceIsOffered(asked, seya) {
   );
 }
 
+const SERVICE_ACCENTS = [
+  [/\bepilation\b/g, "épilation"],
+  [/\bdefinitive\b/g, "définitive"],
+  [/\blumiere pulsee\b/g, "lumière pulsée"],
+  [/\belectrolyse\b/g, "électrolyse"],
+  [/\bradiofrequence\b/g, "radiofréquence"],
+  [/\bmesotherapie\b/g, "mésothérapie"],
+];
+
 function phraseAskedService(asked) {
   const value = String(asked || "")
     .replace(/\s+/g, " ")
@@ -546,16 +555,20 @@ function phraseAskedService(asked) {
   if (!value) {
     return "cette prestation";
   }
+  const spelled = SERVICE_ACCENTS.reduce(
+    (label, [pattern, accented]) => label.replace(pattern, accented),
+    value,
+  );
   if (/^(le |la |l'|les |un |une )/i.test(value)) {
-    return value;
+    return spelled;
   }
   if (/^soins?\b/i.test(value)) {
-    return /^soins\b/i.test(value) ? `les ${value}` : `un ${value}`;
+    return /^soins\b/i.test(value) ? `les ${spelled}` : `un ${spelled}`;
   }
   if (/^epilation\b/i.test(value)) {
-    return `l’${value}`;
+    return `l’${spelled}`;
   }
-  return `le ${value}`;
+  return `le ${spelled}`;
 }
 
 function serviceOfferReply(text, seya) {

@@ -1,3 +1,5 @@
+const { findFacts } = require("./brief-facts");
+
 const GAILLARD_NAME = "JFG Clinic Gaillard";
 const GAILLARD_VISIT_MINUTES = { minceur: 90 };
 
@@ -75,62 +77,73 @@ function lastSeyaAskedPath(conversation) {
   );
 }
 
-function pickBriefSentences(sources, pattern, limit = 3) {
-  const blob = sources.map((item) => String(item || "").trim()).filter(Boolean).join("\n");
-  return blob
-    .split(/(?<=[.!?])\s+|\n+|;\s+/)
-    .map((item) => item.trim())
-    .filter((sentence) => sentence && pattern.test(normalize(sentence)))
-    .slice(0, limit);
+function pathQuestion() {
+  return "Souhaitez-vous que je fasse remonter votre demande pour un bilan minceur offert avec un expert du centre ?";
 }
 
-/**
- * Après la question régimes : on s’appuie sur la fiche minceur (appli, rééquilibrage,
- * compléments, bilan) et on pose une question pour poursuivre — sans clôturer.
- */
-function minceurPathReply(sources = [], pricing = {}) {
-  const support = pickBriefSentences(
+const SUPPORT_TOPICS = [
+  /appli|application/,
+  /complement|physio/,
+  /reequilibrage|aliment|nutrition|regime|coaching/,
+];
+
+/** Accompagnement minceur de la fiche (rééquilibrage, application, compléments), sans question. */
+function minceurPathFacts(sources = [], pricing = {}) {
+  const support = findFacts(
     sources,
     /reequilibrage|aliment|nutrition|application|appli|complement|physio|suivi/,
     3,
   );
-  const offer = pickBriefSentences(
-    sources,
-    /bilan|decouverte|analyse corporelle|protocole|offert|gratuit/,
-    2,
-  );
-  const tech = pickBriefSentences(
-    sources,
-    /cryolipolyse|radiofrequ|ultrasons|appareil|technologie|machine/,
-    1,
-  );
-  const parts = [...support];
-  for (const sentence of [...offer, ...tech]) {
-    if (!parts.includes(sentence)) {
-      parts.push(sentence);
-    }
+  if (!support.length && /offert|gratuit/i.test(String(pricing?.bilan || ""))) {
+    return "Le bilan minceur est offert.";
   }
-  const bilanHint = /offert|gratuit/i.test(String(pricing?.bilan || ""))
-    ? "Le bilan minceur est offert."
-    : "";
-  if (!parts.length && bilanHint) {
-    parts.push(
-      `${bilanHint} On y fait le point sur vos objectifs, le protocole adapté, et l’accompagnement (dont le suivi alimentaire si prévu au centre).`,
-    );
-  }
-  if (!parts.length) {
-    parts.push(
-      "Ensuite, on vous propose un bilan pour voir la solution adaptée à votre besoin, avec l’accompagnement prévu au centre.",
-    );
-  }
-  parts.push(
-    "Souhaitez-vous que je fasse remonter votre demande pour un bilan minceur offert avec un expert du centre ?",
+  return support.join(" ");
+}
+
+/** Faits de la fiche sur le sujet précis de la question (application, compléments, alimentation). */
+function supportTopicFacts(text, sources = []) {
+  const value = normalize(text);
+  const topic = SUPPORT_TOPICS.find((pattern) => pattern.test(value));
+  return topic ? findFacts(sources, topic, 2).join(" ") : "";
+}
+
+/** Après la question régimes : faits de la fiche minceur puis proposition du bilan, sans clôturer. */
+function minceurPathReply(sources = [], pricing = {}) {
+  const facts = minceurPathFacts(sources, pricing);
+  return [facts, pathQuestion()].filter(Boolean).join(" ");
+}
+
+/** Refus explicite de poursuivre l’échange, quelle que soit la question posée. */
+function refusesToContinue(text) {
+  const value = normalize(text);
+  return (
+    value.length <= 140 &&
+    /je ne (veux|souhaite) pas (continuer|aller plus loin|repondre|de bilan|le bilan|etre rappelee?)|pas envie de (continuer|repondre)|je ne suis pas interess|je prefere (en rester la|arreter)/.test(
+      value,
+    )
   );
-  return parts.join(" ");
+}
+
+/** Réponse négative à la proposition de bilan. */
+function declinesOffer(text) {
+  const value = normalize(text);
+  return (
+    refusesToContinue(text) ||
+    (value.length <= 140 &&
+      /^(non|nan|bof|pas (pour )?(le moment|maintenant|tout de suite|besoin|interess)|ca ira|je prefere (pas|ne pas)|plus tard)\b/.test(
+        value,
+      ))
+  );
+}
+
+function declinedReply(family) {
+  return family === "minceur"
+    ? "Très bien, je n’insiste pas 😊 Si vous avez une question sur le parcours minceur, ou si vous changez d’avis pour le bilan offert, je suis là."
+    : "Très bien, je n’insiste pas 😊 Si vous avez une question sur le soin, je suis là.";
 }
 
 function modalityReply() {
-  return "Les modalités du soin vous seront expliquées au centre. Un expert ou une experte pourra également répondre à cette question lors de votre échange.";
+  return "Je n’ai pas cette précision dans la fiche du soin. Je peux la vérifier auprès de l’équipe si vous le souhaitez.";
 }
 
 function identityReply() {
@@ -164,8 +177,10 @@ function durationReply(family, text = "") {
   return "Le bilan et la séance découverte durent environ 1 h 30 au total. La séance découverte seule dure environ 20 minutes.";
 }
 
-function bookingCapabilityReply() {
-  return "Je ne peux pas bloquer un créneau moi-même : la réservation se fait avec l’équipe. Un expert ou une experte du centre vous rappellera pour convenir de votre rendez-vous.";
+function bookingCapabilityReply(handedOff = false) {
+  return handedOff
+    ? "Je ne peux pas bloquer un créneau moi-même : votre demande est déjà chez l’équipe, un expert ou une experte du centre vous rappellera pour convenir de votre rendez-vous."
+    : "Je ne peux pas bloquer un créneau moi-même : c’est l’équipe qui organise le rendez-vous, après un court échange avec vous.";
 }
 
 function countryReply(address, centerName) {
@@ -230,15 +245,9 @@ function asksChildCompanion(text) {
 }
 
 function processReply(family, sources = []) {
-  const blob = sources.map((item) => String(item || "").trim()).filter(Boolean).join(" ");
-  const sentences = blob
-    .split(/(?<=[.!?])\s+|\n+/)
-    .map((item) => item.trim())
-    .filter((sentence) =>
-      /deroule|consiste|bilan|analyse|decouverte|protocole|etape/.test(normalize(sentence)),
-    );
-  if (sentences[0]) {
-    return sentences[0];
+  const found = findFacts(sources, /deroule|consiste|bilan|analyse|decouverte|protocole|etape/, 2);
+  if (found.length) {
+    return found.join(" ");
   }
   if (family === "minceur") {
     return "Le bilan commence par une analyse corporelle, puis une séance découverte. On vous explique ensuite le protocole adapté à vos objectifs et un devis personnalisé.";
@@ -249,47 +258,32 @@ function processReply(family, sources = []) {
   if (family === "visage") {
     return "Le diagnostic visage permet de faire le point sur la peau, puis de vous proposer un protocole adapté.";
   }
-  return "Le déroulement exact dépend de la prestation : l’équipe vous l’explique lors de votre échange.";
+  return "Je n’ai pas le déroulement détaillé dans la fiche du soin. Je peux le vérifier auprès de l’équipe si vous le souhaitez.";
 }
 
 function technologyReply(text, sources = []) {
-  const value = normalize(text);
-  const blob = sources.map((item) => String(item || "").trim()).filter(Boolean).join("\n");
-  const sentences = blob
-    .split(/(?<=[.!?])\s+|\n+|;\s+|\s+[-–—]\s+/)
-    .map((item) => item.trim())
-    .filter(Boolean);
-  if (/lumiere pulsee/.test(value)) {
-    const found = sentences.find((sentence) =>
-      /lumiere pulsee|ipl|laser/.test(normalize(sentence)),
+  if (/lumiere pulsee/.test(normalize(text))) {
+    const found = findFacts(sources, /lumiere pulsee|ipl|laser/, 1)[0];
+    return (
+      found ||
+      "Je n’ai pas dans la fiche si l’épilation du centre est en lumière pulsée ou en laser. Je peux le vérifier auprès de l’équipe si vous le souhaitez."
     );
-    if (found) {
-      return found;
-    }
-    return "Je n’ai pas en fiche si l’épilation du centre est en lumière pulsée ou en laser. L’équipe pourra vous le confirmer.";
   }
-  const techPattern =
-    /technologie|machine|appareil|equipement|laser|cryo|radiofrequ|ultrasons|ipl|lumiere pulsee/;
-  const tech = sentences.find((sentence) => techPattern.test(normalize(sentence)));
-  if (tech) {
-    return tech;
-  }
-  if (techPattern.test(normalize(blob))) {
-    return blob.split(/\n+/).map((item) => item.trim()).filter(Boolean)[0] || blob.trim();
-  }
-  return "Je n’ai pas la liste des machines renseignée pour ce centre. L’équipe pourra vous préciser les technologies utilisées.";
+  const found = findFacts(
+    sources,
+    /technologie|machine|appareil|equipement|laser|cryo|radiofrequ|ultrasons|ipl|lumiere pulsee/,
+    2,
+  );
+  return found.length
+    ? found.join(" ")
+    : "Je n’ai pas la liste des appareils dans la fiche du centre. Je peux la vérifier auprès de l’équipe si vous le souhaitez.";
 }
 
 function childCompanionReply(sources = []) {
-  const blob = sources.map((item) => String(item || "").trim()).filter(Boolean).join("\n");
-  const found = blob
-    .split(/(?<=[.!?])\s+|\n+/)
-    .map((item) => item.trim())
-    .find((sentence) => /enfant|accompagn|bebe/.test(normalize(sentence)));
-  if (found) {
-    return found;
-  }
-  return "Je n’ai pas cette consigne en fiche. L’équipe pourra vous confirmer si vous pouvez venir avec votre enfant.";
+  return (
+    findFacts(sources, /enfant|bebe/, 1)[0] ||
+    "Je n’ai pas cette information dans la fiche du centre. Je peux vérifier auprès de l’équipe si vous pouvez venir avec votre enfant."
+  );
 }
 
 function serviceOfferedReply(offered, askedLabel) {
@@ -302,7 +296,7 @@ function serviceOfferedReply(offered, askedLabel) {
 
 function missingPracticalReply(topic) {
   const label = String(topic || "cette information").trim();
-  return `Je n’ai pas ${label} en fiche pour le centre. L’équipe pourra vous le confirmer lors de votre échange.`;
+  return `Je n’ai pas ${label} dans la fiche du centre. Je peux la vérifier auprès de l’équipe si vous le souhaitez.`;
 }
 
 function needQuestion(family, missing = "") {
@@ -322,6 +316,24 @@ function needQuestion(family, missing = "") {
     return "Qu’est-ce qui vous préoccupe au niveau de votre peau, et qu’attendez-vous du soin ?";
   }
   return "Vous cherchez plutôt un soin minceur, un soin visage ou une épilation ?";
+}
+
+const QUESTION_REPHRASED = {
+  "Quel est votre objectif pour ce soin minceur ?":
+    "Et pour ces zones, que recherchez-vous surtout : perdre du poids, affiner, raffermir ?",
+  "Quelles zones aimeriez-vous travailler ?": "Sur quelles zones aimeriez-vous agir en priorité ?",
+  "Quel est votre objectif, et quelles zones aimeriez-vous travailler ?":
+    "Que recherchez-vous surtout, et sur quelles zones ?",
+  "Quelles zones souhaitez-vous traiter ?": "Quelles autres zones aimeriez-vous traiter, le cas échéant ?",
+};
+
+/** Évite d’envoyer deux fois de suite exactement la même question. */
+function varyQuestion(question, previousSeyaText) {
+  const asked = String(question || "").trim();
+  if (normalize(asked) !== normalize(previousSeyaText)) {
+    return asked;
+  }
+  return QUESTION_REPHRASED[asked] || asked;
 }
 
 function triedQuestion(family) {
@@ -427,17 +439,7 @@ function validatedModality(text, sources) {
     return "";
   }
   const pattern = MODALITY_TOPICS.find(([name]) => name === topic)[1];
-  for (const source of sources) {
-    const sentences = String(source || "")
-      .split(/(?<=[.!?])\s+|\n+/)
-      .map((item) => item.trim())
-      .filter(Boolean);
-    const found = sentences.find((sentence) => pattern.test(normalize(sentence)));
-    if (found) {
-      return found;
-    }
-  }
-  return "";
+  return findFacts(sources, pattern, 1)[0] || "";
 }
 
 function asksIfAi(text, isIdentityQuestion) {
@@ -563,6 +565,8 @@ module.exports = {
   childCompanionReply,
   closingReply,
   countryReply,
+  declinedReply,
+  declinesOffer,
   durationReply,
   expertLabel,
   healthNotedReply,
@@ -576,22 +580,27 @@ module.exports = {
   lastSeyaAskedPath,
   lastSeyaAskedTried,
   looksLikeHandoffClose,
+  minceurPathFacts,
   minceurPathReply,
   missingPracticalReply,
   missingPriceReply,
   modalityReply,
   modalityTopic,
   needQuestion,
+  pathQuestion,
   preferenceNotedPrefix,
   preferenceReply,
   processReply,
   promoSentence,
   promptRules,
+  refusesToContinue,
   relanceText,
   safeGaillardText,
   serviceOfferedReply,
+  supportTopicFacts,
   technologyReply,
   triedQuestion,
   validatedModality,
+  varyQuestion,
   withPreference,
 };

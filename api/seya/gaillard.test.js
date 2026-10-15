@@ -278,8 +278,9 @@ test("Gaillard : pantalon et modalités non renseignées, réponse prudente", as
   conversation = await say(conversation, "Est-ce que je peux garder mon pantalon ?");
   assert.equal(
     lastSeya(conversation),
-    "Les modalités du soin vous seront expliquées au centre. Un expert ou une experte pourra également répondre à cette question lors de votre échange.",
+    "Je n’ai pas cette précision dans la fiche du soin. Je peux la vérifier auprès de l’équipe si vous le souhaitez. Quelles zones souhaitez-vous traiter ?",
   );
+  assert.equal(conversation.teamNotes?.handedOffAt, undefined);
 });
 
 test("Gaillard : modalité validée dans la fiche du soin, elle est reprise telle quelle", async () => {
@@ -293,7 +294,10 @@ test("Gaillard : modalité validée dans la fiche du soin, elle est reprise tell
   };
   let conversation = open("Soin minceur", GAILLARD, withTenue);
   conversation = await say(conversation, "Je dois venir en jupe ou en pantalon ?", GAILLARD, withTenue);
-  assert.equal(lastSeya(conversation), "Un short jetable est fourni pour la séance.");
+  assert.equal(
+    lastSeya(conversation),
+    "Un short jetable est fourni pour la séance. Quel est votre objectif, et quelles zones aimeriez-vous travailler ?",
+  );
 });
 
 test("Gaillard : bilan et découverte minceur, environ 1 h 30 au total, découverte ~20 min", async () => {
@@ -331,16 +335,16 @@ test("Gaillard épilation : tarif de la fiche + mention des promotions", async (
 test("Gaillard : question IA, réponse transparente", async () => {
   let conversation = open("Soin visage");
   conversation = await say(conversation, "Vous êtes une IA ?");
-  assert.equal(
+  assert.match(
     lastSeya(conversation),
-    "Je suis Seya, l’assistante virtuelle du centre JFG Clinic Gaillard 😊 Je recueille les informations sur votre demande, puis un expert ou une experte du centre vous rappelle pour vous accompagner.",
+    /^Je suis Seya, l’assistante virtuelle du centre JFG Clinic Gaillard 😊 .* Qu’est-ce qui vous préoccupe au niveau de votre peau/,
   );
 });
 
 test("Gaillard : adresse du centre uniquement, pas de distance ni d’autre centre", async () => {
   let conversation = open("Soin minceur");
   conversation = await say(conversation, "Où se trouve le centre ?");
-  assert.equal(lastSeya(conversation), "Nous sommes au 58 rue de la Libération, 74240 Gaillard.");
+  assert.match(lastSeya(conversation), /^Nous sommes au 58 rue de la Libération, 74240 Gaillard\. /);
   conversation = await say(conversation, "J'habite à Annemasse");
   assert.doesNotMatch(lastSeya(conversation), NO_PLANNING);
   assert.doesNotMatch(lastSeya(conversation), /centre à|autre centre/i);
@@ -489,4 +493,102 @@ test("Centre en mode prise de rendez-vous : une demande de créneau reste active
   });
   assert.match(lastSeya(result.conversation), /jeudi|créneau|disponible|propose/i);
   assert.notEqual(result.conversation.status, "À recontacter");
+});
+
+const STRUCTURED_MINCEUR = `ACCUEIL ET BESOINS
+Demande l'objectif et les zones à travailler.
+RÉGIMES
+Pose la question des régimes déjà essayés. « J'ai fait plusieurs régimes sans résultat » répond déjà à la question.
+ACCOMPAGNEMENT
+Le centre propose un rééquilibrage alimentaire avec un coaching personnalisé.
+Le suivi se fait sur une application, entre les séances.
+Des compléments alimentaires Physiomins peuvent être proposés selon les besoins, sans obligation.
+BILAN ET TECHNOLOGIES
+Les technologies proposées au centre.
+- Cryolipolyse
+- Radiofréquence
+Le bilan minceur complet et la séance découverte sont offerts.`;
+
+const structured = {
+  ...seya,
+  treatmentBriefs: seya.treatmentBriefs.map((item) =>
+    /minceur/i.test(item.name) ? { ...item, brief: STRUCTURED_MINCEUR } : item,
+  ),
+};
+const LEAK = /BILAN ET TECHNOLOGIES|répond déjà|«|»|C’est noté/;
+
+async function sayAll(turns, settings = structured) {
+  let conversation = open("Soin minceur", GAILLARD, settings);
+  for (const text of turns) {
+    conversation = await say(conversation, text, GAILLARD, settings);
+    assert.doesNotMatch(lastSeya(conversation), LEAK, `« ${text} » → ${lastSeya(conversation)}`);
+  }
+  return conversation;
+}
+
+test("Gaillard : conversation de la capture, sans consigne recopiée ni rappel sur une question", async () => {
+  let conversation = await sayAll([
+    "Je veux perdre du poids sur mon ventre",
+    "10 kilos ça sera déjà bien",
+    "Non enfin juste régime",
+  ]);
+  assert.match(lastSeya(conversation), /rééquilibrage alimentaire.*application.*Physiomins/);
+  assert.match(lastSeya(conversation), /bilan minceur offert.*\?$/);
+  conversation = await say(conversation, "Et vous faites l'épilation laser", GAILLARD, structured);
+  assert.match(lastSeya(conversation), /^Oui, nous proposons l’épilation laser\./);
+  assert.match(lastSeya(conversation), /bilan minceur offert.*\?$/);
+  assert.equal(conversation.status, "Qualifié");
+  assert.equal(conversation.teamNotes?.handedOffAt, undefined);
+});
+
+test("Gaillard : question appareil pendant la qualification, réponse de la fiche puis question en attente", async () => {
+  const conversation = await sayAll([
+    "Je veux perdre du poids sur mon ventre",
+    "Quel appareil utilisez-vous pour la minceur ?",
+  ]);
+  assert.equal(
+    lastSeya(conversation),
+    "Les technologies proposées au centre : cryolipolyse, radiofréquence. Combien de kilos aimeriez-vous perdre ?",
+  );
+  assert.equal(conversation.teamNotes?.handedOffAt, undefined);
+});
+
+test("Gaillard : changement de sujet, réponse puis reprise du parcours sans perdre l’acquis", async () => {
+  const conversation = await sayAll([
+    "Je veux perdre du poids sur mon ventre",
+    "10 kilos ça sera déjà bien",
+    "Au fait c'est où exactement le centre ?",
+  ]);
+  assert.match(lastSeya(conversation), /^Nous sommes au 58 rue de la Libération.*déjà testé une solution/);
+  assert.doesNotMatch(lastSeya(conversation), /kilos|zones/);
+});
+
+test("Gaillard : refus de poursuivre, pas de transmission ni de relance de questions", async () => {
+  let conversation = await sayAll([
+    "Je veux perdre du poids sur mon ventre",
+    "Je ne veux pas répondre à toutes ces questions",
+  ]);
+  assert.match(lastSeya(conversation), /je n’insiste pas/);
+  assert.equal(conversation.teamNotes?.handedOffAt, undefined);
+  conversation = await say(conversation, "Vous utilisez quels appareils ?", GAILLARD, structured);
+  assert.equal(lastSeya(conversation), "Les technologies proposées au centre : cryolipolyse, radiofréquence.");
+  assert.notEqual(conversation.status, "À recontacter");
+});
+
+test("Gaillard : une rédaction IA qui annonce un rappel non déclenché est rejetée", async () => {
+  process.env.OPENAI_API_KEY = "test-key";
+  aiReply = "Je comprends ! Une experte vous rappellera très vite pour en parler.";
+  try {
+    const conversation = await sayAll([
+      "Je veux perdre du poids sur mon ventre",
+      "10 kilos",
+      "Juste des régimes",
+    ]);
+    assert.doesNotMatch(lastSeya(conversation), /rappellera/);
+    assert.match(lastSeya(conversation), /bilan minceur offert.*\?$/);
+    assert.equal(conversation.teamNotes?.handedOffAt, undefined);
+  } finally {
+    delete process.env.OPENAI_API_KEY;
+    aiReply = "";
+  }
 });

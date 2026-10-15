@@ -315,10 +315,15 @@ async function generateCoreReply({
       bookingState,
       draft,
     });
+    // Une transmission n’est annoncée que si les règles l’ont réellement déclenchée.
+    if (announcesHandoff(polished) && !announcesHandoff(draft)) {
+      return { ...settled, via: "rules" };
+    }
     if (
       gaillard.isGaillardCenter(centerName) &&
       (gaillard.breaksGaillardRules(polished) ||
         gaillard.changesStep(draft, polished) ||
+        (String(draft || "").includes("?") && !String(polished || "").includes("?")) ||
         // Interdit d’annoncer un rappel/transfert si les règles n’ont pas clos la qualification.
         (gaillard.looksLikeHandoffClose(polished) &&
           !conversationWithState?.teamNotes?.handedOffAt &&
@@ -334,6 +339,13 @@ async function generateCoreReply({
     console.error("[seya/ai]", error);
     return { ...settled, via: "rules" };
   }
+}
+
+const HANDOFF_ANNOUNCE =
+  /rappellera|recontactera|vous recontacter|reprendra avec vous|je (le |la |vous )?transmets|je fais remonter|transmis (a|à) l['’]équipe|transmise (a|à) l['’]équipe/i;
+
+function announcesHandoff(text) {
+  return HANDOFF_ANNOUNCE.test(String(text || ""));
 }
 
 function isBriefClosing(draft, seya, conversation, text) {
@@ -372,7 +384,6 @@ async function polishSeyaText({
     pricePolicy?.discovery ? `Découverte : ${pricePolicy.discovery}` : "",
     pricePolicy?.session ? `Séance : ${pricePolicy.session}` : "",
     pricePolicy?.package ? `Forfait : ${pricePolicy.package}` : "",
-    brief ? `Consignes prestation : ${String(brief).slice(0, 500)}` : "",
   ]
     .filter(Boolean)
     .join(" · ");
@@ -388,6 +399,10 @@ async function polishSeyaText({
       role: item.author === "lead" ? "user" : "assistant",
       content: String(item.text || "").slice(0, 500),
     }));
+  const lastTurn = history[history.length - 1];
+  if (text && !(lastTurn?.role === "user" && lastTurn.content === String(text).slice(0, 500))) {
+    history.push({ role: "user", content: String(text).slice(0, 500) });
+  }
 
   const response = await client.chat.completions.create({
     model: seyaModel(),
@@ -409,15 +424,14 @@ async function polishSeyaText({
           bookingState,
         }),
       },
-      ...history,
       {
-        role: "user",
+        role: "system",
         content: [
-          `Dernier message de la cliente : ${String(text || "").slice(0, 800)}`,
           threadContext(conversation, text, thread),
           `Faits Bookea autorisés (à utiliser, pas à recopier mot pour mot) : ${String(draft || "").slice(0, 700)}`,
         ].join("\n"),
       },
+      ...history,
     ],
   });
 
@@ -458,7 +472,7 @@ function polishPrompt({
   return [
     "Tu es Seya, au standard WhatsApp. Chaleureuse, naturelle, claire, vouvoiement. Tu parles comme une réceptionniste au téléphone, 1 à 3 phrases.",
     brief
-      ? `Consignes du centre pour ce soin (prioritaires sur les règles générales ci-dessous ; seuls les faits, prix, créneaux et la santé restent cadrés par Bookea) : ${brief}`
+      ? `Consignes du centre pour ce soin (prioritaires sur les règles générales ci-dessous ; seuls les faits, prix, créneaux et la santé restent cadrés par Bookea). Elles te sont adressées : tu t’en sers pour rédiger, sans en recopier les titres, les instructions ni les phrases d’exemple, qui ne sont jamais des propos du prospect.\n${brief}`
       : "",
     closing
       ? `Quand tu conclus l’échange, ta dernière phrase est exactement : « ${closing} ». Cette conclusion remplace toute autre formule de fin (opératrice, conseillère, experte).`
@@ -517,7 +531,9 @@ function polishPrompt({
     careUrl
       ? `Lien du soin (seulement si on te le demande, jamais dans le premier message) : ${careUrl}`
       : "",
-    centerBrief ? `Consignes du centre : ${centerBrief}` : "",
+    centerBrief
+      ? `Consignes générales du centre (adressées à toi, à ne pas recopier) :\n${centerBrief}`
+      : "",
     centerCard
       ? `Fiche de CE centre uniquement (jamais JFG Clinic ni un autre établissement) :\n${centerCard}`
       : "Aucune fiche centre : tu ne parles que du nom et de l’adresse fournis. Interdit d’inventer une enseigne, un parking, un concept ou une autre clinique.",
