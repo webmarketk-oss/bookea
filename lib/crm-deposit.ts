@@ -29,7 +29,7 @@ export const DEPOSIT_REMINDER_LABELS: Record<DepositReminderIndex, string> = {
   4: "Relance acompte 4",
 };
 
-export function emptyDepositReminders(): Lead["depositReminders"] {
+export function emptyDepositReminders(): NonNullable<Lead["depositReminders"]> {
   return { 1: "", 2: "", 3: "", 4: "" };
 }
 
