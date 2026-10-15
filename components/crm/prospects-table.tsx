@@ -10,6 +10,11 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { AdaptiveSelect } from "@/components/ui/adaptive-select";
+import {
+  DEPOSIT_REMINDER_INDEXES,
+  DEPOSIT_REMINDER_LABELS,
+  toDatetimeLocalValue,
+} from "@/lib/crm-deposit";
 import { isOpenReminderDue, toDateOnlyIso } from "@/lib/crm-stats";
 import { leadOfferLabel } from "@/lib/lead-offer";
 import {
@@ -46,6 +51,13 @@ interface ProspectsTableProps {
   onCommercialChange: (leadId: string, commercial: string) => void;
   commercialOptions?: string[];
   whatsApp?: ProspectsWhatsApp;
+  /** Colonnes Relance acompte 1–4 (onglet Gestion des acomptes). */
+  showDepositReminders?: boolean;
+  onDepositReminderChange?: (
+    leadId: string,
+    index: 1 | 2 | 3 | 4,
+    datetimeLocal: string,
+  ) => void;
 }
 
 export type ProspectsWhatsApp = {
@@ -67,6 +79,8 @@ export default function ProspectsTable({
   onCommercialChange,
   commercialOptions = [],
   whatsApp,
+  showDepositReminders = false,
+  onDepositReminderChange,
 }: ProspectsTableProps) {
   const [commentsOpen, setCommentsOpen] = useState(true);
   const [dateSort, setDateSort] = useState<"desc" | "asc">("desc");
@@ -131,6 +145,16 @@ export default function ProspectsTable({
               </button>
             </TableHead>
             <TableHead>Rappel</TableHead>
+            {showDepositReminders
+              ? DEPOSIT_REMINDER_INDEXES.map((index) => (
+                  <TableHead
+                    key={`deposit-head-${index}`}
+                    className="w-[11rem] min-w-[11rem]"
+                  >
+                    {DEPOSIT_REMINDER_LABELS[index]}
+                  </TableHead>
+                ))
+              : null}
             <TableHead className="w-[9.25rem] min-w-[9.25rem]">Statut</TableHead>
             {whatsApp ? (
               <TableHead className="w-[15rem] min-w-[15rem]">Dernier WhatsApp</TableHead>
@@ -271,6 +295,29 @@ export default function ProspectsTable({
                   )}
                 />
               </TableCell>
+
+              {showDepositReminders
+                ? DEPOSIT_REMINDER_INDEXES.map((index) => (
+                    <TableCell key={`${lead.id}-deposit-${index}`}>
+                      <input
+                        type="datetime-local"
+                        aria-label={DEPOSIT_REMINDER_LABELS[index]}
+                        value={toDatetimeLocalValue(
+                          lead.depositReminders?.[index],
+                        )}
+                        onClick={(event) => event.stopPropagation()}
+                        onChange={(event) =>
+                          onDepositReminderChange?.(
+                            lead.id,
+                            index,
+                            event.target.value,
+                          )
+                        }
+                        className="h-8 w-[10.5rem] shrink-0 rounded-lg border border-slate-200 bg-white px-1.5 text-[11px] font-semibold outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                      />
+                    </TableCell>
+                  ))
+                : null}
 
               <TableCell>
                 <AdaptiveSelect

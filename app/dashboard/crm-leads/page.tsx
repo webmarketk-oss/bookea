@@ -35,10 +35,18 @@ import {
   saveCrmLeadsSnapshot,
   setCrmLeadImportOrigin,
   updateCrmLeadAmount,
+  updateCrmLeadDepositReminder,
   updateCrmLeadDetails,
   updateCrmLeadReminder,
   updateCrmLeadStatus,
 } from "@/lib/crm-supabase";
+import {
+  fromDatetimeLocalValue,
+  isDepositManagedLead,
+  matchesDepositPhaseFilter,
+  type DepositPhaseFilter,
+  type DepositReminderIndex,
+} from "@/lib/crm-deposit";
 import { syncBirthdaySms } from "@/lib/send-sms";
 import {
   APPOINTMENT_STATUS_UPDATED_EVENT,
@@ -82,7 +90,7 @@ const emptyLeadForm = {
   reminderDate: "",
 };
 
-type CRMTab = "prospects" | "imports" | "kpi";
+type CRMTab = "prospects" | "imports" | "deposits" | "kpi";
 type KpiScope = "campaigns" | "imports";
 type FicheBox = {
   top: number;
@@ -201,6 +209,8 @@ export default function CRMLeadsPage() {
   );
   const [newLeadForm, setNewLeadForm] = useState(emptyLeadForm);
   const [activeTab, setActiveTab] = useState<CRMTab>("prospects");
+  const [depositPhaseFilter, setDepositPhaseFilter] =
+    useState<DepositPhaseFilter>("Tous");
   const [kpiScope, setKpiScope] = useState<KpiScope>("campaigns");
   const [quickDateFilter, setQuickDateFilter] =
     useState<QuickDateFilter>("Tous");
@@ -512,11 +522,20 @@ export default function CRMLeadsPage() {
     () => leadList.filter((lead) => lead.imported),
     [leadList],
   );
+  const depositLeads = useMemo(
+    () => leadList.filter((lead) => isDepositManagedLead(lead)),
+    [leadList],
+  );
   const importCandidates = useMemo(
     () => campaignLeads.filter((lead) => lead.importCandidate),
     [campaignLeads],
   );
-  const scopeLeads = activeTab === "imports" ? importedLeads : campaignLeads;
+  const scopeLeads =
+    activeTab === "imports"
+      ? importedLeads
+      : activeTab === "deposits"
+        ? depositLeads
+        : campaignLeads;
   const selectedLead =
     scopeLeads.find((lead) => lead.id === selectedLeadId) ??
     scopeLeads[0] ??
@@ -613,6 +632,9 @@ export default function CRMLeadsPage() {
       filters.updatedFrom,
       filters.updatedTo
     );
+    const matchesDepositPhase =
+      activeTab !== "deposits" ||
+      matchesDepositPhaseFilter(lead, depositPhaseFilter);
 
     return (
       matchesSearch &&
@@ -622,7 +644,8 @@ export default function CRMLeadsPage() {
       matchesCampaign &&
       matchesQuickDate &&
       matchesCreatedDate &&
-      matchesUpdatedDate
+      matchesUpdatedDate &&
+      matchesDepositPhase
     );
   });
 
@@ -801,6 +824,16 @@ export default function CRMLeadsPage() {
           ...lead,
           status,
           reminderDate: nextReminder,
+          depositTracked:
+            lead.depositTracked ||
+            status === "Acompte envoyé" ||
+            status === "Acompte en attente" ||
+            status === "Acompte reçu" ||
+            lead.status === "Acompte envoyé" ||
+            lead.status === "Acompte en attente" ||
+            lead.status === "Acompte reçu"
+              ? true
+              : lead.depositTracked,
           activityLog: [
             {
               id: crypto.randomUUID(),
@@ -1007,6 +1040,43 @@ export default function CRMLeadsPage() {
         error instanceof Error
           ? error.message
           : "La date de rappel n'a pas pu être enregistrée."
+      );
+      await refreshCrmLeads();
+    }
+  }
+
+  async function handleDepositReminderChange(
+    leadId: string,
+    index: DepositReminderIndex,
+    datetimeLocal: string,
+  ) {
+    const isoDatetime = fromDatetimeLocalValue(datetimeLocal);
+    setLeadList((currentLeads) =>
+      currentLeads.map((lead) =>
+        lead.id === leadId
+          ? {
+              ...lead,
+              depositTracked: true,
+              depositReminders: {
+                ...(lead.depositReminders || {}),
+                [index]: isoDatetime,
+              },
+              updatedDate: todayIso(),
+            }
+          : lead,
+      ),
+    );
+
+    try {
+      await trackSave(() =>
+        updateCrmLeadDepositReminder(leadId, index, isoDatetime),
+      );
+      setCrmNotice(`Relance acompte ${index} enregistrée.`);
+    } catch (error) {
+      setCrmError(
+        error instanceof Error
+          ? error.message
+          : "La relance acompte n'a pas pu être enregistrée.",
       );
       await refreshCrmLeads();
     }
@@ -1394,6 +1464,16 @@ export default function CRMLeadsPage() {
             {importedLeads.length > 0 ? ` (${importedLeads.length})` : ""}
           </CRMTabButton>
           <CRMTabButton
+            active={activeTab === "deposits"}
+            onClick={() => {
+              setActiveTab("deposits");
+              setIsLeadDetailsOpen(false);
+            }}
+          >
+            Gestion des acomptes
+            {depositLeads.length > 0 ? ` (${depositLeads.length})` : ""}
+          </CRMTabButton>
+          <CRMTabButton
             active={activeTab === "kpi"}
             onClick={() => setActiveTab("kpi")}
           >
@@ -1424,7 +1504,9 @@ export default function CRMLeadsPage() {
           />
         ) : null}
 
-        {activeTab === "prospects" || activeTab === "imports" ? (
+        {activeTab === "prospects" ||
+        activeTab === "imports" ||
+        activeTab === "deposits" ? (
           <>
             <DashboardCards
               leads={scopeLeads}
@@ -1473,6 +1555,34 @@ export default function CRMLeadsPage() {
               onNewLead={openNewLeadModal}
             />
 
+            {activeTab === "deposits" ? (
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-sm font-bold text-slate-600">
+                  Phase acompte
+                </span>
+                {(
+                  [
+                    "Tous",
+                    "En attente",
+                    "Reçus",
+                  ] as DepositPhaseFilter[]
+                ).map((phase) => (
+                  <button
+                    key={phase}
+                    type="button"
+                    onClick={() => setDepositPhaseFilter(phase)}
+                    className={
+                      depositPhaseFilter === phase
+                        ? "rounded-full bg-slate-900 px-3 py-1.5 text-xs font-bold text-white"
+                        : "rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-600 hover:border-slate-300"
+                    }
+                  >
+                    {phase}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+
             {isLoadingCrm ? (
               <div className="rounded-2xl border border-slate-200 bg-white p-8 text-center shadow-sm">
                 <p className="text-lg font-black text-slate-950">
@@ -1490,6 +1600,16 @@ export default function CRMLeadsPage() {
                 <p className="mt-2 text-sm font-semibold text-slate-500">
                   Les prospects ajoutés par import de fichier apparaîtront ici,
                   séparés des prospects des campagnes.
+                </p>
+              </div>
+            ) : activeTab === "deposits" && depositLeads.length === 0 ? (
+              <div className="rounded-2xl border border-slate-200 bg-white p-8 text-center shadow-sm">
+                <p className="text-lg font-black text-slate-950">
+                  Aucun acompte à suivre
+                </p>
+                <p className="mt-2 text-sm font-semibold text-slate-500">
+                  Les prospects passés en « Acompte envoyé » apparaissent ici
+                  automatiquement, sans doublon avec le CRM.
                 </p>
               </div>
             ) : scopeLeads.length === 0 ? (
@@ -1587,6 +1707,8 @@ export default function CRMLeadsPage() {
                   onReminderDateChange={handleReminderDateChange}
                   onCommercialChange={handleCommercialChange}
                   commercialOptions={commercialOptions}
+                  showDepositReminders={activeTab === "deposits"}
+                  onDepositReminderChange={handleDepositReminderChange}
                   whatsApp={
                     isRecontactCategory
                       ? { state: whatsAppState, byLead: whatsAppByLead }

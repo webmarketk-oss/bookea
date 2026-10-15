@@ -52,6 +52,15 @@ export interface Lead {
   updatedDate?: string;
   nextAction: string;
   reminderDate?: string;
+  /** Suivi acomptes : date/heure ISO des 4 relances (même fiche CRM). */
+  depositReminders?: {
+    1?: string;
+    2?: string;
+    3?: string;
+    4?: string;
+  };
+  /** Passé par « Acompte envoyé » : reste visible dans Gestion des acomptes. */
+  depositTracked?: boolean;
   latestComment?: string;
   activityLog: LeadActivity[];
   appointments?: LeadAppointment[];

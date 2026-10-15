@@ -15,6 +15,16 @@ import {
   leadImportOrigin,
 } from "@/lib/lead-import-origin";
 import {
+  ACOMPTE_RELANCE_EVENT,
+  ACOMPTE_SUIVI_EVENT,
+  DEPOSIT_REMINDER_LABELS,
+  DEPOSIT_STATUSES,
+  isAcompteDepositEvent,
+  parseDepositReminders,
+  parseDepositTracked,
+  type DepositReminderIndex,
+} from "@/lib/crm-deposit";
+import {
   closeSeyaThreadsForBookedLead,
   closeSeyaThreadsForCrmStatus,
 } from "@/lib/seya-close-booking";
@@ -549,6 +559,8 @@ async function writeCrmLeadStatus(
     note: `Statut changé : ${lead.status} → ${status}.`,
   });
 
+  await ensureAcompteSuiviEvent(supabase, centerId, lead, status);
+
   if (clientLeadStatuses.includes(status)) {
     await ensureClientForConvertedLead(supabase, centerId, lead.id, lead);
   }
@@ -786,6 +798,53 @@ export async function updateCrmLeadAmount(leadId: string, amount: number) {
   });
 }
 
+export function updateCrmLeadDepositReminder(
+  leadId: string,
+  index: DepositReminderIndex,
+  isoDatetime: string,
+) {
+  return queueLeadWrite(leadId, async () => {
+    const supabase = createClient();
+    const centerId = await getLeadCenterId(supabase, leadId);
+    const value = isoDatetime.trim();
+    await insertLeadEvent(supabase, centerId, leadId, {
+      event_type: ACOMPTE_SUIVI_EVENT,
+      to_value: "1",
+      note: "Suivi acomptes activé.",
+    });
+    await insertLeadEvent(supabase, centerId, leadId, {
+      event_type: ACOMPTE_RELANCE_EVENT,
+      from_value: String(index),
+      to_value: value || null,
+      note: value
+        ? `${DEPOSIT_REMINDER_LABELS[index]} : ${value}`
+        : `${DEPOSIT_REMINDER_LABELS[index]} effacée.`,
+    });
+    await updateLeadFields(supabase, leadId, {
+      updated_at: new Date().toISOString(),
+    });
+  });
+}
+
+async function ensureAcompteSuiviEvent(
+  supabase: SupabaseClient,
+  centerId: string,
+  lead: Lead,
+  nextStatus: LeadStatus,
+) {
+  const touchesDeposit =
+    DEPOSIT_STATUSES.includes(nextStatus) ||
+    DEPOSIT_STATUSES.includes(lead.status);
+  if (!touchesDeposit || lead.depositTracked) {
+    return;
+  }
+  await insertLeadEvent(supabase, centerId, lead.id, {
+    event_type: ACOMPTE_SUIVI_EVENT,
+    to_value: "1",
+    note: "Suivi acomptes activé.",
+  });
+}
+
 export async function updateCrmLeadReminder(leadId: string, reminderDate: string) {
   const supabase = createClient();
   await updateLeadFields(supabase, leadId, {
@@ -918,6 +977,8 @@ async function writeCrmLeadDetails(lead: Lead, input: NewCrmLeadInput) {
       to_value: nextStatus,
       note: `Statut changé : ${lead.status} → ${nextStatus}.`,
     });
+
+    await ensureAcompteSuiviEvent(supabase, centerId, lead, nextStatus);
 
     if (clientLeadStatuses.includes(nextStatus)) {
       await ensureClientForConvertedLead(supabase, centerId, lead.id, {
@@ -1677,9 +1738,13 @@ function toLead(row: LeadRow): Lead {
     events.filter((event) => event.event_type === "system").map((event) => event.note),
   );
   const importOrigin = leadImportOrigin(leadSource?.name, events);
+  const depositReminders = parseDepositReminders(events);
+  const depositTracked = parseDepositTracked(events);
+
   const activityLog: LeadActivity[] = events
     .slice()
     .sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at))
+    .filter((event) => !isAcompteDepositEvent(event.event_type))
     .map((event) => {
       const text = (event.note || event.to_value || "Activité CRM").trim();
       const type = normalizeEventType(event.event_type);
@@ -1755,6 +1820,8 @@ function toLead(row: LeadRow): Lead {
     updatedDate: row.updated_at?.slice(0, 10),
     nextAction: row.next_action || "À contacter",
     reminderDate: toDateOnlyIso(row.recall_date) ?? undefined,
+    depositReminders,
+    ...(depositTracked ? { depositTracked: true } : {}),
     latestComment: latestComment || undefined,
     activityLog,
   };
