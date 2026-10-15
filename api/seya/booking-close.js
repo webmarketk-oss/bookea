@@ -91,6 +91,7 @@ const CRM_LEAD_STATUSES = [
   "RDV pris",
   "RDV confirmé",
   "No show",
+  "Annulation",
   "Client converti",
   "Acompte envoyé",
   "Acompte reçu",

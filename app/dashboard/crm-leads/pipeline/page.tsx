@@ -65,6 +65,7 @@ const stages: PipelineStage[] = [
       "Doublon",
       "Hors zone",
       "No show",
+      "Annulation",
     ],
   },
 ];

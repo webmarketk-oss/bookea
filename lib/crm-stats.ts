@@ -209,6 +209,7 @@ const outcomeByLeadStatus: Partial<Record<LeadStatus, LeadAppointmentOutcome>> =
   Vendu: "Vendu",
   "Client converti": "Vendu",
   "No show": "PVPP",
+  Annulation: "Annulation",
 };
 
 function activityOutcome(activity: LeadActivity) {

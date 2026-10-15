@@ -176,7 +176,7 @@ export default function DashboardCards({
     {
       title: "Perdus",
       value: leads.filter((lead) =>
-        inactiveLeadStatuses.includes(lead.status) &&
+        (inactiveLeadStatuses.includes(lead.status) || lead.status === "Annulation") &&
         isLeadCreatedSince(lead, monthStart),
       ).length,
       subtitle: "Leads rouge du mois",

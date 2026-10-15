@@ -64,7 +64,7 @@ const presentStatuses = [
   "Acompte reçu",
   "Acompte validé",
 ];
-const lostStatuses = [...inactiveLeadStatuses, "Perdu"];
+const lostStatuses = [...inactiveLeadStatuses, "Annulation", "Perdu"];
 
 export default function KPIDashboard({ leads }: KPIDashboardProps) {
   const [period, setPeriod] = useState<KPIPeriod>("month");
@@ -1107,7 +1107,7 @@ function countByStatus(leads: Lead[], statuses: string[]) {
 }
 
 function lostCountByNoShow(leads: Lead[]) {
-  return leads.filter((lead) => lead.status === "No show").length;
+  return leads.filter((lead) => lead.status === "No show" || lead.status === "Annulation").length;
 }
 
 function ratio(value: number, total: number) {

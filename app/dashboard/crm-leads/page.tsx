@@ -186,7 +186,7 @@ const statusGroups: Partial<Record<LeadStatus, LeadStatus[]>> = {
   ],
   "RDV pris": rdvBookedStatusList,
   "Client converti": ["Client converti", "Vendu"],
-  "Prospect perdu": inactiveLeadStatuses,
+  "Prospect perdu": [...inactiveLeadStatuses, "Annulation"],
 };
 
 export default function CRMLeadsPage() {

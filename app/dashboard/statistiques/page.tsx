@@ -54,7 +54,7 @@ import { practitioners as defaultPractitioners } from "@/lib/agenda-data";
 import { Lead } from "@/types/lead";
 import type { Appointment, Practitioner } from "@/types/agenda";
 
-const redStatuses = ["Perdu", "Prospect perdu", "Numéro invalide", "Doublon", "Hors zone", "No show"];
+const redStatuses = ["Perdu", "Prospect perdu", "Numéro invalide", "Doublon", "Hors zone", "No show", "Annulation"];
 
 type StatsTab = "overview" | "practitioners" | "seya";
 
