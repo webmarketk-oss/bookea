@@ -210,6 +210,9 @@ function applyBookingMessage(state, text, extras = {}) {
     if (!explicitDate) {
       next.requestedWeekday = wantedDays[0];
       next.requestedDate = nextDateForWeekday(wantedDays[0], now);
+      if (next.requestedDate === todayIso(now) && wantedMomentIsOver(text, now)) {
+        next.requestedDate = addDays(next.requestedDate, 7);
+      }
       next.weekHalf = null;
       next.pendingQuestion = null;
     }
@@ -261,7 +264,8 @@ function applyBookingMessage(state, text, extras = {}) {
   }
 
   const bookedDate = extras.conversation?.bookedSlot?.date;
-  if ((isRescheduleAsk(text) || wantsNoon(text)) && bookedDate) {
+  const namesOtherDay = Boolean(explicitDate) || wantedDays.length > 0 || /\bdemain\b/.test(value);
+  if ((isRescheduleAsk(text) || wantsNoon(text)) && bookedDate && !namesOtherDay) {
     next.requestedDate = bookedDate;
     next.requestedWeekday = weekdayOf(bookedDate);
     next.weekHalf = null;
@@ -427,11 +431,7 @@ function applyBookingMessage(state, text, extras = {}) {
     next.pendingQuestion = null;
   }
 
-  if (
-    state?.pendingQuestion === "callback" &&
-    !next.pendingQuestion &&
-    !asksAppointmentExplicitly(text)
-  ) {
+  if (state?.pendingQuestion === "callback" && !asksAppointmentExplicitly(text)) {
     next.pendingQuestion = "callback";
   }
 
@@ -475,7 +475,10 @@ function shouldSearchSlots(state, text, conversation) {
   if (state.pendingQuestion === "no_slots" && !wantsSlots(text, conversation)) {
     return false;
   }
-  if (state.pendingQuestion === "callback" && !asksAppointmentExplicitly(text)) {
+  if (
+    (state.pendingQuestion === "callback" || state.pendingQuestion === "offer_callback") &&
+    !asksAppointmentExplicitly(text)
+  ) {
     return false;
   }
   if (state.pendingQuestion === "price" || state.pendingQuestion === "address") {
@@ -656,7 +659,7 @@ function emptySlotFallback(state) {
   if (state.weekHalf === "end") {
     return "Je n’ai plus de place en fin de semaine. Souhaitez-vous plutôt le début de semaine ?";
   }
-  return "Parfait. Vous êtes plutôt disponible en début de semaine, ou plutôt en fin de semaine ?";
+  return "Vous êtes plutôt disponible en début de semaine, ou plutôt en fin de semaine ?";
 }
 
 function slotAllowed(slot, state) {
@@ -928,6 +931,18 @@ function formatHumanDate(iso) {
   const dd = String(date.getDate()).padStart(2, "0");
   const mm = String(date.getMonth() + 1).padStart(2, "0");
   return `${day} ${dd}/${mm}`;
+}
+
+/** « jeudi matin » dit un jeudi après-midi : le moment demandé est déjà passé aujourd’hui. */
+function wantedMomentIsOver(text, now) {
+  const date = now instanceof Date ? now : new Date();
+  const current = date.getHours() * 60 + date.getMinutes();
+  const clocks = parseClockMinutes(text);
+  if (clocks.length) {
+    return clocks.every((minutes) => minutes <= current);
+  }
+  const ends = { morning: 12 * 60, afternoon: 18 * 60, evening: 21 * 60 }[dayPartFromText(text)];
+  return ends != null && current >= ends;
 }
 
 function todayIso(now) {

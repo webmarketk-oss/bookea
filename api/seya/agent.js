@@ -79,9 +79,36 @@ const {
   isOutOfZone,
   isWillCallBack,
   asksForCallback,
+  closingKind,
+  dayPartFromText,
+  lastSeyaText,
 } = require("./conversation");
 const gaillard = require("./gaillard");
 const { findFacts } = require("./brief-facts");
+const { prospectText } = require("./vocabulary");
+const {
+  TEAM_QUESTION_MARK,
+  TEAM_QUESTION_REPLY,
+  TEAM_QUESTION_UNSURE_REPLY,
+  asksTechnology,
+  bilanPriceConflict,
+  checkAgainstCenter,
+  isTechnologyFollowUp,
+  technologyReply,
+  visitDurationsInFacts,
+} = require("./center-knowledge");
+const {
+  callbackTransmittedReply,
+  familyWords,
+  offersCallback,
+  pathGoal,
+  resumeQuestion,
+  slotsReminder,
+  softResumeLine,
+  softResumed,
+  stepAsked,
+  teamOrganisesReply,
+} = require("./path");
 const {
   axisClarifyQuestion,
   briefsForFamily,
@@ -288,6 +315,24 @@ function faqReply(text, extras = {}) {
     return "Les résultats dépendent de la zone et du protocole. On vous les explique au bilan.";
   }
   if (/combien de temps|ca dure|duree|dure (le )?(rdv|bilan|rendez-vous)/.test(value)) {
+    const family =
+      resolveActiveFamily(extras.seya, extras.conversation, text) ||
+      inferCareFamily(`${extras.conversation?.treatment || ""} ${text || ""}`);
+    if (family && visitDurationsInFacts(briefsForFamily(extras.seya, family).map((item) => item?.brief)).length > 1) {
+      return TEAM_QUESTION_UNSURE_REPLY;
+    }
+    const briefDuration = family
+      ? findFacts(
+          briefsForFamily(extras.seya, family).map((item) => item?.brief),
+          /(bilan|diagnostic|rendez-vous|seance).*\b\d+\s*(min|minutes|h|heures?)\b/,
+          1,
+        )[0] || ""
+      : "";
+    const spokenBrief = briefDuration.match(/(?:environ\s+)?\d+\s*(?:min(?:utes)?|h(?:eures?)?)(?:\s*\d+)?/i)?.[0];
+    if (spokenBrief) {
+      const visit = /diagnostic/i.test(briefDuration) ? "Le diagnostic" : "Le bilan";
+      return `${visit} dure ${/^environ/i.test(spokenBrief) ? spokenBrief : `environ ${spokenBrief}`}.`;
+    }
     const minutes = visitDurationMinutes(extras.seya, extras.conversation, text);
     const spoken = spokenVisitDuration(minutes);
     return spoken
@@ -301,17 +346,28 @@ function faqReply(text, extras = {}) {
     const extrasText = normalizeCenterProfile(
       extras?.centerProfile || agentSettings(extras.seya).centerProfile,
     ).extras;
-    return (
-      findFacts([extrasText], /enfant|bebe/, 1)[0] ||
-      "Je n’ai pas cette information dans la fiche du centre. Je peux vérifier auprès de l’équipe si vous pouvez venir avec votre enfant."
-    );
+    return findFacts([extrasText], /enfant|bebe/, 1)[0] || TEAM_QUESTION_REPLY;
   }
-  if (/comment (se )?deroule|c[' ]est quoi (un |le )?bilan|en quoi consiste|comment ca se passe/.test(value)) {
+  if (
+    /comment (se )?deroule|c['’ ]?est quoi (un |le |votre )?(bilan|diagnostic)|en quoi consiste|comment ca se passe|(bilan|diagnostic),? (ca|cela) consiste/.test(
+      value,
+    )
+  ) {
     const family =
       resolveActiveFamily(extras.seya, extras.conversation, text) ||
       inferCareFamily(`${extras.conversation?.treatment || ""} ${text || ""}`);
+    const briefFacts = family
+      ? findFacts(
+          briefsForFamily(extras.seya, family).map((item) => item?.brief),
+          /(bilan|diagnostic).*(permet|consiste|comprend|analyse)|analyse corporelle|devis personnalise/,
+          2,
+        )
+      : [];
+    if (briefFacts.length) {
+      return briefFacts.join(" ");
+    }
     if (family === "minceur") {
-      return "Le bilan commence par une analyse corporelle, puis une séance découverte. On vous explique ensuite le protocole adapté à vos objectifs et un devis personnalisé.";
+      return "Le bilan permet de faire le point sur votre objectif et les zones à travailler, puis de vous présenter les solutions adaptées avec un devis personnalisé.";
     }
     if (family === "epilation") {
       return "Le bilan pilaire permet d’analyser la pilosité et la peau, puis de vous proposer un protocole et un devis pour la zone.";
@@ -321,31 +377,34 @@ function faqReply(text, extras = {}) {
     }
     return "Le déroulement exact dépend de la prestation : l’équipe vous l’explique lors de votre échange.";
   }
-  if (
-    /technologie|machines?|appareils?|materiel/.test(value) &&
-    (/\?|quoi|quelles|avez|utilisez|presentes/.test(value) || /c[' ]est (du |de la )?/.test(value))
-  ) {
+  const previousSeya = [...(extras.conversation?.messages || [])].reverse().find((item) => item.author === "seya")?.text;
+  const asksAboutNamedTechnology =
+    /cryo|radio ?frequence|presso|cellu ?m ?6|\blpg\b|palper|\bems\b|cavitation|ultra ?sons|lipo ?laser|hydra ?facial|microneedling|laser (a )?diode/.test(value) &&
+    (/c'?est quoi|comment (ca|ça) marche|a quoi sert|ca sert|en quoi/.test(value) || String(text || "").trim().endsWith("?"));
+  const namesTechnology = asksAboutNamedTechnology || isTechnologyFollowUp(text, previousSeya);
+  if (asksTechnology(text) || namesTechnology) {
     const profile = normalizeCenterProfile(
       extras?.centerProfile || agentSettings(extras.seya).centerProfile,
     );
     const family =
       resolveActiveFamily(extras.seya, extras.conversation, text) ||
       inferCareFamily(`${extras.conversation?.treatment || ""} ${text || ""}`);
-    const brief =
-      findTreatmentBrief(
-        extras.seya,
-        `${extras.conversation?.qualification?.need || ""} ${extras.conversation?.treatment || ""}`,
-        family,
-      ) || findTreatmentBrief(extras.seya, extras.conversation?.treatment, family);
-    const sources = [brief?.brief, profile.activity, profile.extras, extras.seya?.brief];
-    const hits = findFacts(
+    const sources = [
+      ...briefsForFamily(extras.seya, family).map((item) => item?.brief),
+      profile.activity,
+      profile.extras,
+      extras.seya?.brief,
+    ];
+    const reply = technologyReply({
+      text,
+      family,
+      zone: extras.conversation?.qualification?.zone,
       sources,
-      /technologie|machine|appareil|laser|cryo|radiofrequ|ultrasons|ipl|lumiere pulsee/,
-      2,
-    );
-    return hits.length
-      ? hits.join(" ")
-      : "Je n’ai pas la liste des appareils dans la fiche du centre. Je peux la vérifier auprès de l’équipe si vous le souhaitez.";
+    });
+    if (reply) {
+      return reply;
+    }
+    return namesTechnology && !asksTechnology(text) ? "" : TEAM_QUESTION_REPLY;
   }
   return "";
 }
@@ -394,8 +453,8 @@ function formatCenterProfilePrompt(profile) {
 
 function asksLocation(text) {
   return (
-    /ou (etes|etes[- ]vous|se trouve)|situ[eé]|adresse|\bc['’]est ou\b|vous etes ou|tu es (ou|situ)/i.test(
-      String(text || ""),
+    /\bou (etes|etes[- ]vous|se trouve)\b|situ[eé]|adresse|\bc['’]est ou\b|vous etes ou\b|tu es (ou\b|situ)/i.test(
+      normalize(text),
     ) || gaillard.asksCountry(text)
   );
 }
@@ -486,9 +545,10 @@ function humanSlotReply(slots, state) {
   if (sameDay) {
     const day = list[0].label.replace(/\s+à\s+.*/, "");
     const times = list.map((slot) => String(slot.time || "").replace(":", "h"));
-    const options =
-      times.length === 1 ? times[0] : `${times[0]} ou ${times[1]}`;
-    return `${prefix}Le ${day} je peux vous proposer ${options} — lequel vous irait le mieux ?`;
+    if (times.length === 1) {
+      return `${prefix}Le ${day} à ${times[0]} est disponible. Je vous le réserve ?`;
+    }
+    return `${prefix}Le ${day} je peux vous proposer ${times[0]} ou ${times[1]} — lequel vous irait le mieux ?`;
   }
   return `${prefix}Je peux vous proposer ${formatHumanSlots(list)} — lequel vous irait le mieux ?`;
 }
@@ -560,6 +620,30 @@ function displayCareLabel(qualification, conversation) {
 }
 
 function priceReply(seya, qualification, conversation, text) {
+  const reply = priceReplyCore(seya, qualification, conversation, text);
+  if (!/\b(bilan|diagnostic)\b/i.test(reply)) {
+    return reply;
+  }
+  const family =
+    inferCareFamily(text || "") ||
+    resolveActiveFamily(seya, { ...(conversation || {}), qualification }, text) ||
+    inferCareFamily(`${qualification?.need || ""} ${conversation?.treatment || ""}`);
+  if (!family) {
+    return reply;
+  }
+  const policy = resolvePricePolicy(seya, {
+    ...(conversation || {}),
+    treatment: careLabelForFamily(family),
+    qualification: { ...(qualification || {}), need: careLabelForFamily(family) },
+  });
+  if (!bilanPriceConflict(policy.bilan, briefsForFamily(seya, family).map((item) => item?.brief))) {
+    return reply;
+  }
+  console.warn("[seya/knowledge] tarif du bilan contradictoire", { family });
+  return TEAM_QUESTION_UNSURE_REPLY;
+}
+
+function priceReplyCore(seya, qualification, conversation, text) {
   const intentText =
     text || conversation?.bookingState?.lastLeadPriceText || "c’est combien";
   const spokenFamily = inferCareFamily(intentText);
@@ -1044,6 +1128,7 @@ function extractZone(text) {
     "dos",
     "cuisse",
     "hanche",
+    "poignees",
     "menton",
     "levre",
   ];
@@ -1058,6 +1143,7 @@ function extractZone(text) {
       }
       return value.includes(zone);
     })
+    .map((zone) => (zone === "poignees" ? "poignées d’amour" : zone))
     .join(", ");
 }
 
@@ -1146,6 +1232,13 @@ function mergeQualification(current, text, fallbackTreatment, conversation) {
   const zone = extractZone(text) || extractConcern(text);
   const delay = extractDelay(text);
   const availability = extractAvailability(text);
+  const otherCareQuestion =
+    Boolean(need && currentNeed) &&
+    inferCareFamily(need) !== inferCareFamily(currentNeed) &&
+    (isServiceAsk(text) || /\?\s*$/.test(String(text || "")));
+  if (otherCareQuestion) {
+    return next;
+  }
   if (need) next.need = need;
   if (zone) next.zone = zone;
   if (delay) next.delay = delay;
@@ -1249,10 +1342,11 @@ function nextQualificationQuestion(qualification, seya, fallbackTreatment, conve
 }
 
 function message(author, text) {
+  const clean = String(text || "").trim();
   return {
     id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     author,
-    text: String(text || "").trim(),
+    text: author === "seya" ? prospectText(clean) : clean,
     at: new Date().toISOString(),
   };
 }
@@ -1679,6 +1773,155 @@ function applyLeadReply(conversation, text, seya, slots, extras = {}) {
   if (gaillard.isGaillardCenter(extras.centerName) && !extras.gaillardInner) {
     return gaillardLeadReply(conversation, text, seya, slots, extras);
   }
+  const previousSeya = [...(conversation?.messages || [])].reverse().find((item) => item.author === "seya")?.text;
+  const followUp = isTechnologyFollowUp(text, previousSeya) ? faqReply(text, { seya, conversation }) : "";
+  const result = keepHandoffStatus(
+    followUp
+      ? finishLeadReply(
+          conversation,
+          conversation.qualification || {},
+          conversation.status || "En cours",
+          text,
+          followUp,
+          conversation.bookingState || {},
+          { seya },
+        )
+      : leadReplyCore(conversation, text, seya, slots, extras),
+    conversation,
+  );
+  if (extras.gaillardInner) {
+    return result;
+  }
+  return withPathResume(result, conversation, text, seya);
+}
+
+/** Une demande déjà transmise reste « À recontacter » tant qu’un autre statut métier ne la remplace pas. */
+function keepHandoffStatus(result, conversation) {
+  const next = result?.conversation;
+  const handedOff =
+    conversation?.status === "À recontacter" &&
+    (conversation.bookingState?.pendingQuestion === "callback" ||
+      Boolean(conversation.teamNotes?.handedOffAt));
+  if (!next || !handedOff) {
+    return result;
+  }
+  const keepsStatus = /^(Nouveau|En cours|Qualifié)$/.test(String(next.status || ""));
+  const status = keepsStatus ? "À recontacter" : next.status;
+  const nextState = next.bookingState || {};
+  const offersSlots =
+    nextState.pendingQuestion === "offer_slots" ||
+    (Array.isArray(nextState.lastOfferedSlots) && nextState.lastOfferedSlots.length > 0);
+  const pendingQuestion =
+    status === "À recontacter" && !offersSlots && !next.bookedSlot
+      ? "callback"
+      : nextState.pendingQuestion;
+  if (status === next.status && pendingQuestion === next.bookingState?.pendingQuestion) {
+    return result;
+  }
+  return {
+    ...result,
+    conversation: {
+      ...next,
+      status,
+      bookingState: { ...(next.bookingState || {}), pendingQuestion },
+    },
+  };
+}
+
+const CLOSED_STATUSES = /^(À recontacter|RDV confirmé|Perdu|Pas intéressé|Annulation)$/;
+
+/** Après une réponse à une question, Seya reprend l’étape en cours sans recommencer le parcours. */
+function withPathResume(result, conversation, text, seya) {
+  const next = result?.conversation;
+  const messages = next?.messages || [];
+  const last = messages.at(-1);
+  const reply = last?.author === "seya" ? String(last.text || "").trim() : "";
+  const goal = pathGoal(seya);
+  const state = next?.bookingState || {};
+  if (
+    !reply ||
+    reply.includes("?") ||
+    softResumed(reply) ||
+    goal === "none" ||
+    CLOSED_STATUSES.test(String(next.status || "")) ||
+    state.pendingQuestion === "callback" ||
+    /^(booked|confirmed)$/.test(String(state.appointmentStatus || "")) ||
+    next.bookedSlot ||
+    isAppointmentConfirmed(conversation) ||
+    result.shouldBook ||
+    next.teamNotes?.handedOffAt ||
+    conversation?.teamNotes?.handedOffAt ||
+    conversation?.leadPause ||
+    threadIsPaused(conversation) ||
+    /je peux demander|je (le )?v[ée]rifie|je me renseigne|je reviens vers vous|je (le )?transmets|transmettre|vous faire rappeler/i.test(
+      reply.replace(TEAM_QUESTION_MARK, ""),
+    )
+  ) {
+    return result;
+  }
+  const leadAsks =
+    /\?/.test(String(text || "")) ||
+    asksPrice(text) ||
+    Boolean(classifyPriceQuestion(text)) ||
+    asksLocation(text) ||
+    asksAccess(text) ||
+    isServiceAsk(text) ||
+    asksOpenQuestion(text);
+  const leadStops =
+    isHesitation(text) ||
+    refusesSlots(text) ||
+    isLeadRefusal(text, conversation) ||
+    Boolean(closingKind(text, conversation)) ||
+    isWillCallBack(text) ||
+    isWillComeBack(text) ||
+    isWaitUntilLater(text) ||
+    asksForCallback(text);
+  const seyaTexts = (conversation?.messages || [])
+    .filter((item) => item.author === "seya")
+    .map((item) => String(item.text || ""));
+  const lastStepIndex = seyaTexts.map((item) => stepAsked(item)).lastIndexOf(true);
+  if (!leadAsks || leadStops || lastStepIndex < 0) {
+    return result;
+  }
+  // Le prospect a déjà décliné ou demandé du temps depuis la dernière proposition : on n’insiste pas.
+  if (seyaTexts.slice(lastStepIndex + 1).some((item) => /je n’insiste pas|prenez le temps/i.test(item))) {
+    return result;
+  }
+  const recentSeya = seyaTexts.slice(-2);
+  const withLine = (line, pendingQuestion) => ({
+    ...result,
+    conversation: {
+      ...next,
+      bookingState: { ...state, pendingQuestion },
+      messages: [...messages.slice(0, -1), { ...last, text: `${reply} ${line}` }],
+    },
+    locked: true,
+  });
+  const slotsPending = Math.max((state.lastOfferedSlots || []).length, (next.proposedSlots || []).length);
+  if (slotsPending) {
+    const justOffered = /\d{1,2}h\d{2}/.test(recentSeya.at(-1) || "") && !/\d{1,2}h\d{2}/.test(reply);
+    return goal === "book" && justOffered && !recentSeya.some(softResumed)
+      ? withLine(slotsReminder(slotsPending), state.pendingQuestion)
+      : result;
+  }
+  if (recentSeya.some(softResumed)) {
+    return result;
+  }
+  const family =
+    resolveActiveFamily(seya, next, text) ||
+    inferCareFamily(`${next.qualification?.need || ""} ${next.treatment || ""}`) ||
+    "";
+  // Étape posée juste avant : un rappel sans question plutôt que la même question.
+  const line = recentSeya.some((item) => stepAsked(item))
+    ? softResumeLine(goal, family)
+    : resumeQuestion(goal, family);
+  if (!line) {
+    return result;
+  }
+  return withLine(line, goal === "callback" ? "offer_callback" : "offer_slots");
+}
+
+function leadReplyCore(conversation, text, seya, slots, extras = {}) {
   const settings = agentSettings(seya);
   conversation = withStaffOfferedSlots(conversation, extras.now);
   const previousLead = lastSubstantiveLeadText(conversation, text);
@@ -1887,83 +2130,164 @@ function applyLeadReply(conversation, text, seya, slots, extras = {}) {
     !alreadyBooked &&
     (conversation.bookingState?.pendingQuestion === "callback" ||
       Boolean(conversation.teamNotes?.handedOffAt));
-  // Rappel déjà demandé : un jour / une heure donnés complètent la demande, sans relancer la prise de RDV.
-  if (pendingCallback && !isQualifyCallback(settings) && bookingState.pendingQuestion === "callback") {
-    const day = spokenCallbackDay(bookingState);
-    const slot = callbackSlotFromThread(conversation, intentText, bookingState, null);
-    const givesAvailability =
-      hasDayOfMonthRequest(intentText) ||
-      /lundi|mardi|mercredi|jeudi|vendredi|samedi|demain|\d{1,2}\/\d{1,2}/i.test(String(intentText || ""));
-    if (day && givesAvailability) {
-      const when = slot ? `${day} à ${slot.time.replace(":", "h")}` : day;
-      return {
-        ...finishLeadReply(
-          conversation,
-          qualification,
-          conversation.status || "À recontacter",
-          text,
-          `C’est noté : ${when}. J’ajoute cette disponibilité à votre demande de rappel.`,
-          {
-            ...bookingState,
-            pendingQuestion: "callback",
-            appointmentStatus: "none",
-            callbackSlot: slot,
-            lastOfferedSlots: [],
-          },
-          { proposedSlots: [] },
-        ),
-        locked: true,
-      };
-    }
+  const goal = pathGoal(seya);
+  const pathFamily =
+    resolveActiveFamily(seya, { ...conversation, qualification }, intentText) ||
+    inferCareFamily(`${qualification.need || ""} ${conversation.treatment || ""}`) ||
+    "";
+  const at = (extras.now instanceof Date ? extras.now : new Date()).toISOString();
+  const givesAvailability =
+    hasDayOfMonthRequest(intentText) ||
+    Boolean(parseClockMinutes(intentText).length) ||
+    /\b(lundi|mardi|mercredi|jeudi|vendredi|samedi|demain|matin|apres-midi|apm|soir|fin de journee|debut de semaine|fin de semaine)\b|\b\d{1,2}\/\d{1,2}\b/.test(
+      normalize(intentText),
+    );
+  const preference = givesAvailability ? spokenPreference(conversation, intentText, bookingState) : "";
+  const withLeadPreference = (next) =>
+    givesAvailability
+      ? gaillard.withPreference(next, text, at, pendingCallback || goal === "callback" ? "pour être rappelé(e)" : "")
+      : next;
+
+  // Rappel déjà enregistré : une disponibilité complète la demande, sans relancer la prise de RDV.
+  if (pendingCallback && bookingState.pendingQuestion === "callback" && preference) {
+    return {
+      ...finishLeadReply(
+        withLeadPreference(conversation),
+        qualification,
+        conversation.status || "À recontacter",
+        text,
+        `C’est noté : ${preference}. J’ajoute cette préférence à votre demande de rappel.`,
+        {
+          ...bookingState,
+          pendingQuestion: "callback",
+          appointmentStatus: "none",
+          lastOfferedSlots: [],
+        },
+        { proposedSlots: [] },
+      ),
+      locked: true,
+    };
   }
 
-  // Demande explicite de rappel : on suit le fonctionnement prévu par la mission du centre.
-  if (asksForCallback(text) && !alreadyBooked && !isWillCallBack(text)) {
-    if (pendingCallback) {
-      return {
-        ...finishLeadReply(
-          conversation,
-          qualification,
-          conversation.status || "À recontacter",
-          text,
-          "Votre demande de rappel est bien enregistrée 😊",
-          bookingState,
-        ),
-        locked: true,
-      };
+  // Accord pour un rappel : enregistrement + transmission (envoi réel côté WhatsApp, annonce corrigée si échec).
+  const transmitCallback = (prefix = "") => {
+    const next = {
+      ...withLeadPreference(conversation),
+      teamNotes: {
+        ...(withLeadPreference(conversation).teamNotes || {}),
+        family: pathFamily,
+        need: [qualification.zone, qualification.detail, qualification.need].filter(Boolean).join(" · "),
+        handedOffAt: at,
+      },
+    };
+    const transmitted =
+      briefClosing(seya, conversation, intentText) ||
+      callbackTransmittedReply(pathFamily, preference, extras.now);
+    const done = finishLeadReply(
+      next,
+      qualification,
+      "À recontacter",
+      text,
+      [prefix, transmitted].filter(Boolean).join(" "),
+      {
+        ...bookingState,
+        pendingQuestion: "callback",
+        appointmentStatus: "none",
+        callbackSlot: callbackSlotFromThread(conversation, intentText, bookingState, null),
+        lastOfferedSlots: [],
+      },
+      { proposedSlots: [] },
+    );
+    // La réponse prix éventuelle ne doit jamais masquer l’annonce de transmission.
+    const messages = done.conversation.messages;
+    const shown = String(messages.at(-1)?.text || "");
+    const finalText = shown.includes(transmitted) ? shown : `${shown} ${transmitted}`.trim();
+    return {
+      ...done,
+      conversation: {
+        ...done.conversation,
+        messages: [...messages.slice(0, -1), { ...messages.at(-1), text: finalText }],
+      },
+      locked: true,
+    };
+  };
+
+  // Rappel déjà transmis (objectif B) : un rendez-vous demandé sera fixé par l’expert lors du rappel.
+  if (
+    pendingCallback &&
+    goal !== "book" &&
+    !alreadyBooked &&
+    (wantsSlots(intentText, conversation) ||
+      /rendez-vous|\brdv\b|r[ée]serv|cr[ée]neau/i.test(String(intentText || "")))
+  ) {
+    const words = familyWords(pathFamily);
+    return {
+      ...finishLeadReply(
+        conversation,
+        qualification,
+        conversation.status || "À recontacter",
+        text,
+        `Votre demande est déjà transmise : c’est ${words.expert} du centre qui vous rappellera pour fixer votre ${words.visit} avec vous.`,
+        { ...bookingState, pendingQuestion: "callback", lastOfferedSlots: [] },
+        { proposedSlots: [] },
+      ),
+      locked: true,
+    };
+  }
+
+  if (asksForCallback(text) && !alreadyBooked && !isWillCallBack(text) && pendingCallback) {
+    return {
+      ...finishLeadReply(
+        conversation,
+        qualification,
+        conversation.status || "À recontacter",
+        text,
+        "Votre demande de rappel est bien enregistrée 😊",
+        bookingState,
+      ),
+      locked: true,
+    };
+  }
+
+  if (!alreadyBooked && !pendingCallback && !isWillCallBack(text)) {
+    const callbackOffered =
+      offersCallback(lastSeyaText(conversation)) ||
+      conversation.bookingState?.pendingQuestion === "offer_callback";
+    const accepts =
+      callbackOffered &&
+      !isHesitation(text) &&
+      !refusesSlots(text) &&
+      (isShortYes(text) ||
+        /^(oui|ok|d'accord|volontiers|avec plaisir|je veux bien|tres bien|parfait|go)\b/.test(normalize(text)) ||
+        asksForCallback(text) ||
+        givesAvailability);
+    const explicit = asksForCallback(text);
+    if (goal === "callback" && (accepts || explicit)) {
+      const priceFirst =
+        accepts && (asksPrice(text) || classifyPriceQuestion(text))
+          ? stripBookingCta(priceReply(seya, qualification, conversation, text))
+          : "";
+      return transmitCallback(priceFirst);
     }
-    if (isQualifyCallback(settings)) {
-      if (!callbackSlotFromThread(conversation, intentText, bookingState, chosenSlot)) {
-        const knownDay = spokenCallbackDay(bookingState);
-        return {
-          ...finishLeadReply(
-            conversation,
-            qualification,
-            qualification.need ? "Qualifié" : "En cours",
-            text,
-            knownDay
-              ? `Avec plaisir. À quelle heure souhaitez-vous que l’on vous rappelle ${knownDay} ?`
-              : "Avec plaisir. Quel jour et à quelle heure souhaitez-vous que l’on vous rappelle ?",
-            bookingState,
-          ),
-          locked: true,
-        };
-      }
-    } else if (settings.handoffToHuman || !canBookSeya(settings)) {
+    // Objectif A : le rappel reste possible sur demande explicite, si le centre l’autorise.
+    if (goal !== "callback" && explicit && (settings.handoffToHuman || !canBookSeya(settings))) {
+      return transmitCallback();
+    }
+    // Objectif B seul : un rendez-vous demandé est organisé par l’équipe, sans créneau inventé.
+    if (
+      goal === "callback" &&
+      !callbackOffered &&
+      (wantsSlots(intentText, conversation) ||
+        /rendez-vous|\brdv\b|r[ée]serv|cr[ée]neau/i.test(String(intentText || "")))
+    ) {
       return {
         ...finishLeadReply(
-          conversation,
+          withLeadPreference(conversation),
           qualification,
-          "À recontacter",
+          qualification.need ? "Qualifié" : "En cours",
           text,
-          "C’est noté, je transmets votre demande de rappel à l’équipe du centre.",
-          {
-            ...bookingState,
-            pendingQuestion: "callback",
-            appointmentStatus: "none",
-            callbackSlot: null,
-            lastOfferedSlots: [],
-          },
+          teamOrganisesReply(pathFamily, preference),
+          { ...bookingState, pendingQuestion: "offer_callback", lastOfferedSlots: [] },
           { proposedSlots: [] },
         ),
         locked: true,
@@ -1979,6 +2303,7 @@ function applyLeadReply(conversation, text, seya, slots, extras = {}) {
       text,
       conversationalReply(text, conversation, qualification, extras.now, {
         durationMinutes,
+        seya,
       }),
       bookingState,
     );
@@ -2108,12 +2433,19 @@ function applyLeadReply(conversation, text, seya, slots, extras = {}) {
         },
       );
     }
+    const declines =
+      isLeadRefusal(text, conversation) ||
+      /^(non|non merci|pas besoin|ca ira|ça ira)\b|\b(ca|ça) ira\b|pas la peine/.test(normalize(text));
     return finishLeadReply(
       conversation,
       qualification,
       "Revue santé",
       text,
-      awaitingHealthReply(),
+      declines
+        ? "Très bien, je n’insiste pas 😊 L’équipe devra simplement vérifier votre situation avant toute séance. Si vous changez d’avis, écrivez-nous ici."
+        : isThanks(text, conversation)
+          ? "Avec plaisir 😊"
+          : awaitingHealthReply(),
       bookingState,
       {
         healthReview: conversation.healthReview,
@@ -2144,7 +2476,7 @@ function applyLeadReply(conversation, text, seya, slots, extras = {}) {
     );
   }
 
-  const service = serviceOfferReply(text, seya);
+  const service = serviceOfferReply(text, seya, conversation);
   if (service) {
     return finishLeadReply(
       conversation,
@@ -2158,13 +2490,19 @@ function applyLeadReply(conversation, text, seya, slots, extras = {}) {
 
   const faq = faqReply(text, { seya, conversation: { ...conversation, qualification } });
   if (faq) {
+    const slotsPending = conversation.status === "RDV proposé" && (bookingState.lastOfferedSlots || []).length > 0;
     return finishLeadReply(
       conversation,
       qualification,
-      qualification.need ? "Qualifié" : "En cours",
+      slotsPending ? "RDV proposé" : qualification.need ? "Qualifié" : "En cours",
       text,
       faq,
-      { ...bookingState, pendingQuestion: null },
+      {
+        ...bookingState,
+        pendingQuestion: /^offer_(slots|callback)$/.test(bookingState.pendingQuestion || "")
+          ? bookingState.pendingQuestion
+          : null,
+      },
     );
   }
 
@@ -2221,43 +2559,23 @@ function applyLeadReply(conversation, text, seya, slots, extras = {}) {
     );
   }
 
-  if (isQualifyCallback(settings)) {
-    const callbackSlot = callbackSlotFromThread(
-      conversation,
-      intentText,
-      bookingState,
-      chosenSlot,
-    );
-    if (callbackSlot) {
-      return finishLeadReply(
-        conversation,
+  if (
+    isQualifyCallback(settings) &&
+    !pendingCallback &&
+    (givesAvailability || wantsSlots(intentText, conversation))
+  ) {
+    return {
+      ...finishLeadReply(
+        withLeadPreference(conversation),
         qualification,
-        "À recontacter",
+        qualification.need ? "Qualifié" : "En cours",
         text,
-        briefClosing(seya, conversation, intentText) || operatorCallbackReply(callbackSlot),
-        {
-          ...bookingState,
-          pendingQuestion: "callback",
-          appointmentStatus: "none",
-          callbackSlot,
-        },
-        { bookedSlot: null, shouldBook: null },
-      );
-    }
-  }
-
-  if (wantsSlots(intentText, conversation) && !canBookSeya(settings)) {
-    const knownDay = spokenCallbackDay(bookingState);
-    return finishLeadReply(
-      conversation,
-      qualification,
-      qualification.need ? "Qualifié" : "En cours",
-      text,
-      knownDay
-        ? `C’est noté pour ${knownDay}. À quelle heure souhaitez-vous que l’on vous rappelle ?`
-        : "Parfait. Vous êtes plutôt disponible en début de semaine, ou plutôt en fin de semaine ?",
-      bookingState,
-    );
+        teamOrganisesReply(pathFamily, preference),
+        { ...bookingState, pendingQuestion: "offer_callback", lastOfferedSlots: [] },
+        { proposedSlots: [] },
+      ),
+      locked: true,
+    };
   }
 
   const staffOwned = Boolean(
@@ -2814,7 +3132,7 @@ function gaillardLeadReply(conversation, text, seya, slots, extras = {}) {
   }
 
   if (gaillard.asksTechnology(text)) {
-    return informed(gaillard.technologyReply(text, sourceBag));
+    return informed(gaillard.technologyReply(text, sourceBag, { family: topicFamily, zone: merged.zone }));
   }
 
   const mentionsAvailability = gaillard.availabilityMention(text);
@@ -2987,7 +3305,7 @@ function gaillardLeadReply(conversation, text, seya, slots, extras = {}) {
   }
   // Dernière chance : question matériel / déroulement documentée dans la fiche.
   if (gaillard.asksTechnology(text) || /appareil|equipement|technologie|machine|cryo|radiofrequ/.test(normalize(text))) {
-    return informed(gaillard.technologyReply(text, sourceBag), next);
+    return informed(gaillard.technologyReply(text, sourceBag, { family: topicFamily, zone: merged.zone }), next);
   }
   if (gaillard.asksProcess(text)) {
     return informed(gaillard.processReply(topicFamily, sourceBag), next);
@@ -3001,7 +3319,7 @@ function gaillardLeadReply(conversation, text, seya, slots, extras = {}) {
     }
   }
   if (asksOpenQuestion(text)) {
-    return answer(gaillard.missingPracticalReply("cette précision"), next);
+    return answer(gaillard.missingPracticalReply(), next);
   }
   return fixed(next, status, followUp());
 }
@@ -3050,7 +3368,9 @@ function withCallbackHealthNote(result, review, note = "") {
   const messages = [...(result.conversation?.messages || [])];
   const index = messages.map((item) => item.author).lastIndexOf("seya");
   if (index >= 0) {
-    const current = String(messages[index].text || "").trim();
+    const current = String(messages[index].text || "")
+      .replace(/Oui, je vous écoute\. Dites-moi précisément ce que vous voulez savoir\.\s*/, "")
+      .trim();
     messages[index] = {
       ...messages[index],
       text: note
@@ -3094,6 +3414,40 @@ function spokenCallbackDay(bookingState) {
   return `${weekdays[parsed.getDay()]} ${dd}/${mm}${part}`;
 }
 
+/** Préférence de rappel telle que donnée par le prospect, sans la transformer en horaire promis. */
+function spokenPreference(conversation, text, state) {
+  const clocks = parseClockMinutes(text);
+  const freshMoment =
+    clocks.length > 0 ||
+    /\b(lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche|demain)\b|\b\d{1,2}\/\d{1,2}\b/.test(normalize(text));
+  const bookingState = {
+    ...state,
+    dayPart: dayPartFromText(text) || (freshMoment ? null : state?.dayPart) || null,
+  };
+  const day = spokenCallbackDay(bookingState);
+  const clock = clocks.length
+    ? `${Math.floor(clocks[0] / 60)}h${String(clocks[0] % 60).padStart(2, "0").replace(/^00$/, "")}`
+    : "";
+  if (day) {
+    return clock ? `${day} vers ${clock}` : day;
+  }
+  const part =
+    bookingState?.dayPart === "morning"
+      ? "le matin"
+      : bookingState?.dayPart === "afternoon"
+        ? "l’après-midi"
+        : bookingState?.dayPart === "evening"
+          ? "en fin de journée"
+          : "";
+  const half =
+    bookingState?.weekHalf === "start"
+      ? "en début de semaine"
+      : bookingState?.weekHalf === "end"
+        ? "en fin de semaine"
+        : "";
+  return [half, part, clock ? `vers ${clock}` : ""].filter(Boolean).join(", ");
+}
+
 function callbackSlotFromThread(conversation, text, bookingState, chosenSlot) {
   const date = String(chosenSlot?.date || bookingState?.requestedDate || "").slice(0, 10);
   const time = String(
@@ -3115,22 +3469,48 @@ function callbackSlotFromThread(conversation, text, bookingState, chosenSlot) {
 }
 
 function fallbackAfterNote(qualification, conversation, text) {
+  const reply = fallbackAfterNoteCore(qualification, conversation, text);
+  const last = lastSeyaText(conversation);
+  if (!last || !isNearDuplicate(reply, last)) {
+    return reply;
+  }
+  return pathGoal(conversation?._seya) === "none"
+    ? "Je suis là si une question vous vient."
+    : "Je reste disponible si vous avez une question 😊";
+}
+
+function fallbackAfterNoteCore(qualification, conversation, text) {
   if (isWelcomeRelanceOnly(conversation?._seya)) {
     if (isServiceAsk(text)) {
-      return serviceOfferReply(text, conversation?._seya) ||
-        "Je vérifie cette prestation auprès de l’équipe et je vous dis.";
+      return serviceOfferReply(text, conversation?._seya, conversation) || TEAM_QUESTION_REPLY;
     }
     if (asksOpenQuestion(text)) {
-      return "Oui, je vous écoute. Dites-moi précisément ce que vous voulez savoir.";
+      return (
+        faqReply(text, { seya: conversation?._seya, conversation: { ...conversation, qualification } }) ||
+        "Oui, je vous écoute. Dites-moi précisément ce que vous voulez savoir."
+      );
+    }
+    if (
+      (qualification?.zone || qualification?.need) &&
+      !alreadyTold(conversation, "(bilan|diagnostic) permettra d'evaluer")
+    ) {
+      const step = firstNeedReply(text, conversation, qualification, {
+        durationMinutes: visitDurationMinutes(conversation?._seya, conversation, text),
+      });
+      if (step) {
+        return step;
+      }
     }
     return "Je suis là si une question vous vient.";
   }
   if (isServiceAsk(text)) {
-    return serviceOfferReply(text, conversation?._seya) ||
-      "Je vérifie cette prestation auprès de l’équipe et je vous dis.";
+    return serviceOfferReply(text, conversation?._seya, conversation) || TEAM_QUESTION_REPLY;
   }
   if (asksOpenQuestion(text)) {
-    return "Oui, je vous écoute. Dites-moi précisément ce que vous voulez savoir.";
+    return (
+      faqReply(text, { seya: conversation?._seya, conversation: { ...conversation, qualification } }) ||
+      "Oui, je vous écoute. Dites-moi précisément ce que vous voulez savoir."
+    );
   }
   if (isAppointmentConfirmed(conversation)) {
     if (isRescheduleAsk(text) || wantsNoon(text)) {
@@ -3139,6 +3519,7 @@ function fallbackAfterNote(qualification, conversation, text) {
     if (isThanks(text, conversation) || isShortYes(text)) {
       return "Avec plaisir, à bientôt.";
     }
+    return "Je reste disponible si vous avez une question 😊";
   }
   if (threadIsPaused(conversation) || isWaitUntilLater(text)) {
     return willCallBackReply();
@@ -3149,27 +3530,41 @@ function fallbackAfterNote(qualification, conversation, text) {
   ) {
     return "Très bien. Je reste là si une question vous vient.";
   }
-  if (alreadyTold(conversation, "debut de semaine.*fin de semaine|fin de semaine.*debut de semaine")) {
-    if (threadIsPaused(conversation)) {
-      return willCallBackReply();
+  const goal = pathGoal(conversation?._seya);
+  const family =
+    resolveActiveFamily(conversation?._seya, { ...conversation, qualification }, text) ||
+    inferCareFamily(`${qualification?.need || ""} ${conversation?.treatment || ""}`) ||
+    "";
+  const lastSeya = lastSeyaText(conversation);
+  const stillOpen = "Je reste disponible si vous avez une question 😊";
+  if (goal === "book") {
+    if (alreadyTold(conversation, "debut de semaine.*fin de semaine|fin de semaine.*debut de semaine")) {
+      if (threadIsPaused(conversation)) {
+        return willCallBackReply();
+      }
+      return "Dites-moi un jour qui vous arrange, je regarde tout de suite.";
     }
-    return "Dites-moi un jour qui vous arrange, je regarde tout de suite.";
-  }
-  if (isBookingThread(conversation) || alreadyTold(conversation, "c['’]est note pour|propose un creneau")) {
-    return "Parfait. Vous êtes plutôt disponible en début de semaine, ou plutôt en fin de semaine ?";
-  }
-  if (qualification?.zone) {
-    if (alreadyTold(conversation, "quand seriez-vous disponible|c['’]est note pour|solutions qui peuvent")) {
-      return "Dites-moi un jour qui vous irait, je vous propose un horaire.";
+    if (isBookingThread(conversation) || alreadyTold(conversation, "c['’]est note pour|propose un creneau")) {
+      return `${isHesitation(text) || /je (ne )?sais pas/.test(normalize(text)) ? "Pas de souci. " : ""}Vous êtes plutôt disponible en début de semaine, ou plutôt en fin de semaine ?`;
     }
-    return firstNeedReply(text, conversation, qualification, {
-      durationMinutes: visitDurationMinutes(conversation?._seya, conversation, text),
-    });
   }
-  if (qualification?.need) {
-    return isQualifyCallback(conversation?._seya)
-      ? "Vous avez une autre question, ou vous souhaitez que l’équipe vous rappelle ?"
-      : "Vous voulez que je vous propose un créneau, ou vous avez une autre question ?";
+  if (qualification?.zone || qualification?.need) {
+    if (!alreadyTold(conversation, "(bilan|diagnostic) permettra d'evaluer|faire le point sur votre objectif")) {
+      const step = firstNeedReply(text, conversation, qualification, {
+        durationMinutes: visitDurationMinutes(conversation?._seya, conversation, text),
+      });
+      if (step) {
+        return step;
+      }
+    }
+    if (goal === "callback" && (isHesitation(text) || /je (ne )?sais pas/.test(normalize(text)))) {
+      return "Pas de souci, prenez le temps 😊 Si vous souhaitez un rappel plus tard, il suffit de me l’écrire ici.";
+    }
+    const question = resumeQuestion(goal, family);
+    if (question && !isNearDuplicate(question, lastSeya) && !normalize(lastSeya).includes(normalize(question))) {
+      return question;
+    }
+    return goal === "none" ? "Je suis là si une question vous vient." : stillOpen;
   }
   return (
     axisClarifyQuestion(conversation?._seya) ||
@@ -3198,11 +3593,29 @@ function finishLeadReply(
     qualification,
     bookingState,
   });
-  const reply =
+  const drafted =
     String(checked.text || "").trim() ||
     String(seyaText || "").trim() ||
     "Je suis là. Dites-moi ce dont vous avez besoin, je vous réponds.";
-  const blockedProposal = Boolean(seyaText) && reply !== seyaText;
+  const seyaSettings = extra.seya || _seya;
+  const allowedFamilies = [
+    inferCareFamily(leadText),
+    inferCareFamily(qualification?.need),
+    inferCareFamily(switched.treatment),
+    resolveActiveFamily(seyaSettings, { ...switched, qualification }, leadText),
+  ];
+  const centerCheck = checkAgainstCenter(drafted, { allowedFamilies });
+  if (centerCheck.removed.length) {
+    console.warn("[seya/knowledge] phrase retirée avant envoi", { reasons: centerCheck.removed });
+  }
+  const reply = centerCheck.text;
+  const blockedProposal = Boolean(seyaText) && drafted !== seyaText;
+  const teamQuestion = reply.includes(TEAM_QUESTION_MARK)
+    ? { text: String(leadText || "").trim().slice(0, 300), at: new Date().toISOString(), status: "pending" }
+    : null;
+  const baseNotes = extra.bookedElsewhere
+    ? { ...(conversation.teamNotes || {}), bookedElsewhere: extra.bookedElsewhere }
+    : conversation.teamNotes;
   const nextBookingState = blockedProposal
     ? { ...bookingState, lastOfferedSlots: [], appointmentStatus: "none" }
     : markOfferPending(bookingState, reply);
@@ -3235,12 +3648,7 @@ function finishLeadReply(
       bookedSlot: extra.bookedSlot || conversation.bookedSlot,
       healthReview: extra.healthReview || conversation.healthReview,
       healthTask: extra.healthTask || conversation.healthTask,
-      teamNotes: extra.bookedElsewhere
-        ? {
-            ...(conversation.teamNotes || {}),
-            bookedElsewhere: extra.bookedElsewhere,
-          }
-        : conversation.teamNotes,
+      teamNotes: teamQuestion ? { ...(baseNotes || {}), question: teamQuestion } : baseNotes,
       messages: [
         ...(conversation.messages || []),
         message("lead", leadText),
@@ -3258,6 +3666,16 @@ function finishLeadReply(
 
 function markOfferPending(bookingState, reply) {
   const value = normalize(reply);
+  if (
+    bookingState.pendingQuestion === "no_slots" &&
+    (bookingState.lastOfferedSlots || []).length &&
+    /\d{1,2}h\d{2}/.test(value)
+  ) {
+    return { ...bookingState, pendingQuestion: "offer_slots" };
+  }
+  if (bookingState.pendingQuestion !== "no_slots" && offersCallback(reply)) {
+    return { ...bookingState, pendingQuestion: "offer_callback" };
+  }
   if (
     bookingState.pendingQuestion !== "no_slots" &&
     /propose un creneau|souhaitez[- ]vous que je|vous voulez que je|quel jour vous irait|quand seriez-vous disponible|premier rendez-vous/.test(value) &&
@@ -3339,7 +3757,8 @@ function relanceCopy(conversation, round = 1, centerName = "", seya) {
   }
   if (seya && String(seya.seyaMission || "") === "qualify_callback") {
     const greet = firstName ? `Bonjour ${firstName}` : "Bonjour";
-    return `${greet}, je reviens vers vous. Quand seriez-vous disponible pour qu’une opératrice vous rappelle ?`;
+    const family = inferCareFamily(`${conversation?.qualification?.need || ""} ${conversation?.treatment || ""}`);
+    return `${greet}, je reviens vers vous. ${resumeQuestion("callback", family)}`;
   }
   const lastLead = lastLeadText(conversation);
   const wantsTarif = askedPriceInThread(conversation);

@@ -64,7 +64,9 @@ const {
   closingKind,
   politeCloseReply,
 } = require("./conversation");
-const { resolveActiveFamily, understandThread } = require("./care-family");
+const { inferCareFamily, resolveActiveFamily, understandThread } = require("./care-family");
+const { checkAgainstCenter, familiesIn, technologiesIn } = require("./center-knowledge");
+const { prospectText } = require("./vocabulary");
 const {
   activeLeadPause,
   cityFromAddress,
@@ -87,6 +89,7 @@ const {
   seyaMissionPrompt,
 } = require("./mission");
 const gaillard = require("./gaillard");
+const { stepAsked } = require("./path");
 
 function seyaModel() {
   const requested = String(process.env.OPENAI_MODEL || "").trim();
@@ -305,9 +308,10 @@ async function generateCoreReply({
     classifyPriceQuestion(text) ||
     isPriceRepeatComplaint(text) ||
     /je vérifie le créneau|rendez-vous est confirmé/i.test(draft || "") ||
-    /opératrice vous rappellera|transmets votre demande à l’équipe/i.test(
+    /opératrice vous rappellera|transmets votre (demande|question) à l’équipe|demande a été transmise|organise le (bilan|diagnostic|rendez-vous)/i.test(
       draft || "",
     ) ||
+    stepAsked(draft) ||
     isBriefClosing(draft, seya, conversationWithState, text) ||
     isWelcomeRelanceOnly(seya) ||
     (replyClosesThread(previousSeya) && !replyClosesThread(draft))
@@ -505,6 +509,11 @@ function polishPrompt({
     "Tu réponds au dernier message, dans ce contexte. Interdit de reposer une question déjà traitée. Interdit de recoller le dernier message Seya.",
     "Un objectif esthétique n’est pas une information de santé : rides, ridules, relâchement, taches, éclat (visage) ; kilos, ventre, graisses, cellulite, silhouette (minceur) ; zones, poils, pilosité (laser). Tu t’en sers pour qualifier le besoin et tu poursuis la mission. Interdit de transférer à l’équipe, de parler de contre-indication ou de « vérifier sa situation » pour ça. Seule une vraie information de santé (grossesse en cours, traitement médical, maladie, pacemaker…) suit les consignes santé de la fiche du soin, sans diagnostic ni verdict de compatibilité. Tu ne poses une question de santé que si elle figure dans la fiche du soin de CE centre.",
     "Tu présentes uniquement l’offre, le prix, la durée et les modalités enregistrés pour CE centre et CE soin. Si une information manque, tu ne la prends jamais d’un autre centre et tu ne l’inventes pas.",
+    "Les fiches du centre et des soins sont ta base de connaissances, pas un texte à réciter. Tu choisis seulement l’information utile à sa question et à l’étape en cours, et tu la reformules en phrases courtes. Interdit de recopier une fiche, d’énumérer tous les appareils sans nécessité, ou de citer une consigne interne, un réglage ou un nom de champ.",
+    "Les faits restent exacts au mot près : prix, conditions de l’offre, durée, adresse, caractéristiques des prestations. Si une information manque ou se contredit, tu ne l’inventes pas et tu ne choisis pas entre deux versions. Tu ne mélanges jamais minceur, laser et visage.",
+    "Si on te demande les appareils pour une zone, tu cites seulement ceux de CE centre utiles à cette zone, avec leur rôle en quelques mots et sans promesse de résultat. Tu ne reposes pas une question de rendez-vous ou de rappel que tu viens de poser ou à laquelle elle a déjà répondu.",
+    "Vocabulaire obligatoire : tu écris toujours « cryo », jamais « cryolipolyse », même si la fiche ou la personne emploie le mot complet.",
+    "Avant d’envoyer, tu vérifies : bon centre, bon parcours, bonne offre, données exactes, réponse pertinente, aucune répétition inutile.",
     "Pas de phrase de remplissage du type « En attendant, si vous avez des questions sur le prix, l’adresse ou les horaires, n’hésitez pas ». Une seule question par message.",
     atGaillard
       ? "Priorité absolue : tu réponds d’abord à ce que la personne vient de dire (question, précision, demande de réfléchir). La trame passe toujours après. Interdit d’inventer un autre centre, une adresse ou un transfert."
@@ -517,7 +526,7 @@ function polishPrompt({
     atGaillard
       ? ""
       : resolveSeyaMission(settings) === "qualify_callback"
-      ? `Tu ne clôtures pas tant qu’il manque le jour ou l’heure. Dès que les deux sont connus, la seule conclusion autorisée est : « ${closing || "Une opératrice vous rappellera [jour] à [heure]."} » Interdit de poser un RDV agenda.`
+      ? `Tu ne demandes pas de jour ni d’heure pour le rappel. Tu proposes qu’un expert ou une experte du centre rappelle la personne ; tu n’annonces la transmission que si Bookea l’a faite${closing ? `, avec la conclusion : « ${closing} »` : ""}. Interdit de poser un RDV agenda ou de promettre une heure de rappel.`
       : "Tu ne mets jamais fin à la conversation. Interdit : « écrivez-moi quand vous voulez reprendre », « je vous prie », « je reviendrai vers vous », « une conseillère vous recontacte », « préférez-vous en rester là », « vous préférez rester là », « Avec plaisir, à bientôt » si elle n’a pas dit merci après un rendez-vous confirmé. Si elle confirme qu’elle est au bon centre (Dépil, Vichy), tu continues sur sa vraie demande (prix, créneau), tu ne clôtures pas.",
     !atGaillard && canBookSeya(settings)
       ? "Tu ne pousses jamais à sortir du circuit. Pas de question fermée du type rester là / arrêter / clore. Tu restes gentiment sur la prise de rendez-vous."
@@ -531,7 +540,7 @@ function polishPrompt({
     bookingOnly("Si elle dit qu’elle ne veut pas qu’on la recontacte mais demande un créneau, une proposition ou un prix, tu réponds à ÇA. Tu ne clôtures pas."),
     "Si elle a réfléchi et demande le prix, tu donnes le tarif autorisé. Tu n’envoies pas « écrivez-moi quand vous voulez reprendre ».",
     bookingOnly("Après l’accueil, lis sa réponse. Reprends brièvement ce qu’elle dit, sans phrase commerciale artificielles (interdit : « c’est souvent là que… », « marge intéressante », « zones qui se travaillent bien », « bonne base »). Une seule question utile à la fois, et seulement si l’info manque. Ne redemande jamais une zone, une méthode déjà essayée, une distance ou une disponibilité déjà données. Si elle demande un rendez-vous ou donne une dispo, tu passes à cette demande sans imposer le reste du questionnaire. Tu ne promets pas de résultat. Tu ne dévalorises pas l’alimentation ou le sport. Tu ne cites que les soins de CE centre."),
-    bookingOnly("Quand le besoin est compris, tu demandes les disponibilités simplement. Mission rappel experte : « Envoyez-moi vos disponibilités et une de nos expertes vous recontactera. » Mission prise de rendez-vous : tu cherches un créneau autorisé. Si elle a déjà donné un jour, une demi-journée ou une heure, tu n’y reviens pas."),
+    bookingOnly("Quand le besoin est compris, tu expliques que le bilan permet d’évaluer ses besoins et de présenter les solutions adaptées, puis : mission prise de rendez-vous, tu demandes ses disponibilités et cherches un créneau autorisé ; mission rappel, tu proposes qu’un expert ou une experte du centre la rappelle, et si elle accepte tu ne redemandes pas son accord. Si elle a déjà donné un jour, une demi-journée ou une heure, tu n’y reviens pas. Pas de question sur la distance, le poids, l’alimentation ou ce qu’elle a déjà essayé, sauf consigne du centre."),
     bookingOnly("Si elle refuse l’horaire posé ou demande à modifier, tu ne dis jamais que tu vas décaler sans que Bookea lance vraiment le nouveau créneau. « Midi » = 12h00. Interdit de clore par « à bientôt » si l’heure n’a pas été changée."),
     "Si elle demande si vous faites une prestation (yoga face, massage, etc.), tu réponds d’abord à ÇA. Si ce n’est pas dans les soins du centre, tu dis non, clairement. Interdit de répondre « je reste là si une question vous vient » alors qu’elle vient de poser une question.",
     "Si elle dit qu’elle a déjà pris, calé ou réservé un rendez-vous (Doctolib, Planity, téléphone ou autre), tu dis simplement merci, tu notes, et tu n’offres plus aucun créneau. Tu ne redemandes pas un jour ni un horaire s’ils sont déjà donnés. Ce n’est pas une confirmation agenda Bookea.",
@@ -677,7 +686,20 @@ function pickSafeReply(draft, polished, bookingState, conversation) {
   if (previous && isNearDuplicate(candidate, previous) && !isNearDuplicate(draft, previous)) {
     return draft;
   }
-  return candidate;
+  const lastLead = [...(conversation?.messages || [])].reverse().find((item) => item.author === "lead");
+  const allowedFamilies = [
+    ...familiesIn(draft),
+    inferCareFamily(lastLead?.text),
+    inferCareFamily(conversation?.qualification?.need),
+    inferCareFamily(conversation?.treatment),
+  ];
+  if (
+    checkAgainstCenter(candidate, { allowedFamilies }).removed.length ||
+    technologiesIn(candidate).length > Math.max(technologiesIn(draft).length, 1)
+  ) {
+    return draft;
+  }
+  return prospectText(candidate);
 }
 
 function replyClosesThread(text) {

@@ -60,8 +60,8 @@ export const SEYA_MISSION_OPTIONS: Array<{
   },
   {
     id: "qualify_callback",
-    title: "Accueil + qualification + rappel opératrice",
-    hint: "Seya mène comme une prise de rendez-vous (soin, zone, jour, heure). Elle ne pose pas le RDV : elle dit qu’une opératrice les rappellera à la date et l’heure convenues.",
+    title: "Accueil + qualification + rappel expert",
+    hint: "Seya identifie le besoin, présente le bilan puis propose qu’un expert ou une experte du centre rappelle la personne. Avec son accord, elle transmet la demande (besoin et préférences) à l’équipe, sans poser de RDV ni promettre d’heure de rappel.",
   },
 ];
 

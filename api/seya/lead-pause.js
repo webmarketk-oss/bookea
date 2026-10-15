@@ -18,7 +18,7 @@ const NOT_NOW =
 const BOOKING_INTENT =
   /\brdv\b|rendez[- ]vous|creneau|dispo|reserv|j'ai reflechi|je suis (decidee?|partante?|prete?)|on (peut|pourrait) (fixer|caler|prendre)|lundi|mardi|mercredi|jeudi|vendredi|samedi|\d{1,2}\s*h\b|semaine prochaine|demain|apres[- ]?midi|matin|soir|\bheure/;
 const RESUME_INTENT =
-  /\brdv\b|rendez[- ]vous|creneau|reserv|j'ai reflechi|je suis (decidee?|partante?|prete?)|on (peut|pourrait) (fixer|caler|prendre)|(je peux|je pourrais|je voudrais|je souhaite|j'aimerais|je veux) venir|je suis dispo|(des|vos|une|de la) dispo/;
+  /\brdv\b|rendez[- ]vous|creneau|reserv|j'ai reflechi|je suis (decidee?|partante?|prete?)|on (peut|pourrait) (fixer|caler|prendre)|(je peux|je pourrais|je voudrais|je souhaite|j'aimerais|je veux) venir|je suis dispo|(des|vos|une|de la) dispo|\b(finalement|en fait)\b.*\b(lundi|mardi|mercredi|jeudi|vendredi|samedi|demain)\b/;
 const OPEN_QUESTION =
   /\?|combien|prix|tarif|c'est quoi|comment (ca|se)|est-ce que|ou (se trouve|etes|est)/;
 

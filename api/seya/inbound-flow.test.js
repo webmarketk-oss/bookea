@@ -635,6 +635,79 @@ test("rappel accepté mais transmission en échec : Seya n’annonce pas de rapp
   assert.notEqual(thread.status, "À recontacter");
 });
 
+test("mission rappel : accord donné, transmission en échec → réponse honnête, étape conservée", async () => {
+  const offered = welcomeThread({
+    qualification: { need: "Soin minceur", zone: "ventre", delay: "", availability: "" },
+    messages: [
+      ...welcomeThread().messages,
+      { id: "m-l1", author: "lead", at: minutesAgo(4), text: "Je voudrais perdre du ventre" },
+      {
+        id: "m-s1",
+        author: "seya",
+        at: minutesAgo(3),
+        text: "C’est noté pour le ventre. Le bilan permettra d’évaluer vos besoins et de vous présenter les solutions adaptées. Souhaitez-vous qu’un expert ou une experte minceur du centre vous rappelle pour échanger sur votre besoin et organiser votre bilan ?",
+      },
+    ],
+  });
+  const data = seed(offered, { seyaMission: "qualify_callback", bookAppointment: false, handoffToHuman: true });
+  data.centers[0].name = "Centre Test";
+  data.centers[0].city = "Lyon";
+  currentDb = createFakeDb(data);
+  let meta = installMeta();
+  await post(webhook("Oui", "wamid.in.18"));
+  let replies = textsSent(meta.sent);
+  assert.equal(replies.length, 1);
+  assert.equal(replies[0], "Votre demande de rappel est bien notée 😊");
+  let thread = storedThread();
+  assert.equal(thread.teamHandoff?.status, "failed");
+  assert.equal(thread.bookingState?.pendingQuestion, "callback");
+
+  meta = installMeta();
+  await post(webhook("Merci", "wamid.in.19"));
+  replies = textsSent(meta.sent);
+  for (const text of replies) {
+    assert.doesNotMatch(text, /vous rappelle pour|quelle zone|distance|\d{1,2}h\d{2}/, text);
+  }
+  thread = storedThread();
+  assert.equal(thread.bookingState?.pendingQuestion, "callback");
+});
+
+test("premier RDV choisi parmi les créneaux proposés : écrit dans l’agenda, pas de « slot_missing »", async () => {
+  const day = new Date(NOW + 7 * 86400000);
+  while (day.getDay() !== 2) day.setDate(day.getDate() + 1);
+  const iso = `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, "0")}-${String(day.getDate()).padStart(2, "0")}`;
+  const label = `mar. ${iso.slice(8, 10)}/${iso.slice(5, 7)}`;
+  const slots = [
+    { date: iso, time: "10:00", label: `${label} à 10h00` },
+    { date: iso, time: "10:30", label: `${label} à 10h30` },
+  ];
+  const offered = welcomeThread({
+    status: "RDV proposé",
+    qualification: { need: "Soin minceur", zone: "ventre", delay: "", availability: "" },
+    proposedSlots: slots,
+    bookingState: { requestedDate: iso, lastOfferedSlots: slots, appointmentStatus: "proposed", pendingQuestion: null },
+    messages: [
+      ...welcomeThread().messages,
+      { id: "m-l1", author: "lead", at: minutesAgo(4), text: "le ventre, mardi matin" },
+      { id: "m-s1", author: "seya", at: minutesAgo(3), text: `Le ${label} je peux vous proposer 10h00 ou 10h30 — lequel vous irait le mieux ?` },
+    ],
+  });
+  const data = seed(offered, { seyaMission: "book", bookAppointment: true });
+  data.centers[0].name = "Centre Test";
+  currentDb = createFakeDb(data);
+  const meta = installMeta();
+  await post(webhook("Le premier", "wamid.in.30"));
+  const replies = textsSent(meta.sent);
+  assert.match(replies.join("\n"), /rendez-vous est confirmé/, replies.join("\n"));
+  const written = currentDb.db.appointments.filter((item) => item.appointment_date === iso);
+  assert.equal(written.length, 1);
+  assert.equal(String(written[0].starts_at).slice(0, 5), "10:00");
+  const thread = storedThread();
+  assert.equal(thread.status, "RDV confirmé");
+  assert.equal(thread.bookedSlot?.date, iso);
+  assert.equal(currentDb.db.leads[0].status, "RDV pris");
+});
+
 test("« Non merci » après « autre question ? » : clôture polie, pas « Pas intéressé »", async () => {
   const offered = welcomeThread({
     messages: [

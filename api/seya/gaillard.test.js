@@ -278,9 +278,11 @@ test("Gaillard : pantalon et modalités non renseignées, réponse prudente", as
   conversation = await say(conversation, "Est-ce que je peux garder mon pantalon ?");
   assert.equal(
     lastSeya(conversation),
-    "Je n’ai pas cette précision dans la fiche du soin. Je peux la vérifier auprès de l’équipe si vous le souhaitez. Quelles zones souhaitez-vous traiter ?",
+    "Je n’ai pas cette information. Je transmets votre question à l’équipe du centre, qui vous répondra directement. Quelles zones souhaitez-vous traiter ?",
   );
   assert.equal(conversation.teamNotes?.handedOffAt, undefined);
+  assert.equal(conversation.teamNotes?.question?.status, "pending");
+  assert.match(conversation.teamNotes?.question?.text, /pantalon/);
 });
 
 test("Gaillard : modalité validée dans la fiche du soin, elle est reprise telle quelle", async () => {
@@ -371,10 +373,10 @@ test("Clermont n’est pas concerné : la mission rappel garde son fonctionnemen
   let conversation = open("Soin minceur", clermont);
   conversation = await say(conversation, "Je veux un rendez-vous", clermont);
   conversation = await say(conversation, "Jeudi à 15h", clermont);
-  assert.match(lastSeya(conversation), /opératrice vous rappellera/i);
+  assert.match(lastSeya(conversation), /demande a été transmise à l’équipe, avec votre préférence \(jeudi 15\/10 vers 15h\)/);
   assert.equal(
     relanceCopy(conversation, 1, clermont, seya),
-    "Bonjour Léa, je reviens vers vous. Quand seriez-vous disponible pour qu’une opératrice vous rappelle ?",
+    "Bonjour Léa, je reviens vers vous. Souhaitez-vous qu’un expert ou une experte minceur du centre vous rappelle pour organiser votre bilan ?",
   );
 });
 
@@ -411,7 +413,7 @@ test("Gaillard : après rappel, les questions pratiques restent traitées sans r
   conversation = await say(conversation, "Affiner ma silhouette", GAILLARD, priced);
   assert.match(lastSeya(conversation), /déjà (testé|essayé)/i);
   conversation = await say(conversation, "Oui mais pas de résultats", GAILLARD, priced);
-  assert.match(lastSeya(conversation), /bilan|Souhaitez-vous|cryolipolyse|radiofréquence/i);
+  assert.match(lastSeya(conversation), /bilan|Souhaitez-vous|\bcryo\b|radiofréquence/i);
   assert.doesNotMatch(lastSeya(conversation), /rappellera/i);
   conversation = await say(conversation, "Oui pour le bilan", GAILLARD, priced);
   assert.match(lastSeya(conversation), /expert ou une experte minceur.*rappellera/i);
@@ -433,8 +435,8 @@ test("Gaillard : après rappel, les questions pratiques restent traitées sans r
     ["Est ce que ça fait mal ?", /indolore/i],
     ["Ça coûte cher?", /offert|gratuit/i],
     ["Et après c est quoi vos prix ?", /500 euros|10x/i],
-    ["Vous utilisez quoi comme technologie ?", /cryolipolyse|radiofréquence|Technologies minceur/i],
-    ["Quel appareil utilisez-vous pour la minceur ?", /cryolipolyse|radiofréquence|Technologies minceur/i],
+    ["Vous utilisez quoi comme technologie ?", /\bcryo\b|radiofréquence/i],
+    ["Quel appareil utilisez-vous pour la minceur ?", /\bcryo\b|radiofréquence/i],
     ["Je veux faire épiler les jambes entières ça coute combien ?", /63 €|épilation|bilan pilaire/i],
     ["Oui mais pour l épilation laser ?", /63 €/i],
   ];
@@ -548,7 +550,7 @@ test("Gaillard : question appareil pendant la qualification, réponse de la fich
   ]);
   assert.equal(
     lastSeya(conversation),
-    "Les technologies proposées au centre : cryolipolyse, radiofréquence. Combien de kilos aimeriez-vous perdre ?",
+    "Pour le ventre, le centre utilise la cryo, qui utilise le froid pour cibler les graisses localisées, et la radiofréquence, qui agit par la chaleur pour raffermir la peau. Le bilan permet de choisir ce qui convient à votre cas. Combien de kilos aimeriez-vous perdre ?",
   );
   assert.equal(conversation.teamNotes?.handedOffAt, undefined);
 });
@@ -571,7 +573,8 @@ test("Gaillard : refus de poursuivre, pas de transmission ni de relance de quest
   assert.match(lastSeya(conversation), /je n’insiste pas/);
   assert.equal(conversation.teamNotes?.handedOffAt, undefined);
   conversation = await say(conversation, "Vous utilisez quels appareils ?", GAILLARD, structured);
-  assert.equal(lastSeya(conversation), "Les technologies proposées au centre : cryolipolyse, radiofréquence.");
+  assert.match(lastSeya(conversation), /^Pour le ventre, le centre utilise la cryo,.*la radiofréquence/);
+  assert.doesNotMatch(lastSeya(conversation), /\?/);
   assert.notEqual(conversation.status, "À recontacter");
 });
 

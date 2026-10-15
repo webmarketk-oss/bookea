@@ -96,14 +96,17 @@ function understandThread(conversation, extraText) {
     .map((item) => item.text);
   let family = "";
   let need = "";
-  for (const text of [...leadTexts].reverse()) {
-    const spoken = inferCareFamily(text);
-    if (!spoken) {
-      continue;
-    }
-    family = spoken;
-    need = careLabelForFamily(spoken);
-    break;
+  const newestFirst = [...leadTexts].reverse();
+  const sideQuestion = (text, index) =>
+    index > 0 &&
+    (/\?\s*$/.test(text) || /\b(vous faites|vous proposez|faites[- ]vous|proposez[- ]vous)\b/.test(normalizeCare(text)));
+  const spokenFamily =
+    newestFirst.map((text, index) => (sideQuestion(text, index) ? "" : inferCareFamily(text))).find(Boolean) ||
+    newestFirst.map((text) => inferCareFamily(text)).find(Boolean) ||
+    "";
+  if (spokenFamily) {
+    family = spokenFamily;
+    need = careLabelForFamily(spokenFamily);
   }
   if (!family) {
     family = inferCareFamily(
@@ -571,16 +574,91 @@ function phraseAskedService(asked) {
   return `le ${spelled}`;
 }
 
-function serviceOfferReply(text, seya) {
+function serviceOfferReply(text, seya, conversation) {
   const { askedServiceName, isServiceAsk } = require("./conversation");
   if (!isServiceAsk(text)) {
     return "";
   }
   const asked = askedServiceName(text) || "cette prestation";
+  const family = inferCareFamily(text);
+  const familyBriefs = family ? briefsForFamily(seya, family) : [];
+  if (family && familyBriefs.length && inferCareFamily(familyBriefs[0]?.name) === family) {
+    const alreadySaid = (conversation?.messages || [])
+      .filter((item) => item.author === "seya")
+      .map((item) => normalizeCare(item.text));
+    return familyServiceReply(text, family, familyBriefs, alreadySaid);
+  }
   if (serviceIsOffered(asked, seya)) {
-    return "Oui, nous proposons ça. Je peux regarder un créneau si vous le souhaitez.";
+    return `Oui, nous proposons ${phraseAskedService(asked)}.`;
   }
   return `Non, nous ne faisons pas ${phraseAskedService(asked)}.`;
+}
+
+const FAMILY_SERVICE_LABEL = {
+  minceur: "des soins minceur",
+  visage: "des soins visage",
+  epilation: "l’épilation",
+};
+
+const TECHNOLOGIES = [
+  { pattern: /lumiere pulsee|\bipl\b/, label: "la lumière pulsée" },
+  { pattern: /\blaser\b/, label: "le laser" },
+  { pattern: /cryo/, label: "la cryo" },
+  { pattern: /radio ?frequence/, label: "la radiofréquence" },
+  { pattern: /hydra ?facial/, label: "l’HydraFacial" },
+];
+
+/** « Bilan pilaire offert. » → « Le bilan pilaire est offert. » ; "" si la phrase n’est pas une offre simple. */
+function offerSentence(fact) {
+  const text = String(fact || "").trim().replace(/[.;]\s*$/, "");
+  const match = text.match(/^(bilan|diagnostic|consultation)\b([^,.;:]*?)\s+(offerte?s?|gratuite?s?)\b([^,;]*)/i);
+  if (!match) {
+    return "";
+  }
+  const noun = match[1].toLowerCase();
+  const article = noun === "consultation" ? "La" : "Le";
+  const state = `${/gratuit/i.test(match[3]) ? "gratuit" : "offert"}${noun === "consultation" ? "e" : ""}`;
+  return `${article} ${noun}${match[2]} est ${state}${match[4].trimEnd()}.`;
+}
+
+/** Réponse courte sur un autre soin du centre, tirée de sa fiche et reformulée, sans proposer d’action. */
+function familyServiceReply(text, family, familyBriefs, alreadySaid = []) {
+  const { findFacts } = require("./brief-facts");
+  const { centerTechnologies } = require("./center-knowledge");
+  const sources = familyBriefs.map((item) => item?.brief);
+  const techs = centerTechnologies(sources, family).slice(0, 2);
+  const offerFact = findFacts(sources, /(bilan|diagnostic|consultation)[^.]*\b(offert|gratuit)/, 1)
+    .map(offerSentence)
+    .find(Boolean);
+  // « Le bilan minceur est offert » déjà dit dans le fil : on ne le répète pas.
+  const offerNoun = normalizeCare(offerFact).match(/^(?:le|la) ([a-z' ]+?) est (offert|gratuit)/)?.[1];
+  const offer = offerNoun && alreadySaid.some((said) => said.includes(offerNoun) && /offert|gratuit/.test(said))
+    ? ""
+    : offerFact;
+  if (techs.length) {
+    const value = normalizeCare(text);
+    const askedTech = TECHNOLOGIES.find((item) => item.pattern.test(value));
+    const names = techs.map((tech) => tech.name);
+    const spokenNames = names.length > 1 ? `${names.slice(0, -1).join(", ")} et ${names.at(-1)}` : names[0];
+    const usesAsked = askedTech && techs.some((tech) => tech.facts.some((fact) => askedTech.pattern.test(normalizeCare(fact))));
+    const opening = askedTech && !usesAsked
+      ? `Non, le centre n’utilise pas ${askedTech.label} : il travaille avec ${spokenNames}.`
+      : `Oui, nous proposons ${FAMILY_SERVICE_LABEL[family]}, avec ${spokenNames}.`;
+    return [opening, offer].filter(Boolean).join(" ");
+  }
+  const facts = findFacts(
+    familyBriefs.map((item) => item?.brief),
+    /laser|lumiere|ipl|diode|appareil|technolog|cryo|radiofreq|hydra|offert|bilan|diagnostic|epilation|peau/,
+    2,
+  ).join(" ");
+  const value = normalizeCare(text);
+  const askedTech = TECHNOLOGIES.find((item) => item.pattern.test(value));
+  const factsValue = normalizeCare(facts);
+  if (askedTech && facts && !askedTech.pattern.test(factsValue)) {
+    return `Ce n’est pas ${askedTech.label}. ${facts}`;
+  }
+  const yes = askedTech && facts ? "Oui." : `Oui, nous proposons ${FAMILY_SERVICE_LABEL[family]}.`;
+  return [yes, facts].filter(Boolean).join(" ");
 }
 
 function phraseConfiguredOffer(value) {

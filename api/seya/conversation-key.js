@@ -139,8 +139,9 @@ function mergeConversationPair(current, next) {
           older.bookingState?.lastOfferedSlots,
       pendingQuestion: confirmed
         ? null
-        : newer.bookingState?.pendingQuestion ??
-          older.bookingState?.pendingQuestion,
+        : newer.bookingState && Object.prototype.hasOwnProperty.call(newer.bookingState, "pendingQuestion")
+          ? newer.bookingState.pendingQuestion
+          : older.bookingState?.pendingQuestion,
     },
   };
 }

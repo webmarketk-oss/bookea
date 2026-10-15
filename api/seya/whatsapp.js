@@ -4,6 +4,8 @@ const { generateSeyaReply, hasAiKey } = require("./ai");
 const { inferCareFamily, pickApprovedTemplate, resolveActiveFamily } = require("./care-family");
 const { pickBookingResources } = require("./axis-resources");
 const { notifyCenterSeyaAction, sendCallbackHandoff } = require("./center-notify");
+const { withoutTeamQuestion } = require("./center-knowledge");
+const { prospectText } = require("./vocabulary");
 const { isNearDuplicate } = require("./price");
 const {
   BILAN_DURATION_MINUTES,
@@ -1006,6 +1008,7 @@ async function handleIncoming(
         next,
         wantedSlot,
         seya,
+        existing.bookedSlot,
       );
       if (booking?.leadId) {
         next.leadId = next.leadId || booking.leadId;
@@ -1035,6 +1038,7 @@ async function handleIncoming(
         conversation: next,
         kind: "booked",
         slot: wantedSlot,
+        previousSlot: existing.bookedSlot?.date && existing.bookedSlot?.time ? existing.bookedSlot : null,
       }).catch((error) => {
         console.error("[seya/whatsapp] center notify booked", error);
         return { conversation: next };
@@ -1107,8 +1111,51 @@ async function handleIncoming(
         next.messages[seyaIndex] = { ...next.messages[seyaIndex], text: draftedReply };
       }
     }
+  } else if (
+    !wantedSlot &&
+    existing.teamHandoff?.status === "sent" &&
+    next.teamNotes?.handedOffAt &&
+    (next.teamNotes?.preferences || []).length > (existing.teamNotes?.preferences || []).length
+  ) {
+    const update = await notifyCenterSeyaAction({
+      center,
+      seya,
+      conversation: next,
+      kind: "callback_update",
+    }).catch((error) => {
+      console.error("[seya/whatsapp] center notify callback update", error);
+      return { sent: false };
+    });
+    next.teamHandoff = {
+      ...(next.teamHandoff || {}),
+      lastUpdate: { status: update?.sent ? "sent" : "failed", at: new Date().toISOString() },
+    };
   } else if (next.teamHandoff?.status === "failed" && next.status === "À recontacter") {
     next.status = next.qualification?.need ? "Qualifié" : "En cours";
+  }
+
+  const teamQuestion = next.teamNotes?.question;
+  if (teamQuestion?.status === "pending" && teamQuestion.at !== existing.teamNotes?.question?.at) {
+    const asked = await notifyCenterSeyaAction({
+      center,
+      seya,
+      conversation: next,
+      kind: "question",
+    }).catch((error) => {
+      console.error("[seya/whatsapp] center notify question", error);
+      return { sent: false };
+    });
+    next.teamNotes = {
+      ...next.teamNotes,
+      question: { ...teamQuestion, status: asked?.sent ? "sent" : "failed" },
+    };
+    if (!asked?.sent) {
+      draftedReply = withoutTeamQuestion(draftedReply);
+      const seyaIndex = (next.messages || []).map((item) => item.author).lastIndexOf("seya");
+      if (seyaIndex >= 0) {
+        next.messages[seyaIndex] = { ...next.messages[seyaIndex], text: draftedReply };
+      }
+    }
   }
 
   let uniqueOutgoing = outgoingWhatsAppTexts(
@@ -1355,7 +1402,9 @@ async function markLeadBookedBySeya(supabase, centerId, lead, slot, moved) {
   return status;
 }
 
-async function bookSeyaAppointment(supabase, centerId, context, conversation, slot, seya) {
+/** `previousSlot` : créneau déjà confirmé avant ce message (déplacement), jamais le créneau demandé. */
+async function bookSeyaAppointment(supabase, centerId, context, conversation, slot, seya, previousSlot) {
+  const previous = previousSlot?.date && previousSlot?.time ? previousSlot : null;
   const bookingLead = await resolveBookingLead(supabase, centerId, context, conversation).catch(
     (error) => {
       console.error("[seya/whatsapp] booking lead", error);
@@ -1380,8 +1429,8 @@ async function bookSeyaAppointment(supabase, centerId, context, conversation, sl
   const duration =
     Number(slot?.duration) > 0
       ? Number(slot.duration)
-      : Number(conversation?.bookedSlot && conversation.bookedSlot.duration) > 0
-        ? Number(conversation.bookedSlot.duration)
+      : Number(previous?.duration) > 0
+        ? Number(previous.duration)
         : visitDurationMinutes(seya, conversation, "") ||
           Number(resources.service?.duration_minutes) ||
           resources.durationMinutes;
@@ -1389,7 +1438,7 @@ async function bookSeyaAppointment(supabase, centerId, context, conversation, sl
   const startMinutes = hours * 60 + minutes;
   const endMinutes = startMinutes + duration;
   const endsAt = `${String(Math.floor(endMinutes / 60)).padStart(2, "0")}:${String(endMinutes % 60).padStart(2, "0")}`;
-  const bookedDate = slotDate(conversation?.bookedSlot?.date);
+  const bookedDate = slotDate(previous?.date);
   const today = new Date().toISOString().slice(0, 10);
   const fromDate =
     bookedDate && bookedDate < today ? bookedDate : today;
@@ -1401,7 +1450,7 @@ async function bookSeyaAppointment(supabase, centerId, context, conversation, sl
     )
     .eq("center_id", centerId)
     .gte("appointment_date", fromDate);
-  const own = findOwnSeyaAppointment(existing, context, conversation);
+  const own = findOwnSeyaAppointment(existing, context, { ...conversation, bookedSlot: previous });
   const durationMinutes = Number(own?.duration_minutes) > 0 ? Number(own.duration_minutes) : duration;
   const ownEndsAt =
     Number(own?.duration_minutes) > 0
@@ -1457,7 +1506,7 @@ async function bookSeyaAppointment(supabase, centerId, context, conversation, sl
     if (!data || slotTime(data.starts_at) !== start) {
       throw new Error("slot_update_empty");
     }
-  } else if (conversation?.bookedSlot?.date && conversation?.bookedSlot?.time) {
+  } else if (previous) {
     throw new Error("slot_missing");
   } else {
     const { error } = await supabase.from("appointments").insert({
@@ -1926,7 +1975,13 @@ async function sendSharedWhatsApp(phone, text, extras = {}) {
   }
 
   const intl = toWhatsAppIntl(phone);
-  const vars = welcomeTemplateVars(extras);
+  text = prospectText(text);
+  const vars = Object.fromEntries(
+    Object.entries(welcomeTemplateVars(extras)).map(([key, value]) => [
+      key,
+      typeof value === "string" ? prospectText(value) : value,
+    ]),
+  );
 
   let textError = {};
   if (!extras.preferTemplate) {

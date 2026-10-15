@@ -515,10 +515,11 @@ test("demande de rendez-vous : elle reste dans le fil, elle ne clôt pas", async
     now: NOW,
   });
   conversation = result.conversation;
-  assert.match(lastSeya(conversation), /semaine|rendez-vous|jour/i);
+  assert.match(lastSeya(conversation), /organise le bilan/i);
+  assert.match(lastSeya(conversation), /vous rappelle pour le convenir/i);
   assert.doesNotMatch(
     lastSeya(conversation),
-    /recontacte|reviendrai|conseillère du centre, elle/i,
+    /recontacte|reviendrai|conseillère du centre, elle|lequel vous irait/i,
   );
   assert.notEqual(conversation.status, "À recontacter");
 });
@@ -1312,7 +1313,7 @@ test("aisselles laser : bilan pilaire, pas d’analyse corporelle", async () => 
   assert.doesNotMatch(answer, /analyse corporelle|séance découverte/i);
 });
 
-test("après l’accueil minceur : elle reconnaît la zone puis demande la distance", async () => {
+test("après l’accueil minceur : elle reconnaît la zone, présente le bilan puis demande les disponibilités", async () => {
   let conversation = startConversation(
     {
       leadId: "lead-accueil-minceur",
@@ -1328,11 +1329,12 @@ test("après l’accueil minceur : elle reconnaît la zone puis demande la dista
   conversation = await reply(conversation, "Bonjour. Ventres/hanches");
   const answer = lastSeya(conversation);
   assert.match(answer, /ventre|hanches|zones/i);
-  assert.match(answer, /distance/i);
-  assert.doesNotMatch(answer, /09h00|lun\.|résultat garanti|quand seriez-vous disponible/i);
+  assert.match(answer, /faire le point sur votre objectif lors du bilan/);
+  assert.match(answer, /Quand seriez-vous disponible \?/);
+  assert.doesNotMatch(answer, /distance|déjà essayé|09h00|lun\.|résultat garanti/i);
 });
 
-test("après l’accueil laser : elle reconnaît les zones puis demande la distance", async () => {
+test("après l’accueil laser : elle reconnaît les zones, présente le bilan puis demande les disponibilités", async () => {
   const laser = {
     ...seya,
     treatmentBriefs: [
@@ -1374,11 +1376,12 @@ test("après l’accueil laser : elle reconnaît les zones puis demande la dista
   });
   const answer = lastSeya(first.conversation);
   assert.match(answer, /aisselles|maillot/i);
-  assert.match(answer, /distance|programme|protocole|peau/i);
-  assert.doesNotMatch(answer, /analyse corporelle|ventre|quand seriez-vous disponible/i);
+  assert.match(answer, /bilan permettra d’évaluer/);
+  assert.match(answer, /Quand seriez-vous disponible pour le bilan \?/);
+  assert.doesNotMatch(answer, /distance|analyse corporelle|ventre/i);
 });
 
-test("après l’accueil visage : elle reconnaît l’objectif puis demande la distance", async () => {
+test("après l’accueil visage : elle reconnaît l’objectif, présente le diagnostic puis demande les disponibilités", async () => {
   const visage = {
     ...seya,
     treatmentBriefs: [
@@ -1420,8 +1423,9 @@ test("après l’accueil visage : elle reconnaît l’objectif puis demande la d
   });
   const answer = lastSeya(first.conversation);
   assert.match(answer, /fermeté|peau|diagnostic/i);
-  assert.match(answer, /distance/i);
-  assert.doesNotMatch(answer, /analyse corporelle|pilosité|quand seriez-vous disponible/i);
+  assert.match(answer, /diagnostic visage est à 149€/);
+  assert.match(answer, /Quand seriez-vous disponible pour le diagnostic \?/);
+  assert.doesNotMatch(answer, /distance|analyse corporelle|pilosité/i);
 });
 
 test("zone + jour déjà donnés : elle cherche les créneaux, elle ne redemande pas", async () => {
@@ -2327,7 +2331,7 @@ test("accueil + relances : elle ne propose pas de rendez-vous", async () => {
   assert.equal(conversation.status, "À recontacter");
 });
 
-test("qualification + rappel opératrice : elle note le jour et l’heure, elle ne booke pas", async () => {
+test("qualification + rappel expert : RDV demandé → l’équipe l’organise, jour/heure = préférence, elle ne booke pas", async () => {
   const qualify = { ...seya, seyaMission: "qualify_callback", bookAppointment: false };
   let conversation = startConversation(
     {
@@ -2353,7 +2357,8 @@ test("qualification + rappel opératrice : elle note le jour et l’heure, elle 
       now: NOW,
     })
   ).conversation;
-  assert.match(lastSeya(conversation), /semaine|jour/i);
+  assert.match(lastSeya(conversation), /organise le bilan/i);
+  assert.doesNotMatch(lastSeya(conversation), /lequel vous irait|\d{1,2}h\d{2}/);
   assert.notEqual(conversation.status, "À recontacter");
 
   const closed = await generateSeyaReply({
@@ -2367,9 +2372,10 @@ test("qualification + rappel opératrice : elle note le jour et l’heure, elle 
     now: NOW,
   });
   conversation = closed.conversation;
-  assert.match(lastSeya(conversation), /opératrice vous rappellera/i);
-  assert.match(lastSeya(conversation), /jeudi/i);
-  assert.match(lastSeya(conversation), /15h/i);
+  assert.match(lastSeya(conversation), /demande a été transmise à l’équipe/i);
+  assert.match(lastSeya(conversation), /préférence \(jeudi \d{2}\/\d{2} vers 15h\)/i);
+  assert.doesNotMatch(lastSeya(conversation), /opératrice|vous rappellera jeudi/i);
+  assert.ok(conversation.teamNotes?.handedOffAt);
   assert.doesNotMatch(lastSeya(conversation), /je vérifie le créneau|rendez-vous est confirmé/i);
   assert.equal(closed.shouldBook, null);
   assert.equal(conversation.status, "À recontacter");
@@ -2497,7 +2503,7 @@ test("accueil + relances + prise de rendez-vous : elle peut booker", async () =>
   assert.match(answer, /jeu\.|jeudi|15h|16h|17h|18h|créneau|creneau|horaire|semaine/i);
 });
 
-test("qualification : elle reprend les zones, la distance, puis ce qui a déjà été essayé", async () => {
+test("qualification : elle reprend les zones, présente le bilan, puis transmet après accord", async () => {
   const qualify = { ...seya, seyaMission: "qualify_callback", bookAppointment: false };
   let conversation = startConversation(
     {
@@ -2524,13 +2530,14 @@ test("qualification : elle reprend les zones, la distance, puis ce qui a déjà 
     })
   ).conversation;
   assert.match(lastSeya(conversation), /ventre|fesses|bras|zones/i);
-  assert.match(lastSeya(conversation), /distance/i);
-  assert.doesNotMatch(lastSeya(conversation), /quand seriez-vous disponible|je vérifie le créneau/i);
+  assert.match(lastSeya(conversation), /bilan permettra d’évaluer/);
+  assert.match(lastSeya(conversation), /expert ou une experte minceur du centre vous rappelle/);
+  assert.doesNotMatch(lastSeya(conversation), /distance|déjà essayé|quand seriez-vous disponible|je vérifie le créneau/i);
 
   conversation = (
     await generateSeyaReply({
       conversation,
-      text: "J’habite à Clermont",
+      text: "Oui avec plaisir",
       seya: qualify,
       appointments: [],
       hours: hours(),
@@ -2539,24 +2546,10 @@ test("qualification : elle reprend les zones, la distance, puis ce qui a déjà 
       now: NOW,
     })
   ).conversation;
-  assert.match(lastSeya(conversation), /essayé|testé|technologies/i);
-  assert.equal(conversation.qualification.distance.includes("Clermont"), true);
-
-  conversation = (
-    await generateSeyaReply({
-      conversation,
-      text: "Non, que des régimes",
-      seya: qualify,
-      appointments: [],
-      hours: hours(),
-      centerName: "JFG Clinique Clermont",
-      centerId: "jfg-clinique-clermont",
-      now: NOW,
-    })
-  ).conversation;
-  assert.match(lastSeya(conversation), /noté|je note/i);
-  assert.doesNotMatch(lastSeya(conversation), /régime seul|bonne base|raffermir/i);
-  assert.match(lastSeya(conversation), /disponibilités|expertes vous recontactera|rappellera/i);
+  assert.match(lastSeya(conversation), /demande a été transmise à l’équipe/);
+  assert.doesNotMatch(lastSeya(conversation), /\?/);
+  assert.equal(conversation.status, "À recontacter");
+  assert.match(conversation.teamNotes?.need || "", /ventre|fesses|bras/i);
 });
 
 test("méthodes déjà données : pas de question répétée sur ce qui a été essayé", async () => {

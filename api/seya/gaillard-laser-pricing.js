@@ -63,7 +63,7 @@ function defaultGaillardLaserPackage(existingPackage, brief) {
   return [
     "Programme de 8 séances (6 séances + 2 séances d’entretien), selon la grille par zone du centre.",
     "Les tarifs sont communiqués au forfait, pas à la séance.",
-    "Remises multizones et aisselles offertes selon les conditions renseignées dans la fiche du centre.",
+    "Remises multizones et aisselles offertes selon les conditions du centre.",
   ].join(" ");
 }
 

@@ -165,7 +165,8 @@ test("situation personnelle : transfert, pas de verdict médical", async () => {
   );
   const text = lastSeya(result.conversation);
   assert.match(text, /Merci de me l’avoir précisé/);
-  assert.match(text, /esthéticienne cryolipolyse|personne qui réalise/);
+  assert.match(text, /esthéticienne cryo\b|personne qui réalise/);
+  assert.doesNotMatch(text, /cryo[\s-]*lipolys/i);
   assert.match(text, /vous faire rappeler/);
   assert.doesNotMatch(text, /vous pouvez|c’est possible|c’est impossible|contre-indiqué/i);
   assert.equal(

@@ -172,11 +172,11 @@ function seyaMissionPrompt(value) {
   }
   if (mission === "qualify_callback") {
     return [
-      "Mission de CE centre : accueil + qualification, puis rappel opératrice.",
-      "Tu mènes comme une prise de rendez-vous (soin, zone, jour, heure).",
-      "Quand elle a donné un jour ET une heure, tu ne poses PAS le rendez-vous dans l’agenda.",
-      "Tu dis uniquement qu’une opératrice la rappellera à CETTE date et CETTE heure.",
-      "Interdit de bloquer un créneau, d’inventer un horaire, ou de proposer des disponibilités agenda.",
+      "Mission de CE centre : accueil + qualification, puis rappel par un expert ou une experte du centre.",
+      "Tu identifies le besoin (zone ou objectif), tu expliques que le bilan permet d’évaluer ses besoins et de présenter les solutions adaptées, puis tu proposes qu’un expert ou une experte du centre la rappelle.",
+      "Si elle accepte, tu ne redemandes pas son accord : la demande est transmise avec son besoin et ses préférences éventuelles.",
+      "Si elle demande un rendez-vous, l’équipe l’organise : tu proposes le rappel, sans créneau.",
+      "Interdit de bloquer un créneau, d’inventer un horaire, de promettre un rappel à une heure précise ou de proposer des disponibilités agenda.",
     ].join(" ");
   }
   if (mission === "welcome_relance_book") {

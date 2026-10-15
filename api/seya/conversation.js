@@ -2,6 +2,7 @@ const { classifyPriceQuestion, isNearDuplicate, isPriceRepeatComplaint } = requi
 const { axisClarifyQuestion, inferCareFamily, resolveActiveFamily } = require("./care-family");
 const { isWelcomeRelanceOnly, resolveSeyaMission } = require("./mission");
 const { classifyHealthMessage } = require("./health");
+const { pathGoal, pathStepReply, stepAsked } = require("./path");
 
 function normalize(value) {
   return String(value || "")
@@ -310,7 +311,7 @@ function threadIsPaused(conversation, extraText) {
 
 function isIdentityQuestion(text) {
   const value = normalize(text);
-  return /tu es (une )?ia|t[' ]es une ia|vous etes (une )?ia|c[' ]est une ia|je parle (a|à) un robot|assistante virtuelle|chatbot|intelligence artificielle/.test(
+  return /tu es (une )?ia|t[' ]es une ia|vous etes (une )?ia|c[' ]est une ia|je parle (a|à) un robot|assistante virtuelle|chatbot|intelligence artificielle|\b(tu es|t[' ]es|vous etes|c[' ]est)( pas)?( un| une| une vraie| un vrai)? (humain|humaine|robot|vraie personne|personne reelle)\b|\b(un|une) (robot|humain|humaine)\s*\?/.test(
     value,
   );
 }
@@ -353,7 +354,7 @@ function wantsNoon(text) {
 
 function isRescheduleAsk(text) {
   const value = normalize(text);
-  return /comment (faire )?(pour )?modifi|modifi(er|ez)|changer (l[' ]heure|le (creneau|rdv|rendez-vous|horaire))|l[' ]heure ne (me )?convient|ne convient pas|pas (dit )?oui pour (cet |cette )?(horaire|creneau)|pas cet horaire|mais a midi/.test(
+  return /comment (faire )?(pour )?modifi|modifi(er|ez)|changer (l[' ]heure|le (creneau|rdv|rendez-vous|horaire))|l[' ]heure ne (me )?convient|ne convient pas|pas (dit )?oui pour (cet |cette )?(horaire|creneau)|pas cet horaire|mais a midi|\b(decaler|reporter|deplacer)\b|\b(je )?(ne )?(peux|pourrai|pourrais) (finalement |plus )?pas (venir|y aller|etre la|lundi|mardi|mercredi|jeudi|vendredi|samedi|demain|ce jour)/.test(
     value,
   );
 }
@@ -419,7 +420,7 @@ function lastSeyaOfferedToBook(conversation) {
     return false;
   }
   const value = normalize(last);
-  return /propose(r)? (un )?(creneau|horaire|rdv)|je (peux |vais )?(vous )?(regarder|proposer)|quel jour|lequel vous (irait|conviendrait)|cela vous conviendrait|quand (etes|seriez)|debut de semaine|fin de semaine|je peux vous proposer|autre journee|autre jour|lundi suivant|(l['’])?horaire.*(convient|irait)|convient toujours|pas de disponibilite|je (vous )propose/.test(
+  return /propose(r)? (un )?(creneau|horaire|rdv)|je (peux |vais )?(vous )?(regarder|proposer)|quel jour|lequel vous (irait|conviendrait)|cela vous conviendrait|quand (etes|seriez)|debut de semaine|fin de semaine|je peux vous proposer|autre journee|autre jour|lundi suivant|(l['’])?horaire.*(convient|irait)|convient toujours|pas de disponibilite|je (vous )propose|je vous le reserve|est disponible\. je vous/.test(
     value,
   );
 }
@@ -583,6 +584,7 @@ function isConfirmingOfferedTime(text, conversation) {
   }
   return (
     isShortYes(text) ||
+    /^(le |la )?(premier|premiere|1er|deuxieme|second|seconde|2e|2eme|dernier|derniere)( creneau| horaire)?$/.test(compactText(text)) ||
     /toujours|ca me convient|ça me convient|c[' ]est bon/i.test(compactText(text))
   );
 }
@@ -620,6 +622,13 @@ function isThanks(text, conversation) {
   const value = compactText(text);
   if (
     /^(merci beaucoup d'avance|merci d'avance|merci beaucoup|super merci|ok merci|c'est gentil|je vous remercie|merci)$/.test(
+      value,
+    )
+  ) {
+    return true;
+  }
+  if (
+    /^((super|ok|parfait|top|tres bien|d'accord|genial) )?(merci( beaucoup)? )?(et )?(bonne (journee|soiree|fin de journee|semaine|week-end|weekend)|au revoir)( a vous)?( merci)?$/.test(
       value,
     )
   ) {
@@ -1286,8 +1295,15 @@ function hasDayOfMonthRequest(text) {
   );
 }
 
-function identityReply() {
-  return "Je suis SEYA, l’assistante virtuelle du centre. Je peux vous renseigner et organiser votre rendez-vous, et l’équipe peut reprendre la conversation si vous préférez.";
+function identityReply(seya) {
+  const goal = pathGoal(seya);
+  if (goal === "callback") {
+    return "Je suis Seya, l’assistante virtuelle du centre. Je réponds à vos questions, et un expert ou une experte du centre peut vous rappeler pour organiser votre rendez-vous.";
+  }
+  if (goal === "none") {
+    return "Je suis Seya, l’assistante virtuelle du centre. Je réponds à vos questions, et l’équipe peut reprendre la conversation si vous préférez.";
+  }
+  return "Je suis Seya, l’assistante virtuelle du centre. Je peux vous renseigner et organiser votre rendez-vous, et l’équipe peut reprendre la conversation si vous préférez.";
 }
 
 function lastSeyaText(conversation) {
@@ -1324,6 +1340,7 @@ function speakZoneList(zone) {
     if (/bras/.test(part)) return "les bras";
     if (/dos/.test(part)) return "le dos";
     if (/ventre/.test(part)) return "le ventre";
+    if (/poignee/.test(part)) return "les poignées d’amour";
     if (/fess/.test(part)) return "les fesses";
     if (/fermete/.test(part)) return "le manque de fermeté";
     if (/ride/.test(part)) return "les rides";
@@ -1488,43 +1505,6 @@ function extractConsultativeFields(current, text, conversation) {
   return next;
 }
 
-function distanceQuestion(centerName) {
-  const place = String(centerName || "").trim() || "le centre";
-  return `Vous êtes à quelle distance de ${place} ?`;
-}
-
-function distanceAck(distance, conversation) {
-  const value = normalize(distance);
-  const km = value.match(/(\d+)\s*km/);
-  if (km && Number(km[1]) <= 35) {
-    return pickFresh(
-      [
-        "À cette distance, c’est pratique pour un suivi en centre.",
-        "Parfait, c’est bien dans la zone.",
-      ],
-      conversation,
-    );
-  }
-  if (/j['’]habite|sur place|dans (la ville|le village)|croix de vie|meme ville|même ville/i.test(value)) {
-    return "Parfait, c’est bien dans la zone.";
-  }
-  return pickFresh(["C’est noté.", "Parfait, je note."], conversation);
-}
-
-function triedQuestion(family) {
-  if (family === "epilation") {
-    return "Vous avez déjà testé quelle technologie jusque-là ?";
-  }
-  if (family === "visage") {
-    return "Vous avez déjà fait des soins pour la peau, ou c’est une première ?";
-  }
-  return "Pour vous orienter sur la méthode la plus adaptée, quelles technologies avez-vous déjà essayé jusqu’ici ?";
-}
-
-function triedAck(tried, family, conversation) {
-  return pickFresh(["C’est noté.", "Parfait, je note."], conversation);
-}
-
 function availabilityCta(conversation, extras = {}) {
   const mission = extras.seyaMission || resolveSeyaMission(extras.seya || conversation?._seya);
   const dayPart = conversation?.bookingState?.dayPart;
@@ -1537,10 +1517,7 @@ function availabilityCta(conversation, extras = {}) {
           ? "en fin de journée"
           : "";
   if (mission === "qualify_callback" || extras.skipBookingCta) {
-    if (partLabel) {
-      return `Je note ${partLabel}. Indiquez-moi un ou deux jours qui vous conviennent : une experte vous rappellera pour convenir d’un échange.`;
-    }
-    return "Parfait. Envoyez-moi vos disponibilités et une de nos expertes vous recontactera pour répondre à vos questions et convenir d’un rendez-vous.";
+    return "";
   }
   if (partLabel) {
     return `Je note ${partLabel}. Quel jour vous conviendrait ? Je regarde un créneau.`;
@@ -1566,11 +1543,17 @@ function firstNeedReply(text, conversation, qualification, extras = {}) {
   const zoneLabel =
     speakZoneList(qualification?.zone) || (family === "minceur" ? minceurGoalLabel(text) : "");
   const needKnown = Boolean(qualification?.need || family);
+  // Le besoin peut avoir été donné plus tôt dans le fil, pas forcément dans l’ordre prévu.
+  const threadLead = normalize(
+    [...(conversation?.messages || []).filter((item) => item.author === "lead").map((item) => item.text), text].join(" "),
+  );
   const detailKnown = Boolean(
     zoneLabel ||
+      qualification?.detail ||
+      (family === "minceur" && minceurGoalLabel(threadLead)) ||
       (family === "visage" &&
-        /peau|visage|fermete|ride|ridule|acne|tache|eclat|relach|teint|cerne|pore/.test(normalize(text))) ||
-      (family === "epilation" && /\bpoil|pilosit/.test(normalize(text))),
+        /peau|visage|fermete|ride|ridule|acne|tache|eclat|relach|teint|cerne|pore/.test(threadLead)) ||
+      (family === "epilation" && /\bpoil|pilosit/.test(threadLead)),
   );
   const extracted = extractConsultativeFields(qualification, text, conversation);
   const consultative = {
@@ -1606,68 +1589,54 @@ function firstNeedReply(text, conversation, qualification, extras = {}) {
     return "C’est noté. Quel est votre objectif pour la peau ?";
   }
 
+  const goal = pathGoal(extras.seyaMission || extras.seya || conversation?._seya);
+  const pathConversation = { ...conversation, _seya: extras.seya || conversation?._seya, qualification };
+  const ack = needAck(family, zoneLabel, conversation, text);
+  const step = (stepGoal) =>
+    `${ack} ${pathStepReply({
+      goal: stepGoal,
+      family,
+      seya: pathConversation._seya,
+      conversation: pathConversation,
+      withOffer: !/pendant notre/.test(ack),
+    })}`
+      .replace(/\s+/g, " ")
+      .trim();
+
   if (isWelcomeRelanceOnly(mission)) {
-    return needAck(family, zoneLabel, conversation, text);
+    if (extras.skipConsultative || stepAsked(lastSeyaText(conversation)) || alreadyTold(conversation, "(bilan|diagnostic) permettra d'evaluer")) {
+      return ack;
+    }
+    return step("none");
   }
 
   if (extras.skipConsultative) {
     return "";
   }
 
-  if (
-    wantsSlots(text, conversation) ||
-    isBookingThread(conversation) ||
-    consultative.availability
-  ) {
+  // Parcours : besoin connu → transition + bilan → action de l’objectif (A réservation, B rappel).
+  // Pas de question distance / historique : seules les consignes propres d’un centre peuvent les prévoir.
+  const bookingSignal =
+    wantsSlots(text, conversation) || isBookingThread(conversation) || consultative.availability;
+  if (!(goal === "book" && bookingSignal)) {
     if (
-      alreadyTold(
-        conversation,
-        "quand seriez-vous disponible|dites-moi un ou deux jours|envoyez-moi vos disponibilités",
-      )
+      alreadyTold(conversation, "quand seriez-vous disponible|du centre vous rappelle pour") &&
+      alreadyTold(conversation, "(bilan|diagnostic) permettra d'evaluer|faire le point sur votre objectif")
     ) {
       return "";
     }
-    return availabilityCta(conversation, extras);
-  }
-
-  const healthAside = classifyHealthMessage(text).personal;
-  if (!consultative.distance && healthAside && lastSeyaAskedDistance(conversation)) {
-    return distanceQuestion(extras.centerName);
-  }
-  if (!consultative.tried && consultative.distance && healthAside && lastSeyaAskedTried(conversation)) {
-    return triedQuestion(family);
-  }
-
-  if (
-    !consultative.distance &&
-    !alreadyTold(conversation, "quelle distance|moins de \\d+")
-  ) {
-    return `${needAck(family, zoneLabel, conversation, text)} ${distanceQuestion(extras.centerName)}`
-      .replace(/\s+/g, " ")
-      .trim();
-  }
-
-  if (
-    !consultative.tried &&
-    !alreadyTold(conversation, "déjà essayé|déjà testé|technologies|soins pour la peau")
-  ) {
-    return `${distanceAck(consultative.distance, conversation)} ${triedQuestion(family)}`
-      .replace(/\s+/g, " ")
-      .trim();
+    return step(goal);
   }
 
   if (
     alreadyTold(
       conversation,
-      "envoyez-moi vos disponibilités|dites-moi un ou deux jours|quand seriez-vous disponible",
+      "quand seriez-vous disponible|dites-moi un ou deux jours|envoyez-moi vos disponibilites",
     )
   ) {
     return "";
   }
-
-  return `${triedAck(consultative.tried, family, conversation)} ${availabilityCta(conversation, extras)}`
-    .replace(/\s+/g, " ")
-    .trim();
+  return availabilityCta(conversation, extras);
 }
 
 function conversationalReply(text, conversation, qualification, now, extras = {}) {
@@ -1675,7 +1644,7 @@ function conversationalReply(text, conversation, qualification, now, extras = {}
     return "";
   }
   if (isIdentityQuestion(text)) {
-    return identityReply();
+    return identityReply(extras.seya || conversation?._seya);
   }
   if (isWrongCenter(text)) {
     return wrongCenterReply(now);
@@ -1807,6 +1776,7 @@ module.exports = {
   lastSeyaAskedToSearch,
   willCallBackReply,
   isHesitation,
+  lastSeyaText,
   isIdentityQuestion,
   isWrongCenter,
   wrongCenterReply,

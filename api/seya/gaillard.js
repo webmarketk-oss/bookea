@@ -1,4 +1,5 @@
 const { findFacts } = require("./brief-facts");
+const knowledge = require("./center-knowledge");
 
 const GAILLARD_NAME = "JFG Clinic Gaillard";
 const GAILLARD_VISIT_MINUTES = { minceur: 90 };
@@ -53,9 +54,9 @@ function afterHandoffReply() {
 /** Après transmission : on garde le fil ouvert, sans refermer la conversation. */
 function keepConversationReply(family) {
   if (family === "minceur") {
-    return "Avec plaisir 😊 Avez-vous une autre question sur le parcours minceur, les appareils, l’alimentation ou le bilan ?";
+    return "Avec plaisir 😊 Je reste disponible si vous souhaitez une précision sur le parcours minceur, les appareils, l’alimentation ou le bilan.";
   }
-  return "Avec plaisir 😊 Avez-vous une autre question sur le soin ? Je reste disponible pour vous préciser ce qui est en fiche.";
+  return "Avec plaisir 😊 Je reste disponible si vous souhaitez une précision sur le soin.";
 }
 
 function acceptsContinue(text) {
@@ -143,7 +144,7 @@ function declinedReply(family) {
 }
 
 function modalityReply() {
-  return "Je n’ai pas cette précision dans la fiche du soin. Je peux la vérifier auprès de l’équipe si vous le souhaitez.";
+  return knowledge.TEAM_QUESTION_REPLY;
 }
 
 function identityReply() {
@@ -155,7 +156,7 @@ function promoSentence() {
 }
 
 function missingPriceReply() {
-  return "Je n’ai pas encore le tarif de cette zone dans la fiche du centre : l’équipe pourra vous le confirmer.";
+  return "Je n’ai pas encore le tarif de cette zone : l’équipe pourra vous le confirmer.";
 }
 
 function healthNotedReply() {
@@ -258,32 +259,27 @@ function processReply(family, sources = []) {
   if (family === "visage") {
     return "Le diagnostic visage permet de faire le point sur la peau, puis de vous proposer un protocole adapté.";
   }
-  return "Je n’ai pas le déroulement détaillé dans la fiche du soin. Je peux le vérifier auprès de l’équipe si vous le souhaitez.";
+  return knowledge.TEAM_QUESTION_REPLY;
 }
 
-function technologyReply(text, sources = []) {
-  if (/lumiere pulsee/.test(normalize(text))) {
-    const found = findFacts(sources, /lumiere pulsee|ipl|laser/, 1)[0];
-    return (
-      found ||
-      "Je n’ai pas dans la fiche si l’épilation du centre est en lumière pulsée ou en laser. Je peux le vérifier auprès de l’équipe si vous le souhaitez."
-    );
+function technologyReply(text, sources = [], { family, zone } = {}) {
+  if (/lumiere pulsee|\bipl\b/.test(normalize(text))) {
+    const pulsed = findFacts(sources, /lumiere pulsee|\bipl\b/, 1)[0];
+    if (pulsed) {
+      return pulsed;
+    }
+    const lasers =
+      knowledge.technologyNames(sources, "epilation") ||
+      (findFacts(sources, /epilation[^.]*\blaser\b|\blaser\b[^.]*epilation/, 1).length ? "le laser" : "");
+    return lasers
+      ? `Non, le centre n’utilise pas la lumière pulsée : l’épilation se fait avec ${lasers}.`
+      : knowledge.TEAM_QUESTION_REPLY;
   }
-  const found = findFacts(
-    sources,
-    /technologie|machine|appareil|equipement|laser|cryo|radiofrequ|ultrasons|ipl|lumiere pulsee/,
-    2,
-  );
-  return found.length
-    ? found.join(" ")
-    : "Je n’ai pas la liste des appareils dans la fiche du centre. Je peux la vérifier auprès de l’équipe si vous le souhaitez.";
+  return knowledge.technologyReply({ text, family, zone, sources }) || knowledge.TEAM_QUESTION_REPLY;
 }
 
 function childCompanionReply(sources = []) {
-  return (
-    findFacts(sources, /enfant|bebe/, 1)[0] ||
-    "Je n’ai pas cette information dans la fiche du centre. Je peux vérifier auprès de l’équipe si vous pouvez venir avec votre enfant."
-  );
+  return findFacts(sources, /enfant|bebe/, 1)[0] || knowledge.TEAM_QUESTION_REPLY;
 }
 
 function serviceOfferedReply(offered, askedLabel) {
@@ -294,9 +290,8 @@ function serviceOfferedReply(offered, askedLabel) {
   return `Non, nous ne faisons pas ${label}.`;
 }
 
-function missingPracticalReply(topic) {
-  const label = String(topic || "cette information").trim();
-  return `Je n’ai pas ${label} dans la fiche du centre. Je peux la vérifier auprès de l’équipe si vous le souhaitez.`;
+function missingPracticalReply() {
+  return knowledge.TEAM_QUESTION_REPLY;
 }
 
 function needQuestion(family, missing = "") {
@@ -471,12 +466,13 @@ function availabilityContext(text) {
   return "contexte non précisé";
 }
 
-function withPreference(conversation, text, at) {
+function withPreference(conversation, text, at, context) {
   const notes = conversation?.teamNotes || {};
   const preferences = Array.isArray(notes.preferences) ? notes.preferences : [];
+  const spoken = availabilityContext(text);
   const entry = {
     text: String(text || "").trim().slice(0, 200),
-    context: availabilityContext(text),
+    context: spoken === "contexte non précisé" && context ? context : spoken,
     at,
   };
   if (preferences.some((item) => item.text === entry.text)) {
@@ -541,7 +537,7 @@ function promptRules(family) {
     "Si le prospect donne spontanément un jour ou une heure, tu dis seulement que tu transmets sa préférence à l’équipe. Tu ne promets aucun rappel à cette heure, tu ne confirmes aucun rendez-vous, tu ne transformes pas une disponibilité pour venir en disponibilité pour un appel.",
     "Tu dis « un expert ou une experte du centre », jamais « une opératrice ».",
     "Interdit de demander où habite le prospect ou à quelle distance il se trouve, et interdit de proposer un autre centre (Annemasse ou autre). Si on te demande où est le centre, tu donnes uniquement l’adresse fournie plus bas.",
-    `Modalités pratiques (tenue, rasage, préparation…) : seulement ce qui est écrit dans la fiche du soin. Sinon : « ${modalityReply()} » Interdit d’inventer, par exemple, qu’on peut garder son pantalon.`,
+    "Modalités pratiques (tenue, rasage, préparation…) : seulement ce qui est écrit dans la fiche du soin. Sinon, tu dis simplement que tu n’as pas cette précision. Interdit d’inventer, par exemple, qu’on peut garder son pantalon.",
     "Tarifs : seulement si le prospect les demande, avec les tarifs de la fiche. Jamais de remise précise sans offre active renseignée.",
     "Après la transmission à l’équipe, tu réponds encore aux questions documentées dans la fiche. Tu ne poses plus aucune question de planning.",
   ].join("\n");

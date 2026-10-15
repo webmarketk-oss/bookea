@@ -73,12 +73,30 @@ function notifyKey(kind, slot) {
   return `${kind}:${String(slot?.date || "").slice(0, 10)}|${String(slot?.time || "").slice(0, 5)}`;
 }
 
-function centerNotifyCopy({ kind, centerName, conversation, slot }) {
+function centerNotifyCopy({ kind, centerName, conversation, slot, previousSlot }) {
   const name = personLabel(conversation);
   const phone = String(conversation?.phone || "").trim() || "non renseigné";
   const care = careLabel(conversation);
   const when = slotLabel(slot) || "horaire à confirmer";
   const centre = String(centerName || "").trim() || "le centre";
+  const before = slotLabel(previousSlot);
+
+  if (kind === "booked" && before && before !== when) {
+    return {
+      subject: `Seya : RDV déplacé — ${name}`,
+      text: [
+        `Seya vient de déplacer un rendez-vous pour ${centre}, à la demande du prospect.`,
+        "",
+        `Prospect : ${name}`,
+        `Téléphone : ${phone}`,
+        `Soin : ${care}`,
+        `Ancien créneau : ${before} (libéré)`,
+        `Nouveau créneau : ${when}`,
+        "",
+        "Le rendez-vous est à jour dans l’agenda Bookea.",
+      ].join("\n"),
+    };
+  }
 
   if (kind === "booked") {
     return {
@@ -97,6 +115,38 @@ function centerNotifyCopy({ kind, centerName, conversation, slot }) {
   }
 
   const notes = asRecord(conversation?.teamNotes);
+  if (kind === "callback_update") {
+    const latest = (Array.isArray(notes.preferences) ? notes.preferences : []).at(-1);
+    return {
+      subject: `Seya : rappel — nouvelle préférence de ${name}`,
+      text: [
+        `Le prospect a précisé sa demande de rappel déjà transmise pour ${centre}.`,
+        "",
+        `Prospect : ${name}`,
+        `Téléphone : ${phone}`,
+        `Soin : ${care}`,
+        `Nouvelle préférence : « ${String(latest?.text || "").trim()} »${latest?.context ? ` (${latest.context})` : ""}. Aucun rappel ni rendez-vous n’a été promis à cette heure.`,
+        "",
+        "Aucun rendez-vous n’a été posé dans l’agenda.",
+      ].join("\n"),
+    };
+  }
+  if (kind === "question") {
+    const question = asRecord(notes.question);
+    return {
+      subject: `Seya : question à laquelle répondre — ${name}`,
+      text: [
+        `Un prospect a posé une question à laquelle Seya n’a pas pu répondre de façon fiable pour ${centre}.`,
+        "",
+        `Prospect : ${name}`,
+        `Téléphone : ${phone}`,
+        `Soin : ${care}`,
+        `Question : « ${String(question.text || "").trim()} »`,
+        "",
+        "Seya lui a indiqué que l’équipe lui répondrait directement. Si l’information manque ou se contredit dans les réglages de Seya, pensez à la compléter.",
+      ].join("\n"),
+    };
+  }
   if (notes.handedOffAt) {
     const preferences = (Array.isArray(notes.preferences) ? notes.preferences : [])
       .map((item) => `« ${String(item?.text || "").trim()} » (${item?.context || "contexte non précisé"})`)
@@ -265,11 +315,17 @@ async function notifyCenterSeyaAction({
   conversation,
   kind,
   slot,
+  previousSlot,
 } = {}) {
-  if (kind !== "booked" && kind !== "callback") {
+  if (!["booked", "callback", "callback_update", "question"].includes(kind)) {
     return { sent: false, reason: "unknown_kind", conversation };
   }
-  const key = notifyKey(kind, slot);
+  const key =
+    kind === "callback_update"
+      ? `callback_update:${(asRecord(conversation?.teamNotes).preferences || []).length}`
+      : kind === "question"
+        ? `question:${asRecord(asRecord(conversation?.teamNotes).question).at || ""}`
+        : notifyKey(kind, slot);
   if (conversation?.centerNotifyKey === key) {
     return { sent: false, reason: "already", conversation };
   }
@@ -291,6 +347,7 @@ async function notifyCenterSeyaAction({
     centerName: center?.name,
     conversation,
     slot,
+    previousSlot,
   });
   const results = [];
   for (const email of emails) {
@@ -312,7 +369,7 @@ async function notifyCenterSeyaAction({
   return {
     sent,
     reason: sent ? "sent" : "send_failed",
-    conversation: sent ? { ...conversation, centerNotifyKey: key } : conversation,
+    conversation: sent && kind !== "question" ? { ...conversation, centerNotifyKey: key } : conversation,
     results,
   };
 }

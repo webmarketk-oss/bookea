@@ -231,24 +231,24 @@ test("mission rappel : l’info santé est notée pour l’équipe, la qualifica
   for (const text of [
     "Le ventre",
     "Je suis enceinte, je peux faire la séance ?",
-    "10 km",
-    "Jamais rien fait",
+    "Oui",
     "Jeudi après-midi",
-    "15h",
   ]) {
     lastResult = await reply(center, conversation, text);
     conversation = lastResult.conversation;
     said.push(lastSeya(conversation));
   }
   assert.match(said[1], /je le note pour l’équipe/);
-  assert.match(said[1], /distance/);
+  assert.match(said[1], /du centre peut vous rappeler pour en parler\.$/);
+  assert.equal((said[1].match(/peut vous rappeler/g) || []).length, 1);
+  assert.doesNotMatch(said[1], /distance|je vous écoute/);
   assert.doesNotMatch(said[1], /vérifi\w* votre situation|vous pouvez|c’est possible|contre-indiqué|compatible/i);
-  assert.match(said[3], /expertes vous recontactera/);
-  assert.match(said[5], /rappellera jeudi 15\/10 à 15h00/);
-  assert.notEqual(conversation.status, "Revue santé");
+  assert.match(said[2], /demande a été transmise à l’équipe/);
+  assert.match(said[3], /jeudi 15\/10 après-midi/);
+  assert.equal(conversation.status, "À recontacter");
   assert.equal(conversation.healthTask?.transferTo, "la praticienne Rappel");
   assert.match(conversation.healthTask?.context || "", /enceinte/);
-  assert.equal(conversation.qualification.distance, "10 km");
+  assert.ok(conversation.teamNotes?.handedOffAt);
   assert.equal(lastResult.shouldBook, null);
 });
 
@@ -277,49 +277,48 @@ test("objectif sans zone (kilos, cellulite, poils) : on qualifie et on avance", 
       ],
     };
     const said = lastSeya((await reply(center, conversation, text)).conversation);
-    assert.match(said, /distance/, `${text} → ${said}`);
+    assert.match(said, /du centre vous rappelle pour/, `${text} → ${said}`);
+    assert.doesNotMatch(said, /distance|déjà essayé/, `${text} → ${said}`);
+    assert.ok((said.match(/99€/g) || []).length <= 1, `${text} → ${said}`);
     assert.doesNotMatch(said, /je vous écoute|créneau|notre (un|une) |notre e /i, `${text} → ${said}`);
   }
 });
 
-test("mission rendez-vous : besoin → distance → essais → créneaux → réservation", async () => {
+test("mission rendez-vous : besoin → bilan → disponibilités → créneaux → réservation", async () => {
   const center = CENTERS.lift;
   let conversation = start(center, "visage");
   const turns = [];
-  for (const text of [
-    "J’ai des rides, je peux faire le soin ?",
-    "10 km",
-    "Non jamais",
-    "Jeudi après-midi",
-    "La première",
-  ]) {
+  for (const text of ["J’ai des rides, je peux faire le soin ?", "Jeudi après-midi", "La première"]) {
     const result = await reply(center, conversation, text);
     conversation = result.conversation;
     turns.push({ text, said: lastSeya(conversation), result });
   }
-  assert.match(turns[0].said, /distance/);
-  assert.doesNotMatch(turns[1].said, /zone|objectif pour la peau/i);
-  assert.match(turns[2].said, /jours où vous êtes disponible/);
-  assert.match(turns[3].said, /14h00/);
-  assert.equal(turns[4].result.shouldBook?.time, "14:00");
+  assert.match(turns[0].said, /permettra d’évaluer/);
+  assert.match(turns[0].said, /Quand seriez-vous disponible/);
+  assert.doesNotMatch(turns[0].said, /distance|déjà essayé/);
+  assert.equal((turns[0].said.match(/offert/g) || []).length, 1);
+  assert.match(turns[1].said, /14h00/);
+  assert.equal(turns[2].result.shouldBook?.time, "14:00");
   assert.equal(conversation.qualification.zone, "rides");
 });
 
-test("mission rappel : jour donné → on demande l’heure, pas le jour ; aucun créneau posé", async () => {
+test("mission rappel : accord → transmission, puis jour donné = préférence ; aucun créneau posé", async () => {
   const center = CENTERS.rappel;
   let conversation = start(center, "minceur");
   const said = [];
   let lastResult = null;
-  for (const text of ["Le ventre", "10 km", "Jamais rien fait", "Jeudi après-midi", "15h"]) {
+  for (const text of ["Le ventre", "Oui", "Jeudi après-midi", "15h"]) {
     lastResult = await reply(center, conversation, text);
     conversation = lastResult.conversation;
     said.push(lastSeya(conversation));
   }
-  assert.match(said[2], /expertes vous recontactera/);
-  assert.match(said[3], /jeudi 15\/10 après-midi/);
-  assert.match(said[3], /À quelle heure/);
-  assert.doesNotMatch(said[3], /début de semaine|fin de semaine/);
-  assert.match(said[4], /rappellera jeudi 15\/10 à 15h00/);
+  assert.match(said[0], /du centre vous rappelle pour/);
+  assert.match(said[1], /demande a été transmise à l’équipe/);
+  assert.match(said[2], /jeudi 15\/10 après-midi/);
+  assert.doesNotMatch(said[2], /\?|début de semaine|fin de semaine/);
+  assert.match(said[3], /15h/);
+  assert.doesNotMatch(said.join(" "), /opératrice|rappellera jeudi/);
+  assert.equal(conversation.status, "À recontacter");
   assert.equal(lastResult.shouldBook, null);
   assert.equal((conversation.proposedSlots || []).length, 0);
 });

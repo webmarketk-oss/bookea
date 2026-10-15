@@ -139,7 +139,9 @@ function findFacts(sources, pattern, limit = 3) {
 }
 
 module.exports = {
+  BULLET,
   briefFacts,
   findFacts,
+  isHeaderLine,
   isInstruction,
 };
