@@ -571,6 +571,10 @@ test("j’ai déjà pris le rdv : elle arrête de proposer des créneaux", async
     isAlreadyBookedElsewhere("J'ai déjà pris le rdv sur planity"),
     true,
   );
+  assert.equal(
+    isAlreadyBookedElsewhere("J'ai calé un créneau sur Doctolib"),
+    true,
+  );
   assert.equal(isAlreadyBookedElsewhere("je veux prendre rdv le 8 octobre"), false);
 
   let conversation = startConversation(
@@ -590,19 +594,29 @@ test("j’ai déjà pris le rdv : elle arrête de proposer des créneaux", async
     conversation,
     "J'ai pris le rdv à l'instant le 8 octobre",
   );
-  assert.match(lastSeya(conversation), /déjà pris|c’est noté|à très vite/i);
+  assert.match(lastSeya(conversation), /merci|indiqué/i);
   assert.doesNotMatch(
     lastSeya(conversation),
     /11h30|12h00|12h30|début de semaine|fin de semaine|lequel/i,
   );
   assert.equal((conversation.proposedSlots || []).length, 0);
-  assert.equal(conversation.status, "RDV pris");
+  assert.notEqual(conversation.status, "RDV pris");
+  assert.equal(conversation.bookingState.appointmentStatus, "declared_elsewhere");
+  assert.ok(conversation.teamNotes?.bookedElsewhere);
 
   conversation = await reply(conversation, "J'ai déjà pris le rdv sur planity");
-  assert.match(lastSeya(conversation), /déjà pris|planity|c’est noté|à très vite/i);
+  assert.match(lastSeya(conversation), /merci|indiqué/i);
   assert.doesNotMatch(
     lastSeya(conversation),
     /début de semaine|fin de semaine|11h30|lequel/i,
+  );
+  assert.equal((conversation.proposedSlots || []).length, 0);
+
+  conversation = await reply(conversation, "J'ai calé un créneau sur Doctolib");
+  assert.match(lastSeya(conversation), /merci|indiqué/i);
+  assert.doesNotMatch(
+    lastSeya(conversation),
+    /je vous propose|11h|12h|début de semaine|fin de semaine/i,
   );
   assert.equal((conversation.proposedSlots || []).length, 0);
 });
@@ -2540,7 +2554,91 @@ test("qualification : elle reprend les zones, la distance, puis ce qui a déjà 
       now: NOW,
     })
   ).conversation;
-  assert.match(lastSeya(conversation), /régime|base pour/i);
-  assert.match(lastSeya(conversation), /disponibilités|expertes vous recontactera/i);
+  assert.match(lastSeya(conversation), /noté|je note/i);
+  assert.doesNotMatch(lastSeya(conversation), /régime seul|bonne base|raffermir/i);
+  assert.match(lastSeya(conversation), /disponibilités|expertes vous recontactera|rappellera/i);
+});
+
+test("méthodes déjà données : pas de question répétée sur ce qui a été essayé", async () => {
+  delete process.env.OPENAI_API_KEY;
+  const qualify = {
+    ...seya,
+    seyaMission: "qualify_callback",
+    bookAppointment: false,
+  };
+  let conversation = startConversation(
+    {
+      leadId: "lead-tried-memory",
+      centerId: "jfg-clinique-clermont",
+      firstName: "Léa",
+      phone: "0611223344",
+      treatment: "Soin minceur",
+    },
+    "JFG Clinique Clermont",
+    qualify,
+  );
+  conversation = (
+    await generateSeyaReply({
+      conversation,
+      text: "Le ventre et les poignées d’amour",
+      seya: qualify,
+      appointments: [],
+      hours: hours(),
+      centerName: "JFG Clinique Clermont",
+      centerId: "jfg-clinique-clermont",
+      now: NOW,
+    })
+  ).conversation;
+  conversation = (
+    await generateSeyaReply({
+      conversation,
+      text: "J’habite à Clermont",
+      seya: qualify,
+      appointments: [],
+      hours: hours(),
+      centerName: "JFG Clinique Clermont",
+      centerId: "jfg-clinique-clermont",
+      now: NOW,
+    })
+  ).conversation;
+  conversation = (
+    await generateSeyaReply({
+      conversation,
+      text: "Rien, à part un rééquilibrage alimentaire et du sport",
+      seya: qualify,
+      appointments: [],
+      hours: hours(),
+      centerName: "JFG Clinique Clermont",
+      centerId: "jfg-clinique-clermont",
+      now: NOW,
+    })
+  ).conversation;
+  assert.match(conversation.qualification.tried, /rééquilibrage|sport/i);
+  assert.doesNotMatch(lastSeya(conversation), /quelles technologies|déjà essayé|déjà testé/i);
+});
+
+test("Doctolib annoncé : aucun nouveau créneau proposé", async () => {
+  delete process.env.OPENAI_API_KEY;
+  let conversation = startConversation(
+    {
+      leadId: "lead-doctolib",
+      centerId: "jfg-clinique-clermont",
+      firstName: "Sam",
+      phone: "0611223355",
+      treatment: "Soin minceur",
+    },
+    "JFG Clinique Clermont",
+    seya,
+  );
+  conversation = await reply(conversation, "Je veux un rendez-vous");
+  conversation = await reply(conversation, "J'ai calé un créneau sur Doctolib");
+  assert.match(lastSeya(conversation), /merci|indiqué/i);
+  assert.doesNotMatch(
+    lastSeya(conversation),
+    /je vous propose|11h|12h|début de semaine|fin de semaine|lequel/i,
+  );
+  assert.equal((conversation.proposedSlots || []).length, 0);
+  assert.equal(conversation.bookingState.appointmentStatus, "declared_elsewhere");
+  assert.notEqual(conversation.status, "RDV pris");
 });
 

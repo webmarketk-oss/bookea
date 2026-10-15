@@ -27,7 +27,11 @@ const {
 } = require("./center-route");
 const { findOwnSeyaAppointment, slotDate, slotTime } = require("./own-appointment");
 const { appointmentSlot } = require("../appointments/token-utils");
-const { crmStatusFromLeadMessage } = require("./conversation");
+const {
+  alreadyBookedReply,
+  crmStatusFromLeadMessage,
+  isAlreadyBookedElsewhere,
+} = require("./conversation");
 const { canSeyaSetCrmStatus } = require("./crm-sync");
 const { withCrmStatus } = require("./booking-close");
 const {
@@ -949,10 +953,47 @@ async function handleIncoming(
   next.welcomeSendAt = null;
   next.lastInboundIds = inboundIds;
 
-  const draftedReply =
+  let draftedReply =
     [...(result.conversation.messages || [])]
       .reverse()
       .find((item) => item.author === "seya")?.text || "";
+  const recentLeadTexts = (next.messages || [])
+    .filter((item) => item.author === "lead")
+    .slice(-4)
+    .map((item) => String(item.text || ""));
+  const declaredElsewhere = recentLeadTexts.some((item) =>
+    isAlreadyBookedElsewhere(item),
+  );
+  if (
+    declaredElsewhere &&
+    (result.shouldBook ||
+      /je (vous )?propose|lequel vous irait|début de semaine|fin de semaine|\d{1,2}h\d{2}/i.test(
+        draftedReply,
+      ))
+  ) {
+    const note = alreadyBookedReply(incoming.text);
+    draftedReply = note;
+    result.shouldBook = null;
+    next.status = next.qualification?.need ? "Qualifié" : next.status || "En cours";
+    next.proposedSlots = [];
+    next.bookingState = {
+      ...(next.bookingState || {}),
+      pendingQuestion: "no_slots",
+      lastOfferedSlots: [],
+      appointmentStatus: "declared_elsewhere",
+    };
+    next.teamNotes = {
+      ...(next.teamNotes || {}),
+      bookedElsewhere: {
+        text: String(incoming.text || "").trim().slice(0, 200),
+        at: new Date().toISOString(),
+      },
+    };
+    const seyaIndex = (next.messages || []).map((item) => item.author).lastIndexOf("seya");
+    if (seyaIndex >= 0) {
+      next.messages[seyaIndex] = { ...next.messages[seyaIndex], text: note };
+    }
+  }
   const followUps = [];
   const wantedSlot = result.shouldBook;
   if (wantedSlot) {

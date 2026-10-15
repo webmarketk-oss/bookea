@@ -1756,19 +1756,26 @@ function applyLeadReply(conversation, text, seya, slots, extras = {}) {
     intentText,
   );
   if (isAlreadyBookedElsewhere(intentText) || isAlreadyBookedElsewhere(text)) {
+    // Déclaré par le prospect, pas une réservation vérifiée dans l’agenda Bookea.
     return finishLeadReply(
       conversation,
       qualification,
-      "RDV pris",
+      qualification.need ? "Qualifié" : conversation.status || "En cours",
       text,
       alreadyBookedReply(intentText || text),
       {
         ...bookingState,
         pendingQuestion: "no_slots",
         lastOfferedSlots: [],
-        appointmentStatus: "confirmed",
+        appointmentStatus: "declared_elsewhere",
       },
-      { proposedSlots: [] },
+      {
+        proposedSlots: [],
+        bookedElsewhere: {
+          text: String(intentText || text || "").trim().slice(0, 200),
+          at: (extras.now instanceof Date ? extras.now : new Date()).toISOString(),
+        },
+      },
     );
   }
   const confirmYes = isConfirmingOfferedTime(intentText, conversation);
@@ -2391,7 +2398,7 @@ const GAILLARD_VISAGE_CONCERN =
 const GAILLARD_EPILATION_ZONE =
   /jambe|maillot|aisselle|bras|levre|menton|visage|dos|fesse|ventre|cuisse|torse|barbe|sourcil|nuque|epaule|pied|main|sillon|integral|bresilien|corps entier|joue|favori/;
 const GAILLARD_TRIED =
-  /deja (fait|essaye|teste)|jamais (fait|essaye|teste)|premiere fois|rien (essaye|teste)|aucun(e)? (soin|solution|methode|traitement)|j'ai (fait|essaye|teste) (des?|du|de la|un|une|le|la|plusieurs) (regime|soin|seance|laser|cryo|epil|cire|massage|traitement|methode|solution|lumiere|presso|radiofrequence)/;
+  /deja (fait|essaye|teste)|jamais (fait|essaye|teste)|premiere fois|rien\b|a part |reequilibrage|aliment|sport|regime|aucun(e)? (soin|solution|methode|traitement)|j'ai (fait|essaye|teste) (des?|du|de la|un|une|le|la|plusieurs) (regime|soin|seance|laser|cryo|epil|cire|massage|traitement|methode|solution|lumiere|presso|radiofrequence)/;
 
 function gaillardLeadTexts(conversation, text) {
   return [
@@ -3012,6 +3019,12 @@ function finishLeadReply(
       bookedSlot: extra.bookedSlot || conversation.bookedSlot,
       healthReview: extra.healthReview || conversation.healthReview,
       healthTask: extra.healthTask || conversation.healthTask,
+      teamNotes: extra.bookedElsewhere
+        ? {
+            ...(conversation.teamNotes || {}),
+            bookedElsewhere: extra.bookedElsewhere,
+          }
+        : conversation.teamNotes,
       messages: [
         ...(conversation.messages || []),
         message("lead", leadText),

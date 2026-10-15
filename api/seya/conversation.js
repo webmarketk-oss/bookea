@@ -496,42 +496,53 @@ function isAlreadyBookedElsewhere(text) {
     return false;
   }
   if (
-    /je (veux|voudrais|souhaite|aimerais|peux) (prendre|reserver)/.test(value)
+    /je (veux|voudrais|souhaite|aimerais|peux) (prendre|reserver|caler)/.test(value)
   ) {
     return false;
   }
   if (
-    /(prendre|reserver) (un )?(rdv|rendez-vous|creneau)/.test(value) &&
+    /(prendre|reserver|caler) (un )?(rdv|rendez-vous|creneau)/.test(value) &&
     !/j[' ]?ai |je viens de |deja |a l[' ]instant/.test(value)
   ) {
     return false;
   }
-  const mentionsVisit = /(rdv|rendez-vous|creneau|reserve|reservation|booke)/.test(
-    value,
-  );
+  const platform =
+    /doctolib|planity|treatwell|fresha|clicrdv|rdv medical|en ligne|sur (le )?site|sur (votre )?agenda/.test(
+      value,
+    );
+  const mentionsVisit =
+    /(rdv|rendez-vous|creneau|reserve|reservation|booke|cale)/.test(value) ||
+    platform;
   if (!mentionsVisit) {
     return false;
   }
-  const done =
-    /j[' ]?ai (deja )?(pris|reserve|booke)/.test(value) ||
-    /je viens de (prendre|reserver|booker)/.test(value) ||
+  const declared =
+    /j[' ]?ai (deja )?(pris|reserve|booke|cale|pose|fixe)/.test(value) ||
+    /je viens de (prendre|reserver|booker|caler|poser)/.test(value) ||
     /a l[' ]instant/.test(value) ||
-    /deja (pris|reserve|booke)/.test(value) ||
+    /deja (pris|reserve|booke|cale|pose|fixe)/.test(value) ||
     /rdv (deja )?pris/.test(value) ||
-    /rendez-vous (deja )?(pris|reserve)/.test(value);
-  const elsewhere =
-    /planity|treatwell|en ligne|sur (le )?site|sur (votre )?agenda/.test(value);
-  return done || (elsewhere && /pris|reserve|booke/.test(value));
+    /rendez-vous (deja )?(pris|reserve|cale)/.test(value) ||
+    /j[' ]?ai (un |mon )?(rdv|rendez-vous|creneau)\b/.test(value) ||
+    /cale(e)? (un )?(rdv|rendez-vous|creneau)/.test(value);
+  return (
+    declared ||
+    (platform && /pris|reserve|booke|cale|pose|fixe|rdv|creneau/.test(value))
+  );
 }
 
 function alreadyBookedReply(text) {
   const value = normalize(text);
-  const via = /planity/.test(value)
-    ? " sur Planity"
-    : /treatwell/.test(value)
-      ? " sur Treatwell"
-      : "";
-  return `Parfait, c’est noté, votre rendez-vous est déjà pris${via}. Je n’ai plus de créneau à vous proposer. À très vite au centre.`;
+  const hasWhen =
+    /\b(lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche|demain|aujourd'hui)\b/.test(
+      value,
+    ) ||
+    /\b\d{1,2}\s*h(\d{2})?\b/.test(value) ||
+    /\b\d{1,2}\/\d{1,2}\b/.test(value);
+  if (hasWhen) {
+    return "Merci de me l’avoir indiqué 😊";
+  }
+  return "Merci de me l’avoir indiqué 😊 Si vous avez le jour et l’heure, je peux les noter pour l’équipe.";
 }
 
 function isConfirmingOfferedTime(text, conversation) {
@@ -1279,49 +1290,19 @@ function needAck(family, zoneLabel, conversation, text) {
 }
 
 function firstNeedAck(family, zoneLabel, conversation) {
-  const several = / et |, /.test(zoneLabel || "");
-  if (family === "epilation") {
+  if (zoneLabel) {
     return pickFresh(
-      zoneLabel
-        ? [
-            `C’est noté pour ${zoneLabel}, c’est justement le type de demande où on peut construire un programme assez cohérent.`,
-            `Pour ${zoneLabel}, on adapte le protocole à votre peau et à votre pilosité.`,
-          ]
-        : [
-            "Pour l’épilation laser, le protocole se personnalise selon la peau et la pilosité.",
-          ],
+      [`C’est noté pour ${zoneLabel}.`, `Je note ${zoneLabel}.`],
       conversation,
     );
+  }
+  if (family === "epilation") {
+    return pickFresh(["C’est noté.", "Parfait, je note."], conversation);
   }
   if (family === "visage") {
-    return pickFresh(
-      zoneLabel
-        ? [
-            `${zoneLabel.charAt(0).toUpperCase()}${zoneLabel.slice(1)}, c’est justement le genre d’objectif qu’on voit souvent. Le diagnostic permettra de choisir le soin le plus adapté à votre peau.`,
-            `Je note ${zoneLabel}. Le diagnostic permettra de déterminer le soin qui correspond le mieux à votre peau.`,
-          ]
-        : [
-            "Nous avons des soins visage adaptés. Le diagnostic permettra de déterminer celui qui correspond le mieux à votre peau.",
-          ],
-      conversation,
-    );
+    return pickFresh(["C’est noté.", "Parfait, je note."], conversation);
   }
-  return pickFresh(
-    zoneLabel
-      ? several
-        ? [
-            `Pour ${zoneLabel}, ces zones se travaillent justement assez bien dans un accompagnement global.`,
-            `Pour ${zoneLabel}, on cherche souvent à voir une vraie différence. Le bilan permet de définir l’accompagnement adapté.`,
-          ]
-        : [
-            `${zoneLabel.charAt(0).toUpperCase()}${zoneLabel.slice(1)}, c’est justement un objectif qu’on voit souvent au centre.`,
-            `Pour ${zoneLabel}, nous avons des solutions qui peuvent vous accompagner. Le bilan permettra de définir l’accompagnement adapté.`,
-          ]
-      : [
-          "Nous avons des solutions minceur adaptées. Le bilan permettra de faire le point et de définir l’accompagnement.",
-        ],
-    conversation,
-  );
+  return pickFresh(["C’est noté.", "Parfait, je note."], conversation);
 }
 
 function lastSeyaAskedDistance(conversation) {
@@ -1333,6 +1314,24 @@ function lastSeyaAskedDistance(conversation) {
 function lastSeyaAskedTried(conversation) {
   return /technologies? (avez-vous )?(déjà )?(essay|test)|déjà (essayé|testé)|soins avec technologie|c['’]est une premi[eè]re/i.test(
     lastSeyaText(conversation),
+  );
+}
+
+function looksLikeTriedAnswer(text) {
+  const value = normalize(text);
+  if (!value) {
+    return false;
+  }
+  if (
+    /quelle zone|quelles zones|objectif|distance|combien|prix|tarif|\?/.test(value) &&
+    !/deja |jamais|rien|regime|sport|reequilibrage|essai|teste|essay/.test(value)
+  ) {
+    return false;
+  }
+  return (
+    /regime|sport|reequilibrage|aliment|jamais|rien\b|aucune|premiere fois|deja (fait|essaye|teste)|cryo|laser|presso|cire|epil|methode|solution|soin|seance|techno/.test(
+      value,
+    ) || /a part /.test(value)
   );
 }
 
@@ -1355,8 +1354,11 @@ function extractConsultativeFields(current, text, conversation) {
       next.distance = raw.slice(0, 80);
     }
   }
-  if (!next.tried && lastSeyaAskedTried(conversation)) {
-    next.tried = raw.slice(0, 80);
+  if (
+    !next.tried &&
+    (lastSeyaAskedTried(conversation) || looksLikeTriedAnswer(text))
+  ) {
+    next.tried = raw.slice(0, 120);
   }
   return next;
 }
@@ -1395,31 +1397,28 @@ function triedQuestion(family) {
 }
 
 function triedAck(tried, family, conversation) {
-  const value = normalize(tried);
-  if (/regime|régime/.test(value) && !/cryo|presso|laser|cavitation|techno/.test(value)) {
-    return pickFresh(
-      [
-        "Le régime seul ne suffit pas toujours à traiter ce type de zones, surtout quand on cherche aussi à raffermir.",
-        "C’est fréquent, le régime seul ne traite pas toujours ces zones comme on l’aimerait.",
-      ],
-      conversation,
-    );
-  }
-  if (/aucune|jamais|pas encore|non$|que des regime/.test(value)) {
-    return family === "epilation"
-      ? "C’est une bonne base pour avancer."
-      : "Ça peut tout à fait être une bonne base pour partir sur un bilan adapté.";
-  }
-  return pickFresh(
-    ["C’est noté, ça aide à voir ce qui a déjà été tenté.", "Parfait, je note."],
-    conversation,
-  );
+  return pickFresh(["C’est noté.", "Parfait, je note."], conversation);
 }
 
 function availabilityCta(conversation, extras = {}) {
   const mission = extras.seyaMission || resolveSeyaMission(extras.seya || conversation?._seya);
+  const dayPart = conversation?.bookingState?.dayPart;
+  const partLabel =
+    dayPart === "afternoon"
+      ? "l’après-midi"
+      : dayPart === "morning"
+        ? "le matin"
+        : dayPart === "evening"
+          ? "en fin de journée"
+          : "";
   if (mission === "qualify_callback" || extras.skipBookingCta) {
-    return "Parfait ! Envoyez-moi vos disponibilités et une de nos expertes vous recontactera pour répondre à vos questions et convenir d’un rendez-vous.";
+    if (partLabel) {
+      return `Je note ${partLabel}. Indiquez-moi un ou deux jours qui vous conviennent : une experte vous rappellera pour convenir d’un échange.`;
+    }
+    return "Parfait. Envoyez-moi vos disponibilités et une de nos expertes vous recontactera pour répondre à vos questions et convenir d’un rendez-vous.";
+  }
+  if (partLabel) {
+    return `Je note ${partLabel}. Quel jour vous conviendrait ? Je regarde un créneau.`;
   }
   return "Parfait. Dites-moi un ou deux jours où vous êtes disponible, je regarde un créneau.";
 }

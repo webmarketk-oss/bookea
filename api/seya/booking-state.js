@@ -104,7 +104,7 @@ function applyBookingMessage(state, text, extras = {}) {
   if (isAlreadyBookedElsewhere(text)) {
     next.pendingQuestion = "no_slots";
     next.lastOfferedSlots = [];
-    next.appointmentStatus = "confirmed";
+    next.appointmentStatus = "declared_elsewhere";
     return next;
   }
 
@@ -435,7 +435,12 @@ function shouldSearchSlots(state, text, conversation) {
   if (isRescheduleAsk(text) || wantsNoon(text)) {
     return true;
   }
-  if (isAlreadyBookedElsewhere(text) || isAppointmentConfirmed(conversation)) {
+  if (
+    isAlreadyBookedElsewhere(text) ||
+    isAppointmentConfirmed(conversation) ||
+    conversation?.bookingState?.appointmentStatus === "declared_elsewhere" ||
+    conversation?.teamNotes?.bookedElsewhere
+  ) {
     return false;
   }
   if (

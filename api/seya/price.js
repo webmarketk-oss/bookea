@@ -533,6 +533,25 @@ function apologyForRepeat(previousIntent) {
   return "Vous avez raison, j’ai répété une ancienne réponse au lieu de traiter votre question.";
 }
 
+function recentLeadPriceIntents(conversation, text) {
+  const leads = [
+    text,
+    ...[...(conversation?.messages || [])]
+      .reverse()
+      .filter((item) => item.author === "lead")
+      .map((item) => item.text)
+      .slice(0, 3),
+  ];
+  const intents = [];
+  for (const message of leads) {
+    const intent = classifyPriceQuestion(message);
+    if (intent && intent !== "repeat_complaint" && !intents.includes(intent)) {
+      intents.push(intent);
+    }
+  }
+  return intents;
+}
+
 function buildPriceReply(text, seya, conversation) {
   const intent = classifyPriceQuestion(text);
   const previousIntent =
@@ -553,6 +572,21 @@ function buildPriceReply(text, seya, conversation) {
       return apologyForRepeat(previousIntent);
     }
     return `${apologyForRepeat(previousIntent)} ${priceReplyForIntent(previousIntent, policy, options)}`;
+  }
+  const bundled = recentLeadPriceIntents(conversation, text);
+  if (bundled.length > 1) {
+    const parts = bundled
+      .map((item) => priceReplyForIntent(item, policy, options))
+      .filter(Boolean);
+    const unique = [];
+    for (const part of parts) {
+      if (!unique.some((item) => isNearDuplicate(item, part))) {
+        unique.push(part);
+      }
+    }
+    if (unique.length) {
+      return unique.join(" ");
+    }
   }
   if (!intent) {
     return "";
