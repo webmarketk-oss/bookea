@@ -61,6 +61,8 @@ const {
   isThreadComplaint,
   withStaffOfferedSlots,
   hasDayOfMonthRequest,
+  closingKind,
+  politeCloseReply,
 } = require("./conversation");
 const { resolveActiveFamily, understandThread } = require("./care-family");
 const {
@@ -136,6 +138,18 @@ async function generateSeyaReply(input) {
   const { text, centerAddress } = input;
   const at = (input.now instanceof Date ? input.now : new Date()).toISOString();
   let conversation = input.conversation;
+  const closing = closingKind(text, conversation);
+  if (closing) {
+    return guardedReply(
+      {
+        ...conversation,
+        proposedSlots: [],
+        bookingState: { ...(conversation.bookingState || {}), lastOfferedSlots: [] },
+      },
+      text,
+      politeCloseReply(input.now, closing),
+    );
+  }
   const centerCity = gaillard.isGaillardCenter(input.centerName)
     ? ""
     : cityFromAddress(centerAddress);
@@ -275,9 +289,9 @@ async function generateCoreReply({
     locked ||
     health.personal ||
     fallback.shouldBook ||
-    isOptOut(text) ||
+    isOptOut(text, conversationWithState) ||
     isWrongCenter(text) ||
-    crmUpdateFromLeadMessage(text, now) ||
+    crmUpdateFromLeadMessage(text, now, { conversation: conversationWithState }) ||
     isWillComeBack(text) ||
     isThreadComplaint(text) ||
     isAlreadyBookedElsewhere(text) ||
@@ -762,7 +776,7 @@ function applyAiDecision(conversation, text, seya, slots, decision, extras = {})
     ...(decision.delay ? { delay: decision.delay } : {}),
     ...(decision.availability ? { availability: decision.availability } : {}),
   };
-  const refuses = isOptOut(text);
+  const refuses = isOptOut(text, conversation);
   let action = refuses ? "stop" : decision.action;
   if (threadHasMedical(conversation, text) || hasMedicalFlag(text)) {
     action = "handoff";

@@ -611,3 +611,45 @@ test("Seya coupée sur le centre : aucune réponse, raison explicite", async () 
   assert.equal(res.payload.results[0].skipped, "agent_disabled");
   assert.equal(meta.sent.length, 0);
 });
+
+test("rappel accepté mais transmission en échec : Seya n’annonce pas de rappel", async () => {
+  const asked = welcomeThread({
+    qualification: { need: "Soin minceur", zone: "ventre", delay: "", availability: "" },
+    messages: [
+      ...welcomeThread().messages,
+      { id: "m-l1", author: "lead", at: minutesAgo(4), text: "Le ventre" },
+      { id: "m-s1", author: "seya", at: minutesAgo(3), text: "C’est noté pour le ventre. Vous êtes à quelle distance du centre ?" },
+    ],
+  });
+  const data = seed(asked, { seyaMission: "book", bookAppointment: true, handoffToHuman: true });
+  data.centers[0].name = "Centre Test";
+  data.centers[0].city = "Lyon";
+  currentDb = createFakeDb(data);
+  const meta = installMeta();
+  await post(webhook("Oui je veux bien être rappelée", "wamid.in.16"));
+  const replies = textsSent(meta.sent);
+  assert.equal(replies.length, 1);
+  assert.equal(replies[0], "Votre demande de rappel est bien notée 😊");
+  const thread = storedThread();
+  assert.equal(thread.teamHandoff?.status, "failed", JSON.stringify({ replies, status: thread.status, bookingState: thread.bookingState }));
+  assert.notEqual(thread.status, "À recontacter");
+});
+
+test("« Non merci » après « autre question ? » : clôture polie, pas « Pas intéressé »", async () => {
+  const offered = welcomeThread({
+    messages: [
+      ...welcomeThread().messages,
+      { id: "m-l2", author: "lead", at: minutesAgo(4), text: "Merci pour l'info" },
+      { id: "m-s2", author: "seya", at: minutesAgo(3), text: "Avec plaisir 😊 Avez-vous une autre question ?" },
+    ],
+  });
+  currentDb = createFakeDb(seed(offered));
+  const meta = installMeta();
+  await post(webhook("Non merci", "wamid.in.17"));
+  const replies = textsSent(meta.sent);
+  assert.equal(replies.length, 1);
+  assert.match(replies[0], /merci à vous/i);
+  assert.doesNotMatch(replies[0], /\?/);
+  assert.doesNotMatch(String(storedThread().status), /pas int[ée]ress/i);
+  assert.doesNotMatch(String(currentDb.db.leads[0].status), /pas int[ée]ress/i);
+});

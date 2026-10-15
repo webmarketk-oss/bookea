@@ -118,7 +118,7 @@ function refusesToContinue(text) {
   const value = normalize(text);
   return (
     value.length <= 140 &&
-    /je ne (veux|souhaite) pas (continuer|aller plus loin|repondre|de bilan|le bilan|etre rappelee?)|pas envie de (continuer|repondre)|je ne suis pas interess|je prefere (en rester la|arreter)/.test(
+    /je ne (veux|souhaite) pas (continuer|aller plus loin|repondre|de bilan|le bilan|etre rappelee?|etre appelee?)|pas envie de (continuer|repondre)|je ne suis pas interess|je prefere (en rester la|arreter)|ne (me )?(rappelez|appelez) pas|ne pas (me )?(rappeler|appeler)|pas (de|d') ?(rappel|appel)/.test(
       value,
     )
   );

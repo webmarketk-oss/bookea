@@ -427,7 +427,19 @@ function applyBookingMessage(state, text, extras = {}) {
     next.pendingQuestion = null;
   }
 
+  if (
+    state?.pendingQuestion === "callback" &&
+    !next.pendingQuestion &&
+    !asksAppointmentExplicitly(text)
+  ) {
+    next.pendingQuestion = "callback";
+  }
+
   return next;
+}
+
+function asksAppointmentExplicitly(text) {
+  return /rendez-vous|\brdv\b|r[ée]serv|cr[ée]neau/i.test(String(text || ""));
 }
 
 function shouldSearchSlots(state, text, conversation) {
@@ -461,6 +473,9 @@ function shouldSearchSlots(state, text, conversation) {
     return false;
   }
   if (state.pendingQuestion === "no_slots" && !wantsSlots(text, conversation)) {
+    return false;
+  }
+  if (state.pendingQuestion === "callback" && !asksAppointmentExplicitly(text)) {
     return false;
   }
   if (state.pendingQuestion === "price" || state.pendingQuestion === "address") {

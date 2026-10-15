@@ -46,6 +46,7 @@ const GRAPH_VERSION = "v21.0";
 const inboundLocks = new Map();
 const EMPTY_SEYA_REPLY =
   "Je suis là. Dites-moi ce dont vous avez besoin, je vous réponds.";
+const CALLBACK_NOTED_REPLY = "Votre demande de rappel est bien notée 😊";
 const UNREADABLE_MEDIA_REPLY =
   "Je n’arrive pas à lire ce message. Pouvez-vous m’écrire en texte ce dont vous avez besoin ?";
 
@@ -1099,6 +1100,13 @@ async function handleIncoming(
     existing.bookingState?.pendingQuestion !== "callback"
   ) {
     Object.assign(next, await sendCallbackHandoff({ center, seya, conversation: next }));
+    if (next.teamHandoff?.status !== "sent") {
+      draftedReply = CALLBACK_NOTED_REPLY;
+      const seyaIndex = (next.messages || []).map((item) => item.author).lastIndexOf("seya");
+      if (seyaIndex >= 0) {
+        next.messages[seyaIndex] = { ...next.messages[seyaIndex], text: draftedReply };
+      }
+    }
   } else if (next.teamHandoff?.status === "failed" && next.status === "À recontacter") {
     next.status = next.qualification?.need ? "Qualifié" : "En cours";
   }
@@ -1153,6 +1161,7 @@ async function handleIncoming(
       center.id,
       context,
       incoming.text,
+      existing,
     ).catch((crmError) => {
       console.error("[seya/whatsapp] crm intent failed", crmError);
       return null;
@@ -1211,8 +1220,8 @@ async function loadCenterAppointments(supabase, centerId) {
   }));
 }
 
-async function syncCrmFromSeyaIntent(supabase, centerId, context, text) {
-  const update = crmStatusFromLeadMessage(text, new Date());
+async function syncCrmFromSeyaIntent(supabase, centerId, context, text, conversation) {
+  const update = crmStatusFromLeadMessage(text, new Date(), { conversation });
   if (!update || !context.leadId) {
     return;
   }

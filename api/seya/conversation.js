@@ -282,9 +282,11 @@ function threadIsPaused(conversation, extraText) {
   if (extraText) {
     messages.push({ author: "lead", text: extraText });
   }
-  const leads = messages.filter((item) => item.author === "lead");
-  for (let index = leads.length - 1; index >= 0; index -= 1) {
-    const text = leads[index].text || "";
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    if (messages[index].author !== "lead") {
+      continue;
+    }
+    const text = messages[index].text || "";
     if (isThreadComplaint(text) || isOpeningHoursAsk(text)) {
       continue;
     }
@@ -292,7 +294,7 @@ function threadIsPaused(conversation, extraText) {
       isWillComeBack(text) ||
       isWillCallBack(text) ||
       isOutOfZone(text) ||
-      isLeadRefusal(text)
+      isLeadRefusal(text, { messages: messages.slice(0, index) })
     ) {
       return true;
     }
@@ -876,10 +878,110 @@ function lockedCrmStatuses() {
   ];
 }
 
-function isLeadRefusal(text) {
+// Seya vient de proposer d’autres questions : « non merci » y répond, ce n’est pas un refus commercial.
+function invitesMoreQuestions(seyaText) {
+  return /autres? questions?|une question vous vient|si vous avez (une |des )?questions?|besoin d['’]autre chose|autre chose (pour vous|à savoir|a savoir)|puis-je vous aider|je reste disponible|je suis là si/i.test(
+    String(seyaText || ""),
+  );
+}
+
+function declinesMoreQuestions(text) {
+  const value = compactText(text)
+    .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/gu, "")
+    .replace(/\b(bonne (journee|soiree|fin de journee)|a bientot|au revoir)\b/g, "")
+    .replace(/\b(merci|thanks|thank you)( (beaucoup|bcp|bien|a vous))?\b/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  return (
+    !value ||
+    /^(non|no|nope|nan|non non|pas (d'autres?|de) questions?|aucune( question)?|non aucune|rien|non rien|rien d'autre|non c'est (bon|tout|ok|parfait)|c'est (bon|tout|ok|parfait|clair|note)|ca ira|non ca ira|tout est clair|pas pour (l'instant|le moment)|non pas pour (l'instant|le moment)|ok|d'accord|parfait|super|top)$/.test(
+      value,
+    )
+  );
+}
+
+function isBareNo(text) {
+  const value = compactText(text)
+    .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/gu, "")
+    .replace(/\b(merci|thanks)( (beaucoup|bcp|bien))?\b/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  return /^(non|no|nope|nan|non non|ca ira|non ca ira)$/.test(
+    value,
+  );
+}
+
+function lastSeyaQuestion(seyaText) {
+  const questions = String(seyaText || "").match(/[^.!?]*\?/g) || [];
+  return questions.length ? questions[questions.length - 1].trim() : "";
+}
+
+// Question fermée sur un fait (« Avez-vous déjà testé… ? ») : « non » y répond, ce n’est pas un refus.
+function asksFactualYesNo(question) {
+  const value = normalize(question);
+  return (
+    Boolean(value) &&
+    !/\b(quel|quelle|quels|quelles|combien|comment|quand|pourquoi|lequel|laquelle)\b|^ou\b|\bd'ou\b/.test(value) &&
+    !/souhaitez|voulez|preferez|aimeriez|je vous propose|vous irait|ca vous (dit|va|irait)|je (fasse|transmette|regarde|cherche|reserve|bloque)/.test(
+      value,
+    ) &&
+    /\b(avez[- ]vous|vous avez|aviez[- ]vous|etes[- ]vous|vous etes|est[- ]ce que|faites[- ]vous|suivez[- ]vous|prenez[- ]vous|c'est (une|la|votre) premiere)\b/.test(
+      value,
+    )
+  );
+}
+
+/**
+ * Le prospect clôt poliment : « non merci » après « autre question ? », ou « non » à une proposition.
+ * Retourne "thanks" | "declined" | "" — jamais un refus commercial.
+ */
+function closingKind(text, conversation) {
+  if (!conversation) {
+    return "";
+  }
+  const seyaText = lastSeyaText(conversation);
+  if (invitesMoreQuestions(seyaText) && declinesMoreQuestions(text)) {
+    return "thanks";
+  }
+  const question = lastSeyaQuestion(seyaText);
+  if (question && isBareNo(text) && !asksFactualYesNo(question)) {
+    return "declined";
+  }
+  return "";
+}
+
+function closesAfterOffer(text, conversation) {
+  return Boolean(closingKind(text, conversation));
+}
+
+function politeCloseReply(now, kind = "thanks") {
+  return kind === "declined"
+    ? `Très bien, je n’insiste pas 😊 Si vous changez d’avis ou avez une question, écrivez-nous ici. Je vous souhaite ${greetingForTime(now)}.`
+    : `Très bien, merci à vous 😊 Je vous souhaite ${greetingForTime(now)}.`;
+}
+
+/** Le prospect demande explicitement à être rappelé (pas « je vous rappellerai »). */
+function asksForCallback(text) {
+  const value = normalize(text);
+  if (
+    /(pas|plus) (besoin (d'|de )?)?(etre )?(rappel|appel)|ne (me )?(rappelez|appelez|contactez) pas|ne pas (me )?(rappeler|appeler)/.test(
+      value,
+    )
+  ) {
+    return false;
+  }
+  return /rappelez[- ]moi|appelez[- ]moi|me rappeler|m'appeler|etre rappelee?s?|qu'on me rappelle|qu'on m'appelle|qu'(une|un) (experte?|conseill[a-z]+|personne|operatrice) (me )?(rappelle|appelle)|un rappel|me recontacter|recontactez[- ]moi|par telephone/.test(
+    value,
+  );
+}
+
+function isLeadRefusal(text, conversation) {
   const raw = String(text || "").trim();
   const needle = normalize(raw).replace(/[!?.]+$/g, "");
   if (!needle) {
+    return false;
+  }
+  if (closesAfterOffer(raw, conversation)) {
     return false;
   }
   if (/^(stop|stoppez|arrete|arretez|stop svp)$/.test(needle)) {
@@ -888,11 +990,21 @@ function isLeadRefusal(text) {
   if (/pas int[eé]ress/.test(needle)) {
     return true;
   }
+  if (
+    /(ne|n') ?m'interesse (pas|plus)|je ne suis (plus|pas) interess|ce n'est pas pour moi|c'est pas pour moi|plus besoin de vos services/.test(
+      needle,
+    )
+  ) {
+    return true;
+  }
   if (/ne donne(rai)? pas (la )?suite|pas (la )?peine/.test(needle)) {
     return true;
   }
   if (
     /ne (me )?(plus )?(e[cç]rire|contacter|d[eé]ranger|appeler|relancer)/.test(
+      needle,
+    ) ||
+    /ne (me |m')?(ecrivez|contactez|derangez|relancez|appelez|rappelez) plus|arretez de (me |m')(ecrire|contacter|relancer|appeler)/.test(
       needle,
     )
   ) {
@@ -901,11 +1013,24 @@ function isLeadRefusal(text) {
   if (isWrongCenter(raw)) {
     return true;
   }
-  return /^(non merci|plus jamais)$/.test(needle);
+  if (/^plus jamais$/.test(needle)) {
+    return true;
+  }
+  // « Non merci » sans question en cours (ex. réponse à une relance) reste un refus.
+  return /^non merci$/.test(needle) && !lastSeyaQuestion(lastSeyaText(conversation));
+}
+
+function refusedInThread(conversation) {
+  const messages = conversation?.messages || [];
+  return messages.some(
+    (item, index) =>
+      item.author === "lead" &&
+      isLeadRefusal(item.text || "", { messages: messages.slice(0, index) }),
+  );
 }
 
 function crmUpdateFromLeadMessage(text, now, extras = {}) {
-  if (isLeadRefusal(text)) {
+  if (isLeadRefusal(text, extras.conversation)) {
     return {
       status: "Pas intéressé",
       conversationStatus: "Pas intéressé",
@@ -1703,6 +1828,11 @@ module.exports = {
   isMessageTimeMention,
   parseNextWeekdayIso,
   isLeadRefusal,
+  refusedInThread,
+  asksForCallback,
+  closesAfterOffer,
+  closingKind,
+  politeCloseReply,
   crmStatusFromLeadMessage,
   crmUpdateFromLeadMessage,
   lockedCrmStatuses,

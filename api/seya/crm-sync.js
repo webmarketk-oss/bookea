@@ -376,14 +376,16 @@ async function syncCrmFromConversation(supabase, centerId, original, crmHold) {
   if (closed !== conversation) {
     return closed;
   }
-  const lastLead = [...(conversation?.messages || [])]
-    .reverse()
-    .find((item) => item.author === "lead");
+  const messages = conversation?.messages || [];
+  const lastLeadIndex = messages.map((item) => item.author).lastIndexOf("lead");
+  const lastLead = messages[lastLeadIndex];
   if (!supabase?.from || !centerId || !conversation?.leadId || !lastLead?.text) {
     return conversation;
   }
 
-  const intent = crmStatusFromLeadMessage(lastLead.text, new Date());
+  const intent = crmStatusFromLeadMessage(lastLead.text, new Date(), {
+    conversation: { messages: messages.slice(0, lastLeadIndex) },
+  });
   if (!intent) {
     return conversation;
   }

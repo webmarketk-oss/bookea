@@ -1,7 +1,6 @@
 const { createClient } = require("@supabase/supabase-js");
 const {
   agentSettings,
-  isOptOut,
   lastLeadAt,
   lastSeyaAt,
   message,
@@ -26,6 +25,8 @@ const {
   isCentrePause,
   threadIsPaused,
   threadHasConfirmedVisit,
+  closesAfterOffer,
+  refusedInThread,
 } = require("./conversation");
 const { isSeyaOff, readCenterSeya, writeSeyaConversations } = require("./store");
 const { isSameSeyaConversation } = require("./conversation-key");
@@ -319,9 +320,11 @@ function shouldSkipRelance(conversation, extras = {}) {
   if (threadIsPaused(conversation) || isCentrePause(lastHuman?.text || "")) {
     return true;
   }
+  const lastLeadIndex = messages.lastIndexOf(lastHuman);
   if (
     lastHuman?.author === "lead" &&
-    (isWillComeBack(lastHuman.text || "") ||
+    (closesAfterOffer(lastHuman.text || "", { messages: messages.slice(0, lastLeadIndex) }) ||
+      isWillComeBack(lastHuman.text || "") ||
       isWillCallBack(lastHuman.text || "") ||
       isOutOfZone(lastHuman.text || "") ||
       isThreadComplaint(lastHuman.text || ""))
@@ -329,7 +332,14 @@ function shouldSkipRelance(conversation, extras = {}) {
     return true;
   }
   const leadTexts = messages.filter((item) => item.author === "lead");
-  if (leadTexts.some((item) => isOptOut(item.text || "") || isOutOfZone(item.text || ""))) {
+  if (refusedInThread(conversation) || leadTexts.some((item) => isOutOfZone(item.text || ""))) {
+    return true;
+  }
+  if (
+    conversation?.bookingState?.pendingQuestion === "callback" ||
+    conversation?.teamNotes?.handedOffAt ||
+    conversation?.teamHandoff?.status === "sent"
+  ) {
     return true;
   }
   const seyaTexts = (conversation?.messages || [])

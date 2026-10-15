@@ -78,6 +78,7 @@ const {
   hasDayOfMonthRequest,
   isOutOfZone,
   isWillCallBack,
+  asksForCallback,
 } = require("./conversation");
 const gaillard = require("./gaillard");
 const { findFacts } = require("./brief-facts");
@@ -256,8 +257,8 @@ function isJunkTreatment(value) {
   );
 }
 
-function isOptOut(text) {
-  return isLeadRefusal(text);
+function isOptOut(text, conversation) {
+  return isLeadRefusal(text, conversation);
 }
 
 function asksPrice(text) {
@@ -1810,7 +1811,7 @@ function applyLeadReply(conversation, text, seya, slots, extras = {}) {
       };
     }
   }
-  const refuses = isOptOut(text);
+  const refuses = isOptOut(text, conversation);
 
   if (isWrongCenter(text)) {
     return finishLeadReply(
@@ -1823,10 +1824,21 @@ function applyLeadReply(conversation, text, seya, slots, extras = {}) {
     );
   }
 
-  const crmIntent = crmUpdateFromLeadMessage(text, extras.now, extras);
+  const crmIntent = crmUpdateFromLeadMessage(text, extras.now, { ...extras, conversation });
   const alreadyBooked =
     isAppointmentConfirmed(conversation) ||
     /rdv pris|rdv confirm/i.test(String(conversation.status || ""));
+  if (refuses && !alreadyBooked) {
+    return finishLeadReply(
+      conversation,
+      qualification,
+      "Pas intéressé",
+      text,
+      "Très bien, j’arrête ici. Si vous changez d’avis, écrivez-nous.",
+      { ...bookingState, pendingQuestion: "no_slots", lastOfferedSlots: [] },
+      { proposedSlots: [] },
+    );
+  }
   if (crmIntent && crmIntent.conversationStatus && !alreadyBooked) {
     return finishLeadReply(
       conversation,
@@ -1869,6 +1881,94 @@ function applyLeadReply(conversation, text, seya, slots, extras = {}) {
 
   if (refuses) {
     return finishLeadReply(conversation, qualification, "Pas intéressé", text, "Très bien, j’arrête ici. Si vous changez d’avis, écrivez-nous.", bookingState);
+  }
+
+  const pendingCallback =
+    !alreadyBooked &&
+    (conversation.bookingState?.pendingQuestion === "callback" ||
+      Boolean(conversation.teamNotes?.handedOffAt));
+  // Rappel déjà demandé : un jour / une heure donnés complètent la demande, sans relancer la prise de RDV.
+  if (pendingCallback && !isQualifyCallback(settings) && bookingState.pendingQuestion === "callback") {
+    const day = spokenCallbackDay(bookingState);
+    const slot = callbackSlotFromThread(conversation, intentText, bookingState, null);
+    const givesAvailability =
+      hasDayOfMonthRequest(intentText) ||
+      /lundi|mardi|mercredi|jeudi|vendredi|samedi|demain|\d{1,2}\/\d{1,2}/i.test(String(intentText || ""));
+    if (day && givesAvailability) {
+      const when = slot ? `${day} à ${slot.time.replace(":", "h")}` : day;
+      return {
+        ...finishLeadReply(
+          conversation,
+          qualification,
+          conversation.status || "À recontacter",
+          text,
+          `C’est noté : ${when}. J’ajoute cette disponibilité à votre demande de rappel.`,
+          {
+            ...bookingState,
+            pendingQuestion: "callback",
+            appointmentStatus: "none",
+            callbackSlot: slot,
+            lastOfferedSlots: [],
+          },
+          { proposedSlots: [] },
+        ),
+        locked: true,
+      };
+    }
+  }
+
+  // Demande explicite de rappel : on suit le fonctionnement prévu par la mission du centre.
+  if (asksForCallback(text) && !alreadyBooked && !isWillCallBack(text)) {
+    if (pendingCallback) {
+      return {
+        ...finishLeadReply(
+          conversation,
+          qualification,
+          conversation.status || "À recontacter",
+          text,
+          "Votre demande de rappel est bien enregistrée 😊",
+          bookingState,
+        ),
+        locked: true,
+      };
+    }
+    if (isQualifyCallback(settings)) {
+      if (!callbackSlotFromThread(conversation, intentText, bookingState, chosenSlot)) {
+        const knownDay = spokenCallbackDay(bookingState);
+        return {
+          ...finishLeadReply(
+            conversation,
+            qualification,
+            qualification.need ? "Qualifié" : "En cours",
+            text,
+            knownDay
+              ? `Avec plaisir. À quelle heure souhaitez-vous que l’on vous rappelle ${knownDay} ?`
+              : "Avec plaisir. Quel jour et à quelle heure souhaitez-vous que l’on vous rappelle ?",
+            bookingState,
+          ),
+          locked: true,
+        };
+      }
+    } else if (settings.handoffToHuman || !canBookSeya(settings)) {
+      return {
+        ...finishLeadReply(
+          conversation,
+          qualification,
+          "À recontacter",
+          text,
+          "C’est noté, je transmets votre demande de rappel à l’équipe du centre.",
+          {
+            ...bookingState,
+            pendingQuestion: "callback",
+            appointmentStatus: "none",
+            callbackSlot: null,
+            lastOfferedSlots: [],
+          },
+          { proposedSlots: [] },
+        ),
+        locked: true,
+      };
+    }
   }
 
   if (isIdentityQuestion(text)) {
@@ -2090,7 +2190,8 @@ function applyLeadReply(conversation, text, seya, slots, extras = {}) {
       "À recontacter",
       text,
       "Bien sûr, je transmets à une conseillère du centre. Elle reprendra avec vous.",
-      bookingState,
+      { ...bookingState, pendingQuestion: "callback", callbackSlot: null, lastOfferedSlots: [] },
+      { proposedSlots: [] },
     );
   }
 
@@ -2106,7 +2207,8 @@ function applyLeadReply(conversation, text, seya, slots, extras = {}) {
         "À recontacter",
         text,
         briefClosing(seya, conversation, intentText) || welcomeRelanceHandoffReply(),
-        bookingState,
+        { ...bookingState, pendingQuestion: "callback", callbackSlot: null, lastOfferedSlots: [] },
+        { proposedSlots: [] },
       );
     }
     return finishLeadReply(
@@ -2494,24 +2596,13 @@ function withGaillardText(result, family, fallback) {
   };
 }
 
-function withEpilationPrice(result) {
-  const messages = [...(result.conversation?.messages || [])];
-  const index = messages.map((item) => item.author).lastIndexOf("seya");
-  if (index < 0) {
-    return result;
-  }
-  const current = String(messages[index].text || "").trim();
+function epilationPriceText(reply) {
+  const current = String(reply || "").trim();
   const base =
     !current || current === unknownPriceReply() || /pas ce tarif en fiche/i.test(current)
       ? gaillard.missingPriceReply()
       : current;
-  const text = /promotion/i.test(base) ? base : `${base} ${gaillard.promoSentence()}`;
-  messages[index] = { ...messages[index], text };
-  return {
-    ...result,
-    locked: true,
-    conversation: { ...result.conversation, messages },
-  };
+  return /promotion/i.test(base) ? base : `${base} ${gaillard.promoSentence()}`;
 }
 
 // Gaillard : accueil → besoin → déjà testé → (minceur : fiche + bilan) → rappel. Jamais de créneau.
@@ -2610,7 +2701,7 @@ function gaillardLeadReply(conversation, text, seya, slots, extras = {}) {
   });
 
   if (
-    isOptOut(text) ||
+    isOptOut(text, base) ||
     isWrongCenter(text) ||
     isOutOfZone(text) ||
     isThreadComplaint(text) ||
@@ -2686,10 +2777,9 @@ function gaillardLeadReply(conversation, text, seya, slots, extras = {}) {
       ? `${text} c'est combien`
       : text;
     const reply = priceReply(seya, merged, { ...base, _seya: seya }, priceText);
-    const priced = answer(reply);
     return (inferCareFamily(priceText) || priceFamily) === "epilation"
-      ? withEpilationPrice(priced)
-      : priced;
+      ? { ...answer(epilationPriceText(reply)), locked: true }
+      : answer(reply);
   }
 
   if (gaillard.modalityTopic(text)) {
@@ -2729,7 +2819,10 @@ function gaillardLeadReply(conversation, text, seya, slots, extras = {}) {
 
   const mentionsAvailability = gaillard.availabilityMention(text);
   let next = mentionsAvailability ? gaillard.withPreference(base, text, at) : base;
-  if (!mentionsAvailability && crmUpdateFromLeadMessage(text, extras.now, extras)) {
+  if (
+    !mentionsAvailability &&
+    crmUpdateFromLeadMessage(text, extras.now, { ...extras, conversation: base })
+  ) {
     return delegate();
   }
 
