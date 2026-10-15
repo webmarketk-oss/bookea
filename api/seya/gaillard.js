@@ -48,6 +48,87 @@ function afterHandoffReply() {
   return "C’est bien noté, je le transmets à l’équipe 😊 Un expert ou une experte du centre vous rappellera.";
 }
 
+/** Après transmission : on garde le fil ouvert, sans refermer la conversation. */
+function keepConversationReply(family) {
+  if (family === "minceur") {
+    return "Avec plaisir 😊 Avez-vous une autre question sur le parcours minceur, les appareils, l’alimentation ou le bilan ?";
+  }
+  return "Avec plaisir 😊 Avez-vous une autre question sur le soin ? Je reste disponible pour vous préciser ce qui est en fiche.";
+}
+
+function acceptsContinue(text) {
+  const value = normalize(text);
+  if (!value || value.length > 120) {
+    return false;
+  }
+  return (
+    /^(oui|ok|okay|d'accord|dac|volontiers|avec plaisir|je veux|je suis interes|pourquoi pas)\b/.test(
+      value,
+    ) ||
+    /\b(continuer|la suite|le bilan|ca m'interesse|ça m'intéresse|je continue|go)\b/.test(value)
+  );
+}
+
+function lastSeyaAskedPath(conversation) {
+  return /bilan (minceur )?offert|souhaitez-vous que je (fasse remonter|transmette)|ca vous parle|ça vous parle|organiser un bilan/i.test(
+    lastSeyaQuestion(conversation),
+  );
+}
+
+function pickBriefSentences(sources, pattern, limit = 3) {
+  const blob = sources.map((item) => String(item || "").trim()).filter(Boolean).join("\n");
+  return blob
+    .split(/(?<=[.!?])\s+|\n+|;\s+/)
+    .map((item) => item.trim())
+    .filter((sentence) => sentence && pattern.test(normalize(sentence)))
+    .slice(0, limit);
+}
+
+/**
+ * Après la question régimes : on s’appuie sur la fiche minceur (appli, rééquilibrage,
+ * compléments, bilan) et on pose une question pour poursuivre — sans clôturer.
+ */
+function minceurPathReply(sources = [], pricing = {}) {
+  const support = pickBriefSentences(
+    sources,
+    /reequilibrage|aliment|nutrition|application|appli|complement|physio|suivi/,
+    3,
+  );
+  const offer = pickBriefSentences(
+    sources,
+    /bilan|decouverte|analyse corporelle|protocole|offert|gratuit/,
+    2,
+  );
+  const tech = pickBriefSentences(
+    sources,
+    /cryolipolyse|radiofrequ|ultrasons|appareil|technologie|machine/,
+    1,
+  );
+  const parts = [...support];
+  for (const sentence of [...offer, ...tech]) {
+    if (!parts.includes(sentence)) {
+      parts.push(sentence);
+    }
+  }
+  const bilanHint = /offert|gratuit/i.test(String(pricing?.bilan || ""))
+    ? "Le bilan minceur est offert."
+    : "";
+  if (!parts.length && bilanHint) {
+    parts.push(
+      `${bilanHint} On y fait le point sur vos objectifs, le protocole adapté, et l’accompagnement (dont le suivi alimentaire si prévu au centre).`,
+    );
+  }
+  if (!parts.length) {
+    parts.push(
+      "Ensuite, on vous propose un bilan pour voir la solution adaptée à votre besoin, avec l’accompagnement prévu au centre.",
+    );
+  }
+  parts.push(
+    "Souhaitez-vous que je fasse remonter votre demande pour un bilan minceur offert avec un expert du centre ?",
+  );
+  return parts.join(" ");
+}
+
 function modalityReply() {
   return "Les modalités du soin vous seront expliquées au centre. Un expert ou une experte pourra également répondre à cette question lors de votre échange.";
 }
@@ -275,6 +356,7 @@ const STEP_QUESTIONS = [
   /quel est votre objectif|quelles? zones?|qu['’]est-ce qui vous pr[ée]occupe/i,
   /d[ée]j[àa] (test|essay)/i,
   /combien de kilos/i,
+  /bilan (minceur )?offert|souhaitez-vous que je (fasse remonter|transmette)/i,
 ];
 
 function looksLikeHandoffClose(text) {
@@ -447,21 +529,25 @@ function relanceText(round, firstName, care, custom) {
 
 function promptRules(family) {
   return [
-    `Mission de ${GAILLARD_NAME} : recueillir les informations puis transmettre à l’équipe. Un expert ou une experte du centre rappelle ensuite le prospect.`,
+    `Mission de ${GAILLARD_NAME} : accueillir chaleureusement, comprendre le besoin, s’appuyer sur la fiche du soin, puis transmettre à l’équipe quand le prospect est prêt. Un expert ou une experte du centre rappelle ensuite.`,
     "Interdit de demander des disponibilités (ni pour venir au centre, ni pour un rappel), de proposer un créneau, de prendre ou confirmer un rendez-vous.",
-    "Parcours : 1) comprendre le besoin (minceur : objectif et zones, et si la personne veut perdre du poids sans avoir précisé combien, « Combien de kilos aimeriez-vous perdre ? » ; épilation : zones à traiter ; visage : préoccupations et attentes), 2) demander s’il a déjà testé une solution, 3) conclure. Une seule question à la fois, jamais une question à laquelle il a déjà répondu.",
-    `Conclusion, une fois les informations recueillies : « ${closingReply(family)} »`,
+    family === "minceur"
+      ? "Parcours minceur : 1) accueil, 2) besoin (objectif + zones ; kilos si perte de poids sans montant), 3) question régimes / solutions déjà testées, 4) à ce moment expliquer ce qui est dans la fiche (rééquilibrage alimentaire, suivi sur application, compléments éventuels non obligatoires, appareils), 5) proposer le bilan offert avec une question ouverte. Une seule question à la fois. Interdit de clôturer juste après les zones ou juste après « déjà testé »."
+      : "Parcours : 1) comprendre le besoin (épilation : zones ; visage : préoccupations), 2) demander s’il a déjà testé une solution, 3) conclure. Une seule question à la fois.",
+    `Conclusion, seulement quand le prospect confirme qu’il veut être rappelé / le bilan : « ${closingReply(family)} » Interdit d’annoncer cette conclusion tant que la qualification minceur n’est pas allée jusqu’à la proposition de bilan.`,
+    "Tu restes chaleureuse et tu laisses toujours une porte ouverte (question utile). Interdit de fermer le fil avec un simple « je transmets » si le prospect pose encore une question ou dit seulement « oui ».",
     "Si le prospect donne spontanément un jour ou une heure, tu dis seulement que tu transmets sa préférence à l’équipe. Tu ne promets aucun rappel à cette heure, tu ne confirmes aucun rendez-vous, tu ne transformes pas une disponibilité pour venir en disponibilité pour un appel.",
     "Tu dis « un expert ou une experte du centre », jamais « une opératrice ».",
     "Interdit de demander où habite le prospect ou à quelle distance il se trouve, et interdit de proposer un autre centre (Annemasse ou autre). Si on te demande où est le centre, tu donnes uniquement l’adresse fournie plus bas.",
     `Modalités pratiques (tenue, rasage, préparation…) : seulement ce qui est écrit dans la fiche du soin. Sinon : « ${modalityReply()} » Interdit d’inventer, par exemple, qu’on peut garder son pantalon.`,
     "Tarifs : seulement si le prospect les demande, avec les tarifs de la fiche. Jamais de remise précise sans offre active renseignée.",
-    "Après la transmission à l’équipe, tu ne poses plus aucune question de planning.",
+    "Après la transmission à l’équipe, tu réponds encore aux questions documentées dans la fiche. Tu ne poses plus aucune question de planning.",
   ].join("\n");
 }
 
 module.exports = {
   GAILLARD_VISIT_MINUTES,
+  acceptsContinue,
   afterHandoffReply,
   asksBookingNow,
   asksChildCompanion,
@@ -483,11 +569,14 @@ module.exports = {
   identityReply,
   isAnswerLike,
   isGaillardCenter,
-  lastSeyaAskedNeed,
+  keepConversationReply,
   kilosQuestion,
   lastSeyaAskedKilos,
+  lastSeyaAskedNeed,
+  lastSeyaAskedPath,
   lastSeyaAskedTried,
   looksLikeHandoffClose,
+  minceurPathReply,
   missingPracticalReply,
   missingPriceReply,
   modalityReply,

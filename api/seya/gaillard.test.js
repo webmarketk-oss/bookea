@@ -82,25 +82,50 @@ async function say(conversation, text, centerName = GAILLARD, settings = seya) {
   return result.conversation;
 }
 
-test("Gaillard minceur : objectif et zones, déjà testé, puis rappel d’un expert minceur", async () => {
-  let conversation = open("Soin minceur");
-  conversation = await say(conversation, "Bonjour oui");
+test("Gaillard minceur : besoin → déjà testé → fiche/bilan → rappel seulement après confirmation", async () => {
+  const settings = {
+    ...seya,
+    treatmentBriefs: [
+      {
+        name: "Soin minceur",
+        brief:
+          "Après les régimes, on propose un rééquilibrage alimentaire avec suivi sur application. Des compléments physio-minces peuvent être conseillés, sans être obligatoires. Technologies : cryolipolyse et radiofréquence. Le bilan et la séance découverte sont offerts.",
+        pricing: {
+          bilan: "offert",
+          discovery: "offerte",
+          sessionPolicy: "after_bilan",
+          package: "à partir de 500 euros",
+        },
+      },
+    ],
+  };
+  let conversation = open("Soin minceur", GAILLARD, settings);
+  conversation = await say(conversation, "Bonjour oui", GAILLARD, settings);
   assert.match(lastSeya(conversation), /objectif.*zones/i);
-  conversation = await say(conversation, "Je voudrais perdre du ventre et des cuisses");
-  assert.match(lastSeya(conversation), /déjà testé/i);
-  conversation = await say(conversation, "J'ai déjà fait des régimes");
-  assert.equal(
-    lastSeya(conversation),
-    "Merci pour ces précisions 😊 Un expert ou une experte minceur du centre vous rappellera pour échanger sur votre besoin et convenir de votre rendez-vous.",
+  conversation = await say(
+    conversation,
+    "Je voudrais perdre du ventre et des cuisses",
+    GAILLARD,
+    settings,
   );
+  assert.match(lastSeya(conversation), /déjà testé/i);
+  conversation = await say(conversation, "J'ai déjà fait des régimes", GAILLARD, settings);
+  assert.match(lastSeya(conversation), /rééquilibrage|application|bilan/i);
+  assert.match(lastSeya(conversation), /Souhaitez-vous/i);
+  assert.doesNotMatch(lastSeya(conversation), /rappellera/i);
+  assert.equal(Boolean(conversation.teamNotes?.handedOffAt), false);
+
+  conversation = await say(conversation, "Oui je veux bien le bilan", GAILLARD, settings);
+  assert.match(lastSeya(conversation), /expert ou une experte minceur.*rappellera/i);
   assert.equal(conversation.status, "À recontacter");
   assert.equal(conversation.bookingState.pendingQuestion, "callback");
   for (const item of conversation.messages.filter((entry) => entry.author === "seya").slice(1)) {
     assert.doesNotMatch(item.text, NO_PLANNING);
   }
 
-  conversation = await say(conversation, "Merci");
+  conversation = await say(conversation, "Merci", GAILLARD, settings);
   assert.equal(conversation.status, "À recontacter");
+  assert.doesNotMatch(lastSeya(conversation), /C’est bien noté, je le transmets à l’équipe/);
   assert.doesNotMatch(lastSeya(conversation), NO_PLANNING);
 });
 
@@ -124,14 +149,20 @@ test("Gaillard visage : préoccupations et attentes, un simple bonjour ne compte
   assert.match(lastSeya(conversation), /expert ou une experte en soins visage du centre vous rappellera/);
 });
 
-test("Gaillard : informations déjà données, pas de question répétée", async () => {
+test("Gaillard : informations déjà données, pas de question répétée, proposition de bilan", async () => {
   let conversation = open("Soin minceur");
   conversation = await say(
     conversation,
     "Je veux perdre du ventre, j'ai déjà fait des régimes sans résultat",
   );
-  assert.match(lastSeya(conversation), /expert ou une experte minceur du centre vous rappellera/);
-  assert.equal(conversation.messages.filter((item) => /objectif|déjà testé/i.test(item.text)).length, 0);
+  assert.match(lastSeya(conversation), /bilan|Souhaitez-vous/i);
+  assert.doesNotMatch(lastSeya(conversation), /rappellera/i);
+  assert.equal(
+    conversation.messages.filter((item) =>
+      /quel est votre objectif|déjà testé une solution/i.test(item.text),
+    ).length,
+    0,
+  );
 });
 
 test("Gaillard minceur : zones seules → objectif, puis déjà testé (pas de clôture anticipée)", async () => {
@@ -162,6 +193,8 @@ test("Gaillard minceur : perte de poids, zones puis kilos", async () => {
   conversation = await say(conversation, "Une dizaine");
   assert.match(lastSeya(conversation), /déjà testé/i);
   conversation = await say(conversation, "non jamais");
+  assert.match(lastSeya(conversation), /bilan|Souhaitez-vous/i);
+  conversation = await say(conversation, "Oui");
   assert.equal(conversation.status, "À recontacter");
   assert.match(conversation.teamNotes.need, /kilos : Une dizaine/);
   assert.equal(conversation.messages.filter((item) => /combien de kilos/i.test(item.text)).length, 1);
@@ -220,6 +253,8 @@ test("Gaillard : disponibilité spontanée gardée pour l’équipe, sans promes
   conversation = await say(conversation, "rappelez moi demain à 18h");
   assert.match(lastSeya(conversation), /déjà testé/i);
   conversation = await say(conversation, "non");
+  assert.match(lastSeya(conversation), /bilan|Souhaitez-vous/i);
+  conversation = await say(conversation, "Oui");
   assert.equal(conversation.status, "À recontacter");
 
   const prefs = conversation.teamNotes.preferences;
@@ -372,6 +407,9 @@ test("Gaillard : après rappel, les questions pratiques restent traitées sans r
   conversation = await say(conversation, "Affiner ma silhouette", GAILLARD, priced);
   assert.match(lastSeya(conversation), /déjà (testé|essayé)/i);
   conversation = await say(conversation, "Oui mais pas de résultats", GAILLARD, priced);
+  assert.match(lastSeya(conversation), /bilan|Souhaitez-vous|cryolipolyse|radiofréquence/i);
+  assert.doesNotMatch(lastSeya(conversation), /rappellera/i);
+  conversation = await say(conversation, "Oui pour le bilan", GAILLARD, priced);
   assert.match(lastSeya(conversation), /expert ou une experte minceur.*rappellera/i);
   assert.equal(conversation.status, "À recontacter");
   assert.ok(conversation.teamNotes?.handedOffAt);

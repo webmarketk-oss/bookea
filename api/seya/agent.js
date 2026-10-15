@@ -2483,6 +2483,10 @@ function gaillardNextQuestion(family, qualification, leadTexts, seya) {
   if (!qualification.tried && !leadTexts.some((value) => GAILLARD_TRIED.test(value))) {
     return { step: "tried", text: gaillard.triedQuestion(family) };
   }
+  // Minceur : après « déjà testé », on enchaîne sur la fiche (appli / alimentaire / bilan), sans clôturer.
+  if (family === "minceur" && !qualification.pathOffered) {
+    return { step: "path", text: "" };
+  }
   return null;
 }
 
@@ -2520,7 +2524,7 @@ function withEpilationPrice(result) {
   };
 }
 
-// Gaillard : recueil du besoin, puis « déjà testé ? », puis rappel par un expert ou une experte, sans jamais demander de disponibilités.
+// Gaillard : accueil → besoin → déjà testé → (minceur : fiche + bilan) → rappel. Jamais de créneau.
 function gaillardLeadReply(conversation, text, seya, slots, extras = {}) {
   const at = (extras.now instanceof Date ? extras.now : new Date()).toISOString();
   const base = { ...withStaffOfferedSlots(conversation, extras.now), _seya: seya };
@@ -2732,6 +2736,11 @@ function gaillardLeadReply(conversation, text, seya, slots, extras = {}) {
     ) {
       qualification.kilos = answer;
     }
+    const wantsCallback =
+      gaillard.lastSeyaAskedPath(base) && gaillard.acceptsContinue(text);
+    if (wantsCallback) {
+      qualification.pathOffered = true;
+    }
     const leadTexts = gaillardLeadTexts(base, text);
     const nextQuestion = gaillardNextQuestion(family, qualification, leadTexts, seya);
     const prefix = mentionsAvailability ? gaillard.preferenceNotedPrefix() : "";
@@ -2750,12 +2759,37 @@ function gaillardLeadReply(conversation, text, seya, slots, extras = {}) {
         locked: true,
       });
 
+    if (nextQuestion?.step === "path") {
+      const pathText = gaillard.minceurPathReply(sourceBag, brief?.pricing || {});
+      return {
+        ...finishLeadReply(
+          next,
+          { ...qualification, pathOffered: true, tried: qualification.tried || answer },
+          status,
+          text,
+          [prefix, `C’est noté. ${pathText}`].filter(Boolean).join(" "),
+          bookingState,
+        ),
+        shouldBook: null,
+        locked: true,
+      };
+    }
+
     if (nextQuestion) {
       return ask(
         nextQuestion.step === "need" || nextQuestion.step === "axis" || prefix
           ? nextQuestion.text
           : `C’est noté. ${nextQuestion.text}`,
       );
+    }
+
+    // Clôture seulement si le prospect confirme (bilan / suite) ou hors minceur après déjà testé.
+    const mayClose =
+      family !== "minceur" ||
+      wantsCallback ||
+      (qualification.pathOffered && gaillard.acceptsContinue(text));
+    if (!mayClose && family === "minceur") {
+      return ask(gaillard.keepConversationReply("minceur"));
     }
 
     next = {
@@ -2777,7 +2811,7 @@ function gaillardLeadReply(conversation, text, seya, slots, extras = {}) {
     return {
       ...finishLeadReply(
         next,
-        qualification,
+        { ...qualification, pathOffered: true },
         "À recontacter",
         text,
         mentionsAvailability ? gaillard.preferenceReply() : gaillard.closingReply(family),
@@ -2830,10 +2864,24 @@ function gaillardLeadReply(conversation, text, seya, slots, extras = {}) {
   if (gaillard.asksProcess(text)) {
     return fixed(next, status, gaillard.processReply(family, sourceBag));
   }
+  if (/aliment|nutrition|regime|appli|application|complement|physio/.test(normalize(text))) {
+    const fromBrief = gaillard.minceurPathReply(sourceBag, brief?.pricing || {});
+    // Sans la question de clôture bilan si on a déjà transmis.
+    const spoken = fromBrief
+      .replace(
+        /\s*Souhaitez-vous que je fasse remonter votre demande pour un bilan minceur offert avec un expert du centre \?$/i,
+        "",
+      )
+      .trim();
+    if (spoken && !/^Ensuite, on vous propose un bilan/i.test(spoken)) {
+      return fixed(next, status, `${spoken} ${gaillard.keepConversationReply(family)}`);
+    }
+  }
   if (asksOpenQuestion(text)) {
     return fixed(next, status, gaillard.missingPracticalReply("cette précision"));
   }
-  return fixed(next, status, gaillard.afterHandoffReply());
+  // Plus de « je transmets » en boucle : on laisse une question ouverte.
+  return fixed(next, status, gaillard.keepConversationReply(family));
 }
 
 function lastOtherLeadText(conversation, current) {
