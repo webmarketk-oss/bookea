@@ -43,6 +43,7 @@ const {
   writeSeyaConversations,
 } = require("./store");
 const { activeLeadPause, stripBookingPush } = require("./lead-pause");
+const { claimInboundMessage, settleInboundClaim } = require("./inbound-claim");
 
 const GRAPH_VERSION = "v21.0";
 const inboundLocks = new Map();
@@ -531,45 +532,49 @@ async function processInbound(supabase, incoming, deps = {}) {
   const attempts = deps.attempts ?? 2;
   const trace = { stage: "start", centerId: null, sentTexts: [] };
   let lastError = null;
-  for (let round = 0; round < attempts; round += 1) {
-    try {
-      const result = await handle(supabase, incoming, trace);
-      logInbound(incoming, result);
-      return result;
-    } catch (error) {
-      lastError = error;
-      console.error(
-        "[seya/inbound] failed",
-        JSON.stringify({
-          ...inboundLogFields(incoming),
-          stage: trace.stage,
-          round,
-          error: error instanceof Error ? error.message : String(error),
-        }),
-      );
-      if (trace.sentTexts.length || round === attempts - 1) {
-        break;
+  try {
+    for (let round = 0; round < attempts; round += 1) {
+      try {
+        const result = await handle(supabase, incoming, trace);
+        logInbound(incoming, result);
+        return result;
+      } catch (error) {
+        lastError = error;
+        console.error(
+          "[seya/inbound] failed",
+          JSON.stringify({
+            ...inboundLogFields(incoming),
+            stage: trace.stage,
+            round,
+            error: error instanceof Error ? error.message : String(error),
+          }),
+        );
+        if (trace.sentTexts.length || round === attempts - 1) {
+          break;
+        }
+        await wait(deps.retryDelayMs ?? 800);
       }
-      await wait(deps.retryDelayMs ?? 800);
     }
+    const recorded = await recordFailedInbound(supabase, incoming, trace, lastError).catch(
+      (recordError) => {
+        console.error("[seya/inbound] record failed", recordError);
+        return null;
+      },
+    );
+    const result = {
+      phone: incoming.phone,
+      routed: Boolean(recorded),
+      centerId: recorded?.centerId || trace.centerId,
+      error: "inbound_failed",
+      stage: trace.stage,
+      errorDetail: lastError instanceof Error ? lastError.message : String(lastError || ""),
+      sent: trace.sentTexts.length > 0,
+    };
+    logInbound(incoming, result);
+    return result;
+  } finally {
+    await settleInboundClaim(supabase, trace);
   }
-  const recorded = await recordFailedInbound(supabase, incoming, trace, lastError).catch(
-    (recordError) => {
-      console.error("[seya/inbound] record failed", recordError);
-      return null;
-    },
-  );
-  const result = {
-    phone: incoming.phone,
-    routed: Boolean(recorded),
-    centerId: recorded?.centerId || trace.centerId,
-    error: "inbound_failed",
-    stage: trace.stage,
-    errorDetail: lastError instanceof Error ? lastError.message : String(lastError || ""),
-    sent: trace.sentTexts.length > 0,
-  };
-  logInbound(incoming, result);
-  return result;
 }
 
 async function contextFromSeyaThread(supabase, phone) {
@@ -649,6 +654,13 @@ async function recordFailedInbound(supabase, incoming, trace, error) {
     messages.push(message("lead", incoming.text));
   }
   for (const text of trace.sentTexts) {
+    const last = messages[messages.length - 1];
+    if (
+      last?.author === "seya" &&
+      String(last.text || "").trim() === String(text || "").trim()
+    ) {
+      continue;
+    }
     messages.push({ ...message("seya", text), delivery: "sent" });
   }
   const detail = error instanceof Error ? error.message : "erreur technique";
@@ -768,6 +780,28 @@ async function handleIncoming(
       centerId: center.id,
       skipped: "duplicate",
     };
+  }
+
+  const alreadyClaimed =
+    trace.inboundClaim === "claimed" && trace.claimMessageId === incoming.messageId;
+  if (!alreadyClaimed && incoming.messageId) {
+    const claim = await claimInboundMessage(supabase, {
+      messageId: incoming.messageId,
+      centerId: center.id,
+    });
+    if (claim.state === "duplicate") {
+      return {
+        phone: incoming.phone,
+        routed: true,
+        centerId: center.id,
+        skipped: "duplicate",
+      };
+    }
+    if (claim.state === "claimed") {
+      trace.inboundClaim = "claimed";
+      trace.claimMessageId = incoming.messageId;
+      trace.claimVia = claim.via || "table";
+    }
   }
 
   const sendExtras = {
@@ -1171,6 +1205,15 @@ async function handleIncoming(
     console.error("[seya/whatsapp] fresh read", freshError);
     return null;
   });
+  if (fresh && alreadyHandledInbound(fresh, incoming) && !fresh.sendError) {
+    trace.claimHandled = true;
+    return {
+      phone: incoming.phone,
+      routed: true,
+      centerId: center.id,
+      skipped: "duplicate",
+    };
+  }
   const heldOutgoing = holdOutgoingAfterPause(fresh, existing, uniqueOutgoing);
   if (heldOutgoing !== uniqueOutgoing) {
     uniqueOutgoing = heldOutgoing;
@@ -1181,6 +1224,7 @@ async function handleIncoming(
     if (!uniqueOutgoing.length) {
       const lastSeyaIndex = (next.messages || []).map((item) => item.author).lastIndexOf("seya");
       next.messages = (next.messages || []).filter((_, index) => index !== lastSeyaIndex);
+      trace.claimHandled = true;
     }
   }
   Object.assign(next, replaceDraftWithSent(next, uniqueOutgoing));
@@ -1557,12 +1601,12 @@ function wabaId() {
 
 async function graphGet(path) {
   const token = process.env.WHATSAPP_TOKEN;
-  const response = await fetch(
-    `https://graph.facebook.com/${GRAPH_VERSION}/${path}`,
-    {
-      headers: { Authorization: `Bearer ${token}` },
-    },
-  );
+  const url = /^https?:\/\//i.test(path)
+    ? path
+    : `https://graph.facebook.com/${GRAPH_VERSION}/${path}`;
+  const response = await fetch(url, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
   const data = await response.json().catch(() => ({}));
   return { ok: response.ok, status: response.status, data };
 }
@@ -1812,16 +1856,23 @@ async function sendGraphMessage(phoneNumberId, token, body) {
 }
 
 async function listTemplates() {
-  const listed = await graphGet(
-    `${wabaId()}/message_templates?limit=80&fields=name,status,language,category,components`,
-  );
-  if (!listed.ok) {
-    return { templates: [], error: listed.data?.error || { message: "templates_failed" } };
+  const fields = "name,status,language,category,components";
+  const templates = [];
+  let path = `${wabaId()}/message_templates?limit=100&fields=${fields}`;
+  for (let page = 0; page < 20 && path; page += 1) {
+    const listed = await graphGet(path);
+    if (!listed.ok) {
+      if (templates.length) {
+        return { templates, error: null };
+      }
+      return { templates: [], error: listed.data?.error || { message: "templates_failed" } };
+    }
+    if (Array.isArray(listed.data?.data)) {
+      templates.push(...listed.data.data);
+    }
+    path = listed.data?.paging?.next || "";
   }
-  return {
-    templates: Array.isArray(listed.data?.data) ? listed.data.data : [],
-    error: null,
-  };
+  return { templates, error: null };
 }
 
 async function ensureSeyaTemplate() {

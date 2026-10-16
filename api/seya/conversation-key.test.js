@@ -6,6 +6,24 @@ const {
   persistableConversations,
 } = require("./conversation-key");
 
+test("deux réponses Seya identiques dans la même minute n’en font qu’une", () => {
+  const text =
+    "C’est noté pour le ventre. Le bilan minceur est à 79€. Souhaitez-vous qu’un expert vous rappelle ?";
+  const thread = {
+    phone: "33650347844",
+    centerId: "center-labrede",
+    messages: [
+      { id: "a", author: "seya", text: "Bonjour Laura", at: "2026-10-16T14:00:00.000Z" },
+      { id: "b", author: "lead", text: "le bas ventre", at: "2026-10-16T14:01:00.000Z" },
+      { id: "c", author: "seya", text, at: "2026-10-16T14:01:02.000Z" },
+      { id: "d", author: "seya", text, at: "2026-10-16T14:01:03.000Z" },
+    ],
+  };
+  const [saved] = persistableConversations([thread]);
+  assert.equal(saved.messages.length, 3);
+  assert.equal(saved.messages.filter((item) => item.author === "seya").length, 2);
+});
+
 test("un fil WhatsApp sans leadId reste fusionné par le téléphone", () => {
   const remote = [
     {

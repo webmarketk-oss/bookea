@@ -2,12 +2,50 @@ function last9Phone(value) {
   return String(value || "").replace(/\D/g, "").slice(-9);
 }
 
+function sameSeyaBurst(previous, item) {
+  if (previous?.author !== "seya" || item?.author !== "seya") {
+    return false;
+  }
+  const left = String(previous.text || "").trim();
+  const right = String(item.text || "").trim();
+  if (!left || left !== right) {
+    return false;
+  }
+  const atPrevious = Date.parse(previous.at || "");
+  const atItem = Date.parse(item.at || "");
+  if (!Number.isFinite(atPrevious) || !Number.isFinite(atItem)) {
+    return true;
+  }
+  return Math.abs(atPrevious - atItem) < 3 * 60 * 1000;
+}
+
+function collapseRepeatedSeya(messages) {
+  const collapsed = [];
+  for (const item of messages || []) {
+    const previous = collapsed[collapsed.length - 1];
+    if (previous && sameSeyaBurst(previous, item)) {
+      if (item.waId && !previous.waId) {
+        collapsed[collapsed.length - 1] = item;
+      }
+      continue;
+    }
+    collapsed.push(item);
+  }
+  return collapsed;
+}
+
 function persistableConversation(item) {
   if (!item || typeof item !== "object") {
     return item;
   }
   const { _seya, ...rest } = item;
-  return rest;
+  if (!Array.isArray(rest.messages)) {
+    return rest;
+  }
+  return {
+    ...rest,
+    messages: collapseRepeatedSeya(rest.messages),
+  };
 }
 
 function lastActivityAt(item) {
@@ -246,6 +284,7 @@ function persistableConversations(list) {
 }
 
 module.exports = {
+  collapseRepeatedSeya,
   isLiveSeyaThread,
   isSameSeyaConversation,
   last9Phone,
