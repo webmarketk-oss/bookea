@@ -194,6 +194,68 @@ test("le client Supabase thenable attend le filtre settings avant d’écrire", 
   );
 });
 
+test("tous les réglages d’un centre restent siens pendant une écriture de conversation", async () => {
+  const db = createCasDb({
+    id: "labrede",
+    settings: {
+      seya: {
+        seyaMission: "book",
+        brief: "Consignes La Brède",
+        centerProfile: { supportEmail: "labrede@centre.fr" },
+        relances: [{ afterDays: 2, message: "Relance La Brède" }],
+        offerMaps: [{ match: "79", label: "Bilan 79", template: "seya_minceur_79_relance" }],
+        treatmentBriefs: [{ name: "Soin minceur", brief: "Fiche La Brède" }],
+        conversations: [{ id: "c1", centerId: "labrede" }],
+      },
+    },
+  });
+  db.centers.set("autre", {
+    settings: {
+      seya: {
+        seyaMission: "qualify_callback",
+        brief: "Consignes autre centre",
+        offerMaps: [{ match: "laser", label: "Laser" }],
+        treatmentBriefs: [{ name: "Épilation laser", brief: "Fiche autre" }],
+        conversations: [],
+      },
+    },
+  });
+  db.forceConflicts(1);
+
+  const settingsWrite = mutateCenterSettings(db, "labrede", (settings) => ({
+    ...settings,
+    seya: {
+      ...settings.seya,
+      seyaMission: "qualify_callback",
+      brief: "Consignes La Brède mises à jour",
+      centerProfile: { supportEmail: "accueil@labrede.fr" },
+      relances: [{ afterDays: 3, message: "Nouveau texte" }],
+      offerMaps: [{ match: "79", label: "Bilan + séance", template: "seya_minceur_79_relance" }],
+      treatmentBriefs: [{ name: "Soin minceur", brief: "Fiche La Brède mise à jour" }],
+    },
+  }));
+  const conversationsWrite = patchCenterSeya(db, "labrede", (seya) => ({
+    ...seya,
+    conversations: [...(seya.conversations || []), { id: "c2", centerId: "labrede" }],
+  }));
+
+  await Promise.all([settingsWrite, conversationsWrite]);
+
+  const seya = db.centers.get("labrede").settings.seya;
+  assert.equal(seya.seyaMission, "qualify_callback");
+  assert.equal(seya.brief, "Consignes La Brède mises à jour");
+  assert.equal(seya.centerProfile.supportEmail, "accueil@labrede.fr");
+  assert.equal(seya.relances[0].message, "Nouveau texte");
+  assert.equal(seya.offerMaps[0].label, "Bilan + séance");
+  assert.equal(seya.treatmentBriefs[0].brief, "Fiche La Brède mise à jour");
+  assert.deepEqual(
+    seya.conversations.map((item) => item.id),
+    ["c1", "c2"],
+  );
+  assert.equal(db.centers.get("autre").settings.seya.brief, "Consignes autre centre");
+  assert.equal(db.centers.get("autre").settings.seya.offerMaps[0].label, "Laser");
+});
+
 test("patchCenterSeya ne touche qu’au centre demandé", async () => {
   const db = createCasDb({
     id: "gaillard",
