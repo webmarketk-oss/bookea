@@ -415,6 +415,7 @@ export default function SeyaCrmPage() {
   const savedAgentSettingsRef = useRef<SeyaAgentSettings | null>(null);
   const persistSeqRef = useRef(0);
   const persistTailRef = useRef(Promise.resolve());
+  const removedTreatmentNamesRef = useRef<string[]>([]);
   const persistConversationsSeqRef = useRef(0);
   const loadSeqRef = useRef(0);
   const settingsCenterIdRef = useRef("");
@@ -770,8 +771,14 @@ export default function SeyaCrmPage() {
         }
         setSavingAgent(true);
         setAgentFeedback("Enregistrement…");
+        const removedTreatmentNames = [...removedTreatmentNamesRef.current];
         try {
-          const result = await saveSeyaAgentSettings(latest, targetCenterId, changedKeys);
+          const result = await saveSeyaAgentSettings(
+            latest,
+            targetCenterId,
+            changedKeys,
+            { removedTreatmentNames },
+          );
           if (seq !== persistSeqRef.current) {
             return;
           }
@@ -782,6 +789,9 @@ export default function SeyaCrmPage() {
             return;
           }
           savedAgentSettingsRef.current = result.settings;
+          removedTreatmentNamesRef.current = removedTreatmentNamesRef.current.filter(
+            (name) => !removedTreatmentNames.includes(name),
+          );
           if (agentSettingsRef.current === latest) {
             setAgentSettings(result.settings);
             agentSettingsRef.current = result.settings;
@@ -861,6 +871,10 @@ export default function SeyaCrmPage() {
 
   function removeTreatmentBrief(index: number) {
     const current = agentSettingsRef.current;
+    const name = String(current.treatmentBriefs[index]?.name || "").trim();
+    if (name) {
+      removedTreatmentNamesRef.current = [...removedTreatmentNamesRef.current, name];
+    }
     void persistAgentSettings({
       ...current,
       treatmentBriefs: current.treatmentBriefs.filter(

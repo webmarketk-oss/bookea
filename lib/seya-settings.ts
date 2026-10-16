@@ -1158,14 +1158,20 @@ export function changedSeyaSettingKeys(
 export function mergeTreatmentBriefLists(
   remote: SeyaTreatmentBrief[] | null | undefined,
   incoming: SeyaTreatmentBrief[] | null | undefined,
+  removedNames?: string[],
 ) {
-  return mergeTreatmentBriefListsFromPatch(remote, incoming) as SeyaTreatmentBrief[];
+  return mergeTreatmentBriefListsFromPatch(
+    remote,
+    incoming,
+    removedNames,
+  ) as SeyaTreatmentBrief[];
 }
 
 export function mergeSeyaSettingsPatch(
   remote: Partial<SeyaAgentSettings> | null,
   settings: SeyaAgentSettings,
   changedKeys?: (keyof SeyaAgentSettings)[],
+  removedTreatmentNames?: string[],
 ) {
   if (!changedKeys) {
     return normalizeSeyaAgentSettings(settings);
@@ -1176,7 +1182,11 @@ export function mergeSeyaSettingsPatch(
       if (key === "treatmentBriefs") {
         return [
           key,
-          mergeTreatmentBriefLists(base.treatmentBriefs, settings.treatmentBriefs),
+          mergeTreatmentBriefLists(
+            base.treatmentBriefs,
+            settings.treatmentBriefs,
+            removedTreatmentNames,
+          ),
         ];
       }
       return [key, settings[key]];
@@ -1192,6 +1202,7 @@ export async function saveSeyaAgentSettings(
   settings: SeyaAgentSettings,
   expectedCenterId?: string,
   changedKeys?: (keyof SeyaAgentSettings)[],
+  options?: { removedTreatmentNames?: string[] },
 ) {
   const context = await getActiveCenterContext();
   assertExpectedCenter(expectedCenterId, context.centerId);
@@ -1204,6 +1215,7 @@ export async function saveSeyaAgentSettings(
       currentSettings.seya ? (currentSeya as Partial<SeyaAgentSettings>) : null,
       settings,
       changedKeys,
+      options?.removedTreatmentNames,
     );
     const repaired = repairGaillardLaserSettings(
       merged,

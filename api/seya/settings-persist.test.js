@@ -118,6 +118,20 @@ test("un patch partiel de pricing conserve bilan et brief", () => {
   assert.equal(merged[0].pricing.package, "grille B");
 });
 
+test("retirer un soin n’enlève que celui-là", () => {
+  const merged = mergeTreatmentBriefLists(
+    [
+      { name: "Hydrafacial", brief: "Visage", pricing: { session: "à partir de 90€" } },
+      { name: "Soin minceur", brief: "Minceur" },
+    ],
+    [{ name: "Soin minceur", brief: "Minceur" }],
+    ["Hydrafacial"],
+  );
+  assert.equal(merged.length, 1);
+  assert.equal(merged[0].name, "Soin minceur");
+  assert.equal(merged[0].brief, "Minceur");
+});
+
 test("une prestation absente de la requête reste en base", () => {
   const merged = mergeTreatmentBriefLists(
     [

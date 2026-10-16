@@ -33,9 +33,14 @@ function mergePricing(previous, incoming) {
   return merged;
 }
 
-function mergeTreatmentBriefLists(remote, incoming) {
+function mergeTreatmentBriefLists(remote, incoming, removedNames) {
   const remoteList = Array.isArray(remote) ? remote : [];
   const incomingList = Array.isArray(incoming) ? incoming : [];
+  const removed = new Set(
+    (Array.isArray(removedNames) ? removedNames : [])
+      .map((name) => normalizeTreatmentName(name))
+      .filter(Boolean),
+  );
   const remoteByName = new Map(
     remoteList
       .filter((item) => String(item?.name || "").trim())
@@ -43,7 +48,7 @@ function mergeTreatmentBriefLists(remote, incoming) {
   );
   const seen = new Set();
 
-  const merged = incomingList.map((item) => {
+  const merged = incomingList.filter((item) => !removed.has(normalizeTreatmentName(item?.name))).map((item) => {
     const name = String(item?.name || "").trim();
     const key = normalizeTreatmentName(name);
     if (key) {
@@ -74,7 +79,7 @@ function mergeTreatmentBriefLists(remote, incoming) {
   // Conserver les prestations absentes du formulaire / de la requête.
   for (const previous of remoteList) {
     const key = normalizeTreatmentName(previous?.name);
-    if (!key || seen.has(key)) {
+    if (!key || seen.has(key) || removed.has(key)) {
       continue;
     }
     merged.push(previous);
