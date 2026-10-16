@@ -10,6 +10,7 @@ import Filters, {
 } from "@/components/crm/filters";
 import KPIDashboard from "@/components/crm/kpi-dashboard";
 import LeadDetails from "@/components/crm/lead-details";
+import BookedRdvTable from "@/components/crm/booked-rdv-table";
 import ProspectsTable from "@/components/crm/prospects-table";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -28,6 +29,7 @@ import {
   addCrmLeadActivity,
   createCrmLead,
   deleteCrmLeadComment,
+  loadBookedCrmLeads,
   loadCrmLeads,
   loadCrmWhatsAppThreads,
   mergeCrmDuplicateLeads,
@@ -39,7 +41,14 @@ import {
   updateCrmLeadDetails,
   updateCrmLeadReminder,
   updateCrmLeadStatus,
+  updateCrmLeadVisitDate,
 } from "@/lib/crm-supabase";
+import {
+  compareBookedLeads,
+  displayVisitDate,
+  isEverBookedLead,
+  leadWithVisitDate,
+} from "@/lib/crm-rdv";
 import {
   fromDatetimeLocalValue,
   isDepositManagedLead,
@@ -90,7 +99,7 @@ const emptyLeadForm = {
   reminderDate: "",
 };
 
-type CRMTab = "prospects" | "imports" | "deposits" | "kpi";
+type CRMTab = "prospects" | "booked" | "imports" | "deposits" | "kpi";
 type KpiScope = "campaigns" | "imports";
 type FicheBox = {
   top: number;
@@ -209,6 +218,10 @@ export default function CRMLeadsPage() {
   );
   const [newLeadForm, setNewLeadForm] = useState(emptyLeadForm);
   const [activeTab, setActiveTab] = useState<CRMTab>("prospects");
+  const [bookedLeads, setBookedLeads] = useState<Lead[] | null>(null);
+  const [bookedLoading, setBookedLoading] = useState(false);
+  const [bookedError, setBookedError] = useState<string | null>(null);
+  const bookedRequestRef = useRef(0);
   const [depositPhaseFilter, setDepositPhaseFilter] =
     useState<DepositPhaseFilter>("Tous");
   const [kpiScope, setKpiScope] = useState<KpiScope>("campaigns");
@@ -1019,6 +1032,92 @@ export default function CRMLeadsPage() {
     }
   }
 
+  async function refreshBookedLeads() {
+    const request = bookedRequestRef.current + 1;
+    bookedRequestRef.current = request;
+    setBookedLoading(true);
+    setBookedError(null);
+    try {
+      const rows = await loadBookedCrmLeads();
+      if (bookedRequestRef.current === request) {
+        setBookedLeads(rows);
+      }
+    } catch (error) {
+      if (bookedRequestRef.current === request) {
+        setBookedError(
+          error instanceof Error
+            ? error.message
+            : "Les rendez-vous n'ont pas pu être chargés.",
+        );
+      }
+    } finally {
+      if (bookedRequestRef.current === request) {
+        setBookedLoading(false);
+      }
+    }
+  }
+
+  useEffect(() => {
+    if (activeTab !== "booked" || bookedLeads) {
+      return;
+    }
+    void refreshBookedLeads();
+  }, [activeTab, bookedLeads]);
+
+  function patchVisitDate(leadId: string, date: string) {
+    setLeadList((currentLeads) =>
+      currentLeads.map((lead) =>
+        lead.id === leadId ? leadWithVisitDate(lead, date) : lead,
+      ),
+    );
+    setBookedLeads((currentLeads) => {
+      if (!currentLeads) {
+        return currentLeads;
+      }
+      const known =
+        currentLeads.find((lead) => lead.id === leadId) ||
+        leadList.find((lead) => lead.id === leadId);
+      const next = known
+        ? currentLeads.some((lead) => lead.id === leadId)
+          ? currentLeads.map((lead) =>
+              lead.id === leadId ? leadWithVisitDate(lead, date) : lead,
+            )
+          : [...currentLeads, leadWithVisitDate(known, date)]
+        : currentLeads.map((lead) =>
+            lead.id === leadId ? leadWithVisitDate(lead, date) : lead,
+          );
+      return next.filter(isEverBookedLead).sort(compareBookedLeads);
+    });
+  }
+
+  async function handleVisitDateChange(leadId: string, date: string) {
+    const current =
+      leadList.find((lead) => lead.id === leadId) ||
+      bookedLeads?.find((lead) => lead.id === leadId);
+    patchVisitDate(leadId, date);
+    try {
+      await trackSave(() =>
+        updateCrmLeadVisitDate(
+          leadId,
+          date,
+          current ? displayVisitDate(current) : "",
+          current?.appointments,
+        ),
+      );
+      setCrmNotice("Date du rendez-vous enregistrée.");
+    } catch (error) {
+      setCrmError(
+        error instanceof Error
+          ? error.message
+          : "La date du rendez-vous n'a pas pu être enregistrée.",
+      );
+      await refreshCrmLeads();
+      if (bookedLeads) {
+        await refreshBookedLeads();
+      }
+    }
+  }
+
   async function handleReminderDateChange(leadId: string, reminderDate: string) {
     setLeadList((currentLeads) =>
       currentLeads.map((lead) =>
@@ -1049,8 +1148,10 @@ export default function CRMLeadsPage() {
     leadId: string,
     index: DepositReminderIndex,
     datetimeLocal: string,
+    comment = "",
   ) {
     const isoDatetime = fromDatetimeLocalValue(datetimeLocal);
+    const note = comment.trim().slice(0, 500);
     setLeadList((currentLeads) =>
       currentLeads.map((lead) =>
         lead.id === leadId
@@ -1061,6 +1162,10 @@ export default function CRMLeadsPage() {
                 ...(lead.depositReminders || {}),
                 [index]: isoDatetime,
               },
+              depositReminderNotes: {
+                ...(lead.depositReminderNotes || {}),
+                [index]: note,
+              },
               updatedDate: todayIso(),
             }
           : lead,
@@ -1069,7 +1174,7 @@ export default function CRMLeadsPage() {
 
     try {
       await trackSave(() =>
-        updateCrmLeadDepositReminder(leadId, index, isoDatetime),
+        updateCrmLeadDepositReminder(leadId, index, isoDatetime, note),
       );
       setCrmNotice(`Relance acompte ${index} enregistrée.`);
     } catch (error) {
@@ -1454,6 +1559,16 @@ export default function CRMLeadsPage() {
             Prospects
           </CRMTabButton>
           <CRMTabButton
+            active={activeTab === "booked"}
+            onClick={() => {
+              setActiveTab("booked");
+              setIsLeadDetailsOpen(false);
+            }}
+          >
+            Tous les RDV pris
+            {bookedLeads ? ` (${bookedLeads.length})` : ""}
+          </CRMTabButton>
+          <CRMTabButton
             active={activeTab === "imports"}
             onClick={() => {
               setActiveTab("imports");
@@ -1504,7 +1619,17 @@ export default function CRMLeadsPage() {
           />
         ) : null}
 
-        {activeTab === "prospects" ||
+        {activeTab === "booked" ? (
+          <BookedRdvTable
+            leads={bookedLeads}
+            loading={bookedLoading}
+            error={bookedError}
+            onVisitDateChange={handleVisitDateChange}
+            onRefresh={() => {
+              void refreshBookedLeads();
+            }}
+          />
+        ) : activeTab === "prospects" ||
         activeTab === "imports" ||
         activeTab === "deposits" ? (
           <>
@@ -1709,6 +1834,8 @@ export default function CRMLeadsPage() {
                   commercialOptions={commercialOptions}
                   showDepositReminders={activeTab === "deposits"}
                   onDepositReminderChange={handleDepositReminderChange}
+                  showVisitDate={activeTab === "prospects"}
+                  onVisitDateChange={handleVisitDateChange}
                   whatsApp={
                     isRecontactCategory
                       ? { state: whatsAppState, byLead: whatsAppByLead }

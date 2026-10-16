@@ -33,6 +33,19 @@ export function emptyDepositReminders(): NonNullable<Lead["depositReminders"]> {
   return { 1: "", 2: "", 3: "", 4: "" };
 }
 
+export function emptyDepositReminderNotes(): NonNullable<Lead["depositReminderNotes"]> {
+  return { 1: "", 2: "", 3: "", 4: "" };
+}
+
+/** Les anciennes notes automatiques ne sont pas des commentaires saisis. */
+export function depositReminderComment(note?: string | null): string {
+  const text = (note || "").trim();
+  if (!text || /^Relance acompte [1-4]\b/i.test(text)) {
+    return "";
+  }
+  return text.slice(0, 500);
+}
+
 export function isDepositManagedLead(lead: Lead): boolean {
   return (
     Boolean(lead.depositTracked) ||
@@ -57,6 +70,7 @@ type DepositEventLike = {
   event_type: string;
   from_value?: string | null;
   to_value?: string | null;
+  note?: string | null;
   created_at: string;
 };
 
@@ -64,11 +78,10 @@ export function parseDepositTracked(events: DepositEventLike[]): boolean {
   return events.some((event) => event.event_type === ACOMPTE_SUIVI_EVENT);
 }
 
-export function parseDepositReminders(
-  events: DepositEventLike[],
-): NonNullable<Lead["depositReminders"]> {
-  const reminders = emptyDepositReminders();
-  const latestByIndex = new Map<DepositReminderIndex, { at: number; value: string }>();
+type DepositFollowUp = { at: number; value: string; comment: string };
+
+function latestDepositFollowUps(events: DepositEventLike[]) {
+  const latestByIndex = new Map<DepositReminderIndex, DepositFollowUp>();
 
   for (const event of events) {
     if (event.event_type !== ACOMPTE_RELANCE_EVENT) {
@@ -80,20 +93,38 @@ export function parseDepositReminders(
     }
     const at = Date.parse(event.created_at);
     const previous = latestByIndex.get(index);
-    if (previous && previous.at >= at) {
+    const stamp = Number.isNaN(at) ? 0 : at;
+    if (previous && previous.at >= stamp) {
       continue;
     }
     latestByIndex.set(index, {
-      at: Number.isNaN(at) ? 0 : at,
+      at: stamp,
       value: (event.to_value || "").trim(),
+      comment: depositReminderComment(event.note),
     });
   }
 
-  for (const [index, entry] of latestByIndex) {
+  return latestByIndex;
+}
+
+export function parseDepositReminders(
+  events: DepositEventLike[],
+): NonNullable<Lead["depositReminders"]> {
+  const reminders = emptyDepositReminders();
+  for (const [index, entry] of latestDepositFollowUps(events)) {
     reminders[index] = entry.value;
   }
-
   return reminders;
+}
+
+export function parseDepositReminderNotes(
+  events: DepositEventLike[],
+): NonNullable<Lead["depositReminderNotes"]> {
+  const notes = emptyDepositReminderNotes();
+  for (const [index, entry] of latestDepositFollowUps(events)) {
+    notes[index] = entry.comment;
+  }
+  return notes;
 }
 
 /** Valeur pour `<input type="datetime-local">` (fuseau local). */

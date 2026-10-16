@@ -16,6 +16,7 @@ import {
   toDatetimeLocalValue,
 } from "@/lib/crm-deposit";
 import { isOpenReminderDue, toDateOnlyIso } from "@/lib/crm-stats";
+import { displayVisitDate } from "@/lib/crm-rdv";
 import { leadOfferLabel } from "@/lib/lead-offer";
 import {
   formatWhatsAppDate,
@@ -57,7 +58,10 @@ interface ProspectsTableProps {
     leadId: string,
     index: 1 | 2 | 3 | 4,
     datetimeLocal: string,
+    comment: string,
   ) => void;
+  showVisitDate?: boolean;
+  onVisitDateChange?: (leadId: string, date: string) => void;
 }
 
 export type ProspectsWhatsApp = {
@@ -81,6 +85,8 @@ export default function ProspectsTable({
   whatsApp,
   showDepositReminders = false,
   onDepositReminderChange,
+  showVisitDate = false,
+  onVisitDateChange,
 }: ProspectsTableProps) {
   const [commentsOpen, setCommentsOpen] = useState(true);
   const [dateSort, setDateSort] = useState<"desc" | "asc">("desc");
@@ -149,13 +155,16 @@ export default function ProspectsTable({
               ? DEPOSIT_REMINDER_INDEXES.map((index) => (
                   <TableHead
                     key={`deposit-head-${index}`}
-                    className="w-[11rem] min-w-[11rem]"
+                    className="w-[12.5rem] min-w-[12.5rem]"
                   >
                     {DEPOSIT_REMINDER_LABELS[index]}
                   </TableHead>
                 ))
               : null}
             <TableHead className="w-[9.25rem] min-w-[9.25rem]">Statut</TableHead>
+            {showVisitDate ? (
+              <TableHead className="w-[9.5rem] min-w-[9.5rem]">Date du RDV</TableHead>
+            ) : null}
             {whatsApp ? (
               <TableHead className="w-[15rem] min-w-[15rem]">Dernier WhatsApp</TableHead>
             ) : null}
@@ -299,21 +308,20 @@ export default function ProspectsTable({
               {showDepositReminders
                 ? DEPOSIT_REMINDER_INDEXES.map((index) => (
                     <TableCell key={`${lead.id}-deposit-${index}`}>
-                      <input
-                        type="datetime-local"
-                        aria-label={DEPOSIT_REMINDER_LABELS[index]}
-                        value={toDatetimeLocalValue(
+                      <DepositReminderCell
+                        label={DEPOSIT_REMINDER_LABELS[index]}
+                        datetime={toDatetimeLocalValue(
                           lead.depositReminders?.[index],
                         )}
-                        onClick={(event) => event.stopPropagation()}
-                        onChange={(event) =>
+                        comment={lead.depositReminderNotes?.[index] || ""}
+                        onCommit={(datetimeLocal, comment) =>
                           onDepositReminderChange?.(
                             lead.id,
                             index,
-                            event.target.value,
+                            datetimeLocal,
+                            comment,
                           )
                         }
-                        className="h-8 w-[10.5rem] shrink-0 rounded-lg border border-slate-200 bg-white px-1.5 text-[11px] font-semibold outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
                       />
                     </TableCell>
                   ))
@@ -334,6 +342,21 @@ export default function ProspectsTable({
                   )}
                 />
               </TableCell>
+
+              {showVisitDate ? (
+                <TableCell>
+                  <input
+                    type="date"
+                    aria-label="Date du RDV"
+                    value={displayVisitDate(lead)}
+                    onClick={(event) => event.stopPropagation()}
+                    onChange={(event) =>
+                      onVisitDateChange?.(lead.id, event.target.value)
+                    }
+                    className="h-8 w-[8.5rem] shrink-0 rounded-lg border border-slate-200 bg-white px-2 text-xs font-semibold outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                  />
+                </TableCell>
+              ) : null}
 
               {whatsApp ? (
                 <TableCell className="w-[15rem] min-w-[15rem] max-w-[15rem] whitespace-normal">
@@ -627,6 +650,72 @@ function SourceIcon({ source }: { source: Lead["source"] }) {
   }
 
   return <Globe className="h-4 w-4 text-slate-500" />;
+}
+
+function DepositReminderCell({
+  label,
+  datetime,
+  comment,
+  onCommit,
+}: {
+  label: string;
+  datetime: string;
+  comment: string;
+  onCommit: (datetimeLocal: string, comment: string) => void;
+}) {
+  const [draft, setDraft] = useState(comment);
+  const draftRef = useRef(comment);
+  const [focused, setFocused] = useState(false);
+
+  useEffect(() => {
+    if (!focused) {
+      draftRef.current = comment;
+      setDraft(comment);
+    }
+  }, [comment, focused]);
+
+  function commit(nextDatetime: string, nextComment: string) {
+    if (nextDatetime === datetime && nextComment.trim() === comment.trim()) {
+      return;
+    }
+    onCommit(nextDatetime, nextComment);
+  }
+
+  return (
+    <div className="flex w-[11.5rem] flex-col gap-1">
+      <input
+        type="datetime-local"
+        aria-label={label}
+        value={datetime}
+        onClick={(event) => event.stopPropagation()}
+        onChange={(event) => commit(event.target.value, draftRef.current)}
+        className="h-8 w-full shrink-0 rounded-lg border border-slate-200 bg-white px-1.5 text-[11px] font-semibold outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+      />
+      <input
+        type="text"
+        aria-label={`Commentaire ${label}`}
+        placeholder="Commentaire"
+        maxLength={500}
+        value={draft}
+        onClick={(event) => event.stopPropagation()}
+        onFocus={() => setFocused(true)}
+        onChange={(event) => {
+          draftRef.current = event.target.value;
+          setDraft(event.target.value);
+        }}
+        onBlur={() => {
+          setFocused(false);
+          commit(datetime, draftRef.current);
+        }}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") {
+            event.currentTarget.blur();
+          }
+        }}
+        className="h-8 w-full rounded-lg border border-slate-200 bg-white px-2 text-[11px] font-semibold outline-none placeholder:font-medium placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+      />
+    </div>
+  );
 }
 
 function sourceKey(source: Lead["source"]) {

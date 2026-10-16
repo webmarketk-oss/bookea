@@ -53,8 +53,19 @@ export interface Lead {
   updatedDate?: string;
   nextAction: string;
   reminderDate?: string;
+  /** Date du rendez-vous saisie dans le CRM (YYYY-MM-DD). Vide = effacée. Absent = non saisie. */
+  visitDate?: string;
+  centerId?: string;
+  centerName?: string;
   /** Suivi acomptes : date/heure ISO des 4 relances (même fiche CRM). */
   depositReminders?: {
+    1?: string;
+    2?: string;
+    3?: string;
+    4?: string;
+  };
+  /** Commentaire associé à chaque date de relance acompte. */
+  depositReminderNotes?: {
     1?: string;
     2?: string;
     3?: string;

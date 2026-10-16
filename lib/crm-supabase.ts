@@ -17,9 +17,10 @@ import {
 import {
   ACOMPTE_RELANCE_EVENT,
   ACOMPTE_SUIVI_EVENT,
-  DEPOSIT_REMINDER_LABELS,
   DEPOSIT_STATUSES,
   isAcompteDepositEvent,
+  depositReminderComment,
+  parseDepositReminderNotes,
   parseDepositReminders,
   parseDepositTracked,
   type DepositReminderIndex,
@@ -30,6 +31,12 @@ import {
 } from "@/lib/seya-close-booking";
 import { createClient } from "@/lib/supabase";
 import { normalizeLeadStatus } from "@/lib/lead-statuses";
+import {
+  appointmentIdForVisitDate,
+  isEverBookedLead,
+  parseVisitDate,
+  RDV_DATE_EVENT,
+} from "@/lib/crm-rdv";
 import type { WhatsAppThread } from "@/lib/lead-whatsapp";
 import type {
   Lead,
@@ -80,6 +87,7 @@ type LeadRow = {
   campaigns: Relation<{ name: string | null }>;
   services: Relation<{ name: string | null }>;
   profiles: Relation<{ full_name: string | null }>;
+  centers?: Relation<{ name: string | null }>;
   lead_events:
     | Array<{
         id: string;
@@ -338,6 +346,90 @@ export async function loadCrmLeads() {
       }),
     ),
   };
+}
+
+const LEAD_LIST_SELECT = `
+  id,
+  center_id,
+  client_id,
+  source_id,
+  campaign_id,
+  service_id,
+  status,
+  recall_date,
+  next_action,
+  latest_comment,
+  amount_cure_ttc,
+  created_at,
+  updated_at,
+  last_activity_at,
+  clients(first_name,last_name,phone,email,birthdate,gender,address_line1,postal_code,city),
+  lead_sources(name,slug),
+  campaigns(name),
+  services(name),
+  profiles(full_name),
+  lead_events(
+    id,
+    event_type,
+    from_value,
+    to_value,
+    note,
+    created_at
+  )
+`;
+
+async function fetchAllRows<T>(
+  build: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>,
+) {
+  const pageSize = 1000;
+  const rows: T[] = [];
+  for (let page = 0; page < 30; page += 1) {
+    const start = page * pageSize;
+    const { data, error } = await build(start, start + pageSize - 1);
+    if (error) {
+      throw new Error(error.message);
+    }
+    const batch = data ?? [];
+    rows.push(...batch);
+    if (batch.length < pageSize) {
+      break;
+    }
+  }
+  return rows;
+}
+
+/** Tous les prospects avec un rendez-vous pris, tous centres accessibles, sans filtre de mois. */
+export async function loadBookedCrmLeads(): Promise<Lead[]> {
+  const supabase = createClient();
+  const rows = await fetchAllRows<LeadRow>((start, end) =>
+    supabase
+      .from("leads")
+      .select(`${LEAD_LIST_SELECT}, centers(name)`)
+      .order("last_activity_at", { ascending: false })
+      .range(start, end) as PromiseLike<{
+      data: LeadRow[] | null;
+      error: { message: string } | null;
+    }>,
+  );
+  const appointments = await fetchAllRows<CenterAppointmentRow>((start, end) =>
+    supabase
+      .from("appointments")
+      .select("id,lead_id,client_id,created_at,appointment_date,status,notes")
+      .order("appointment_date", { ascending: false })
+      .range(start, end) as PromiseLike<{
+      data: CenterAppointmentRow[] | null;
+      error: { message: string } | null;
+    }>,
+  );
+  const appointmentsByLead = groupLeadAppointments(appointments, rows);
+  return rows
+    .map(
+      (row): Lead => ({
+        ...toLead(row),
+        appointments: appointmentsByLead.get(row.id) ?? [],
+      }),
+    )
+    .filter(isEverBookedLead);
 }
 
 export async function loadCrmWhatsAppThreads(): Promise<{
@@ -798,15 +890,58 @@ export async function updateCrmLeadAmount(leadId: string, amount: number) {
   });
 }
 
+export function updateCrmLeadVisitDate(
+  leadId: string,
+  date: string,
+  previousDate = "",
+  appointments?: LeadAppointment[],
+) {
+  const value = date.trim() ? toDateOnlyIso(date) || "" : "";
+  if (date.trim() && !value) {
+    return Promise.reject(new Error("Date de rendez-vous invalide."));
+  }
+  return queueLeadWrite(leadId, async () => {
+    const supabase = createClient();
+    const centerId = await getLeadCenterId(supabase, leadId);
+    await insertLeadEvent(supabase, centerId, leadId, {
+      event_type: RDV_DATE_EVENT,
+      to_value: value || null,
+    });
+    await updateLeadFields(supabase, leadId, {
+      updated_at: new Date().toISOString(),
+    });
+    if (!value) {
+      return;
+    }
+    const appointmentId = appointmentIdForVisitDate(appointments, previousDate);
+    if (!appointmentId) {
+      return;
+    }
+    const { error } = await supabase
+      .from("appointments")
+      .update({
+        appointment_date: value,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", appointmentId)
+      .eq("center_id", centerId);
+    if (error) {
+      throw new Error(error.message);
+    }
+  });
+}
+
 export function updateCrmLeadDepositReminder(
   leadId: string,
   index: DepositReminderIndex,
   isoDatetime: string,
+  comment = "",
 ) {
   return queueLeadWrite(leadId, async () => {
     const supabase = createClient();
     const centerId = await getLeadCenterId(supabase, leadId);
     const value = isoDatetime.trim();
+    const note = depositReminderComment(comment);
     await insertLeadEvent(supabase, centerId, leadId, {
       event_type: ACOMPTE_SUIVI_EVENT,
       to_value: "1",
@@ -816,9 +951,7 @@ export function updateCrmLeadDepositReminder(
       event_type: ACOMPTE_RELANCE_EVENT,
       from_value: String(index),
       to_value: value || null,
-      note: value
-        ? `${DEPOSIT_REMINDER_LABELS[index]} : ${value}`
-        : `${DEPOSIT_REMINDER_LABELS[index]} effacée.`,
+      note: note || null,
     });
     await updateLeadFields(supabase, leadId, {
       updated_at: new Date().toISOString(),
@@ -1739,12 +1872,18 @@ function toLead(row: LeadRow): Lead {
   );
   const importOrigin = leadImportOrigin(leadSource?.name, events);
   const depositReminders = parseDepositReminders(events);
+  const depositReminderNotes = parseDepositReminderNotes(events);
   const depositTracked = parseDepositTracked(events);
+  const visitDate = parseVisitDate(events);
 
   const activityLog: LeadActivity[] = events
     .slice()
     .sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at))
-    .filter((event) => !isAcompteDepositEvent(event.event_type))
+      .filter(
+        (event) =>
+          !isAcompteDepositEvent(event.event_type) &&
+          event.event_type !== RDV_DATE_EVENT,
+      )
     .map((event) => {
       const text = (event.note || event.to_value || "Activité CRM").trim();
       const type = normalizeEventType(event.event_type);
@@ -1820,7 +1959,11 @@ function toLead(row: LeadRow): Lead {
     updatedDate: row.updated_at?.slice(0, 10),
     nextAction: row.next_action || "À contacter",
     reminderDate: toDateOnlyIso(row.recall_date) ?? undefined,
+    ...(visitDate !== undefined ? { visitDate } : {}),
+    centerId: row.center_id,
+    centerName: relationObject(row.centers)?.name?.trim() || undefined,
     depositReminders,
+    depositReminderNotes,
     ...(depositTracked ? { depositTracked: true } : {}),
     latestComment: latestComment || undefined,
     activityLog,

@@ -7,6 +7,7 @@ import {
   fromDatetimeLocalValue,
   isDepositManagedLead,
   matchesDepositPhaseFilter,
+  parseDepositReminderNotes,
   parseDepositReminders,
   parseDepositTracked,
   toDatetimeLocalValue,
@@ -100,6 +101,36 @@ describe("crm-deposit", () => {
     assert.equal(reminders[2], "");
     assert.equal(reminders[3], "2026-03-05T08:15:00.000Z");
     assert.equal(reminders[4], "");
+  });
+
+  it("lit le commentaire de la dernière relance et ignore l’ancienne note automatique", () => {
+    const events = [
+      {
+        event_type: ACOMPTE_RELANCE_EVENT,
+        from_value: "1",
+        to_value: "2026-03-01T10:00:00.000Z",
+        note: "Relance acompte 1 : 2026-03-01T10:00:00.000Z",
+        created_at: "2026-03-01T09:00:00.000Z",
+      },
+      {
+        event_type: ACOMPTE_RELANCE_EVENT,
+        from_value: "1",
+        to_value: "2026-03-02T11:30:00.000Z",
+        note: "Rappeler après 18h, elle est au travail",
+        created_at: "2026-03-02T10:00:00.000Z",
+      },
+      {
+        event_type: ACOMPTE_RELANCE_EVENT,
+        from_value: "2",
+        to_value: "2026-03-04T09:00:00.000Z",
+        note: "Relance acompte 2 effacée.",
+        created_at: "2026-03-04T08:00:00.000Z",
+      },
+    ];
+    const notes = parseDepositReminderNotes(events);
+    assert.equal(notes[1], "Rappeler après 18h, elle est au travail");
+    assert.equal(notes[2], "");
+    assert.equal(parseDepositReminders(events)[1], "2026-03-02T11:30:00.000Z");
   });
 
   it("détecte le marqueur de suivi acompte", () => {
