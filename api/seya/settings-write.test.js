@@ -114,6 +114,86 @@ test("une écriture conversations ne peut pas écraser les fiches d’un autre s
   assert.equal(seya.treatmentBriefs[1].brief, "Minceur Clermont");
   assert.equal(seya.conversations.length, 2);
 });
+test("le client Supabase thenable attend le filtre settings avant d’écrire", async () => {
+  let stored = {
+    seya: {
+      brief: "Consignes La Brède",
+      treatmentBriefs: [{ name: "Soin minceur", brief: "fiche" }],
+      conversations: [{ id: "c1" }],
+    },
+  };
+  let wroteWithoutSettingsFilter = false;
+
+  const db = {
+    from() {
+      const filters = [];
+      let payload = null;
+      const builder = {
+        select() {
+          return builder;
+        },
+        eq(key, value) {
+          filters.push([key, value]);
+          return builder;
+        },
+        update(next) {
+          payload = next;
+          return builder;
+        },
+        then(resolve, reject) {
+          return Promise.resolve(run()).then(resolve, reject);
+        },
+        maybeSingle() {
+          return Promise.resolve(run());
+        },
+      };
+
+      function run() {
+        if (!payload) {
+          return { data: { settings: structuredClone(stored) }, error: null };
+        }
+        const settingsFilter = filters.find(([key]) => key === "settings");
+        if (!settingsFilter) {
+          wroteWithoutSettingsFilter = true;
+          stored = structuredClone(payload.settings);
+          return { error: null };
+        }
+        if (JSON.stringify(stored) !== JSON.stringify(settingsFilter[1])) {
+          return { data: null, error: null };
+        }
+        stored = structuredClone(payload.settings);
+        return { data: { id: "labrede" }, error: null };
+      }
+
+      return builder;
+    },
+  };
+
+  let read = structuredClone(stored);
+  const settingsWrite = mutateCenterSettings(db, "labrede", () => ({
+    ...read,
+    seya: {
+      ...read.seya,
+      treatmentBriefs: [{ name: "Soin minceur", brief: "fiche modifiée" }],
+    },
+  }));
+  const conversationsWrite = patchCenterSeya(db, "labrede", (seya) => ({
+    ...seya,
+    conversations: [...seya.conversations, { id: "c2" }],
+  }));
+  await settingsWrite;
+  read = structuredClone(stored);
+  await conversationsWrite;
+
+  assert.equal(wroteWithoutSettingsFilter, false);
+  assert.equal(stored.seya.treatmentBriefs[0].brief, "fiche modifiée");
+  assert.equal(stored.seya.brief, "Consignes La Brède");
+  assert.deepEqual(
+    stored.seya.conversations.map((item) => item.id),
+    ["c1", "c2"],
+  );
+});
+
 test("patchCenterSeya ne touche qu’au centre demandé", async () => {
   const db = createCasDb({
     id: "gaillard",

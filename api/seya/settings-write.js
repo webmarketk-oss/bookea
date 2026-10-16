@@ -93,8 +93,14 @@ async function writeSettingsCas(supabase, id, nextSettings, currentSettings) {
     .update({ settings: nextSettings })
     .eq("id", id);
 
-  // Anciens mocks de tests : .eq("id") renvoie déjà une Promise.
-  if (afterId && typeof afterId.then === "function") {
+  // Anciens mocks de tests : .eq("id") renvoie déjà une Promise, sans .eq suivant.
+  // Le client Supabase est thenable ET a encore .eq : il ne faut pas écrire avant
+  // le filtre sur settings, sinon une conversation peut réécrire d’anciens réglages.
+  if (
+    afterId &&
+    typeof afterId.then === "function" &&
+    typeof afterId.eq !== "function"
+  ) {
     const { error } = await afterId;
     if (error) {
       return { ok: false, error, retryable: false, cas: false };

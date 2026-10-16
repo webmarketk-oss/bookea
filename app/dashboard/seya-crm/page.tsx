@@ -414,6 +414,7 @@ export default function SeyaCrmPage() {
   agentSettingsRef.current = agentSettings;
   const savedAgentSettingsRef = useRef<SeyaAgentSettings | null>(null);
   const persistSeqRef = useRef(0);
+  const persistTailRef = useRef(Promise.resolve());
   const persistConversationsSeqRef = useRef(0);
   const loadSeqRef = useRef(0);
   const settingsCenterIdRef = useRef("");
@@ -708,8 +709,23 @@ export default function SeyaCrmPage() {
   }
 
   async function persistAgentSettings(next: SeyaAgentSettings) {
-    agentSettingsRef.current = next;
-    setAgentSettings(next);
+    const savedNow = savedAgentSettingsRef.current;
+    const typed = agentSettingsRef.current;
+    let nextSettings = next;
+    if (savedNow && typed && typed !== next) {
+      const nextKeys = new Set(changedSeyaSettingKeys(savedNow, next));
+      const localKeys = changedSeyaSettingKeys(savedNow, typed);
+      const kept = Object.fromEntries(
+        localKeys
+          .filter((key) => !nextKeys.has(key))
+          .map((key) => [key, typed[key]]),
+      );
+      if (Object.keys(kept).length > 0) {
+        nextSettings = { ...next, ...kept };
+      }
+    }
+    agentSettingsRef.current = nextSettings;
+    setAgentSettings(nextSettings);
     const targetCenterId = centerId || settingsCenterIdRef.current;
     if (!targetCenterId) {
       setAgentFeedback("Centre introuvable : réglages non enregistrés.");
@@ -736,46 +752,64 @@ export default function SeyaCrmPage() {
       setAgentFeedback("Réglages en cours de chargement : réessayez dans un instant.");
       return;
     }
-    const changedKeys = changedSeyaSettingKeys(saved, next);
-    if (changedKeys.length === 0) {
-      return;
-    }
     const seq = ++persistSeqRef.current;
-    setSavingAgent(true);
-    setAgentFeedback("Enregistrement…");
-    try {
-      const result = await saveSeyaAgentSettings(next, targetCenterId, changedKeys);
-      if (seq !== persistSeqRef.current) {
-        return;
-      }
-      if (result.centerId !== targetCenterId) {
-        setAgentFeedback(
-          "Centre différent après sauvegarde : modifications conservées dans le formulaire, rien n’a été mélangé.",
-        );
-        return;
-      }
-      savedAgentSettingsRef.current = result.settings;
-      setAgentSettings(result.settings);
-      agentSettingsRef.current = result.settings;
-      setAgentFeedback(
-        `Enregistré pour ${result.centerName || centerName} uniquement.`,
-      );
-    } catch {
-      if (seq !== persistSeqRef.current) {
-        return;
-      }
-      setAgentFeedback(
-        "Impossible d’enregistrer les réglages. Vos modifications restent dans le formulaire.",
-      );
-    } finally {
-      if (seq === persistSeqRef.current) {
-        setSavingAgent(false);
-      }
-    }
+    const job = persistTailRef.current
+      .catch(() => undefined)
+      .then(async () => {
+        if (seq !== persistSeqRef.current) {
+          return;
+        }
+        const latest = agentSettingsRef.current;
+        const baseline = savedAgentSettingsRef.current;
+        if (!baseline) {
+          return;
+        }
+        const changedKeys = changedSeyaSettingKeys(baseline, latest);
+        if (changedKeys.length === 0) {
+          return;
+        }
+        setSavingAgent(true);
+        setAgentFeedback("Enregistrement…");
+        try {
+          const result = await saveSeyaAgentSettings(latest, targetCenterId, changedKeys);
+          if (seq !== persistSeqRef.current) {
+            return;
+          }
+          if (result.centerId !== targetCenterId) {
+            setAgentFeedback(
+              "Centre différent après sauvegarde : modifications conservées dans le formulaire, rien n’a été mélangé.",
+            );
+            return;
+          }
+          savedAgentSettingsRef.current = result.settings;
+          if (agentSettingsRef.current === latest) {
+            setAgentSettings(result.settings);
+            agentSettingsRef.current = result.settings;
+          }
+          setAgentFeedback(
+            `Enregistré pour ${result.centerName || centerName} uniquement.`,
+          );
+        } catch {
+          if (seq !== persistSeqRef.current) {
+            return;
+          }
+          setAgentFeedback(
+            "Impossible d’enregistrer les réglages. Vos modifications restent dans le formulaire.",
+          );
+        } finally {
+          if (seq === persistSeqRef.current) {
+            setSavingAgent(false);
+          }
+        }
+      });
+    persistTailRef.current = job;
+    await job;
   }
 
   function persistCurrentAgentSettings() {
-    void persistAgentSettings(agentSettingsRef.current);
+    window.setTimeout(() => {
+      void persistAgentSettings(agentSettingsRef.current);
+    }, 0);
   }
 
   async function sendCenterNotifyTest() {
