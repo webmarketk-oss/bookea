@@ -219,6 +219,7 @@ export default function CRMLeadsPage() {
   const [newLeadForm, setNewLeadForm] = useState(emptyLeadForm);
   const [activeTab, setActiveTab] = useState<CRMTab>("prospects");
   const [bookedLeads, setBookedLeads] = useState<Lead[] | null>(null);
+  const [bookedCenterId, setBookedCenterId] = useState("");
   const [bookedLoading, setBookedLoading] = useState(false);
   const [bookedError, setBookedError] = useState<string | null>(null);
   const bookedRequestRef = useRef(0);
@@ -292,6 +293,10 @@ export default function CRMLeadsPage() {
 
     try {
       const { leads: loadedLeads, center } = await loadCrmLeads();
+      if (center.centerId !== centerIdRef.current) {
+        setBookedLeads(null);
+        setBookedCenterId("");
+      }
       centerNameRef.current = center.centerName;
       centerIdRef.current = center.centerId;
 
@@ -1041,6 +1046,7 @@ export default function CRMLeadsPage() {
       const rows = await loadBookedCrmLeads();
       if (bookedRequestRef.current === request) {
         setBookedLeads(rows);
+        setBookedCenterId(centerIdRef.current);
       }
     } catch (error) {
       if (bookedRequestRef.current === request) {
@@ -1058,11 +1064,14 @@ export default function CRMLeadsPage() {
   }
 
   useEffect(() => {
-    if (activeTab !== "booked" || bookedLeads) {
+    if (
+      activeTab !== "booked" ||
+      (bookedLeads && bookedCenterId === leadsCenterId)
+    ) {
       return;
     }
     void refreshBookedLeads();
-  }, [activeTab, bookedLeads]);
+  }, [activeTab, bookedLeads, bookedCenterId, leadsCenterId]);
 
   function patchVisitDate(leadId: string, date: string) {
     setLeadList((currentLeads) =>

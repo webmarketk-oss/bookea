@@ -36,11 +36,9 @@ export default function BookedRdvTable({
         if (!needle) {
           return true;
         }
-        const center = (lead.centerName || "").toLowerCase();
         const phone = (lead.phone || "").toLowerCase();
         return (
           matchesPersonSearch(query, lead.firstName, lead.lastName) ||
-          center.includes(needle) ||
           phone.includes(needle)
         );
       })
@@ -53,7 +51,7 @@ export default function BookedRdvTable({
         <div>
           <h2 className="text-lg font-black text-slate-900">Tous les RDV pris</h2>
           <p className="text-sm text-slate-500">
-            Historique complet, tous les centres accessibles. Les dates manquantes sont en haut.
+            Historique du centre ouvert. Les dates manquantes sont en haut.
           </p>
         </div>
         <button
@@ -67,7 +65,7 @@ export default function BookedRdvTable({
       <Input
         value={query}
         onChange={(event) => setQuery(event.target.value)}
-        placeholder="Rechercher un nom, un téléphone ou un centre"
+        placeholder="Rechercher un nom ou un téléphone"
         aria-label="Rechercher un rendez-vous"
       />
       {error ? (
@@ -83,7 +81,6 @@ export default function BookedRdvTable({
             <TableHeader>
               <TableRow>
                 <TableHead>Prospect</TableHead>
-                <TableHead>Centre</TableHead>
                 <TableHead>Statut</TableHead>
                 <TableHead className="w-[9.5rem]">Date du RDV</TableHead>
                 <TableHead>Téléphone</TableHead>
@@ -93,7 +90,7 @@ export default function BookedRdvTable({
             <TableBody>
               {rows.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={6} className="text-sm text-slate-500">
+                  <TableCell colSpan={5} className="text-sm text-slate-500">
                     Aucun rendez-vous pris pour cette recherche.
                   </TableCell>
                 </TableRow>
@@ -103,7 +100,6 @@ export default function BookedRdvTable({
                     <TableCell className="font-semibold">
                       {lead.firstName} {lead.lastName}
                     </TableCell>
-                    <TableCell>{lead.centerName || "Centre"}</TableCell>
                     <TableCell>{lead.status}</TableCell>
                     <TableCell>
                       <input

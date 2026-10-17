@@ -416,13 +416,18 @@ const BOOKED_LEAD_SELECT = `
   centers(name)
 `;
 
-async function fetchLeadsByIds(supabase: SupabaseClient, ids: string[]) {
+async function fetchLeadsByIds(
+  supabase: SupabaseClient,
+  centerId: string,
+  ids: string[],
+) {
   const rows: LeadRow[] = [];
   for (let index = 0; index < ids.length; index += 80) {
     const slice = ids.slice(index, index + 80);
     const { data, error } = await supabase
       .from("leads")
       .select(BOOKED_LEAD_SELECT)
+      .eq("center_id", centerId)
       .in("id", slice);
     if (error) {
       throw new Error(error.message);
@@ -432,15 +437,18 @@ async function fetchLeadsByIds(supabase: SupabaseClient, ids: string[]) {
   return rows;
 }
 
-/** Tous les prospects avec un rendez-vous pris, tous centres accessibles, sans filtre de mois. */
+/** Rendez-vous pris du centre ouvert, sans filtre de mois. */
 export async function loadBookedCrmLeads(): Promise<Lead[]> {
   const supabase = createClient();
+  const context = await getCrmCenterContext(supabase);
+  const centerId = context.centerId;
   const statuses = bookedHistoryStatuses();
   const [statusRows, appointments, visitEvents] = await Promise.all([
     fetchAllRows<LeadRow>((start, end) =>
       supabase
         .from("leads")
         .select(BOOKED_LEAD_SELECT)
+        .eq("center_id", centerId)
         .in("status", statuses)
         .order("last_activity_at", { ascending: false })
         .range(start, end) as PromiseLike<{
@@ -452,6 +460,7 @@ export async function loadBookedCrmLeads(): Promise<Lead[]> {
       supabase
         .from("appointments")
         .select("id,lead_id,client_id,created_at,appointment_date,status,notes")
+        .eq("center_id", centerId)
         .order("appointment_date", { ascending: false })
         .range(start, end) as PromiseLike<{
         data: CenterAppointmentRow[] | null;
@@ -467,6 +476,7 @@ export async function loadBookedCrmLeads(): Promise<Lead[]> {
       supabase
         .from("lead_events")
         .select("lead_id,event_type,to_value,created_at")
+        .eq("center_id", centerId)
         .eq("event_type", RDV_DATE_EVENT)
         .order("created_at", { ascending: false })
         .range(start, end) as PromiseLike<{
@@ -491,7 +501,7 @@ export async function loadBookedCrmLeads(): Promise<Lead[]> {
     ),
   ];
   const extraRows = extraIds.length
-    ? await fetchLeadsByIds(supabase, extraIds)
+    ? await fetchLeadsByIds(supabase, centerId, extraIds)
     : [];
   const rows = [...statusRows, ...extraRows];
   const eventsByLead = new Map<string, LeadRow["lead_events"]>();
@@ -511,7 +521,7 @@ export async function loadBookedCrmLeads(): Promise<Lead[]> {
     });
     eventsByLead.set(leadId, current);
   }
-  const withEvents = rows.map((row) => ({
+  const withEvents = rows.filter((row) => row.center_id === centerId).map((row) => ({
     ...row,
     lead_events: eventsByLead.get(row.id) ?? [],
   }));
