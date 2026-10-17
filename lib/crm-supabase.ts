@@ -438,7 +438,10 @@ async function fetchLeadsByIds(
 }
 
 /** Rendez-vous pris du centre ouvert, sans filtre de mois. */
-export async function loadBookedCrmLeads(): Promise<Lead[]> {
+export async function loadBookedCrmLeads(): Promise<{
+  centerId: string;
+  leads: Lead[];
+}> {
   const supabase = createClient();
   const context = await getCrmCenterContext(supabase);
   const centerId = context.centerId;
@@ -526,14 +529,17 @@ export async function loadBookedCrmLeads(): Promise<Lead[]> {
     lead_events: eventsByLead.get(row.id) ?? [],
   }));
   const appointmentsByLead = groupLeadAppointments(appointments, withEvents);
-  return withEvents
-    .map(
-      (row): Lead => ({
-        ...toLead(row),
-        appointments: appointmentsByLead.get(row.id) ?? [],
-      }),
-    )
-    .filter(isEverBookedLead);
+  return {
+    centerId,
+    leads: withEvents
+      .map(
+        (row): Lead => ({
+          ...toLead(row),
+          appointments: appointmentsByLead.get(row.id) ?? [],
+        }),
+      )
+      .filter((lead) => lead.centerId === centerId && isEverBookedLead(lead)),
+  };
 }
 
 export async function loadCrmWhatsAppThreads(): Promise<{

@@ -1043,10 +1043,13 @@ export default function CRMLeadsPage() {
     setBookedLoading(true);
     setBookedError(null);
     try {
-      const rows = await loadBookedCrmLeads();
-      if (bookedRequestRef.current === request) {
-        setBookedLeads(rows);
-        setBookedCenterId(centerIdRef.current);
+      const loaded = await loadBookedCrmLeads();
+      if (
+        bookedRequestRef.current === request &&
+        loaded.centerId === centerIdRef.current
+      ) {
+        setBookedLeads(loaded.leads);
+        setBookedCenterId(loaded.centerId);
       }
     } catch (error) {
       if (bookedRequestRef.current === request) {
