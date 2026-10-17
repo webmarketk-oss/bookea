@@ -2922,7 +2922,13 @@ function epilationPriceText(reply) {
     !current || current === unknownPriceReply() || /pas ce tarif en fiche/i.test(current)
       ? gaillard.missingPriceReply()
       : current;
-  return /promotion/i.test(base) ? base : `${base} ${gaillard.promoSentence()}`;
+  if (/promotion/i.test(base)) {
+    return base;
+  }
+  const question = base.match(/^(.*[.!😊])\s+([^.!?]*\?)$/u);
+  return question
+    ? `${question[1]} ${gaillard.promoSentence()} ${question[2]}`
+    : `${base} ${gaillard.promoSentence()}`;
 }
 
 // Gaillard : accueil → besoin → déjà testé → (minceur : fiche + bilan) → rappel. Jamais de créneau.

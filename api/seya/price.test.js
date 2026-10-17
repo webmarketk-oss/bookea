@@ -429,15 +429,11 @@ test("une consigne collée dans le forfait n'est pas récitée au prospect", () 
   assert.equal(leaked.removed[0], "internal");
 });
 
-test("Gaillard laser : tarif de la zone demandée, sans grille ni consignes", () => {
+const GAILLARD_GRID =
+  "Tous les prix ci-dessous correspondent au programme complet de 8 séances : 6 séances + 2 séances d’entretien. Ce ne sont pas des prix à la séance.FEMME :Aisselles : 296 € ; maillot normal : 315 € ; maillot brésilien : 480 € ; maillot intégral : 630 € ; sillon inter-fessiers : 230 € ; demi-jambes : 790 € ; trois quarts des jambes : 1 190 € ; jambes entières : 1 490 € ; demi-cuisses : 590 € ; cuisses : 790 € ; pieds : 270 € ; demi-bras : 490 € ; bras entiers : 810 € ; mains : 230 € ; bande du ventre : 230 € ; inter-sourcilier : 135 € ; lèvres : 160 € ; menton : 190 €.HOMME :Aisselles : 296 € ; sillon inter-fessiers : 230 € ; jambes entières : 1 490 € ; demi-jambes : 790 € ; trois quarts des jambes : 1 190 € ; cuisses : 790 € ; demi-cuisses : 590 € ; pieds : 270 € ; demi-bras : 490 € ; bras entiers : 810 € ; mains : 230 € ; barbe : sur devis ; torse : 1 090 € ; demi-torse : 690 € ; ventre : 690 € ; col de chemise : 315 € ; dos : 1 090 € ; demi-dos : 690 € ; épaules : 490 €.REMISES MULTIZONES :Pour 2 zones achetées : réduction de 20 % sur la zone la plus chère.Pour 3 zones achetées : réduction de 30 % sur la zone la plus chère.Pour 4 zones achetées : réduction de 40 % sur la zone la plus chère.Pour calculer le total, additionner les zones achetées puis déduire la remise uniquement sur la zone la plus chère. Ne pas compter les aisselles offertes comme une zone achetée. Ne pas inventer de conditions pour plus de 4 zones ni de cumul avec d’autres promotions.OFFRE DU MOMENT :Les aisselles sont offertes pour toute zone du corps achetée. Lors d’une demande de tarif pour une zone du corps, ajouter naturellement : « Et en ce moment, les aisselles sont offertes pour toute zone du corps achetée 😊 »RÈGLES DE RÉPONSE :Donner le prix de la zone demandée en précisant qu’il comprend les 8 séances : 6 séances + 2 séances d’entretien. Ne pas envoyer toute la grille.Si la personne demande plusieurs zones, communiquer le total avec la remise applicable et une courte explication. Clarifier la zone ou la grille femme/homme uniquement si nécessaire.Préciser que des promotions sont régulièrement proposées, à voir directement au centre. Ne pas annoncer de promotion supplémentaire non renseignée.Le bilan pilaire et le test laser sont gratuits et sans engagement.Répondre directement à la question, sans répéter toutes les informations commerciales à chaque message ni redemander une information déjà donnée.ACCOMPAGNEMENT :Diagnostic pilaire avant le programme, technologie Triwave (Alexandrite/Diode/Nd-YAG), adaptation au phototype et suivi en centre. La compatibilité et le protocole sont évalués lors du bilan.";
+
+function gaillardGridPrice(text, qualification = {}) {
   const { buildPriceReply } = require("./price");
-  const packageText = [
-    "RÈGLES DE RÉPONSE : Ne pas envoyer toute la grille. Pose une seule question.",
-    "TARIFS ÉPILATION LASER Tous les prix correspondent au programme complet de 8 séances : 6 séances + 2 séances d’entretien.",
-    "FEMME : Aisselles : 296 € ; maillot normal : 315 € ; maillot brésilien : 480 € ; maillot intégral : 630 € ; demi-jambes : 790 € ; jambes entières : 1 490 €.",
-    "Pour 2 zones achetées : réduction de 20 % sur la zone la plus chère.",
-    "OFFRE DU MOMENT : Les aisselles sont offertes pour toute zone du corps achetée.",
-  ].join(" ");
   const settings = {
     treatmentBriefs: [
       {
@@ -446,32 +442,74 @@ test("Gaillard laser : tarif de la zone demandée, sans grille ni consignes", ()
           bilan: "Offert et sans engagement",
           discovery: "Test laser offert et sans engagement",
           sessionPolicy: "after_bilan",
-          package: packageText,
+          package: GAILLARD_GRID,
         },
       },
     ],
   };
-  const aisselles = buildPriceReply("C’est combien les aisselles ?", settings, {
+  return buildPriceReply(text, settings, {
     treatment: "Épilation laser",
-    qualification: { need: "Épilation laser" },
+    qualification: { need: "Épilation laser", ...qualification },
     messages: [],
   });
-  assert.match(aisselles, /296\s*€/);
-  assert.match(aisselles, /8 séances/i);
-  assert.doesNotMatch(aisselles, /règles de réponse|ne pas envoyer|maillot normal|1 490/i);
+}
 
-  const multi = buildPriceReply(
-    "Combien pour le maillot intégral et les demi-jambes ?",
-    settings,
-    {
-      treatment: "Épilation laser",
-      qualification: { need: "Épilation laser" },
-      messages: [],
-    },
+const GRID_LEAK = /règles de réponse|ne pas envoyer|ne pas inventer|accompagnement|triwave|mission/i;
+
+test("Gaillard laser : une zone demandée, son prix seul, sans grille ni consignes", () => {
+  const text = gaillardGridPrice("C’est combien les aisselles ?");
+  assert.match(text, /aisselles/i);
+  assert.match(text, /296 €/);
+  assert.match(text, /8 séances : 6 séances \+ 2 séances d’entretien/);
+  assert.doesNotMatch(text, /315|480|630|1 490/);
+  assert.doesNotMatch(text, GRID_LEAK);
+
+  const half = gaillardGridPrice("Et pour les demi-jambes ça coûte combien ?");
+  assert.match(half, /demi-jambes.*790 €/);
+  assert.match(half, /aisselles sont offertes pour toute zone du corps achetée/);
+  assert.doesNotMatch(half, /1 490|1 190/);
+});
+
+test("Gaillard laser : aisselles + maillot intégral + demi-jambes, total remisé, aisselles offertes", () => {
+  const text = gaillardGridPrice(
+    "Combien pour les aisselles, le maillot intégral et les demi-jambes ?",
   );
-  assert.match(multi, /630\s*€/);
-  assert.match(multi, /790\s*€/);
-  assert.match(multi, /20\s*%/);
-  assert.match(multi, /aisselles sont offertes/i);
-  assert.doesNotMatch(multi, /mission|règles de réponse|ne pas envoyer/i);
+  // 630 + 790 = 1 420 ; 20 % sur 790 = 158 ; aisselles offertes, non comptées.
+  assert.match(text, /^Maillot intégral \(630 €\) \+ demi-jambes \(790 €\) : total de 1 262 €/);
+  assert.match(text, /remise de 20 % sur la zone la plus chère \(demi-jambes\)/);
+  assert.match(text, /aisselles sont offertes avec ces zones/);
+  assert.doesNotMatch(text, /296/);
+  assert.doesNotMatch(text, GRID_LEAK);
+});
+
+test("Gaillard laser : trois zones, remise de 30 %", () => {
+  const text = gaillardGridPrice("Prix maillot brésilien, demi-jambes et lèvres ?");
+  // 480 + 790 + 160 = 1 430 ; 30 % sur 790 = 237 → 1 193 €.
+  assert.match(text, /total de 1 193 €/);
+  assert.match(text, /30 %/);
+});
+
+test("Gaillard laser : zone imprécise ou sans zone, Seya demande laquelle", () => {
+  const maillot = gaillardGridPrice("C’est combien le maillot ?");
+  assert.match(maillot, /maillot normal 315 €, maillot brésilien 480 €, maillot intégral 630 €/);
+  assert.match(maillot, /Laquelle vous intéresse \?/);
+  assert.doesNotMatch(maillot, GRID_LEAK);
+
+  const none = gaillardGridPrice("Excusez-moi, combien ça coute ?");
+  assert.match(none, /Quelle zone souhaitez-vous traiter \?/);
+  assert.match(none, /bilan pilaire et le test laser sont offerts/);
+  assert.doesNotMatch(none, /\d+ €/);
+  assert.doesNotMatch(none, GRID_LEAK);
+
+  const known = gaillardGridPrice("Excusez-moi, combien ça coute ?", {
+    detail: "Je voudrais une épilation laser intégrale du maillot, en incluant le pubis et les grandes lèvres",
+  });
+  assert.match(known, /maillot intégral.*630 €/);
+  assert.doesNotMatch(known, /160/);
+});
+
+test("Gaillard laser : barbe sur devis, ventre homme/femme précisé", () => {
+  assert.match(gaillardGridPrice("combien pour la barbe ?"), /barbe.*sur devis/);
+  const ventre = gaillardGridPrice("c'est combien le ventre en laser ?");
+  assert.match(ventre, /bande du ventre \(femme\) 230 €, ventre \(homme\) 690 €/);
 });

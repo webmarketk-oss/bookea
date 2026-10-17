@@ -4,6 +4,7 @@ const {
   inferCareFamily,
   lockedCenterFamily,
 } = require("./care-family");
+const { askZoneReply, hasZoneGrid, laserZonePriceReply } = require("./laser-zone-price");
 
 const SESSION_POLICIES = ["fixed", "from", "range", "after_bilan", "callback"];
 
@@ -115,8 +116,13 @@ function asksPrice(text) {
   if (/combien de (temps|seance|seances|rdv|fois|jours)/i.test(raw)) {
     return false;
   }
-  return /prix|tarif|co[uû]te|\bcout\b|donne le prix|c['’ ]?est combien|combien (coute|le bilan|les seances|pour|les|le|la|un|une)/i.test(
-    raw,
+  return (
+    /prix|tarif|co[uû]te|\bcout\b|donne le prix|c['’ ]?est combien|combien (coute|le bilan|les seances|pour|les|le|la|un|une)/i.test(
+      raw,
+    ) ||
+    /(ça|ca|cela) (fait|fera|ferait|revient|reviendrait) combien|combien (ça|ca|cela) (fait|fera|ferait|revient)|\bcombien\s*\?*\s*$/i.test(
+      raw,
+    )
   );
 }
 
@@ -158,7 +164,25 @@ function resolvePricePolicy(seya, conversation, extraText) {
   if (shouldIgnoreLeakedOfferedDefault(seya, conversation, policy)) {
     return overlayOfferPricing(emptyPricePolicy(), seya, conversation);
   }
-  return policy;
+  const zoneGrid = [brief?.pricing?.package, brief?.pricing?.session, brief?.price, brief?.brief]
+    .map((value) => String(value || "").trim())
+    .filter(Boolean)
+    .join(" ");
+  return withoutPastedGrid(policy, zoneGrid);
+}
+
+// Une grille ou une consigne collée dans un champ prix ne doit jamais être lue telle quelle au prospect.
+function withoutPastedGrid(policy, zoneGrid) {
+  const pasted = (value) => looksLikeInternalBrief(value) || hasZoneGrid(value);
+  const next = { ...policy, zoneGrid };
+  if (pasted(next.session)) {
+    next.session = "";
+    next.sessionPolicy = "after_bilan";
+  }
+  if (pasted(next.package)) {
+    next.package = "";
+  }
+  return next;
 }
 
 function matchOfferMap(seya, conversation) {
@@ -469,153 +493,6 @@ function looksLikeInternalBrief(value) {
   return text.length > 700 && /prospect|ne pas |phototype/.test(normalized);
 }
 
-/** Grille « Zone : 296 € » dans le forfait / brief — sans recopier les consignes. */
-function parseZonePrices(source) {
-  const text = String(source || "");
-  if (!text) {
-    return [];
-  }
-  const entries = [];
-  const seen = new Set();
-  const pattern =
-    /([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ0-9'’ \-]{1,42}?)\s*:\s*(\d[\d\s]*)\s*€/g;
-  let match;
-  while ((match = pattern.exec(text))) {
-    const label = String(match[1] || "")
-      .replace(/^(femme|homme)\s+/i, "")
-      .trim();
-    const amount = String(match[2] || "").replace(/\s+/g, " ").trim();
-    const key = normalize(label);
-    if (
-      !label ||
-      !amount ||
-      !key ||
-      seen.has(key) ||
-      /mission|regle|consigne|prospect|ne pas|phototype|remise|pour \d/.test(key)
-    ) {
-      continue;
-    }
-    seen.add(key);
-    entries.push({ key, label, amount: `${amount} €` });
-  }
-  return entries;
-}
-
-function zoneLookupKeys(entryKey) {
-  const key = normalize(entryKey);
-  const aliases = [key];
-  if (/^aisselles?$/.test(key)) {
-    aliases.push("aisselle", "aisselles");
-  }
-  if (/maillot/.test(key)) {
-    aliases.push(key.replace(/\s+/g, " "));
-  }
-  if (/demi[- ]jambes?/.test(key)) {
-    aliases.push("demi-jambes", "demi jambes", "demi-jambe");
-  }
-  if (/jambes? entieres?/.test(key)) {
-    aliases.push("jambes entieres", "jambes");
-  }
-  return [...new Set(aliases)];
-}
-
-function matchAskedZonePrices(source, text, conversation) {
-  const entries = parseZonePrices(source);
-  if (!entries.length) {
-    return [];
-  }
-  const asked = normalize(
-    `${text || ""} ${conversation?.qualification?.zone || ""} ${conversation?.bookingState?.serviceIntent || ""}`,
-  );
-  if (!asked.trim()) {
-    return [];
-  }
-  const matched = [];
-  const used = new Set();
-  const ordered = [...entries].sort((a, b) => b.key.length - a.key.length);
-  for (const entry of ordered) {
-    const keys = zoneLookupKeys(entry.key);
-    const hit = keys.some((key) => {
-      if (key.length < 4 && !/aisselle/.test(key)) {
-        return false;
-      }
-      return new RegExp(`(?:^|[^a-z])${key.replace(/[- ]/g, "[- ]?")}(?:$|[^a-z])`).test(
-        asked,
-      );
-    });
-    if (!hit || used.has(entry.key)) {
-      continue;
-    }
-    used.add(entry.key);
-    matched.push(entry);
-  }
-  return matched;
-}
-
-function aissellesOfferNote(source, matched) {
-  const value = normalize(source);
-  if (!/aisselles? (sont )?offertes?/.test(value)) {
-    return "";
-  }
-  if (matched.length === 1 && /^aisselles?$/.test(matched[0].key)) {
-    return "";
-  }
-  if (matched.some((item) => /^aisselles?$/.test(item.key)) && matched.length === 1) {
-    return "";
-  }
-  return "Et en ce moment, les aisselles sont offertes pour toute zone du corps achetée 😊";
-}
-
-function multiZoneDiscountNote(source, zoneCount) {
-  if (zoneCount < 2) {
-    return "";
-  }
-  const value = normalize(source);
-  const pattern = /pour (\d) zones? achetees? ?:? reduction de (\d+)\s*%/g;
-  let best = null;
-  let match;
-  while ((match = pattern.exec(value))) {
-    const count = Number(match[1]);
-    const percent = Number(match[2]);
-    if (count <= zoneCount && (!best || count > best.count)) {
-      best = { count, percent };
-    }
-  }
-  if (!best) {
-    return "";
-  }
-  return `Pour ${best.count} zones achetées : réduction de ${best.percent} % sur la zone la plus chère.`;
-}
-
-function laserZonePriceReply(policy, text, conversation) {
-  const source = String(policy?.package || "").trim();
-  if (!source) {
-    return "";
-  }
-  const matched = matchAskedZonePrices(source, text, conversation);
-  if (!matched.length) {
-    return "";
-  }
-  const lines = matched.map((item) => {
-    const name = item.label.charAt(0).toLowerCase() + item.label.slice(1);
-    return `${name} : ${item.amount}`;
-  });
-  const parts = [
-    matched.length === 1
-      ? `Pour ${lines[0]}, le forfait comprend 8 séances : 6 séances + 2 séances d’entretien.`
-      : `Pour ces zones, les forfaits (8 séances : 6 + 2 d’entretien) sont : ${lines.join(" ; ")}.`,
-  ];
-  const discount = multiZoneDiscountNote(source, matched.length);
-  if (discount) {
-    parts.push(discount);
-  }
-  const offer = aissellesOfferNote(source, matched);
-  if (offer) {
-    parts.push(offer);
-  }
-  return parts.join(" ").replace(/\s+/g, " ").trim();
-}
-
 function packageSentence(value) {
   const text = String(value || "").trim();
   if (!text || looksLikeInternalBrief(text)) {
@@ -757,12 +634,18 @@ function buildPriceReply(text, seya, conversation) {
     alreadyAnsweredSessions: alreadyGaveSessionPrice(conversation),
     alreadyAnsweredBilan: alreadyGaveBilanPrice(conversation),
   };
-  const zoneTariff =
-    (family === "epilation" || !family) && asksPrice(text)
-      ? laserZonePriceReply(policy, text, conversation)
-      : "";
-  if (zoneTariff) {
-    return zoneTariff;
+  if (
+    (family === "epilation" || !family) &&
+    hasZoneGrid(policy.zoneGrid) &&
+    !["bilan", "discovery", "repeat_complaint"].includes(intent) &&
+    (intent || asksPrice(text))
+  ) {
+    const qualification = conversation?.qualification || {};
+    return (
+      laserZonePriceReply(policy.zoneGrid, text) ||
+      laserZonePriceReply(policy.zoneGrid, `${qualification.zone || ""} ${qualification.detail || ""}`) ||
+      askZoneReply(policy.zoneGrid, isFree(policy.bilan) || isFree(policy.discovery))
+    );
   }
   if (intent === "repeat_complaint") {
     if (previousIntent === "next_session" || !previousIntent) {
@@ -823,9 +706,7 @@ module.exports = {
   genericPriceReply,
   isNearDuplicate,
   isPriceRepeatComplaint,
-  laserZonePriceReply,
   normalizePricePolicy,
-  parseZonePrices,
   priceReplyForIntent,
   overlayOfferPricing,
   resolvePricePolicy,
