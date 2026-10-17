@@ -57,13 +57,6 @@ const rdvStatuses = [
   "Acompte validé",
   "Acompte en attente",
 ];
-const presentStatuses = [
-  "Vendu",
-  "Client converti",
-  "Client",
-  "Acompte reçu",
-  "Acompte validé",
-];
 const lostStatuses = [...inactiveLeadStatuses, "Annulation", "Perdu"];
 
 export default function KPIDashboard({ leads }: KPIDashboardProps) {
@@ -104,7 +97,14 @@ export default function KPIDashboard({ leads }: KPIDashboardProps) {
   const pvppCount = leads.filter((lead) =>
     leadHasOutcomeBetween(lead, ["PVPP"], isInPeriod),
   ).length;
-  const presentCount = countByStatus(periodLeads, presentStatuses);
+  const attendedLeads = leads.filter((lead) =>
+    leadHasOutcomeBetween(lead, ["Devis", "Vendu"], isInPeriod),
+  );
+  const missedCount = leads.filter(
+    (lead) =>
+      !attendedLeads.includes(lead) &&
+      leadHasOutcomeBetween(lead, ["Annulation", "PVPP"], isInPeriod),
+  ).length;
   const depositCount = countByStatus(periodLeads, [
     "Acompte reçu",
     "Acompte validé",
@@ -126,7 +126,7 @@ export default function KPIDashboard({ leads }: KPIDashboardProps) {
     devisCount + conversionSalesCount,
   );
   const rdvRate = Math.min(100, ratio(rdvCount, totalProspects));
-  const attendanceRate = ratio(presentCount, presentCount + lostCountByNoShow(periodLeads));
+  const attendanceRate = ratio(attendedLeads.length, attendedLeads.length + missedCount);
   const depositRate = ratio(depositCount, Math.max(soldCount + rdvCount, 1));
   const redRate = ratio(lostCount, totalProspects);
   const remainingRate = ratio(remainingCount, totalProspects);
@@ -1104,10 +1104,6 @@ function Rate({
 
 function countByStatus(leads: Lead[], statuses: string[]) {
   return leads.filter((lead) => statuses.includes(lead.status)).length;
-}
-
-function lostCountByNoShow(leads: Lead[]) {
-  return leads.filter((lead) => lead.status === "No show" || lead.status === "Annulation").length;
 }
 
 function ratio(value: number, total: number) {
