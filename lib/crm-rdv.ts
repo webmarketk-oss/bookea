@@ -10,6 +10,10 @@ const BOOKED_STATUSES = new Set<LeadStatus>([
 
 export const RDV_DATE_EVENT = "rdv_date";
 
+export function bookedHistoryStatuses(): LeadStatus[] {
+  return [...BOOKED_STATUSES, ...VISIT_FOLLOW_UP_STATUSES];
+}
+
 const VISIT_FOLLOW_UP_STATUSES = new Set<LeadStatus>([
   "Devis",
   "Vendu",

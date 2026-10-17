@@ -151,6 +151,9 @@ export default function ProspectsTable({
               </button>
             </TableHead>
             <TableHead>Rappel</TableHead>
+            {showDepositReminders ? (
+              <TableHead className="w-[9.25rem] min-w-[9.25rem]">Statut</TableHead>
+            ) : null}
             {showDepositReminders
               ? DEPOSIT_REMINDER_INDEXES.map((index) => (
                   <TableHead
@@ -161,7 +164,9 @@ export default function ProspectsTable({
                   </TableHead>
                 ))
               : null}
-            <TableHead className="w-[9.25rem] min-w-[9.25rem]">Statut</TableHead>
+            {showDepositReminders ? null : (
+              <TableHead className="w-[9.25rem] min-w-[9.25rem]">Statut</TableHead>
+            )}
             {showVisitDate ? (
               <TableHead className="w-[9.5rem] min-w-[9.5rem]">Date du RDV</TableHead>
             ) : null}
@@ -305,6 +310,24 @@ export default function ProspectsTable({
                 />
               </TableCell>
 
+              {showDepositReminders ? (
+                <TableCell>
+                  <AdaptiveSelect
+                    ariaLabel="Statut"
+                    value={lead.status}
+                    options={leadStatusSelectOptions(lead.status)}
+                    onChange={(status) =>
+                      onStatusChange(lead.id, status as LeadStatus)
+                    }
+                    className={cn(
+                      "h-7 w-full min-w-[8.75rem] max-w-[9.25rem] rounded-full border-0 px-2.5 text-xs font-semibold outline-none ring-1 transition-colors",
+                      "focus:ring-2 focus:ring-blue-400",
+                      leadStatusClassName(lead.status)
+                    )}
+                  />
+                </TableCell>
+              ) : null}
+
               {showDepositReminders
                 ? DEPOSIT_REMINDER_INDEXES.map((index) => (
                     <TableCell key={`${lead.id}-deposit-${index}`}>
@@ -327,6 +350,7 @@ export default function ProspectsTable({
                   ))
                 : null}
 
+              {showDepositReminders ? null : (
               <TableCell>
                 <AdaptiveSelect
                   ariaLabel="Statut"
@@ -342,6 +366,7 @@ export default function ProspectsTable({
                   )}
                 />
               </TableCell>
+              )}
 
               {showVisitDate ? (
                 <TableCell>

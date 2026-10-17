@@ -33,6 +33,7 @@ import { createClient } from "@/lib/supabase";
 import { normalizeLeadStatus } from "@/lib/lead-statuses";
 import {
   appointmentIdForVisitDate,
+  bookedHistoryStatuses,
   isEverBookedLead,
   parseVisitDate,
   RDV_DATE_EVENT,
@@ -398,31 +399,124 @@ async function fetchAllRows<T>(
   return rows;
 }
 
+const BOOKED_LEAD_SELECT = `
+  id,
+  center_id,
+  client_id,
+  status,
+  recall_date,
+  next_action,
+  latest_comment,
+  amount_cure_ttc,
+  created_at,
+  updated_at,
+  last_activity_at,
+  clients(first_name,last_name,phone,email),
+  services(name),
+  centers(name)
+`;
+
+async function fetchLeadsByIds(supabase: SupabaseClient, ids: string[]) {
+  const rows: LeadRow[] = [];
+  for (let index = 0; index < ids.length; index += 80) {
+    const slice = ids.slice(index, index + 80);
+    const { data, error } = await supabase
+      .from("leads")
+      .select(BOOKED_LEAD_SELECT)
+      .in("id", slice);
+    if (error) {
+      throw new Error(error.message);
+    }
+    rows.push(...((data ?? []) as unknown as LeadRow[]));
+  }
+  return rows;
+}
+
 /** Tous les prospects avec un rendez-vous pris, tous centres accessibles, sans filtre de mois. */
 export async function loadBookedCrmLeads(): Promise<Lead[]> {
   const supabase = createClient();
-  const rows = await fetchAllRows<LeadRow>((start, end) =>
-    supabase
-      .from("leads")
-      .select(`${LEAD_LIST_SELECT}, centers(name)`)
-      .order("last_activity_at", { ascending: false })
-      .range(start, end) as PromiseLike<{
-      data: LeadRow[] | null;
-      error: { message: string } | null;
-    }>,
-  );
-  const appointments = await fetchAllRows<CenterAppointmentRow>((start, end) =>
-    supabase
-      .from("appointments")
-      .select("id,lead_id,client_id,created_at,appointment_date,status,notes")
-      .order("appointment_date", { ascending: false })
-      .range(start, end) as PromiseLike<{
-      data: CenterAppointmentRow[] | null;
-      error: { message: string } | null;
-    }>,
-  );
-  const appointmentsByLead = groupLeadAppointments(appointments, rows);
-  return rows
+  const statuses = bookedHistoryStatuses();
+  const [statusRows, appointments, visitEvents] = await Promise.all([
+    fetchAllRows<LeadRow>((start, end) =>
+      supabase
+        .from("leads")
+        .select(BOOKED_LEAD_SELECT)
+        .in("status", statuses)
+        .order("last_activity_at", { ascending: false })
+        .range(start, end) as PromiseLike<{
+        data: LeadRow[] | null;
+        error: { message: string } | null;
+      }>,
+    ),
+    fetchAllRows<CenterAppointmentRow>((start, end) =>
+      supabase
+        .from("appointments")
+        .select("id,lead_id,client_id,created_at,appointment_date,status,notes")
+        .order("appointment_date", { ascending: false })
+        .range(start, end) as PromiseLike<{
+        data: CenterAppointmentRow[] | null;
+        error: { message: string } | null;
+      }>,
+    ),
+    fetchAllRows<{
+      lead_id: string;
+      event_type: string;
+      to_value: string | null;
+      created_at: string;
+    }>((start, end) =>
+      supabase
+        .from("lead_events")
+        .select("lead_id,event_type,to_value,created_at")
+        .eq("event_type", RDV_DATE_EVENT)
+        .order("created_at", { ascending: false })
+        .range(start, end) as PromiseLike<{
+        data: Array<{
+          lead_id: string;
+          event_type: string;
+          to_value: string | null;
+          created_at: string;
+        }> | null;
+        error: { message: string } | null;
+      }>,
+    ),
+  ]);
+
+  const known = new Set(statusRows.map((row) => row.id));
+  const extraIds = [
+    ...new Set(
+      [
+        ...appointments.map((row) => String(row.lead_id || "")),
+        ...visitEvents.map((row) => String(row.lead_id || "")),
+      ].filter((id) => id && !known.has(id)),
+    ),
+  ];
+  const extraRows = extraIds.length
+    ? await fetchLeadsByIds(supabase, extraIds)
+    : [];
+  const rows = [...statusRows, ...extraRows];
+  const eventsByLead = new Map<string, LeadRow["lead_events"]>();
+  for (const event of visitEvents) {
+    const leadId = String(event.lead_id || "");
+    if (!leadId) {
+      continue;
+    }
+    const current = eventsByLead.get(leadId) ?? [];
+    current.push({
+      id: `${leadId}-rdv-${event.created_at}`,
+      event_type: event.event_type,
+      from_value: null,
+      to_value: event.to_value,
+      note: null,
+      created_at: event.created_at,
+    });
+    eventsByLead.set(leadId, current);
+  }
+  const withEvents = rows.map((row) => ({
+    ...row,
+    lead_events: eventsByLead.get(row.id) ?? [],
+  }));
+  const appointmentsByLead = groupLeadAppointments(appointments, withEvents);
+  return withEvents
     .map(
       (row): Lead => ({
         ...toLead(row),
