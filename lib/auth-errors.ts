@@ -13,7 +13,16 @@ export function getAuthFeedback(
   error: AuthError,
   mode: AuthMode
 ): AuthFeedback {
-  const msg = error.message.toLowerCase();
+  const raw = typeof error?.message === "string" ? error.message.trim() : "";
+  const msg = raw.toLowerCase();
+
+  if (!raw || raw === "{}" || raw.startsWith("{")) {
+    return {
+      type: "error",
+      message:
+        "La connexion ne répond pas pour le moment. Réessayez dans un instant.",
+    };
+  }
 
   if (msg.includes("invalid login credentials")) {
     return {
