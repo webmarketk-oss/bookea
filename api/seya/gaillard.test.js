@@ -578,6 +578,27 @@ test("Gaillard : refus de poursuivre, pas de transmission ni de relance de quest
   assert.notEqual(conversation.status, "À recontacter");
 });
 
+test("Gaillard : bonne après-midi n'est pas une préférence d'horaire", async () => {
+  const gaillard = require("./gaillard");
+  assert.equal(gaillard.availabilityMention("Merci bonne après midi"), false);
+  assert.equal(gaillard.availabilityMention("Je suis dispo mardi après-midi"), true);
+  let conversation = open("Soin visage");
+  conversation = {
+    ...conversation,
+    status: "À recontacter",
+    teamNotes: { handedOffAt: NOW.toISOString(), family: "visage" },
+    messages: [
+      ...(conversation.messages || []),
+      {
+        author: "seya",
+        text: "Merci pour ces précisions 😊 Un expert ou une experte en soins visage du centre vous rappellera pour échanger sur votre besoin et convenir de votre rendez-vous.",
+      },
+    ],
+  };
+  conversation = await say(conversation, "Merci bonne après midi");
+  assert.doesNotMatch(lastSeya(conversation), /préférence|après-midi|apres-midi/i);
+});
+
 test("Gaillard : une rédaction IA qui annonce un rappel non déclenché est rejetée", async () => {
   process.env.OPENAI_API_KEY = "test-key";
   aiReply = "Je comprends ! Une experte vous rappellera très vite pour en parler.";

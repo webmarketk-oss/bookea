@@ -615,9 +615,19 @@ function acceptsBookingOffer(text, conversation) {
   );
 }
 
+function isCourtesyClose(text) {
+  const value = compactText(text);
+  return /^(merci( beaucoup)?[, ]*)?(et )?(passez une )?(tres )?(bonne|bon) apres[- ]?midi( a vous| a toute)?[.! ]*$/.test(
+    value,
+  );
+}
+
 function isThanks(text, conversation) {
   if (acceptsBookingOffer(text, conversation)) {
     return false;
+  }
+  if (isCourtesyClose(text)) {
+    return true;
   }
   const value = compactText(text);
   if (
@@ -1145,7 +1155,10 @@ function dayPartFromText(text) {
   ) {
     return "evening";
   }
-  if (/\b(apm|aprem)['']?\b|apres[- ]?midi/.test(value)) {
+  if (
+    /\b(apm|aprem)['']?\b|apres[- ]?midi/.test(value) &&
+    !/^(.* )?(bonne|bon) apres[- ]?midi( a vous)?$/.test(value)
+  ) {
     return "afternoon";
   }
   if (/\bmatin\b/.test(value) && !/apres/.test(value)) {
@@ -1807,6 +1820,7 @@ module.exports = {
   crmUpdateFromLeadMessage,
   lockedCrmStatuses,
   isShortYes,
+  isCourtesyClose,
   isThanks,
   lastSeyaOfferedToBook,
   offeredSlots,

@@ -397,3 +397,81 @@ test("Vichy laser : les briefs minceur 500€ ne fuient pas sur les aisselles", 
   assert.doesNotMatch(before, /500|cures|analyse corporelle|minceur/i);
   assert.match(before, /fourchette|avant de venir|rappeler|bilan pilaire/i);
 });
+
+test("une consigne collée dans le forfait n'est pas récitée au prospect", () => {
+  const { buildPriceReply } = require("./price");
+  const { checkAgainstCenter } = require("./center-knowledge");
+  const brief =
+    "a mission est uniquement de qualifier le prospect pour l’épilation laser. RÈGLES DE RÉPONSE : Ne pas envoyer toute la grille. Ne pas inventer de conditions. TARIFS ÉPILATION LASER Aisselles : 296 €. Ne filtre pas les contre-indications.";
+  const settings = {
+    treatmentBriefs: [
+      {
+        name: "Épilation laser",
+        brief,
+        pricing: {
+          bilan: "Offert et sans engagement",
+          discovery: "Test laser offert et sans engagement",
+          sessionPolicy: "after_bilan",
+          package: brief,
+        },
+      },
+    ],
+  };
+  const text = buildPriceReply("Excusez-moi, combien ça coute ?", settings, {
+    treatment: "Épilation laser",
+    qualification: { need: "Épilation laser" },
+    messages: [],
+  });
+  assert.match(text, /bilan pilaire/i);
+  assert.doesNotMatch(text, /mission est|règles de réponse|ne pas inventer|296/i);
+  const leaked = checkAgainstCenter(brief, { allowedFamilies: ["epilation"] });
+  assert.doesNotMatch(leaked.text, /mission est|ne pas inventer|296/i);
+  assert.equal(leaked.removed[0], "internal");
+});
+
+test("Gaillard laser : tarif de la zone demandée, sans grille ni consignes", () => {
+  const { buildPriceReply } = require("./price");
+  const packageText = [
+    "RÈGLES DE RÉPONSE : Ne pas envoyer toute la grille. Pose une seule question.",
+    "TARIFS ÉPILATION LASER Tous les prix correspondent au programme complet de 8 séances : 6 séances + 2 séances d’entretien.",
+    "FEMME : Aisselles : 296 € ; maillot normal : 315 € ; maillot brésilien : 480 € ; maillot intégral : 630 € ; demi-jambes : 790 € ; jambes entières : 1 490 €.",
+    "Pour 2 zones achetées : réduction de 20 % sur la zone la plus chère.",
+    "OFFRE DU MOMENT : Les aisselles sont offertes pour toute zone du corps achetée.",
+  ].join(" ");
+  const settings = {
+    treatmentBriefs: [
+      {
+        name: "Épilation laser",
+        pricing: {
+          bilan: "Offert et sans engagement",
+          discovery: "Test laser offert et sans engagement",
+          sessionPolicy: "after_bilan",
+          package: packageText,
+        },
+      },
+    ],
+  };
+  const aisselles = buildPriceReply("C’est combien les aisselles ?", settings, {
+    treatment: "Épilation laser",
+    qualification: { need: "Épilation laser" },
+    messages: [],
+  });
+  assert.match(aisselles, /296\s*€/);
+  assert.match(aisselles, /8 séances/i);
+  assert.doesNotMatch(aisselles, /règles de réponse|ne pas envoyer|maillot normal|1 490/i);
+
+  const multi = buildPriceReply(
+    "Combien pour le maillot intégral et les demi-jambes ?",
+    settings,
+    {
+      treatment: "Épilation laser",
+      qualification: { need: "Épilation laser" },
+      messages: [],
+    },
+  );
+  assert.match(multi, /630\s*€/);
+  assert.match(multi, /790\s*€/);
+  assert.match(multi, /20\s*%/);
+  assert.match(multi, /aisselles sont offertes/i);
+  assert.doesNotMatch(multi, /mission|règles de réponse|ne pas envoyer/i);
+});

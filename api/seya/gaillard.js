@@ -450,6 +450,13 @@ function asksIfAi(text, isIdentityQuestion) {
 
 function availabilityMention(text) {
   const value = normalize(text);
+  if (
+    /^(merci( beaucoup)?[, ]*)?(et )?(passez une )?(tres )?(bonne|bon) apres[- ]?midi( a vous| a toute)?[.! ]*$/.test(
+      value,
+    )
+  ) {
+    return false;
+  }
   return /\b(lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche|demain|apres[- ]demain|aujourd'hui|ce soir|matin|matinee|apres[- ]midi|soir|soiree|fin de journee|debut de semaine|fin de semaine|week[- ]?end|midi|dispo|disponible|disponibilites?)\b|\b\d{1,2}\s*h\b|\b\d{1,2}\s*h\s*\d{2}\b|\b\d{1,2}\/\d{1,2}\b/.test(
     value,
   );

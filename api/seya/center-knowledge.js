@@ -352,7 +352,27 @@ const INTERNAL_LEAK =
  * Vérification avant envoi : pas de consigne interne ni de nom de champ, et pas de phrase
  * sur un autre soin que celui du parcours ou de la question posée.
  */
+function recitesInstructions(reply) {
+  const value = normalize(reply);
+  const markers = [
+    /mission est/,
+    /qualifier le prospect/,
+    /regles de reponse/,
+    /ne pas inventer/,
+    /ne pas envoyer toute/,
+    /ne filtre pas/,
+    /tarifs epilation laser/,
+  ].filter((pattern) => pattern.test(value));
+  return markers.length >= 2;
+}
+
 function checkAgainstCenter(reply, { allowedFamilies = [] } = {}) {
+  if (recitesInstructions(reply)) {
+    return {
+      text: "Je transmets votre question à l’équipe, qui vous répondra directement.",
+      removed: ["internal"],
+    };
+  }
   const sentences = sentencesOf(reply);
   if (!sentences.length) {
     return { text: reply, removed: [] };
@@ -375,6 +395,12 @@ function checkAgainstCenter(reply, { allowedFamilies = [] } = {}) {
     return true;
   });
   if (!kept.length) {
+    if (removed.includes("internal")) {
+      return {
+        text: "Je transmets votre question à l’équipe, qui vous répondra directement.",
+        removed,
+      };
+    }
     return { text: reply, removed: [] };
   }
   return { text: kept.join(" "), removed };

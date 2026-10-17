@@ -53,6 +53,7 @@ const {
   isAppointmentConfirmed,
   isConfirmingOfferedTime,
   isShortYes,
+  isCourtesyClose,
   isThanks,
   checkingSlotReply,
   lastSeyaOfferedToBook,
@@ -2137,11 +2138,12 @@ function leadReplyCore(conversation, text, seya, slots, extras = {}) {
     "";
   const at = (extras.now instanceof Date ? extras.now : new Date()).toISOString();
   const givesAvailability =
-    hasDayOfMonthRequest(intentText) ||
-    Boolean(parseClockMinutes(intentText).length) ||
-    /\b(lundi|mardi|mercredi|jeudi|vendredi|samedi|demain|matin|apres-midi|apm|soir|fin de journee|debut de semaine|fin de semaine)\b|\b\d{1,2}\/\d{1,2}\b/.test(
-      normalize(intentText),
-    );
+    !isCourtesyClose(intentText) &&
+    (hasDayOfMonthRequest(intentText) ||
+      Boolean(parseClockMinutes(intentText).length) ||
+      /\b(lundi|mardi|mercredi|jeudi|vendredi|samedi|demain|matin|apres-midi|apm|soir|fin de journee|debut de semaine|fin de semaine)\b|\b\d{1,2}\/\d{1,2}\b/.test(
+        normalize(intentText),
+      ));
   const preference = givesAvailability ? spokenPreference(conversation, intentText, bookingState) : "";
   const withLeadPreference = (next) =>
     givesAvailability
