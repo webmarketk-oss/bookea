@@ -10,7 +10,6 @@ import Filters, {
 } from "@/components/crm/filters";
 import KPIDashboard from "@/components/crm/kpi-dashboard";
 import LeadDetails from "@/components/crm/lead-details";
-import BookedRdvTable from "@/components/crm/booked-rdv-table";
 import ProspectsTable from "@/components/crm/prospects-table";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -1571,16 +1570,6 @@ export default function CRMLeadsPage() {
             Prospects
           </CRMTabButton>
           <CRMTabButton
-            active={activeTab === "booked"}
-            onClick={() => {
-              setActiveTab("booked");
-              setIsLeadDetailsOpen(false);
-            }}
-          >
-            Tous les RDV pris
-            {bookedLeads ? ` (${bookedLeads.length})` : ""}
-          </CRMTabButton>
-          <CRMTabButton
             active={activeTab === "imports"}
             onClick={() => {
               setActiveTab("imports");
@@ -1631,17 +1620,7 @@ export default function CRMLeadsPage() {
           />
         ) : null}
 
-        {activeTab === "booked" ? (
-          <BookedRdvTable
-            leads={bookedLeads}
-            loading={bookedLoading}
-            error={bookedError}
-            onVisitDateChange={handleVisitDateChange}
-            onRefresh={() => {
-              void refreshBookedLeads();
-            }}
-          />
-        ) : activeTab === "prospects" ||
+        {activeTab === "prospects" ||
         activeTab === "imports" ||
         activeTab === "deposits" ? (
           <>
