@@ -1,5 +1,16 @@
+const { mirrorConversationChanges } = require("./conversation-mirror");
+
 function asRecord(value) {
   return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+}
+
+async function mirrorAfterWrite(supabase, centerId, previousSettings, nextSettings) {
+  const before = asRecord(previousSettings).seya?.conversations;
+  const after = asRecord(nextSettings).seya?.conversations;
+  if (!Array.isArray(after) || before === after) {
+    return;
+  }
+  await mirrorConversationChanges(supabase, centerId, before, after);
 }
 
 function cloneJson(value) {
@@ -75,6 +86,7 @@ async function mutateCenterSettings(supabase, centerId, mutate, options = {}) {
       continue;
     }
     if (wrote.ok) {
+      await mirrorAfterWrite(supabase, id, currentSettings, nextSettings);
       return {
         settings: nextSettings,
         changed: true,

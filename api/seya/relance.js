@@ -8,6 +8,7 @@ const {
   relanceCopy,
 } = require("./agent");
 const { isWelcomeDue, sendDueWelcomes } = require("./welcome");
+const { backfillCenterConversations } = require("./conversation-mirror");
 const { sendSharedWhatsApp } = require("./whatsapp");
 const { isNearDuplicate } = require("./price");
 const {
@@ -77,6 +78,7 @@ module.exports = async function handler(req, res) {
       if (conversations.length === 0) {
         continue;
       }
+      await backfillCenterConversations(supabase, row.id, conversations);
       const center = { ...row, settings: latest.settings };
       const welcomeDue = conversations.some((item) => isWelcomeDue(item, now));
       const welcomed = welcomeDue
