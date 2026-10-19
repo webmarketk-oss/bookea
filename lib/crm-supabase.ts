@@ -39,6 +39,7 @@ import {
   RDV_DATE_EVENT,
 } from "@/lib/crm-rdv";
 import type { WhatsAppThread } from "@/lib/lead-whatsapp";
+import { withConversationSource } from "@/api/seya/conversation-source";
 import type {
   Lead,
   LeadActivity,
@@ -558,7 +559,11 @@ export async function loadCrmWhatsAppThreads(): Promise<{
     throw new Error(error.message);
   }
 
-  const threads = (data as { conversations?: unknown } | null)?.conversations;
+  const stored = (data as { conversations?: unknown } | null)?.conversations;
+  const sourced = (await withConversationSource(supabase, context.centerId, {
+    conversations: Array.isArray(stored) ? stored : [],
+  })) as { conversations?: unknown };
+  const threads = sourced.conversations;
   return {
     centerId: context.centerId,
     threads: Array.isArray(threads) ? (threads as WhatsAppThread[]) : [],

@@ -44,6 +44,7 @@ const {
 } = require("./store");
 const { activeLeadPause, stripBookingPush } = require("./lead-pause");
 const { claimInboundMessage, settleInboundClaim } = require("./inbound-claim");
+const { latestThreadForPhone, withConversationSource } = require("./conversation-source");
 
 const GRAPH_VERSION = "v21.0";
 const inboundLocks = new Map();
@@ -582,11 +583,15 @@ async function contextFromSeyaThread(supabase, phone) {
   if (key.length < 9) {
     return null;
   }
+  // La table contient les conversations de tous les centres : une recherche par numéro suffit.
+  let best = await latestThreadForPhone(supabase, key);
+  if (best) {
+    return threadContext(best, phone);
+  }
   const { data, error } = await supabase.from("centers").select("id,settings");
   if (error) {
     throw new Error(error.message);
   }
-  let best = null;
   for (const center of data || []) {
     const list = asRecord(asRecord(center.settings).seya).conversations;
     for (const item of Array.isArray(list) ? list : []) {
@@ -604,6 +609,10 @@ async function contextFromSeyaThread(supabase, phone) {
   if (!best) {
     return null;
   }
+  return threadContext(best, phone);
+}
+
+function threadContext(best, phone) {
   const thread = best.conversation;
   return {
     centerId: best.centerId,
@@ -722,7 +731,11 @@ async function handleIncoming(
 
   const publicSettings = asRecord(asRecord(center.settings).public);
   const seya = {
-    ...asRecord(asRecord(center.settings).seya),
+    ...(await withConversationSource(
+      supabase,
+      center.id,
+      asRecord(asRecord(center.settings).seya),
+    )),
     catalogServices: Array.isArray(publicSettings.services)
       ? publicSettings.services
       : [],

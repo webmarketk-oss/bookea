@@ -6,6 +6,7 @@ const { conversationsForCenter } = require("./center-route");
 const { missionForcesWelcome } = require("./mission");
 const { periodConversationCount } = require("../billing/_renewal");
 const { asRecord, patchCenterSeya } = require("./settings-write");
+const { withConversationSource } = require("./conversation-source");
 
 function isExplicitFalse(value) {
   return value === false || value === "false" || value === 0 || value === "0";
@@ -38,7 +39,7 @@ async function readCenterSeya(supabase, centerId) {
   const settings = asRecord(data?.settings);
   return {
     settings,
-    seya: asRecord(settings.seya),
+    seya: await withConversationSource(supabase, centerId, asRecord(settings.seya)),
   };
 }
 

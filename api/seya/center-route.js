@@ -1,5 +1,6 @@
 const { last9Phone, persistableConversations, mergeSeyaConversationLists } = require("./conversation-key");
 const { patchCenterSeya } = require("./settings-write");
+const { removeMovedThreads } = require("./conversation-source");
 
 function asRecord(value) {
   return value && typeof value === "object" && !Array.isArray(value) ? value : {};
@@ -400,6 +401,9 @@ async function applyRehomeUpdates(supabase, settingsById, planned) {
       ...seya,
       conversations: update.conversations,
     }));
+  }
+  if (planned.moved.length) {
+    await removeMovedThreads(supabase, planned.moved);
   }
   return planned;
 }

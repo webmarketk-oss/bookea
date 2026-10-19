@@ -22,6 +22,7 @@ import {
 } from "@/api/seya/mission";
 import { mergeTreatmentBriefLists as mergeTreatmentBriefListsFromPatch } from "@/api/seya/settings-patch";
 import { mutateCenterSettings } from "@/api/seya/settings-write";
+import { withConversationSource } from "@/api/seya/conversation-source";
 import { repairGaillardLaserSettings } from "@/api/seya/gaillard-laser-pricing";
 import { getActiveCenterContext } from "@/lib/center-access";
 import { sanitizePersonName } from "@/lib/seya-person-name";
@@ -1032,9 +1033,12 @@ export async function loadSeyaAgentSettings() {
 
   writeLocalSeyaSettings(context.centerId, settings);
 
+  const sourced = asRecord(
+    await withConversationSource(supabase, context.centerId, remote),
+  );
   const remoteConversations = filterOwnedConversations(
-    Array.isArray(remote.conversations)
-      ? (remote.conversations as SeyaConversation[])
+    Array.isArray(sourced.conversations)
+      ? (sourced.conversations as SeyaConversation[])
       : [],
     context.centerId,
     ownedPhones,
@@ -1108,7 +1112,14 @@ export async function refreshSeyaConversations() {
   }
 
   const raw = (data as { conversations?: unknown } | null)?.conversations;
-  const remote = Array.isArray(raw) ? (raw as SeyaConversation[]) : [];
+  const sourced = asRecord(
+    await withConversationSource(supabase, context.centerId, {
+      conversations: Array.isArray(raw) ? raw : [],
+    }),
+  );
+  const remote = Array.isArray(sourced.conversations)
+    ? (sourced.conversations as SeyaConversation[])
+    : [];
   const ownedPhones = await ownedPhonesFor(supabase, context.centerId, remote);
   const remoteConversations = filterOwnedConversations(remote, context.centerId, ownedPhones);
   const localOwned = filterOwnedConversations(
