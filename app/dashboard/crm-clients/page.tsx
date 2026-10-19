@@ -49,6 +49,7 @@ import {
   addCrmClientNote,
   createCrmClient,
   loadCrmClients,
+  mergeCrmDuplicateClients,
   updateCrmClient,
   type CrmClient as Client,
   type CrmClientCare as ClientCare,
@@ -67,6 +68,26 @@ import {
   type ClientNotifyPref,
 } from "@/lib/client-notify";
 import { loadBirthdaySmsStatus, syncBirthdaySms } from "@/lib/send-sms";
+import {
+  duplicateLeadGroupKey,
+  findDuplicateLeadGroups,
+  leadsAreSureDuplicates,
+} from "@/lib/public-bookings";
+
+const CLIENT_DISMISSED_DUPLICATES_KEY = "bookea-crm-dismissed-client-duplicates";
+
+function readDismissedClientDuplicateKeys() {
+  try {
+    const parsed = JSON.parse(
+      window.localStorage.getItem(CLIENT_DISMISSED_DUPLICATES_KEY) || "[]",
+    );
+    return Array.isArray(parsed)
+      ? parsed.filter((value): value is string => typeof value === "string")
+      : [];
+  } catch {
+    return [];
+  }
+}
 
 const statusStyles: Record<ClientStatus, string> = {
   Actif: "bg-emerald-50 text-emerald-700 border-emerald-100",
@@ -140,6 +161,9 @@ export default function CRMClientsPage() {
   const [isFullClientOpen, setIsFullClientOpen] = useState(false);
   const [clientForm, setClientForm] = useState(emptyClientForm);
   const openedFicheFromUrlRef = useRef(false);
+  const [dismissedDuplicateKeys, setDismissedDuplicateKeys] = useState<string[]>([]);
+  const [isMergingDuplicates, setIsMergingDuplicates] = useState(false);
+  const [clientNotice, setClientNotice] = useState("");
 
   function openFullClientFiche() {
     collapseSidebar();
@@ -186,6 +210,79 @@ export default function CRMClientsPage() {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void refreshClients();
   }, []);
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setDismissedDuplicateKeys(readDismissedClientDuplicateKeys());
+  }, []);
+
+  const visibleDuplicateGroups = useMemo(
+    () =>
+      findDuplicateLeadGroups(clientList).filter(
+        (group) => !dismissedDuplicateKeys.includes(duplicateLeadGroupKey(group)),
+      ),
+    [clientList, dismissedDuplicateKeys],
+  );
+
+  async function handleMergeDuplicate(group: Client[]) {
+    const [primaryClient, ...duplicateClients] = group;
+
+    if (!primaryClient || duplicateClients.length === 0 || isMergingDuplicates) {
+      return;
+    }
+
+    if (!leadsAreSureDuplicates(group)) {
+      setClientError(
+        "Fusion refusée : ces fiches n'ont pas le même téléphone ni le même email.",
+      );
+      return;
+    }
+
+    setIsMergingDuplicates(true);
+    setClientError("");
+    setClientNotice("");
+
+    try {
+      await mergeCrmDuplicateClients(
+        primaryClient.id,
+        duplicateClients.map((client) => client.id),
+      );
+      setSelectedClientId(primaryClient.id);
+      await refreshClients();
+      setClientNotice(
+        `${group.length} fiches fusionnées vers ${primaryClient.firstName} ${primaryClient.lastName}.`,
+      );
+    } catch (error) {
+      await refreshClients();
+      setClientError(
+        error instanceof Error
+          ? error.message
+          : "Les fiches n'ont pas pu être fusionnées.",
+      );
+    } finally {
+      setIsMergingDuplicates(false);
+    }
+  }
+
+  function handleDismissDuplicate(group: Client[]) {
+    const key = duplicateLeadGroupKey(group);
+
+    setDismissedDuplicateKeys((current) => {
+      if (current.includes(key)) {
+        return current;
+      }
+      const next = [...current, key];
+      try {
+        window.localStorage.setItem(
+          CLIENT_DISMISSED_DUPLICATES_KEY,
+          JSON.stringify(next),
+        );
+      } catch {
+        // Stockage indisponible : la proposition reviendra au prochain chargement.
+      }
+      return next;
+    });
+  }
 
   useEffect(() => {
     if (isLoadingClients || openedFicheFromUrlRef.current) {
@@ -542,6 +639,58 @@ export default function CRMClientsPage() {
         {isLoadingClients && (
           <div className="rounded-2xl border border-blue-100 bg-blue-50 p-4 text-sm font-bold text-blue-700">
             Chargement des clients...
+          </div>
+        )}
+
+        {clientNotice && (
+          <div className="rounded-2xl border border-emerald-100 bg-emerald-50 p-4 text-sm font-semibold text-emerald-700">
+            {clientNotice}
+          </div>
+        )}
+
+        {visibleDuplicateGroups.length > 0 && (
+          <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-slate-900 shadow-sm">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <p className="text-sm font-black uppercase text-amber-700">
+                  Doublons confirmés
+                </p>
+                <p className="mt-1 text-sm font-semibold text-slate-600">
+                  Même téléphone ou même email uniquement. Vérifiez que
+                  c’est bien la même personne avant de fusionner.
+                </p>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                {visibleDuplicateGroups[0].map((client, index) => (
+                  <span
+                    key={client.id}
+                    className="rounded-full bg-white px-3 py-2 text-sm font-bold text-slate-700"
+                  >
+                    {index + 1}. {client.firstName} {client.lastName}
+                    {client.phone ? ` · ${client.phone}` : ""}
+                    {client.email ? ` · ${client.email}` : ""}
+                  </span>
+                ))}
+                <Button
+                  type="button"
+                  disabled={isMergingDuplicates}
+                  onClick={() => handleMergeDuplicate(visibleDuplicateGroups[0])}
+                >
+                  {isMergingDuplicates
+                    ? "Fusion en cours..."
+                    : "Fusionner vers la fiche 1"}
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={isMergingDuplicates}
+                  onClick={() => handleDismissDuplicate(visibleDuplicateGroups[0])}
+                >
+                  Non merci
+                </Button>
+              </div>
+            </div>
           </div>
         )}
 

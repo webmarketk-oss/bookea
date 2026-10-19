@@ -993,6 +993,188 @@ export async function mergeCrmDuplicateLeads(
   });
 }
 
+const MERGE_CLIENT_SELECT =
+  "id,center_id,profile_user_id,email,phone,birthdate,gender,address_line1,postal_code,city,source_id,campaign_id,private_note,shared_note,merged_into_client_id";
+
+const MERGE_CLIENT_GAP_FIELDS = [
+  "profile_user_id",
+  "email",
+  "phone",
+  "birthdate",
+  "gender",
+  "address_line1",
+  "postal_code",
+  "city",
+  "source_id",
+  "campaign_id",
+] as const;
+
+function joinedNotes(primary: unknown, duplicate: unknown) {
+  const kept = String(primary || "").trim();
+  const extra = String(duplicate || "").trim();
+  if (!extra || kept.includes(extra)) {
+    return kept || null;
+  }
+  return kept ? `${kept}\n${extra}` : extra;
+}
+
+async function moveClientRows(
+  supabase: SupabaseClient,
+  table: string,
+  column: string,
+  fromClientId: string,
+  toClientId: string,
+) {
+  const { error } = await supabase
+    .from(table)
+    .update({ [column]: toClientId })
+    .eq(column, fromClientId);
+  if (error) {
+    throw new Error(error.message);
+  }
+}
+
+// Une seule conversation par cliente et par centre : les messages du doublon rejoignent celle de la fiche gardée.
+async function moveClientConversation(
+  supabase: SupabaseClient,
+  centerId: string,
+  fromClientId: string,
+  toClientId: string,
+) {
+  const { data, error } = await supabase
+    .from("conversations")
+    .select("id,client_id")
+    .eq("center_id", centerId)
+    .in("client_id", [fromClientId, toClientId]);
+  if (error) {
+    throw new Error(error.message);
+  }
+  const from = (data ?? []).find((row) => row.client_id === fromClientId);
+  const to = (data ?? []).find((row) => row.client_id === toClientId);
+  if (!from) {
+    return;
+  }
+  if (!to) {
+    await moveClientRows(supabase, "conversations", "client_id", fromClientId, toClientId);
+    return;
+  }
+  const { error: messagesError } = await supabase
+    .from("messages")
+    .update({ conversation_id: to.id })
+    .eq("conversation_id", from.id);
+  if (messagesError) {
+    throw new Error(messagesError.message);
+  }
+  const { error: deleteError } = await supabase
+    .from("conversations")
+    .delete()
+    .eq("id", from.id);
+  if (deleteError) {
+    throw new Error(deleteError.message);
+  }
+}
+
+/** Fusion de fiches clientes du même centre : tout l’historique rejoint la fiche gardée, le doublon est masqué. */
+export async function mergeCrmDuplicateClients(
+  primaryClientId: string,
+  duplicateClientIds: string[],
+) {
+  const supabase = createClient();
+  const uniqueDuplicateIds = [...new Set(duplicateClientIds)].filter(
+    (id) => id && id !== primaryClientId,
+  );
+  if (uniqueDuplicateIds.length === 0) {
+    return;
+  }
+
+  const { data: primary, error: primaryError } = await supabase
+    .from("clients")
+    .select(MERGE_CLIENT_SELECT)
+    .eq("id", primaryClientId)
+    .single();
+  if (primaryError) {
+    throw new Error(primaryError.message);
+  }
+  if (primary.merged_into_client_id) {
+    throw new Error("La fiche à garder a déjà été fusionnée dans une autre fiche.");
+  }
+
+  const { data: duplicates, error: duplicatesError } = await supabase
+    .from("clients")
+    .select(MERGE_CLIENT_SELECT)
+    .in("id", uniqueDuplicateIds);
+  if (duplicatesError) {
+    throw new Error(duplicatesError.message);
+  }
+  const centerId = String(primary.center_id);
+  if ((duplicates ?? []).some((row) => String(row.center_id) !== centerId)) {
+    throw new Error("Fusion refusée : ces fiches n'appartiennent pas au même centre.");
+  }
+
+  const patch: Record<string, unknown> = {};
+  let privateNote: unknown = primary.private_note;
+  let sharedNote: unknown = primary.shared_note;
+
+  for (const duplicate of duplicates ?? []) {
+    const duplicateId = String(duplicate.id);
+    if (duplicate.merged_into_client_id) {
+      continue;
+    }
+
+    for (const field of MERGE_CLIENT_GAP_FIELDS) {
+      const current = patch[field] ?? primary[field];
+      if (!current && duplicate[field]) {
+        patch[field] = duplicate[field];
+      }
+    }
+    privateNote = joinedNotes(privateNote, duplicate.private_note);
+    sharedNote = joinedNotes(sharedNote, duplicate.shared_note);
+
+    for (const table of [
+      "leads",
+      "appointments",
+      "invoices",
+      "documents",
+      "reviews",
+      "loyalty_events",
+      "client_identities",
+    ]) {
+      await moveClientRows(supabase, table, "client_id", duplicateId, primaryClientId);
+    }
+    await moveClientRows(supabase, "messages", "sender_client_id", duplicateId, primaryClientId);
+    await moveClientConversation(supabase, centerId, duplicateId, primaryClientId);
+
+    // Le compte client en ligne suit la fiche gardée : on le retire du doublon seulement s’il y est reporté.
+    const transfersAccount =
+      Boolean(duplicate.profile_user_id) &&
+      patch.profile_user_id === duplicate.profile_user_id;
+    const { error: hideError } = await supabase
+      .from("clients")
+      .update({
+        merged_into_client_id: primaryClientId,
+        ...(transfersAccount ? { profile_user_id: null } : {}),
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", duplicateId);
+    if (hideError) {
+      throw new Error(hideError.message);
+    }
+  }
+
+  const { error: updateError } = await supabase
+    .from("clients")
+    .update({
+      ...patch,
+      private_note: privateNote || null,
+      shared_note: sharedNote || null,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", primaryClientId);
+  if (updateError) {
+    throw new Error(updateError.message);
+  }
+}
+
 export async function updateCrmLeadAmount(leadId: string, amount: number) {
   await updateLeadFields(createClient(), leadId, {
     amount_cure_ttc: amount,

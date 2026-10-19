@@ -240,12 +240,14 @@ export function mergePublicBookingIntoAppointments(
   return [...currentAppointments, bookingToAppointment(booking)];
 }
 
-export function duplicateLeadGroupKey(leads: Lead[]) {
+type DuplicateCandidate = { id: string; phone?: string; email?: string };
+
+export function duplicateLeadGroupKey(leads: DuplicateCandidate[]) {
   return [...new Set(leads.map((lead) => lead.id))].sort().join("-");
 }
 
 // Même téléphone mais emails différents : personnes distinctes possibles, jamais « confirmé ».
-function hasConflictingEmails(leads: Lead[]) {
+function hasConflictingEmails(leads: DuplicateCandidate[]) {
   const emails = new Set(
     leads
       .map((lead) => normalizeEmail(lead.email))
@@ -254,8 +256,8 @@ function hasConflictingEmails(leads: Lead[]) {
   return emails.size > 1;
 }
 
-export function findDuplicateLeadGroups(leads: Lead[]) {
-  const groups = new Map<string, Lead[]>();
+export function findDuplicateLeadGroups<T extends DuplicateCandidate>(leads: T[]) {
+  const groups = new Map<string, T[]>();
 
   leads.forEach((lead) => {
     const keys = sureIdentityKeys(lead);
@@ -439,7 +441,7 @@ export function sureIdentityKeys(identity: Identity) {
   return keys;
 }
 
-export function leadsAreSureDuplicates(leads: Lead[]) {
+export function leadsAreSureDuplicates(leads: DuplicateCandidate[]) {
   if (leads.length < 2) {
     return false;
   }
