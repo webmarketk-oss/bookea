@@ -197,6 +197,11 @@ const statusGroups: Partial<Record<LeadStatus, LeadStatus[]>> = {
   "Prospect perdu": [...inactiveLeadStatuses, "Annulation"],
 };
 
+function leadMatchesStatusFilter(leadStatus: LeadStatus, filter: LeadStatus) {
+  const group = statusGroups[filter];
+  return group ? group.includes(leadStatus) : leadStatus === filter;
+}
+
 export default function CRMLeadsPage() {
   const [initialSnapshot] = useState(readCrmLeadsSnapshot);
   const [leadList, setLeadList] = useState<Lead[]>(
@@ -568,7 +573,8 @@ export default function CRMLeadsPage() {
         : new Map(),
     [leadList, centerWhatsAppThreads],
   );
-  const isRecontactCategory = filters.status === "À relancer";
+  const isRecontactCategory =
+    filters.status === "À relancer" || filters.statuses.includes("À relancer");
   const whatsAppState = centerWhatsAppThreads
     ? "ready"
     : whatsAppLoadFailed
@@ -616,6 +622,30 @@ export default function CRMLeadsPage() {
     [leadList],
   );
 
+  const filterSourceOptions = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          [
+            "Facebook",
+            "Instagram",
+            "Google",
+            "Site Web",
+            "Organique",
+            ...leadList.map((lead) => lead.source.trim()),
+          ].filter(Boolean),
+        ),
+      ),
+    [leadList],
+  );
+  const filterCampaignOptions = useMemo(
+    () =>
+      Array.from(
+        new Set(leadList.map((lead) => lead.campaign.trim()).filter(Boolean)),
+      ).sort((left, right) => left.localeCompare(right, "fr")),
+    [leadList],
+  );
+
   const filteredLeads = scopeLeads.filter((lead) => {
     const search = filters.search.trim().toLowerCase();
     const matchesSearch =
@@ -626,18 +656,21 @@ export default function CRMLeadsPage() {
       lead.treatment.toLowerCase().includes(search);
 
     const matchesSource =
-      filters.source === "Tous" || lead.source === filters.source;
+      filters.sources.length === 0 ||
+      filters.sources.includes(lead.source.trim());
     const matchesCommercial =
-      filters.commercial === "Tous" || lead.commercial === filters.commercial;
-    const selectedStatusGroup =
-      filters.status === "Tous" ? null : statusGroups[filters.status];
+      filters.commercials.length === 0 ||
+      filters.commercials.includes(lead.commercial.trim());
     const matchesStatus =
-      filters.status === "Tous" ||
-      (selectedStatusGroup
-        ? selectedStatusGroup.includes(lead.status)
-        : lead.status === filters.status);
+      (filters.status === "Tous" ||
+        leadMatchesStatusFilter(lead.status, filters.status)) &&
+      (filters.statuses.length === 0 ||
+        filters.statuses.some((status) =>
+          leadMatchesStatusFilter(lead.status, status),
+        ));
     const matchesCampaign =
-      filters.campaign === "Toutes" || lead.campaign === filters.campaign;
+      filters.campaigns.length === 0 ||
+      filters.campaigns.includes(lead.campaign.trim());
     const matchesQuickDate = matchesCrmQuickFilter(lead, quickDateFilter);
     const matchesCreatedDate = isDateInRange(
       lead.createdDate,
@@ -1655,6 +1688,8 @@ export default function CRMLeadsPage() {
             <Filters
               filters={filters}
               commercialOptions={commercialNames}
+              sourceOptions={filterSourceOptions}
+              campaignOptions={filterCampaignOptions}
               onFiltersChange={(nextFilters) => {
                 setFilters((currentFilters) => {
                   const resolved =

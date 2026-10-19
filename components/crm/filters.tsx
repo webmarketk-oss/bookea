@@ -1,16 +1,19 @@
 import { Search, SlidersHorizontal, Plus } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { leadStatuses } from "@/lib/lead-statuses";
-import { Lead, LeadStatus } from "@/types/lead";
+import { LeadStatus } from "@/types/lead";
 
 export type ProspectFilters = {
   search: string;
-  source: "Tous" | Lead["source"];
-  campaign: string;
-  commercial: string;
+  sources: string[];
+  campaigns: string[];
+  commercials: string[];
+  /** Catégorie choisie depuis les cartes du tableau de bord. */
   status: "Tous" | LeadStatus;
+  /** Statuts cochés dans les filtres avancés. */
+  statuses: LeadStatus[];
   createdFrom: string;
   createdTo: string;
   updatedFrom: string;
@@ -20,10 +23,11 @@ export type ProspectFilters = {
 
 export const defaultProspectFilters: ProspectFilters = {
   search: "",
-  source: "Tous",
-  campaign: "Toutes",
-  commercial: "Tous",
+  sources: [],
+  campaigns: [],
+  commercials: [],
   status: "Tous",
+  statuses: [],
   createdFrom: "",
   createdTo: "",
   updatedFrom: "",
@@ -39,29 +43,9 @@ type FiltersProps = {
   onReset?: () => void;
   onNewLead: () => void;
   commercialOptions?: string[];
+  sourceOptions?: string[];
+  campaignOptions?: string[];
 };
-
-const sourceOptions: ProspectFilters["source"][] = [
-  "Tous",
-  "Facebook",
-  "Instagram",
-  "Google",
-  "Site Web",
-  "Organique",
-];
-
-const campaignOptions = [
-  "Toutes",
-  "Laser juillet",
-  "Cryo été",
-  "HIFU Lift",
-  "Hydrafacial",
-];
-
-const statusOptions: ProspectFilters["status"][] = [
-  "Tous",
-  ...leadStatuses,
-];
 
 export default function Filters({
   filters,
@@ -69,6 +53,8 @@ export default function Filters({
   onReset,
   onNewLead,
   commercialOptions = [],
+  sourceOptions = [],
+  campaignOptions = [],
 }: FiltersProps) {
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
   const [draft, setDraft] = useState<ProspectFilters>(filters);
@@ -149,36 +135,36 @@ export default function Filters({
       {showAdvancedFilters && (
         <>
         <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-          <FilterSelect
+          <FilterMultiSelect
             label="Source"
-            value={draft.source}
-            options={sourceOptions}
-            onChange={(value) =>
-              updateDraft("source", value as ProspectFilters["source"])
-            }
+            allLabel="Tous"
+            selected={draft.sources}
+            options={withSelected(sourceOptions, draft.sources)}
+            onChange={(value) => updateDraft("sources", value)}
           />
 
-          <FilterSelect
+          <FilterMultiSelect
             label="Campagne"
-            value={draft.campaign}
-            options={campaignOptions}
-            onChange={(value) => updateDraft("campaign", value)}
+            allLabel="Toutes"
+            selected={draft.campaigns}
+            options={withSelected(campaignOptions, draft.campaigns)}
+            onChange={(value) => updateDraft("campaigns", value)}
           />
 
-          <FilterSelect
+          <FilterMultiSelect
             label="Commercial"
-            value={draft.commercial}
-            options={["Tous", ...commercialOptions]}
-            onChange={(value) => updateDraft("commercial", value)}
+            allLabel="Tous"
+            selected={draft.commercials}
+            options={withSelected(commercialOptions, draft.commercials)}
+            onChange={(value) => updateDraft("commercials", value)}
           />
 
-          <FilterSelect
+          <FilterMultiSelect
             label="Statut"
-            value={draft.status}
-            options={statusOptions}
-            onChange={(value) =>
-              updateDraft("status", value as ProspectFilters["status"])
-            }
+            allLabel="Tous"
+            selected={draft.statuses}
+            options={leadStatuses}
+            onChange={(value) => updateDraft("statuses", value as LeadStatus[])}
           />
 
           <DateRangeFilter
@@ -272,6 +258,123 @@ function DateRangeFilter({
           />
         </label>
       </div>
+    </div>
+  );
+}
+
+function withSelected(options: string[], selected: string[]) {
+  return Array.from(new Set([...options, ...selected])).filter(Boolean);
+}
+
+function multiSummary(selected: string[], allLabel: string) {
+  if (selected.length === 0) {
+    return allLabel;
+  }
+  if (selected.length <= 2) {
+    return selected.join(", ");
+  }
+  return `${selected.length} sélectionnés`;
+}
+
+function FilterMultiSelect({
+  label,
+  allLabel,
+  selected,
+  options,
+  onChange,
+}: {
+  label: string;
+  allLabel: string;
+  selected: string[];
+  options: string[];
+  onChange: (value: string[]) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    function closeOutside(event: PointerEvent) {
+      if (rootRef.current && !rootRef.current.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    }
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setOpen(false);
+      }
+    }
+    document.addEventListener("pointerdown", closeOutside);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeOutside);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [open]);
+
+  function toggle(option: string) {
+    onChange(
+      selected.includes(option)
+        ? selected.filter((item) => item !== option)
+        : [...selected, option],
+    );
+  }
+
+  return (
+    <div ref={rootRef} className="relative">
+      <button
+        type="button"
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        onClick={() => setOpen((current) => !current)}
+        title={selected.length > 2 ? selected.join(", ") : undefined}
+        className={`h-11 max-w-full truncate rounded-xl border bg-white px-4 pr-9 text-left text-sm font-semibold text-slate-800 shadow-sm outline-none transition-colors hover:bg-slate-50 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 ${
+          selected.length ? "border-violet-300" : "border-slate-200"
+        }`}
+      >
+        {label} : {multiSummary(selected, allLabel)}
+      </button>
+      <span className="pointer-events-none absolute right-3 top-[22px] -translate-y-1/2 text-xs text-slate-400">
+        ▾
+      </span>
+      {open ? (
+        <div
+          role="listbox"
+          aria-multiselectable="true"
+          aria-label={label}
+          className="absolute left-0 z-30 mt-2 max-h-72 w-full min-w-[16rem] overflow-y-auto rounded-xl border border-slate-200 bg-white p-2 shadow-lg"
+        >
+          <button
+            type="button"
+            onClick={() => onChange([])}
+            className={`flex w-full items-center rounded-lg px-2 py-1.5 text-left text-sm font-semibold hover:bg-slate-50 ${
+              selected.length === 0 ? "text-violet-700" : "text-slate-500"
+            }`}
+          >
+            {allLabel}
+          </button>
+          {options.length === 0 ? (
+            <p className="px-2 py-1.5 text-sm text-slate-400">Aucune option</p>
+          ) : (
+            options.map((option) => (
+              <label
+                key={option}
+                className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+              >
+                <input
+                  type="checkbox"
+                  checked={selected.includes(option)}
+                  onChange={() => toggle(option)}
+                  className="h-4 w-4 accent-violet-600"
+                />
+                {option}
+              </label>
+            ))
+          )}
+        </div>
+      ) : null}
     </div>
   );
 }
