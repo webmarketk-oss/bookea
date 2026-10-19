@@ -646,6 +646,13 @@ export default function CRMLeadsPage() {
     [leadList],
   );
 
+  const tablePageResetKey = JSON.stringify([
+    activeTab,
+    quickDateFilter,
+    depositPhaseFilter,
+    { ...filters, sortBy: undefined },
+  ]);
+
   const filteredLeads = scopeLeads.filter((lead) => {
     const search = filters.search.trim().toLowerCase();
     const matchesSearch =
@@ -1867,6 +1874,7 @@ export default function CRMLeadsPage() {
                       ? { state: whatsAppState, byLead: whatsAppByLead }
                       : undefined
                   }
+                  resetKey={tablePageResetKey}
                 />
               </section>
 

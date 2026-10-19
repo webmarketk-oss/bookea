@@ -63,6 +63,19 @@ interface ProspectsTableProps {
   ) => void;
   showVisitDate?: boolean;
   onVisitDateChange?: (leadId: string, date: string) => void;
+  /** Change quand la recherche, les filtres ou l'onglet changent : on revient alors à la page 1. */
+  resetKey?: string;
+}
+
+const PAGE_SIZES = [20, 50, 100] as const;
+const PAGE_SIZE_STORAGE_KEY = "bookea-crm-page-size";
+
+function readPageSize() {
+  if (typeof window === "undefined") {
+    return PAGE_SIZES[0];
+  }
+  const stored = Number(window.localStorage.getItem(PAGE_SIZE_STORAGE_KEY));
+  return PAGE_SIZES.find((size) => size === stored) ?? PAGE_SIZES[0];
 }
 
 export type ProspectsWhatsApp = {
@@ -88,14 +101,21 @@ export default function ProspectsTable({
   onDepositReminderChange,
   showVisitDate = false,
   onVisitDateChange,
+  resetKey = "",
 }: ProspectsTableProps) {
   const [commentsOpen, setCommentsOpen] = useState(true);
   const [dateSort, setDateSort] = useState<"desc" | "asc">("desc");
+  const [pageSize, setPageSize] = useState<number>(PAGE_SIZES[0]);
   const pressStartedOnControlRef = useRef(false);
 
   useEffect(() => {
     setDateSort("desc");
   }, [sortBy]);
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setPageSize(readPageSize());
+  }, []);
 
   const sortedLeads = leads
     .map((lead, index) => ({ lead, index }))
@@ -109,7 +129,30 @@ export default function ProspectsTable({
     })
     .map(({ lead }) => lead);
 
+  const pageKey = `${resetKey}|${sortBy}|${dateSort}|${pageSize}`;
+  const [pageState, setPageState] = useState({ key: pageKey, page: 0 });
+  const pageCount = Math.max(1, Math.ceil(sortedLeads.length / pageSize));
+  const page = Math.min(pageState.key === pageKey ? pageState.page : 0, pageCount - 1);
+  const pageStart = page * pageSize;
+  const visibleLeads = sortedLeads.slice(pageStart, pageStart + pageSize);
+  const goToPage = (next: number) =>
+    setPageState({ key: pageKey, page: Math.max(0, Math.min(next, pageCount - 1)) });
+
+  // Fiche ouverte depuis un lien, la recherche ou WhatsApp : afficher la page où se trouve ce prospect.
+  const selectedIndex = isLeadDetailsOpen
+    ? sortedLeads.findIndex((lead) => lead.id === selectedLead?.id)
+    : -1;
+  const selectedPage = selectedIndex >= 0 ? Math.floor(selectedIndex / pageSize) : -1;
+  useEffect(() => {
+    if (selectedPage >= 0 && selectedPage !== page) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setPageState({ key: pageKey, page: selectedPage });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedLead?.id, isLeadDetailsOpen]);
+
   return (
+    <>
     <div className="w-full max-w-full min-w-0 overflow-x-auto overflow-y-clip rounded-2xl border border-slate-200 bg-white shadow-sm">
       <Table className="min-w-full">
         <TableHeader>
@@ -219,7 +262,7 @@ export default function ProspectsTable({
         </TableHeader>
 
         <TableBody>
-          {sortedLeads.map((lead) => {
+          {visibleLeads.map((lead) => {
             const isInactive = isInactiveLeadStatus(lead.status);
             const latestComment = getLatestLeadComment(lead);
             const offer = leadOfferLabel(lead);
@@ -460,6 +503,110 @@ export default function ProspectsTable({
         </TableBody>
       </Table>
     </div>
+    {sortedLeads.length > PAGE_SIZES[0] ? (
+      <TablePager
+        page={page}
+        pageCount={pageCount}
+        pageSize={pageSize}
+        total={sortedLeads.length}
+        onPage={goToPage}
+        onPageSize={(size) => {
+          setPageSize(size);
+          window.localStorage.setItem(PAGE_SIZE_STORAGE_KEY, String(size));
+        }}
+      />
+    ) : null}
+    </>
+  );
+}
+
+function pagerPages(page: number, pageCount: number) {
+  const pages = new Set([0, pageCount - 1, page - 1, page, page + 1]);
+  return [...pages].filter((item) => item >= 0 && item < pageCount).sort((a, b) => a - b);
+}
+
+function TablePager({
+  page,
+  pageCount,
+  pageSize,
+  total,
+  onPage,
+  onPageSize,
+}: {
+  page: number;
+  pageCount: number;
+  pageSize: number;
+  total: number;
+  onPage: (page: number) => void;
+  onPageSize: (size: number) => void;
+}) {
+  const first = page * pageSize + 1;
+  const last = Math.min(total, (page + 1) * pageSize);
+  const pages = pagerPages(page, pageCount);
+  const buttonClass =
+    "h-8 min-w-8 rounded-lg border border-slate-200 bg-white px-2 text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40";
+
+  return (
+    <nav
+      aria-label="Pages des prospects"
+      className="mt-3 flex flex-wrap items-center justify-between gap-3 px-1 text-xs font-semibold text-slate-500"
+    >
+      <span>
+        {first}–{last} sur {total} prospects
+      </span>
+      <div className="flex flex-wrap items-center gap-1">
+        <button
+          type="button"
+          className={buttonClass}
+          disabled={page === 0}
+          onClick={() => onPage(page - 1)}
+          aria-label="Page précédente"
+        >
+          <ChevronLeft className="mx-auto h-4 w-4" />
+        </button>
+        {pages.map((item, index) => (
+          <span key={item} className="flex items-center gap-1">
+            {index > 0 && item - pages[index - 1] > 1 ? (
+              <span className="px-1 text-slate-400">…</span>
+            ) : null}
+            <button
+              type="button"
+              className={cn(
+                buttonClass,
+                item === page && "border-violet-600 bg-violet-600 text-white hover:bg-violet-600",
+              )}
+              aria-current={item === page ? "page" : undefined}
+              onClick={() => onPage(item)}
+            >
+              {item + 1}
+            </button>
+          </span>
+        ))}
+        <button
+          type="button"
+          className={buttonClass}
+          disabled={page >= pageCount - 1}
+          onClick={() => onPage(page + 1)}
+          aria-label="Page suivante"
+        >
+          <ChevronRight className="mx-auto h-4 w-4" />
+        </button>
+      </div>
+      <label className="flex items-center gap-2">
+        Par page
+        <select
+          value={pageSize}
+          onChange={(event) => onPageSize(Number(event.target.value))}
+          className="h-8 rounded-lg border border-slate-200 bg-white px-2 text-xs font-semibold text-slate-700 outline-none focus:border-blue-500"
+        >
+          {PAGE_SIZES.map((size) => (
+            <option key={size} value={size}>
+              {size}
+            </option>
+          ))}
+        </select>
+      </label>
+    </nav>
   );
 }
 

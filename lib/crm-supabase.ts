@@ -293,47 +293,19 @@ export async function loadCrmLeads() {
   const context = await getCrmCenterContext(supabase);
 
   const appointmentsQuery = loadCenterAppointments(supabase, context.centerId);
-  const { data, error } = await supabase
-    .from("leads")
-    .select(
-      `
-        id,
-        center_id,
-        client_id,
-        source_id,
-        campaign_id,
-        service_id,
-        status,
-        recall_date,
-        next_action,
-        latest_comment,
-        amount_cure_ttc,
-        created_at,
-        updated_at,
-        last_activity_at,
-        clients(first_name,last_name,phone,email,birthdate,gender,address_line1,postal_code,city),
-        lead_sources(name,slug),
-        campaigns(name),
-        services(name),
-        profiles(full_name),
-        lead_events(
-          id,
-          event_type,
-          from_value,
-          to_value,
-          note,
-          created_at
-        )
-      `,
-    )
-    .eq("center_id", context.centerId)
-    .order("last_activity_at", { ascending: false });
-
-  if (error) {
-    throw new Error(error.message);
-  }
-
-  const rows = (data ?? []) as unknown as LeadRow[];
+  // Supabase renvoie au plus 1 000 lignes par requête : au-delà, les prospects arrivent par paquets.
+  const rows = await fetchAllRows<LeadRow>((start, end) =>
+    supabase
+      .from("leads")
+      .select(LEAD_LIST_SELECT)
+      .eq("center_id", context.centerId)
+      .order("last_activity_at", { ascending: false })
+      .order("id", { ascending: true })
+      .range(start, end) as unknown as PromiseLike<{
+      data: LeadRow[] | null;
+      error: { message: string } | null;
+    }>,
+  );
   const appointmentsByLead = groupLeadAppointments(
     await appointmentsQuery,
     rows,
@@ -592,11 +564,18 @@ async function loadCenterAppointments(
   centerId: string,
 ): Promise<CenterAppointmentRow[]> {
   try {
-    const { data, error } = await supabase
-      .from("appointments")
-      .select("id,lead_id,client_id,created_at,appointment_date,status,notes")
-      .eq("center_id", centerId);
-    return error ? [] : ((data ?? []) as CenterAppointmentRow[]);
+    return await fetchAllRows<CenterAppointmentRow>((start, end) =>
+      supabase
+        .from("appointments")
+        .select("id,lead_id,client_id,created_at,appointment_date,status,notes")
+        .eq("center_id", centerId)
+        .order("appointment_date", { ascending: false })
+        .order("id", { ascending: true })
+        .range(start, end) as PromiseLike<{
+        data: CenterAppointmentRow[] | null;
+        error: { message: string } | null;
+      }>,
+    );
   } catch {
     return [];
   }
