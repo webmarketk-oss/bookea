@@ -1060,6 +1060,71 @@ export async function loadSeyaAgentSettings() {
   };
 }
 
+const OWNED_PHONES_TTL_MS = 5 * 60 * 1000;
+let ownedPhonesCache: { centerId: string; at: number; phones: Set<string> } | null = null;
+
+function conversationPhoneKey(phone: unknown) {
+  return String(phone || "").replace(/\D/g, "").slice(-9);
+}
+
+async function ownedPhonesFor(
+  supabase: ReturnType<typeof createClient>,
+  centerId: string,
+  conversations: SeyaConversation[],
+) {
+  const cached =
+    ownedPhonesCache?.centerId === centerId &&
+    Date.now() - ownedPhonesCache.at < OWNED_PHONES_TTL_MS
+      ? ownedPhonesCache.phones
+      : null;
+  // Un numéro inconnu du cache (nouveau prospect) force une relecture : il ne doit pas être masqué.
+  const missing =
+    cached &&
+    cached.size > 0 &&
+    conversations.some((item) => {
+      const key = conversationPhoneKey(item?.phone);
+      return key.length >= 9 && !cached.has(key);
+    });
+  if (cached && !missing) {
+    return cached;
+  }
+  const phones = await loadOwnedPhones(supabase, centerId).catch(() => new Set<string>());
+  ownedPhonesCache = { centerId, at: Date.now(), phones };
+  return phones;
+}
+
+/** Rafraîchissement de la boîte Seya : seulement les conversations, pas toute la fiche de réglages. */
+export async function refreshSeyaConversations() {
+  const context = await getActiveCenterContext();
+  const supabase = createClient();
+  const { data, error } = await supabase
+    .from("centers")
+    .select("conversations:settings->seya->conversations")
+    .eq("id", context.centerId)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  const raw = (data as { conversations?: unknown } | null)?.conversations;
+  const remote = Array.isArray(raw) ? (raw as SeyaConversation[]) : [];
+  const ownedPhones = await ownedPhonesFor(supabase, context.centerId, remote);
+  const remoteConversations = filterOwnedConversations(remote, context.centerId, ownedPhones);
+  const localOwned = filterOwnedConversations(
+    readLocalSeyaConversations(context.centerId),
+    context.centerId,
+    ownedPhones,
+  ).filter((item) =>
+    remoteConversations.some((remoteItem) => isSameSeyaConversation(remoteItem, item)),
+  );
+  const merged = mergeSeyaConversations(remoteConversations, localOwned);
+  const conversations = merged.length > 0 ? merged : remoteConversations;
+  writeLocalSeyaConversations(context.centerId, conversations, { notify: false });
+
+  return { centerId: context.centerId, conversations };
+}
+
 export function mergeSeyaConversations(
   ...lists: SeyaConversation[][]
 ): SeyaConversation[] {

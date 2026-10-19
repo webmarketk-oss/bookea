@@ -4,6 +4,7 @@ const {
   exactPhoneRows,
   filterOwnedConversations,
   ownershipFromRows,
+  phoneThreadFilter,
   pickPhoneHome,
   planRehome,
   rehomePhoneThread,
@@ -125,6 +126,14 @@ test("si la fiche existe dans les deux centres, on ne déplace pas", () => {
   assert.equal(planned.moved.length, 0);
 });
 
+test("message entrant : seuls les centres contenant ce numéro (et le centre visé) sont relus", () => {
+  const filter = phoneThreadFilter("611223344", gaillard);
+  assert.ok(filter.startsWith(`id.eq.${gaillard},`));
+  for (const pattern of ["611223344", "6 11 22 33 44", "6.11.22.33.44", "6-11-22-33-44"]) {
+    assert.ok(filter.includes(`settings->seya->>conversations.ilike."*${pattern}*"`), pattern);
+  }
+});
+
 test("déplacer un fil ne remet pas les anciens réglages Seya du centre", async () => {
   const typed = [
     { afterDays: 1, message: "Rebonjour {prenom}" },
@@ -159,7 +168,8 @@ test("déplacer un fil ne remet pas les anciens réglages Seya du centre", async
               settings: structuredClone(settings),
             }));
             rows.get(gaillard).seya.relances = typed;
-            return Promise.resolve({ data: snapshot, error: null });
+            const result = Promise.resolve({ data: snapshot, error: null });
+            return Object.assign(result, { or: () => result });
           }
           return {
             eq: (_column, id) => ({

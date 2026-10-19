@@ -7,7 +7,7 @@ const {
   persistableConversations,
   relanceCopy,
 } = require("./agent");
-const { sendDueWelcomes } = require("./welcome");
+const { isWelcomeDue, sendDueWelcomes } = require("./welcome");
 const { sendSharedWhatsApp } = require("./whatsapp");
 const { isNearDuplicate } = require("./price");
 const {
@@ -61,25 +61,52 @@ module.exports = async function handler(req, res) {
     const supabase = createServiceClient();
     const { data: centers, error } = await supabase
       .from("centers")
-      .select("id,name,email,settings");
+      .select("id,name,email");
     if (error) {
       throw new Error(error.message);
     }
 
+    const now = new Date();
+    const fullPass = isFullRelancePass(now, req);
     const sent = [];
-    for (const center of centers || []) {
-      const welcomed = await sendDueWelcomes(supabase, center);
+    for (const row of centers || []) {
+      const latest = await readCenterSeya(supabase, row.id);
+      const conversations = Array.isArray(latest.seya.conversations)
+        ? latest.seya.conversations
+        : [];
+      if (conversations.length === 0) {
+        continue;
+      }
+      const center = { ...row, settings: latest.settings };
+      const welcomeDue = conversations.some((item) => isWelcomeDue(item, now));
+      const welcomed = welcomeDue
+        ? await sendDueWelcomes(supabase, center, undefined, now, latest)
+        : [];
       sent.push(...welcomed.map((item) => ({ ...item, kind: "welcome" })));
-      const result = await relanceCenter(supabase, center);
+      if (!fullPass) {
+        continue;
+      }
+      // Les messages d’accueil ont pu réécrire les conversations : relecture seulement dans ce cas.
+      const result = await relanceCenter(supabase, center, now, welcomeDue ? null : latest);
       sent.push(...result);
     }
 
-    return res.status(200).json({ ok: true, sent: sent.length, results: sent });
+    return res
+      .status(200)
+      .json({ ok: true, fullPass, sent: sent.length, results: sent });
   } catch (error) {
     console.error("[seya/relance]", error);
     return res.status(500).json({ error: "relance_failed" });
   }
 };
+
+// Accueils chaque minute (délai de 4 min) ; relances et synchro CRM, à l’échelle du jour, toutes les 5 min.
+const FULL_PASS_EVERY_MINUTES = 5;
+
+function isFullRelancePass(now, req) {
+  const forced = String(req?.query?.full || "") === "1";
+  return forced || now.getUTCMinutes() % FULL_PASS_EVERY_MINUTES === 0;
+}
 
 function isAuthorized(req) {
   const secret = process.env.CRON_SECRET;
@@ -100,8 +127,8 @@ function createServiceClient() {
   });
 }
 
-async function relanceCenter(supabase, center, now = new Date()) {
-  const latest = await readCenterSeya(supabase, center.id);
+async function relanceCenter(supabase, center, now = new Date(), preloaded = null) {
+  const latest = preloaded || (await readCenterSeya(supabase, center.id));
   const seya = latest.seya;
   const agent = agentSettings(seya);
   const retried = await retryTeamHandoffs(
@@ -471,6 +498,7 @@ function pickRelanceRound(conversation, now = new Date(), extras = {}) {
   return 0;
 }
 
+module.exports.isFullRelancePass = isFullRelancePass;
 module.exports.shouldSkipRelance = shouldSkipRelance;
 module.exports.relanceCenter = relanceCenter;
 module.exports.stillDueForRelance = stillDueForRelance;

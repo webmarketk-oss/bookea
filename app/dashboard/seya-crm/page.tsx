@@ -44,6 +44,7 @@ import {
   defaultSeyaAgentSettings,
   emptySeyaCenterProfile,
   loadSeyaAgentSettings,
+  refreshSeyaConversations,
   resolveSeyaMission,
   SEYA_MISSION_OPTIONS,
   mergeSeyaConversations,
@@ -586,7 +587,7 @@ export default function SeyaCrmPage() {
       }
       refreshInFlight = true;
       try {
-        const seya = await loadSeyaAgentSettings();
+        const seya = await refreshSeyaConversations();
         const activeId = readActiveCenterId();
         if (
           cancelled ||
@@ -614,7 +615,7 @@ export default function SeyaCrmPage() {
       if (document.visibilityState === "visible") {
         void refreshConversations();
       }
-    }, 12000);
+    }, 30000);
     const refreshIfVisible = () => {
       if (document.visibilityState === "visible") {
         void refreshConversations();

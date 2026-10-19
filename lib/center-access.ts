@@ -18,7 +18,7 @@ export type ActiveCenterContext = {
 
 export const ACTIVE_CENTER_STORAGE_KEY = "bookea-active-center-id";
 
-const CENTERS_CACHE_MS = 15000;
+const CENTERS_CACHE_MS = 60000;
 const CENTERS_LOAD_TIMEOUT_MS = 8000;
 
 let cachedCenters: { at: number; value: AccessibleCenter[] } | null = null;
@@ -98,21 +98,31 @@ export async function loadAccessibleCenters(
   );
 }
 
+// Session lue dans le navigateur : getUser() interrogeait le service de connexion Supabase à chaque
+// rafraîchissement de chaque onglet. Les droits restent vérifiés par la base (RLS) sur chaque requête.
+async function sessionUserId(supabase: SupabaseClient) {
+  const {
+    data: { session },
+    error,
+  } = await supabase.auth.getSession();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return session?.user?.id ?? null;
+}
+
 async function fetchAccessibleCenters(
   supabase: SupabaseClient,
 ): Promise<AccessibleCenter[]> {
-  const {
-    data: { user },
-    error: userError,
-  } = await supabase.auth.getUser();
+  const userId = await sessionUserId(supabase);
 
-  if (userError) {
-    throw new Error(userError.message);
-  }
-
-  if (!user) {
+  if (!userId) {
     return [];
   }
+
+  const user = { id: userId };
 
   const isAdmin = await getIsBookeaAdmin(supabase, user.id);
 
@@ -220,13 +230,11 @@ export function saveActiveCenterId(centerId: string) {
 export async function loadIsBookeaAdmin(
   supabase: SupabaseClient = createClient(),
 ) {
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) {
+  const userId = await sessionUserId(supabase).catch(() => null);
+  if (!userId) {
     return false;
   }
-  return getIsBookeaAdmin(supabase, user.id);
+  return getIsBookeaAdmin(supabase, userId);
 }
 
 async function getIsBookeaAdmin(supabase: SupabaseClient, profileId: string) {

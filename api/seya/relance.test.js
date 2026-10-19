@@ -4,7 +4,18 @@ const assert = require("node:assert/strict");
 delete process.env.OPENAI_API_KEY;
 
 const { relanceCopy } = require("./agent");
-const { isRelanceQuietHours, pickRelanceRound, shouldSkipRelance } = require("./relance");
+const {
+  isFullRelancePass,
+  isRelanceQuietHours,
+  pickRelanceRound,
+  shouldSkipRelance,
+} = require("./relance");
+
+test("tâche de chaque minute : relances et synchro CRM toutes les 5 minutes, ou sur demande", () => {
+  assert.equal(isFullRelancePass(new Date("2026-10-19T14:05:10Z"), {}), true);
+  assert.equal(isFullRelancePass(new Date("2026-10-19T14:06:10Z"), {}), false);
+  assert.equal(isFullRelancePass(new Date("2026-10-19T14:06:10Z"), { query: { full: "1" } }), true);
+});
 
 const NOW = new Date("2026-09-28T10:00:00Z");
 

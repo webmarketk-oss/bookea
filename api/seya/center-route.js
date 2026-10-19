@@ -351,11 +351,33 @@ async function loadOwnershipIndex(supabase) {
   return ownershipFromRows({ clients, leads: withClientPhone(leads, clients) });
 }
 
-async function loadCenterConversationLists(supabase) {
-  const { data: centers, error } = await supabase
-    .from("centers")
-    .select("id,settings");
+// Formats saisis courants : 0672675888, +33672675888, 06 72 67 58 88, 06.72.67.58.88, 06-72-67-58-88.
+function phoneTextPatterns(last9) {
+  const digits = String(last9 || "");
+  const parts = [digits[0], ...(digits.slice(1).match(/.{2}/g) || [])];
+  return [digits, parts.join(" "), parts.join("."), parts.join("-")];
+}
+
+function phoneThreadFilter(last9, targetCenterId) {
+  return [
+    `id.eq.${targetCenterId}`,
+    ...phoneTextPatterns(last9).map(
+      (pattern) => `settings->seya->>conversations.ilike."*${pattern}*"`,
+    ),
+  ].join(",");
+}
+
+async function loadCenterConversationLists(supabase, { last9, targetCenterId } = {}) {
+  let query = supabase.from("centers").select("id,settings");
+  if (last9 && targetCenterId) {
+    query = query.or(phoneThreadFilter(last9, targetCenterId));
+  }
+  const { data: centers, error } = await query;
   if (error) {
+    if (last9 && targetCenterId) {
+      console.error("[seya/center-route] phone prefilter", error.message);
+      return loadCenterConversationLists(supabase);
+    }
     throw new Error(error.message);
   }
   const lists = new Map();
@@ -394,7 +416,11 @@ async function rehomePhoneThread(supabase, phone, targetCenterId) {
   if (last9.length < 9 || !targetCenterId) {
     return { moved: [] };
   }
-  const { lists, settingsById } = await loadCenterConversationLists(supabase);
+  // Seuls les centres où ce numéro apparaît (et le centre visé) peuvent être concernés par le déplacement.
+  const { lists, settingsById } = await loadCenterConversationLists(supabase, {
+    last9,
+    targetCenterId,
+  });
   const ownership = new Map();
   addHome(ownership, last9, {
     centerId: targetCenterId,
@@ -414,6 +440,7 @@ module.exports = {
   loadOwnedPhones,
   loadPhoneHomes,
   ownershipFromRows,
+  phoneThreadFilter,
   pickPhoneHome,
   planRehome,
   rehomeMisplacedConversations,

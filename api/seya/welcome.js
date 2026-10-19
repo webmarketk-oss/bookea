@@ -122,12 +122,13 @@ async function sendDueWelcomes(
   center,
   sendWhatsApp = sendSharedWhatsApp,
   now = new Date(),
+  preloaded = null,
 ) {
   if (!center?.id) {
     return [];
   }
 
-  const latest = await readCenterSeya(supabase, center.id);
+  const latest = preloaded || (await readCenterSeya(supabase, center.id));
   if (isSeyaWelcomeOff(latest.seya)) {
     return [];
   }
