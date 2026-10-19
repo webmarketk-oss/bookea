@@ -9,6 +9,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { AdaptiveDateInput } from "@/components/ui/adaptive-date-input";
 import { AdaptiveSelect } from "@/components/ui/adaptive-select";
 import {
   DEPOSIT_REMINDER_INDEXES,
@@ -295,13 +296,10 @@ export default function ProspectsTable({
               <TableCell>{lead.createdAt}</TableCell>
 
               <TableCell>
-                <input
-                  type="date"
+                <AdaptiveDateInput
+                  ariaLabel="Rappel"
                   value={toDateOnlyIso(lead.reminderDate) ?? ""}
-                  onClick={(event) => event.stopPropagation()}
-                  onChange={(event) =>
-                    onReminderDateChange(lead.id, event.target.value)
-                  }
+                  onChange={(date) => onReminderDateChange(lead.id, date)}
                   className={cn(
                     "h-8 w-[8.5rem] shrink-0 rounded-lg border border-slate-200 bg-white px-2 text-xs font-semibold outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100",
                     isOpenReminderDue(lead) &&
@@ -370,14 +368,10 @@ export default function ProspectsTable({
 
               {showVisitDate ? (
                 <TableCell>
-                  <input
-                    type="date"
-                    aria-label="Date du RDV"
+                  <AdaptiveDateInput
+                    ariaLabel="Date du RDV"
                     value={displayVisitDate(lead)}
-                    onClick={(event) => event.stopPropagation()}
-                    onChange={(event) =>
-                      onVisitDateChange?.(lead.id, event.target.value)
-                    }
+                    onChange={(date) => onVisitDateChange?.(lead.id, date)}
                     className="h-8 w-[8.5rem] shrink-0 rounded-lg border border-slate-200 bg-white px-2 text-xs font-semibold outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
                   />
                 </TableCell>
@@ -708,12 +702,11 @@ function DepositReminderCell({
 
   return (
     <div className="flex w-[11.5rem] flex-col gap-1">
-      <input
-        type="datetime-local"
-        aria-label={label}
+      <AdaptiveDateInput
+        withTime
+        ariaLabel={label}
         value={datetime}
-        onClick={(event) => event.stopPropagation()}
-        onChange={(event) => commit(event.target.value, draftRef.current)}
+        onChange={(value) => commit(value, draftRef.current)}
         className="h-8 w-full shrink-0 rounded-lg border border-slate-200 bg-white px-1.5 text-[11px] font-semibold outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
       />
       <input
