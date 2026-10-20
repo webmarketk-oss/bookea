@@ -84,7 +84,7 @@ export async function loadAccessibleCenters(
   if (!centersInFlight) {
     centersInFlight = fetchAccessibleCenters(supabase)
       .then((value) => {
-        cachedCenters = { at: Date.now(), value };
+        cachedCenters = value.length ? { at: Date.now(), value } : null;
         return value;
       })
       .finally(() => {
@@ -118,8 +118,9 @@ async function fetchAccessibleCenters(
 ): Promise<AccessibleCenter[]> {
   const userId = await sessionUserId(supabase);
 
+  // Sans session (expirée ou fermée) : c'est une reconnexion qu'il faut, pas « aucun centre ».
   if (!userId) {
-    return [];
+    throw new Error("Auth session missing");
   }
 
   const user = { id: userId };
