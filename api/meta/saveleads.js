@@ -122,6 +122,16 @@ module.exports = async function handler(req, res) {
       center.id,
       imported.phone,
     );
+    if (existingId && isYesFlag(firstValue(req.query?.doublon, payload?.doublon))) {
+      return res.status(200).json({
+        ok: true,
+        duplicate: true,
+        skipped: "existing_phone",
+        id: existingId,
+        center: center.slug,
+        center_name: center.name,
+      });
+    }
     const leadId = await importPostedLead(supabase, center.id, imported, {
       possibleDuplicate: Boolean(existingId),
       sourceName,
@@ -131,7 +141,9 @@ module.exports = async function handler(req, res) {
     });
 
     let whatsapp = { sent: false, skipped: "no_phone" };
-    if (imported.phone) {
+    if (imported.phone && isNoFlag(firstValue(req.query?.welcome, payload?.welcome))) {
+      whatsapp = { sent: false, skipped: "welcome_disabled" };
+    } else if (imported.phone) {
       whatsapp = await welcomeNewLead(supabase, center, {
         leadId,
         firstName: imported.firstName,
@@ -1185,6 +1197,18 @@ function flattenFields(raw, prefix = "") {
   return result;
 }
 
+// ?welcome=0 : aucun WhatsApp d'accueil Seya (ajout manuel d'anciens prospects).
+function isNoFlag(value) {
+  return ["0", "false", "non", "no", "off"].includes(String(value ?? "").trim().toLowerCase());
+}
+
+// ?doublon=ignorer : un numéro déjà présent dans le centre ne crée pas de nouvelle fiche.
+function isYesFlag(value) {
+  return ["1", "true", "oui", "yes", "ignorer", "ignore", "skip"].includes(
+    String(value ?? "").trim().toLowerCase(),
+  );
+}
+
 function isFileImport(payload, query) {
   const flag = String(firstValue(query?.import, payload?.import) || "").trim().toLowerCase();
   if (["1", "true", "oui", "fichier", "file"].includes(flag)) {
@@ -1575,7 +1599,7 @@ function queryFields(query) {
 
   const result = {};
   for (const [key, value] of Object.entries(query)) {
-    if (key === "center" || key === "center_slug") {
+    if (key === "center" || key === "center_slug" || key === "welcome" || key === "doublon") {
       continue;
     }
     const text = Array.isArray(value) ? value[0] : value;
