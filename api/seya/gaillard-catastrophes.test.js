@@ -283,3 +283,85 @@ test("Gaillard : ballonnement seul ne pose pas la question kilos", async () => {
   conversation = await say(conversation, "Mon ventre est toujours gonflé", "bloat only");
   assert.doesNotMatch(lastSeya(conversation), /Combien de kilos/i);
 });
+
+const LIVE_MINCEUR_BRIEF = {
+  ...seya,
+  treatmentBriefs: [
+    {
+      name: "Soin minceur",
+      brief:
+        "Le parcours comprend un accompagnement au rééquilibrage alimentaire avec un suivi sur une application.\nPour un objectif de perte de poids, explique que l’approche est globale : les technologies s’inscrivent dans un accompagnement comprenant aussi l’alimentation.\nNe prescris pas de régime, de restriction alimentaire ou d’objectif calorique personnalisé.",
+      pricing: { bilan: "offert", discovery: "offerte", sessionPolicy: "after_bilan" },
+    },
+  ],
+};
+
+async function sayLive(conversation, text) {
+  const result = await generateSeyaReply({
+    conversation,
+    text,
+    seya: LIVE_MINCEUR_BRIEF,
+    appointments: [],
+    hours: hours(),
+    centerName: GAILLARD,
+    centerAddress: "58 rue de la Libération, 74240 Gaillard",
+    centerId: "gaillard",
+    now: NOW,
+  });
+  assert.equal(result.shouldBook, null);
+  return result.conversation;
+}
+
+test("Gaillard capture : après graisse du ventre, une question, sans consigne ni bilan", async () => {
+  let conversation = startConversation(
+    {
+      leadId: "lead-gaillard-capture",
+      centerId: "gaillard",
+      firstName: "Léa",
+      phone: "0611223344",
+      treatment: "Soin minceur",
+    },
+    GAILLARD,
+    LIVE_MINCEUR_BRIEF,
+  );
+  conversation = await sayLive(conversation, "Bonjour");
+  conversation = {
+    ...conversation,
+    messages: [
+      ...conversation.messages,
+      {
+        id: "seya-objectif",
+        author: "seya",
+        text: "Quel est votre objectif pour ce soin minceur ?",
+        at: NOW.toISOString(),
+      },
+    ],
+  };
+  conversation = await sayLive(conversation, "Une diminution de la graisse du ventre");
+  assert.match(lastSeya(conversation), /déjà (testé|essayé)/i);
+  assert.doesNotMatch(lastSeya(conversation), /prescris|explique que|restriction alimentaire|objectif calorique/i);
+  assert.doesNotMatch(lastSeya(conversation), /Souhaitez-vous que je fasse remonter|bilan minceur offert/i);
+  assert.doesNotMatch(lastSeya(conversation), /Quelest|votreobjectif|Leparcours|comprendun/i);
+});
+
+test("Gaillard : mention alimentaire dans un message précédent ne saute pas « déjà testé »", async () => {
+  let conversation = startConversation(
+    {
+      leadId: "lead-gaillard-aliment",
+      centerId: "gaillard",
+      firstName: "Léa",
+      phone: "0611223344",
+      treatment: "Soin minceur",
+    },
+    GAILLARD,
+    LIVE_MINCEUR_BRIEF,
+  );
+  conversation = await sayLive(
+    conversation,
+    "Bonjour, je suis intéressée par votre accompagnement minceur avec rééquilibrage alimentaire",
+  );
+  conversation = await sayLive(conversation, "Une diminution de la graisse du ventre");
+  assert.match(lastSeya(conversation), /déjà (testé|essayé)|zones|kilos|objectif/i);
+  assert.doesNotMatch(lastSeya(conversation), /prescris|explique que/i);
+  assert.doesNotMatch(lastSeya(conversation), /Souhaitez-vous que je fasse remonter/i);
+});

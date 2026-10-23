@@ -103,17 +103,23 @@ const SUPPORT_TOPICS = [
   /reequilibrage|aliment|nutrition|regime|coaching/,
 ];
 
+const SAFE_MINCEUR_PATH =
+  "Le parcours comprend un accompagnement au rééquilibrage alimentaire, avec un suivi sur application.";
+
 /** Accompagnement minceur de la fiche (rééquilibrage, application, compléments), sans question. */
 function minceurPathFacts(sources = [], pricing = {}) {
   const support = findFacts(
     sources,
     /reequilibrage|aliment|nutrition|application|appli|complement|physio|suivi/,
     3,
-  );
-  if (!support.length && /offert|gratuit/i.test(String(pricing?.bilan || ""))) {
-    return "Le bilan minceur est offert.";
+  ).filter((fact) => !leaksInternalBrief(fact));
+  if (support.length) {
+    return support.join(" ");
   }
-  return support.join(" ");
+  if (/offert|gratuit/i.test(String(pricing?.bilan || ""))) {
+    return `${SAFE_MINCEUR_PATH} Le bilan minceur est offert.`;
+  }
+  return SAFE_MINCEUR_PATH;
 }
 
 /** Faits de la fiche sur le sujet précis de la question (application, compléments, alimentation). */
@@ -651,8 +657,31 @@ function withPreference(conversation, text, at, context) {
 const RULE_BREAK =
   /disponibilit|quand seriez|quand etes|quel jour|quels jours|quelle heure|a quelle heure|dites-moi un (ou deux )?jours?|debut de semaine|fin de semaine|un creneau|des creneaux|ce creneau|je regarde (le planning|un creneau|les creneaux)|je (peux )?vous propose|lequel vous irait|quelle distance|habitez|loin de|pres de chez|annemasse|operatrice/;
 
+const BRIEF_LEAK =
+  /ne prescris|prescris pas|explique[rz]? que|interdit de|objectif calorique|restriction alimentaire|\bconsignes?\b|(^|[.!?]\s)(tu |toi )/;
+
+const GLUED_FRENCH =
+  /quelest|votreobjectif|pource |leparcours|comprendun|accompagnementau|alimentaireavec|unsuivi|surune|expliquieque|neprescris/i;
+
+function leaksInternalBrief(text) {
+  return BRIEF_LEAK.test(normalize(text));
+}
+
+function looksGarbledFrench(text) {
+  const value = String(text || "").replace(/\s+/g, " ").trim();
+  if (!value) {
+    return false;
+  }
+  if (GLUED_FRENCH.test(value)) {
+    return true;
+  }
+  const letters = (value.match(/[A-Za-zÀ-ÿ]/g) || []).length;
+  const spaces = (value.match(/ /g) || []).length;
+  return letters > 80 && spaces < letters / 14;
+}
+
 function breaksGaillardRules(text) {
-  return RULE_BREAK.test(normalize(text));
+  return RULE_BREAK.test(normalize(text)) || leaksInternalBrief(text) || looksGarbledFrench(text);
 }
 
 function safeGaillardText(text, family) {
@@ -750,6 +779,8 @@ module.exports = {
   lastSeyaAskedNeed,
   lastSeyaAskedPath,
   lastSeyaAskedTried,
+  leaksInternalBrief,
+  looksGarbledFrench,
   looksLikeHandoffClose,
   mentionsOtherClinicVisit,
   minceurPathFacts,

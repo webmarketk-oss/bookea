@@ -29,3 +29,12 @@ test("fiche : titre en début de ligne retiré de l’information", () => {
 test("fiche : liste introduite par une consigne non recopiée", () => {
   assert.deepEqual(briefFacts(["Propose ensuite :\n- le bilan\n- la séance découverte"]), []);
 });
+
+test("fiche : consignes « explique / ne prescris pas » écartées", () => {
+  const facts = briefFacts([
+    "Le suivi se fait sur une application, entre les séances.",
+    "Pour un objectif de perte de poids, explique que l’approche est globale : les technologies s’inscrivent dans un accompagnement comprenant aussi l’alimentation.",
+    "Ne prescris pas de régime, de restriction alimentaire ou d’objectif calorique personnalisé.",
+  ]);
+  assert.deepEqual(facts, ["Le suivi se fait sur une application, entre les séances."]);
+});

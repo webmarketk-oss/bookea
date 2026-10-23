@@ -2816,7 +2816,7 @@ const GAILLARD_VISAGE_CONCERN =
 const GAILLARD_EPILATION_ZONE =
   /jambe|maillot|intime|parties? intimes?|aisselle|bras|levre|menton|visage|dos|fesse|ventre|cuisse|torse|barbe|sourcil|nuque|epaule|pied|main|sillon|integral|bresilien|corps entier|joue|favori/;
 const GAILLARD_TRIED =
-  /deja (fait|essaye|teste)|jamais (fait|essaye|teste)|premiere fois|rien\b|a part |reequilibrage|aliment|sport|salle|regime|drainage|aucun(e)? (soin|solution|methode|traitement)|j'ai (fait|essaye|teste) (des?|du|de la|un|une|le|la|plusieurs) (regime|soin|seance|laser|cryo|epil|cire|massage|traitement|methode|solution|lumiere|presso|radiofrequence|drainage)/;
+  /deja (fait|essaye|teste)|jamais (fait|essaye|teste)|premiere fois|a part |aucun(e)? (soin|solution|methode|traitement)|j'ai (fait|essaye|teste) (des?|du|de la|un|une|le|la|plusieurs) (regime|soin|seance|laser|cryo|epil|cire|massage|traitement|methode|solution|lumiere|presso|radiofrequence|drainage)|rien (fait|essaye|teste|de special)|pas (encore )?(teste|essaye)/;
 const GAILLARD_KILOS_UNKNOWN =
   /je ne (sais|ses) pas|je sais pas|aucune idee|pas (d'|de )?idee|pas (de )?chiffre|je (ne )?connais pas/;
 
@@ -3361,22 +3361,18 @@ function gaillardLeadReply(conversation, text, seya, slots, extras = {}) {
       }
     }
 
+    if (
+      nextQuestion?.step === "path" &&
+      (gaillard.lastSeyaAskedNeed(base) || gaillard.lastSeyaAskedKilos(base)) &&
+      !gaillard.lastSeyaAskedTried(base) &&
+      !GAILLARD_TRIED.test(normalize(text))
+    ) {
+      return ask(gaillard.triedQuestion(family));
+    }
+
     if (nextQuestion?.step === "path") {
-      // Brouillon factuel tiré de la fiche ; le modèle peut le rédiger, la question bilan est conservée par le garde-fou.
-      return {
-        ...finishLeadReply(
-          next,
-          { ...qualification, pathOffered: true, tried: qualification.tried || said },
-          status,
-          text,
-          [prefix, gaillard.minceurPathReply(sourceBag, brief?.pricing || {})]
-            .filter(Boolean)
-            .join(" "),
-          bookingState,
-        ),
-        shouldBook: null,
-        locked: false,
-      };
+      qualification.pathOffered = true;
+      return ask(gaillard.minceurPathReply(sourceBag, brief?.pricing || {}));
     }
 
     if (nextQuestion) {

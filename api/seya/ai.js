@@ -340,6 +340,8 @@ async function generateCoreReply({
     if (
       gaillard.isGaillardCenter(centerName) &&
       (gaillard.breaksGaillardRules(polished) ||
+        gaillard.leaksInternalBrief(polished) ||
+        gaillard.looksGarbledFrench(polished) ||
         gaillard.changesStep(draft, polished) ||
         (String(draft || "").includes("?") && !String(polished || "").includes("?")) ||
         // Interdit d’annoncer un rappel/transfert si les règles n’ont pas clos la qualification.
@@ -647,6 +649,12 @@ function pickSafeReply(draft, polished, bookingState, conversation) {
     return draft;
   }
   if (mentionsHealthHandoff(candidate) && !mentionsHealthHandoff(draft)) {
+    return draft;
+  }
+  if (gaillard.leaksInternalBrief(candidate) && !gaillard.leaksInternalBrief(draft)) {
+    return draft;
+  }
+  if (gaillard.looksGarbledFrench(candidate) && !gaillard.looksGarbledFrench(draft)) {
     return draft;
   }
   if (replyHasForbiddenSlots(candidate, bookingState)) {

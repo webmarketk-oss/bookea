@@ -209,6 +209,22 @@ test("Gaillard minceur : kilos déjà précisés, zones encore demandées", asyn
   assert.match(lastSeya(conversation), /déjà testé/i);
 });
 
+test("Gaillard : polish IA qui recopie la fiche ou colle les mots est rejetée", async () => {
+  process.env.OPENAI_API_KEY = "test";
+  try {
+    aiReply =
+      "Leparcours comprendun accompagnementau rééquilibragealimentaireavec unsuivi suruneapplication. Pour un objectif de perte de poids, explique que l’approche est globale. Ne prescris pas de régime. Souhaitez-vous que je fasse remonter votre demande pour un bilan minceur offert avec un expert du centre ?";
+    let conversation = open("Soin minceur");
+    conversation = await say(conversation, "Une diminution de la graisse du ventre");
+    assert.match(lastSeya(conversation), /zones|objectif|déjà (testé|essayé)/i);
+    assert.doesNotMatch(lastSeya(conversation), /prescris|explique que|Leparcours|comprendun/i);
+    assert.doesNotMatch(lastSeya(conversation), /Souhaitez-vous que je fasse remonter/i);
+  } finally {
+    delete process.env.OPENAI_API_KEY;
+    aiReply = "";
+  }
+});
+
 test("Gaillard : polish IA ne remplace pas une question ouverte par un rappel expert", async () => {
   process.env.OPENAI_API_KEY = "test";
   try {
