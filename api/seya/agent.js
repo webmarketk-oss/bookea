@@ -2818,7 +2818,7 @@ const GAILLARD_EPILATION_ZONE =
 const GAILLARD_TRIED =
   /deja (fait|essaye|teste)|jamais (fait|essaye|teste)|premiere fois|a part |aucun(e)? (soin|solution|methode|traitement)|j'ai (fait|essaye|teste) (des?|du|de la|un|une|le|la|plusieurs) (regime|soin|seance|laser|cryo|epil|cire|massage|traitement|methode|solution|lumiere|presso|radiofrequence|drainage)|rien (fait|essaye|teste|de special)|pas (encore )?(teste|essaye)/;
 const GAILLARD_KILOS_UNKNOWN =
-  /je ne (sais|ses) pas|je sais pas|aucune idee|pas (d'|de )?idee|pas (de )?chiffre|je (ne )?connais pas/;
+  /je ne (sais|ses|cet|cest|sait) pas|je (sais|ses|cet) pas|aucune idee|pas (d'|de )?idee|pas (de )?chiffre|je (ne )?connais pas|je verr?(ai|ais) (ca |sa )?(avec vous|ensemble|sur place|au (bilan|centre))|on verra (ca |sa )?(avec vous|ensemble)/;
 
 /** « Perdre » / « affiner » seuls ne répondent pas à « déjà testé ». */
 function looksLikeObjectifOnly(text) {
@@ -2919,6 +2919,10 @@ function gaillardNextQuestion(family, qualification, leadTexts, seya) {
     }
   } else if (!gaillardDetailKnown(family, qualification, leadTexts)) {
     return { step: "need", text: gaillard.needQuestion(family) };
+  }
+  // Une fois le bilan proposé, on ne revient pas en arrière (kilos, zones, déjà testé).
+  if (family === "minceur" && qualification.pathOffered) {
+    return null;
   }
   // Ballonnement ≠ objectif « kilos à perdre » : on ne force pas la question kilos.
   if (
@@ -3143,6 +3147,14 @@ function gaillardLeadReply(conversation, text, seya, slots, extras = {}) {
       /je (vais|veux) (bien )?(faire |venir )?(pour )?(le |la |l')?(bilan|seance|decouverte)/.test(
         normalize(text),
       ));
+  if (!softPathAccept && (gaillard.asksTrialWhen(text) || gaillard.asksDiscoveryFree(text))) {
+    const offer = `${base.offerLabel || ""} ${brief?.pricing?.bilan || ""} ${brief?.pricing?.discovery || ""}`;
+    const known = gaillard.asksTrialWhen(text)
+      ? gaillard.trialWhenReply(brief?.pricing || {}, offer)
+      : gaillard.discoveryOfferedReply(brief?.pricing || {}, offer) ||
+        "Oui, le bilan et la séance découverte d’environ 20 minutes sont offerts.";
+    return answer(known.includes("?") ? known : `${known} ${gaillard.pathQuestion()}`);
+  }
   // Prix cryo demandé sans tarif séance cryo en fiche → ne pas présenter le forfait 500 € comme prix cryo.
   if (
     !softPathAccept &&

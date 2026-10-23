@@ -344,6 +344,73 @@ test("Gaillard capture : après graisse du ventre, une question, sans consigne n
   assert.doesNotMatch(lastSeya(conversation), /Quelest|votreobjectif|Leparcours|comprendun/i);
 });
 
+test("Gaillard Rose : pas de lecture, séance offerte, essai transmis", async () => {
+  const settings = {
+    ...LIVE_MINCEUR_BRIEF,
+    offerMaps: [
+      {
+        match: "minceur",
+        label: "Bilan minceur complet + séance découverte d’environ 20 minutes offerts",
+      },
+    ],
+  };
+  async function sayRose(conversation, text) {
+    const result = await generateSeyaReply({
+      conversation,
+      text,
+      seya: settings,
+      appointments: [],
+      hours: hours(),
+      centerName: GAILLARD,
+      centerAddress: "58 rue de la Libération, 74240 Gaillard",
+      centerId: "gaillard",
+      now: NOW,
+    });
+    assert.equal(result.shouldBook, null);
+    return result.conversation;
+  }
+  let conversation = startConversation(
+    {
+      leadId: "lead-rose",
+      centerId: "gaillard",
+      firstName: "Rose",
+      phone: "0611223344",
+      treatment: "Soin minceur",
+      campaign: "minceur",
+    },
+    GAILLARD,
+    settings,
+  );
+  conversation = await sayRose(conversation, "Mon ventre");
+  conversation = await sayRose(conversation, "Retrouver une belle silhouette");
+  conversation = await sayRose(conversation, "Non");
+  assert.match(lastSeya(conversation), /Souhaitez-vous que je fasse remonter|bilan minceur offert/i);
+  assert.doesNotMatch(lastSeya(conversation), /approche globale|technologies avancées|compléments alimentaires|prescris|explique que/i);
+
+  conversation = await sayRose(
+    conversation,
+    "Je ne mange pas beaucoup je fait attention\nLe but c’est de perdre du poids repidement\nSurtout avoir un ventre plat",
+  );
+  assert.doesNotMatch(lastSeya(conversation), /Combien de kilos/i);
+  assert.match(lastSeya(conversation), /Souhaitez-vous que je fasse remonter|bilan minceur offert/i);
+
+  conversation = await sayRose(conversation, "Je ne cet pas\nJe verrais sa avec vous");
+  assert.doesNotMatch(lastSeya(conversation), /Je reste disponible|Je n’ai pas cette information/i);
+  assert.match(lastSeya(conversation), /Souhaitez-vous que je fasse remonter|bilan minceur offert|rappellera/i);
+
+  conversation = await sayRose(conversation, "La 1iere séance est gratuite ?");
+  assert.match(lastSeya(conversation), /Oui, le bilan et la séance découverte d’environ 20 minutes sont offerts/i);
+  assert.doesNotMatch(lastSeya(conversation), /Je n’ai pas cette information/i);
+
+  conversation = await sayRose(conversation, "Je pourrais faire un essaie qd");
+  assert.match(lastSeya(conversation), /offert|rappelle|remonter/i);
+  assert.doesNotMatch(lastSeya(conversation), /Je reste disponible|Je n’ai pas cette information/i);
+
+  conversation = await sayRose(conversation, "Oui je veux bien");
+  assert.equal(conversation.status, "À recontacter");
+  assert.match(lastSeya(conversation), /rappellera/i);
+});
+
 test("Gaillard : mention alimentaire dans un message précédent ne saute pas « déjà testé »", async () => {
   let conversation = startConversation(
     {

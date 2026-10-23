@@ -103,21 +103,21 @@ const SUPPORT_TOPICS = [
   /reequilibrage|aliment|nutrition|regime|coaching/,
 ];
 
-const SAFE_MINCEUR_PATH =
-  "Le parcours comprend un accompagnement au rééquilibrage alimentaire, avec un suivi sur application.";
+const SAFE_MINCEUR_PATH = "Le bilan et la séance découverte sont offerts.";
+const PATH_FLUFF = /approche globale|technologies avancees|selon vos besoins/;
 
-/** Accompagnement minceur de la fiche (rééquilibrage, application, compléments), sans question. */
+/** Accompagnement minceur de la fiche (rééquilibrage, application), une phrase, sans consigne. */
 function minceurPathFacts(sources = [], pricing = {}) {
   const support = findFacts(
     sources,
-    /reequilibrage|aliment|nutrition|application|appli|complement|physio|suivi/,
-    3,
-  ).filter((fact) => !leaksInternalBrief(fact));
+    /reequilibrage|application|appli/,
+    1,
+  ).filter((fact) => !leaksInternalBrief(fact) && !PATH_FLUFF.test(normalize(fact)));
   if (support.length) {
-    return support.join(" ");
+    return support[0];
   }
-  if (/offert|gratuit/i.test(String(pricing?.bilan || ""))) {
-    return `${SAFE_MINCEUR_PATH} Le bilan minceur est offert.`;
+  if (/offert|gratuit/i.test(`${pricing?.bilan || ""} ${pricing?.discovery || ""}`)) {
+    return SAFE_MINCEUR_PATH;
   }
   return SAFE_MINCEUR_PATH;
 }
@@ -240,6 +240,40 @@ function asksBookingNow(text) {
     ) &&
     (/rdv|rendez|creneau|venir|reserver|bloquer/.test(value) || /\?/.test(String(text || "")))
   );
+}
+
+function asksDiscoveryFree(text) {
+  const value = normalize(text);
+  if (/ensuite|apres|suivant|forfait|cure|pack/.test(value)) {
+    return false;
+  }
+  return (
+    /(1[eè]?re|premiere|1ere|1iere) seance/.test(value) ||
+    ((/seance|essai|decouverte|bilan/.test(value)) && /gratuit|offert/.test(value))
+  );
+}
+
+function asksTrialWhen(text) {
+  const value = normalize(text);
+  return (
+    /(essai|essaie|essayer|decouverte).{0,28}(\bquand\b|\bqd\b|dispo|disponible)/.test(value) ||
+    /(\bquand\b|\bqd\b).{0,28}(essai|essayer|decouverte|venir|seance)/.test(value)
+  );
+}
+
+function discoveryOfferedReply(pricing = {}, offer = "") {
+  const hay = `${pricing?.bilan || ""} ${pricing?.discovery || ""} ${offer}`;
+  if (!/offert|gratuit|d[ée]couverte/i.test(hay)) {
+    return "";
+  }
+  return "Oui, le bilan et la séance découverte d’environ 20 minutes sont offerts.";
+}
+
+function trialWhenReply(pricing = {}, offer = "") {
+  const known =
+    discoveryOfferedReply(pricing, offer) ||
+    "Le bilan et la séance découverte d’environ 20 minutes sont offerts.";
+  return `${known} Je ne fixe pas les horaires : un expert ou une experte du centre vous rappelle pour organiser l’essai.`;
 }
 
 function asksWhiteHairLaser(text) {
@@ -744,10 +778,12 @@ module.exports = {
   asksChildCompanion,
   asksCountry,
   asksDeviceCompare,
+  asksDiscoveryFree,
   asksIfAi,
   asksLanguageHelp,
   asksProcess,
   asksTechnology,
+  asksTrialWhen,
   asksWhiteHairLaser,
   availabilityContext,
   availabilityMention,
@@ -761,6 +797,7 @@ module.exports = {
   cryoPriceUnknownReply,
   declinedReply,
   declinesOffer,
+  discoveryOfferedReply,
   describesBloating,
   deviceCompareReply,
   durationReply,
@@ -805,6 +842,7 @@ module.exports = {
   serviceOfferedReply,
   supportTopicFacts,
   technologyReply,
+  trialWhenReply,
   triedObjectifAckReply,
   triedQuestion,
   validatedModality,

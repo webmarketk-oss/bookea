@@ -550,7 +550,7 @@ test("Gaillard : conversation de la capture, sans consigne recopiée ni rappel s
     "10 kilos ça sera déjà bien",
     "Non enfin juste régime",
   ]);
-  assert.match(lastSeya(conversation), /rééquilibrage alimentaire.*application.*Physiomins/);
+  assert.match(lastSeya(conversation), /rééquilibrage alimentaire|séance découverte sont offerts|bilan minceur offert/i);
   assert.match(lastSeya(conversation), /bilan minceur offert.*\?$/);
   conversation = await say(conversation, "Et vous faites l'épilation laser", GAILLARD, structured);
   assert.match(lastSeya(conversation), /^Oui, nous proposons l’épilation laser\./);

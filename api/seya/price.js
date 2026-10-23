@@ -100,7 +100,12 @@ function classifyPriceQuestion(text) {
   ) {
     return "next_session";
   }
-  if (/decouverte/.test(value) && asks) {
+  if (
+    (/decouverte/.test(value) ||
+      /(1[eè]?re|premiere|1ere|1iere) seance/.test(value) ||
+      (/essai/.test(value) && /gratuit|offert/.test(value))) &&
+    asks
+  ) {
     return "discovery";
   }
   if (/bilan/.test(value) && asks) {
@@ -562,6 +567,13 @@ function isNearDuplicate(draft, previous) {
 function draftMissesCurrentQuestion(draft, text, conversation) {
   const intent = classifyPriceQuestion(text) || "";
   const previous = lastSeyaText(conversation);
+  if (
+    intent === "discovery" &&
+    /decouverte|premiere seance|1[eè]?re seance/.test(normalize(draft)) &&
+    /offert|gratuit/.test(normalize(draft))
+  ) {
+    return false;
+  }
   if (isNearDuplicate(draft, previous)) {
     return true;
   }
