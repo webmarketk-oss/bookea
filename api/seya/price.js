@@ -75,7 +75,10 @@ function classifyPriceQuestion(text) {
   if (isPriceRepeatComplaint(text)) {
     return "repeat_complaint";
   }
-  if (/combien de (temps|seance|seances|rdv|fois|jours)/.test(value)) {
+  if (
+    /combien de (temps|rdv|fois|jours)/.test(value) &&
+    !/prix|tarif|coute|cout|gratuit|offert/.test(value)
+  ) {
     return "";
   }
   // « Ok je vais faire la séance gratuit ensuite je verrai » = acceptation, pas une demande de tarif.
@@ -126,7 +129,10 @@ function isPriceRepeatComplaint(text) {
 
 function asksPrice(text) {
   const raw = String(text || "");
-  if (/combien de (temps|seance|seances|rdv|fois|jours)/i.test(raw)) {
+  if (
+    /combien de (temps|rdv|fois|jours)/i.test(raw) &&
+    !/prix|tarif|co[uû]te|\bcout\b|gratuit|offert/i.test(raw)
+  ) {
     return false;
   }
   return (
@@ -574,6 +580,9 @@ function draftMissesCurrentQuestion(draft, text, conversation) {
   ) {
     return false;
   }
+  if (/€/.test(draft) && /forfait|8 seances|zone/.test(normalize(draft))) {
+    return false;
+  }
   if (isNearDuplicate(draft, previous)) {
     return true;
   }
@@ -661,8 +670,19 @@ function buildPriceReply(text, seya, conversation) {
     (intent || asksPrice(text))
   ) {
     const qualification = conversation?.qualification || {};
+    const zoneHay = [
+      text,
+      qualification.zone,
+      qualification.detail,
+      ...[...(conversation?.messages || [])]
+        .filter((item) => item.author === "lead")
+        .map((item) => item.text)
+        .slice(-6),
+    ]
+      .filter(Boolean)
+      .join(" ");
     return (
-      laserZonePriceReply(policy.zoneGrid, text) ||
+      laserZonePriceReply(policy.zoneGrid, zoneHay) ||
       laserZonePriceReply(policy.zoneGrid, `${qualification.zone || ""} ${qualification.detail || ""}`) ||
       askZoneReply(policy.zoneGrid, isFree(policy.bilan) || isFree(policy.discovery))
     );

@@ -508,6 +508,36 @@ test("Gaillard laser : zone imprécise ou sans zone, Seya demande laquelle", () 
   assert.doesNotMatch(known, /160/);
 });
 
+test("Gaillard laser : prix + combien de séances + à vie, jambe complète déjà dite", () => {
+  const { buildPriceReply } = require("./price");
+  const settings = {
+    treatmentBriefs: [
+      {
+        name: "Épilation laser",
+        pricing: {
+          bilan: "Offert et sans engagement",
+          discovery: "Test laser offert et sans engagement",
+          sessionPolicy: "after_bilan",
+          package: GAILLARD_GRID,
+        },
+      },
+    ],
+  };
+  const text = buildPriceReply(
+    "Quel sont les prix svp\nEt combien de seances faut til ?\nCest a vie ou bien ?",
+    settings,
+    {
+      treatment: "Épilation laser",
+      qualification: { need: "Épilation laser", zone: "jambes complètes" },
+      messages: [{ author: "lead", text: "Seulement les jambes complète" }],
+    },
+  );
+  assert.match(text, /1 490 €/);
+  assert.match(text, /8 séances/);
+  assert.doesNotMatch(text, /Je n’ai pas cette information/i);
+  assert.doesNotMatch(text, GRID_LEAK);
+});
+
 test("Gaillard laser : barbe sur devis, ventre homme/femme précisé", () => {
   assert.match(gaillardGridPrice("combien pour la barbe ?"), /barbe.*sur devis/);
   const ventre = gaillardGridPrice("c'est combien le ventre en laser ?");

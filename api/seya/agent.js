@@ -20,6 +20,7 @@ const {
   isPriceRepeatComplaint,
   resolvePricePolicy,
   unknownPriceReply,
+  asksPrice,
 } = require("./price");
 const {
   awaitingHealthReply,
@@ -287,16 +288,6 @@ function isJunkTreatment(value) {
 
 function isOptOut(text, conversation) {
   return isLeadRefusal(text, conversation);
-}
-
-function asksPrice(text) {
-  const raw = String(text || "");
-  if (/combien de (temps|seance|seances|rdv|fois|jours)/i.test(raw)) {
-    return false;
-  }
-  return /prix|tarif|co[uû]te|\bcout\b|donne le prix|c['’ ]?est combien|combien (coute|le bilan)/i.test(
-    raw,
-  );
 }
 
 function faqReply(text, extras = {}) {
@@ -1133,6 +1124,9 @@ function extractZone(text) {
     "menton",
     "levre",
   ];
+  if (/jambe/.test(value) && /complet|entier/.test(value)) {
+    return "jambes complètes";
+  }
   return zones
     .filter((zone) => {
       if (
@@ -3169,15 +3163,33 @@ function gaillardLeadReply(conversation, text, seya, slots, extras = {}) {
     (asksPrice(text) ||
       classifyPriceQuestion(text) ||
       isPriceRepeatComplaint(text) ||
-      priceFollowUp)
+      priceFollowUp ||
+      gaillard.asksSessionCount(text) ||
+      gaillard.asksPermanence(text))
   ) {
     const priceText = priceFollowUp
       ? `${text} c'est combien`
       : text;
-    const reply = priceReply(seya, merged, { ...base, _seya: seya }, priceText);
-    return (inferCareFamily(priceText) || priceFamily) === "epilation"
-      ? { ...answer(epilationPriceText(reply)), locked: true }
-      : answer(reply);
+    const priced =
+      asksPrice(text) || classifyPriceQuestion(text) || isPriceRepeatComplaint(text) || priceFollowUp
+        ? priceReply(seya, merged, { ...base, _seya: seya }, priceText)
+        : "";
+    const spoken = [
+      priced,
+      gaillard.asksSessionCount(text) && !/8 séances/.test(priced)
+        ? gaillard.sessionCountReply(topicFamily || priceFamily, sourceBag)
+        : "",
+      gaillard.asksPermanence(text)
+        ? gaillard.permanenceReply(topicFamily || priceFamily)
+        : "",
+    ]
+      .filter(Boolean)
+      .join(" ");
+    if (spoken) {
+      return (inferCareFamily(priceText) || priceFamily) === "epilation"
+        ? { ...answer(epilationPriceText(spoken)), locked: true }
+        : answer(spoken);
+    }
   }
 
   if (gaillard.modalityTopic(text)) {

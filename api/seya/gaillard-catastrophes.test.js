@@ -432,3 +432,65 @@ test("Gaillard : mention alimentaire dans un message précédent ne saute pas «
   assert.doesNotMatch(lastSeya(conversation), /prescris|explique que/i);
   assert.doesNotMatch(lastSeya(conversation), /Souhaitez-vous que je fasse remonter/i);
 });
+
+const GAILLARD_LASER_GRID =
+  "Tous les prix correspondent au programme de 8 séances : 6 séances + 2 séances d’entretien. FEMME : Aisselles : 296 € ; demi-jambes : 790 € ; trois quarts des jambes : 1 190 € ; jambes entières : 1 490 €. OFFRE : Les aisselles sont offertes pour toute zone du corps achetée. Le bilan pilaire et le test laser sont gratuits et sans engagement.";
+
+test("Gaillard Erblina : prix + séances + à vie, sans « je n’ai pas cette information »", async () => {
+  const settings = {
+    ...seya,
+    treatmentBriefs: [
+      {
+        name: "Épilation définitive",
+        brief: "Épilation laser définitive. Bilan pilaire et test laser offerts.",
+        pricing: {
+          bilan: "Offert et sans engagement",
+          discovery: "Test laser offert et sans engagement",
+          sessionPolicy: "after_bilan",
+          package: GAILLARD_LASER_GRID,
+        },
+      },
+    ],
+  };
+  async function sayLaser(conversation, text) {
+    const result = await generateSeyaReply({
+      conversation,
+      text,
+      seya: settings,
+      appointments: [],
+      hours: hours(),
+      centerName: GAILLARD,
+      centerAddress: "58 rue de la Libération, 74240 Gaillard",
+      centerId: "gaillard",
+      now: NOW,
+    });
+    assert.equal(result.shouldBook, null);
+    return result.conversation;
+  }
+  let conversation = startConversation(
+    {
+      leadId: "lead-erblina",
+      centerId: "gaillard",
+      firstName: "Erblina",
+      phone: "0611223344",
+      treatment: "Épilation définitive",
+      campaign: "laser",
+    },
+    GAILLARD,
+    settings,
+  );
+  conversation = await sayLaser(conversation, "Bonsoir,\nSeulement les jambes complète");
+  assert.match(lastSeya(conversation), /déjà testé/i);
+  conversation = await sayLaser(
+    conversation,
+    "Quel sont les prix svp\nEt combien de seances faut til ?\nCest a vie ou bien ?",
+  );
+  assert.match(lastSeya(conversation), /1 490 €/);
+  assert.match(lastSeya(conversation), /8 séances/);
+  assert.match(lastSeya(conversation), /définitive/i);
+  assert.doesNotMatch(lastSeya(conversation), /Je n’ai pas cette information/i);
+  assert.match(lastSeya(conversation), /déjà testé/i);
+  conversation = await sayLaser(conversation, "Non");
+  assert.equal(conversation.status, "À recontacter");
+  assert.match(lastSeya(conversation), /rappellera/i);
+});

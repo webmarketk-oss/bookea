@@ -180,6 +180,39 @@ function missingPriceReply() {
   return "Je n’ai pas encore le tarif de cette zone : l’équipe pourra vous le confirmer.";
 }
 
+function asksSessionCount(text) {
+  return /combien de seances|nombre de seances|nb de seances|faut[- ]il .{0,20}seances|ca (prend|fait) combien de seances/.test(
+    normalize(text),
+  );
+}
+
+function asksPermanence(text) {
+  const value = normalize(text);
+  return (
+    /a vie|c[' ]est (pour )?(la vie|toujours)|les poils (reviennent|repartent)|resultat (permanent|definitif)|c[' ]est definitif/.test(
+      value,
+    )
+  );
+}
+
+function sessionCountReply(family, sources = []) {
+  const hay = normalize(sources.filter(Boolean).join(" "));
+  if (family === "epilation" && /8 seances/.test(hay)) {
+    return "Le forfait comprend 8 séances : 6 séances + 2 séances d’entretien.";
+  }
+  if (family === "epilation") {
+    return "Le nombre de séances se précise au bilan pilaire, selon la zone et la pilosité.";
+  }
+  return "";
+}
+
+function permanenceReply(family) {
+  if (family === "epilation") {
+    return "C’est une épilation définitive : le protocole se précise au bilan pilaire, offert avec le test laser.";
+  }
+  return "";
+}
+
 function healthNotedReply() {
   return "Je note cette information pour l’équipe. Une validation médicale est nécessaire avant toute séance : l’équipe vérifiera si le soin est adapté à votre situation.";
 }
@@ -781,7 +814,9 @@ module.exports = {
   asksDiscoveryFree,
   asksIfAi,
   asksLanguageHelp,
+  asksPermanence,
   asksProcess,
+  asksSessionCount,
   asksTechnology,
   asksTrialWhen,
   asksWhiteHairLaser,
@@ -831,6 +866,7 @@ module.exports = {
   noteTriedMethodsReply,
   otherClinicCompareReply,
   pathQuestion,
+  permanenceReply,
   preferenceNotedPrefix,
   preferenceReply,
   processReply,
@@ -840,6 +876,7 @@ module.exports = {
   relanceText,
   safeGaillardText,
   serviceOfferedReply,
+  sessionCountReply,
   supportTopicFacts,
   technologyReply,
   trialWhenReply,
