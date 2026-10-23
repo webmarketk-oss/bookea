@@ -681,6 +681,7 @@ async function createCrmLeadRecord(input: NewCrmLeadInput) {
     event_type: "system",
     note: `Lead créé avec le statut ${input.status}.`,
   });
+  void requestNewLeadNotification(supabase, lead.id);
 
   const { leads } = await loadCrmLeads();
   const createdLead = leads.find((item) => item.id === lead.id);
@@ -694,6 +695,28 @@ async function createCrmLeadRecord(input: NewCrmLeadInput) {
     source: input.source.trim() || createdLead.source,
     campaign: input.campaign.trim() || createdLead.campaign,
   };
+}
+
+// L’e-mail « Nouveau prospect » part côté serveur ; un échec ne doit jamais bloquer la création.
+async function requestNewLeadNotification(supabase: SupabaseClient, leadId: string) {
+  try {
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+    if (!session?.access_token) {
+      return;
+    }
+    await fetch("/api/center/lead-notify", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${session.access_token}`,
+      },
+      body: JSON.stringify({ action: "lead", leadId }),
+    });
+  } catch {
+    // Notification facultative.
+  }
 }
 
 const leadWriteQueues = new Map<string, Promise<unknown>>();

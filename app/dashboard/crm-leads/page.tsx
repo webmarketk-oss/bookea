@@ -14,6 +14,7 @@ import ProspectsTable from "@/components/crm/prospects-table";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
+import { readActiveCenterId, saveActiveCenterId } from "@/lib/center-access";
 import { inactiveLeadStatuses, leadStatuses } from "@/lib/lead-statuses";
 import { matchesPersonSearch } from "@/lib/person-search";
 import {
@@ -393,6 +394,13 @@ export default function CRMLeadsPage() {
   }
 
   useEffect(() => {
+    // Lien « Consulter le prospect » : ouvre le centre du prospect (ignoré si le compte n’y a pas accès).
+    const linkedCenterId = String(
+      new URLSearchParams(window.location.search).get("center") || "",
+    ).trim();
+    if (linkedCenterId && linkedCenterId !== readActiveCenterId()) {
+      saveActiveCenterId(linkedCenterId);
+    }
     // eslint-disable-next-line react-hooks/set-state-in-effect
     refreshCrmLeads();
   }, []);

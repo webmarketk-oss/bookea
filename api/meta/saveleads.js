@@ -4,6 +4,7 @@ const { careLabelForFamily, inferCareFamily } = require("../seya/care-family");
 const { welcomeNewLead } = require("../seya/welcome");
 const { resolvePersonName } = require("../../lib/seya-person-name");
 const { findCenterBySlug } = require("./center-slug");
+const { notifyNewLead } = require("../center/_lead-notify");
 
 module.exports = async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
@@ -132,16 +133,31 @@ module.exports = async function handler(req, res) {
         center_name: center.name,
       });
     }
+    const fileImport = isFileImport(payload, req.query);
+    const welcomeOff = isNoFlag(firstValue(req.query?.welcome, payload?.welcome));
     const leadId = await importPostedLead(supabase, center.id, imported, {
       possibleDuplicate: Boolean(existingId),
       sourceName,
       importTool: origin.importTool,
       fields,
-      fileImport: isFileImport(payload, req.query),
+      fileImport,
     });
 
+    const notifyFlag = firstValue(req.query?.notify, payload?.notify);
+    const skipNotify =
+      Boolean(existingId) ||
+      isNoFlag(notifyFlag) ||
+      ((fileImport || welcomeOff) && !isYesFlag(notifyFlag));
+    const notifying = skipNotify
+      ? Promise.resolve({ sent: false, reason: existingId ? "duplicate" : "import" })
+      : notifyNewLead(supabase, {
+          center,
+          leadId,
+          lead: { ...imported, offer: imported.offer || imported.campaign || imported.treatment },
+        });
+
     let whatsapp = { sent: false, skipped: "no_phone" };
-    if (imported.phone && isNoFlag(firstValue(req.query?.welcome, payload?.welcome))) {
+    if (imported.phone && welcomeOff) {
       whatsapp = { sent: false, skipped: "welcome_disabled" };
     } else if (imported.phone) {
       whatsapp = await welcomeNewLead(supabase, center, {
@@ -156,6 +172,7 @@ module.exports = async function handler(req, res) {
         return { sent: false, skipped: "welcome_failed" };
       });
     }
+    const notification = await notifying;
 
     return res.status(200).json({
       ok: true,
@@ -164,6 +181,7 @@ module.exports = async function handler(req, res) {
       center: center.slug,
       center_name: center.name,
       whatsapp,
+      notification: { sent: notification.sent, reason: notification.reason },
     });
   } catch (error) {
     console.error("[meta/saveleads]", error);
@@ -1599,7 +1617,13 @@ function queryFields(query) {
 
   const result = {};
   for (const [key, value] of Object.entries(query)) {
-    if (key === "center" || key === "center_slug" || key === "welcome" || key === "doublon") {
+    if (
+      key === "center" ||
+      key === "center_slug" ||
+      key === "welcome" ||
+      key === "doublon" ||
+      key === "notify"
+    ) {
       continue;
     }
     const text = Array.isArray(value) ? value[0] : value;

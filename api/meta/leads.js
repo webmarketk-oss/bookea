@@ -4,6 +4,7 @@ const { careLabelForFamily, inferCareFamily } = require("../seya/care-family");
 const { welcomeNewLead } = require("../seya/welcome");
 const { resolvePersonName } = require("../../lib/seya-person-name");
 const { findCenterBySlug } = require("./center-slug");
+const { notifyNewLead } = require("../center/_lead-notify");
 
 const GRAPH_VERSION = "v26.0";
 
@@ -153,12 +154,20 @@ async function importMetaLead(supabase, change) {
     note,
   });
 
+  const { data: center } = await supabase
+    .from("centers")
+    .select("id,name,slug,settings")
+    .eq("id", centerId)
+    .maybeSingle();
+
+  await notifyNewLead(supabase, {
+    center,
+    leadId: crmLead.id,
+    receivedAt: now,
+    lead: { ...mapped, offer: mapped.campaign || mapped.treatment },
+  });
+
   if (mapped.phone) {
-    const { data: center } = await supabase
-      .from("centers")
-      .select("id,name,slug,settings")
-      .eq("id", centerId)
-      .maybeSingle();
     if (center) {
       await welcomeNewLead(supabase, center, {
         leadId: crmLead.id,

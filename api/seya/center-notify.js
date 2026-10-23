@@ -268,6 +268,7 @@ async function sendBrevoToCenter({
   to,
   subject,
   text,
+  html,
   centerName,
   senderEmail,
   senderName,
@@ -297,7 +298,7 @@ async function sendBrevoToCenter({
       to: [{ email: to }],
       subject: String(subject || "").slice(0, 200),
       textContent: text,
-      htmlContent: toHtml(text),
+      htmlContent: html || toHtml(text),
       tags:
         Array.isArray(tags) && tags.length > 0 ? tags : ["bookea-seya-center"],
     }),

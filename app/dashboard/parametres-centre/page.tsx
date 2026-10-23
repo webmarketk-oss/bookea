@@ -71,6 +71,7 @@ import {
   saveLeadOfferRoutes,
   type LeadOfferRoute,
 } from "@/lib/lead-offer-routes";
+import { loadLeadNotifySettings, saveLeadNotifySettings } from "@/lib/lead-notify-settings";
 
 type StripeConnectStatus = {
   ok?: boolean;
@@ -2553,6 +2554,7 @@ export default function CenterSettingsPage() {
       {activeTab === "sources" && (
         <section className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-sm">
           <InboundLeadsCard slug={center.slug} />
+          <NewLeadNotifyCard centerId={loadedCenterId} />
           <LeadOfferRoutesCard />
           <div className="mt-8 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
             <SectionTitle
@@ -3267,6 +3269,100 @@ function LeadOfferRoutesCard() {
         <button
           type="button"
           disabled={!loaded || saving}
+          onClick={() => void save()}
+          className="inline-flex h-10 items-center gap-2 rounded-xl bg-slate-950 px-3 text-sm font-medium text-white disabled:opacity-60"
+        >
+          <Save className="h-4 w-4" />
+          {saving ? "Enregistrement…" : "Enregistrer"}
+        </button>
+        {notice ? <p className="text-sm font-medium text-slate-600">{notice}</p> : null}
+      </div>
+    </div>
+  );
+}
+
+function NewLeadNotifyCard({ centerId }: { centerId: string }) {
+  const [available, setAvailable] = useState(false);
+  const [enabled, setEnabled] = useState(false);
+  const [emailsText, setEmailsText] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [notice, setNotice] = useState("");
+
+  useEffect(() => {
+    if (!centerId) {
+      return;
+    }
+    let active = true;
+    void loadLeadNotifySettings(centerId)
+      .then((settings) => {
+        if (!active) {
+          return;
+        }
+        setAvailable(settings.available);
+        setEnabled(settings.enabled);
+        setEmailsText(
+          (settings.emails.length ? settings.emails : settings.suggestedEmails).join("\n"),
+        );
+      })
+      .catch(() => null);
+    return () => {
+      active = false;
+    };
+  }, [centerId]);
+
+  if (!available) {
+    return null;
+  }
+
+  async function save(nextEnabled = enabled) {
+    setSaving(true);
+    setNotice("");
+    try {
+      const saved = await saveLeadNotifySettings(centerId, {
+        enabled: nextEnabled,
+        emails: emailsText.split(/[\s,;]+/).filter(Boolean),
+      });
+      setEnabled(saved.enabled);
+      setEmailsText(saved.emails.join("\n"));
+      setNotice(saved.enabled ? "Notifications activées." : "Notifications désactivées.");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Enregistrement impossible.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="mt-5 rounded-[24px] border border-emerald-100 bg-emerald-50/60 p-5">
+      <SectionTitle
+        icon={<Share2 className="h-4 w-4" />}
+        title="E-mail à chaque nouveau prospect"
+        subtitle="Un e-mail « Nouveau prospect » part à chaque prospect enregistré (Systeme.io, Meta, ajout manuel). Pas d’e-mail pour une modification, un doublon ou un import de fichier."
+      />
+      <div className="mt-4 grid gap-3">
+        <label className="grid gap-1 text-sm font-medium text-slate-700">
+          Adresses destinataires (une par ligne)
+          <textarea
+            value={emailsText}
+            onChange={(event) => {
+              setNotice("");
+              setEmailsText(event.target.value);
+            }}
+            rows={3}
+            placeholder="accueil@centre.fr"
+            className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-violet-500"
+          />
+        </label>
+      </div>
+      <div className="mt-4 flex flex-wrap items-center gap-3">
+        <Toggle
+          checked={enabled}
+          label={enabled ? "Notifications activées" : "Notifications désactivées"}
+          onClick={() => void save(!enabled)}
+        />
+        <button
+          type="button"
+          disabled={saving}
           onClick={() => void save()}
           className="inline-flex h-10 items-center gap-2 rounded-xl bg-slate-950 px-3 text-sm font-medium text-white disabled:opacity-60"
         >
