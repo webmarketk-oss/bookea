@@ -2808,15 +2808,44 @@ function leadReplyCore(conversation, text, seya, slots, extras = {}) {
 }
 
 const GAILLARD_MINCEUR_OBJECTIF =
-  /perdre|maigrir|mincir|kilos?|\bkg\b|cellulite|peau d'orange|graisse|bourrelet|capiton|affiner|tonifier|raffermir|fermete|silhouette/;
+  /perdre|perde|perd\b|maigrir|mincir|kilos?|\bkg\b|cellulite|peau d'orange|graisse|bourrelet|capiton|affiner|tonifier|raffermir|fermete|silhouette|gonfl|ballonn/;
 const GAILLARD_MINCEUR_ZONE =
   /ventre|cuisse|hanche|fesse|bras|culotte de cheval|poignee d'amour|dos|jambes?/;
 const GAILLARD_VISAGE_CONCERN =
-  /ride|ridule|acne|bouton|tache|eclat|relach|teint|cerne|pore|fermete|hydrat|rajeun|terne|peau (seche|grasse|sensible)|rougeur|cicatrice|double menton|ovale/;
+  /ride|ridule|acne|bouton|tache|eclat|relach|teint|cerne|pore|fermete|hydrat|rajeun|terne|peau (seche|grasse|sensible)|rougeur|cicatrice|double menton|ovale|ferme/;
 const GAILLARD_EPILATION_ZONE =
-  /jambe|maillot|aisselle|bras|levre|menton|visage|dos|fesse|ventre|cuisse|torse|barbe|sourcil|nuque|epaule|pied|main|sillon|integral|bresilien|corps entier|joue|favori/;
+  /jambe|maillot|intime|parties? intimes?|aisselle|bras|levre|menton|visage|dos|fesse|ventre|cuisse|torse|barbe|sourcil|nuque|epaule|pied|main|sillon|integral|bresilien|corps entier|joue|favori/;
 const GAILLARD_TRIED =
-  /deja (fait|essaye|teste)|jamais (fait|essaye|teste)|premiere fois|rien\b|a part |reequilibrage|aliment|sport|regime|aucun(e)? (soin|solution|methode|traitement)|j'ai (fait|essaye|teste) (des?|du|de la|un|une|le|la|plusieurs) (regime|soin|seance|laser|cryo|epil|cire|massage|traitement|methode|solution|lumiere|presso|radiofrequence)/;
+  /deja (fait|essaye|teste)|jamais (fait|essaye|teste)|premiere fois|rien\b|a part |reequilibrage|aliment|sport|salle|regime|drainage|aucun(e)? (soin|solution|methode|traitement)|j'ai (fait|essaye|teste) (des?|du|de la|un|une|le|la|plusieurs) (regime|soin|seance|laser|cryo|epil|cire|massage|traitement|methode|solution|lumiere|presso|radiofrequence|drainage)/;
+const GAILLARD_KILOS_UNKNOWN =
+  /je ne (sais|ses) pas|je sais pas|aucune idee|pas (d'|de )?idee|pas (de )?chiffre|je (ne )?connais pas/;
+
+/** « Perdre » / « affiner » seuls ne répondent pas à « déjà testé ». */
+function looksLikeObjectifOnly(text) {
+  const value = normalize(text)
+    .replace(/[!.,;:?…)(-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!value || value.length > 40) {
+    return false;
+  }
+  if (
+    GAILLARD_TRIED.test(value) ||
+    /^(oui|non)\b/.test(value) ||
+    /\d/.test(value) ||
+    /aimerais|voudrais|souhaite|kilos?|\bkg\b/.test(value)
+  ) {
+    return false;
+  }
+  if (/^(perdre|perde|perd|affiner|raffermir|maigrir|mincir|tonifier)(\s+\w+){0,3}$/.test(value)) {
+    return true;
+  }
+  return (
+    GAILLARD_MINCEUR_OBJECTIF.test(value) &&
+    !GAILLARD_MINCEUR_ZONE.test(value) &&
+    value.split(" ").length <= 3
+  );
+}
 
 function gaillardLeadTexts(conversation, text) {
   return [
@@ -2863,7 +2892,14 @@ function gaillardDetailKnown(family, qualification, leadTexts) {
 
 const GAILLARD_WEIGHT_LOSS =
   /perdre (du |de |des |quelques )?(poids|kilos?|kg)|maigrir|perte de poids|kilos? en trop|mincir/;
-const GAILLARD_KILOS_GIVEN = /\d+\s*(kg|kilos?)\b|(un|deux|trois|quatre|cinq|six|sept|huit|neuf|dix|quinze|vingt|trente) (kg|kilos?)\b/;
+const GAILLARD_KILOS_GIVEN =
+  /\d+\s*(kg|kilos?)\b|(un|deux|trois|quatre|cinq|six|sept|huit|neuf|dix|quinze|vingt|trente) (kg|kilos?)\b|non chiffre/;
+
+function gaillardMostlyBloating(leadTexts) {
+  const bloating = leadTexts.some((value) => /gonfl|ballonn/.test(value));
+  const weightLoss = leadTexts.some((value) => GAILLARD_WEIGHT_LOSS.test(value));
+  return bloating && !weightLoss;
+}
 
 function gaillardNextQuestion(family, qualification, leadTexts, seya) {
   if (!family) {
@@ -2884,9 +2920,11 @@ function gaillardNextQuestion(family, qualification, leadTexts, seya) {
   } else if (!gaillardDetailKnown(family, qualification, leadTexts)) {
     return { step: "need", text: gaillard.needQuestion(family) };
   }
+  // Ballonnement ≠ objectif « kilos à perdre » : on ne force pas la question kilos.
   if (
     family === "minceur" &&
     !qualification.kilos &&
+    !gaillardMostlyBloating(leadTexts) &&
     leadTexts.some((value) => GAILLARD_WEIGHT_LOSS.test(value)) &&
     !leadTexts.some((value) => GAILLARD_KILOS_GIVEN.test(value))
   ) {
@@ -3026,6 +3064,10 @@ function gaillardLeadReply(conversation, text, seya, slots, extras = {}) {
     locked: false,
   });
 
+  if (gaillard.mentionsOtherClinicVisit(text)) {
+    return answer(gaillard.otherClinicCompareReply());
+  }
+
   if (
     isOptOut(text, base) ||
     isWrongCenter(text) ||
@@ -3093,11 +3135,29 @@ function gaillardLeadReply(conversation, text, seya, slots, extras = {}) {
     ) &&
     (asksPrice(lastOtherLeadText(base, text)) ||
       classifyPriceQuestion(lastOtherLeadText(base, text)));
+  // « Ok je vais faire la séance gratuit » = acceptation du bilan, pas une question tarif.
+  const softPathAccept =
+    !/\?/.test(String(text || "")) &&
+    !/prix|tarif|coute|cout|combien/.test(normalize(text)) &&
+    (/(seance|bilan) (gratuit|offert)/.test(normalize(text)) ||
+      /je (vais|veux) (bien )?(faire |venir )?(pour )?(le |la |l')?(bilan|seance|decouverte)/.test(
+        normalize(text),
+      ));
+  // Prix cryo demandé sans tarif séance cryo en fiche → ne pas présenter le forfait 500 € comme prix cryo.
   if (
-    asksPrice(text) ||
-    classifyPriceQuestion(text) ||
-    isPriceRepeatComplaint(text) ||
-    priceFollowUp
+    !softPathAccept &&
+    /cryo|cryolipolyse/.test(normalize(text)) &&
+    (asksPrice(text) || classifyPriceQuestion(text)) &&
+    !/\d+\s*€/.test(String(brief?.pricing?.session || ""))
+  ) {
+    return answer(gaillard.cryoPriceUnknownReply());
+  }
+  if (
+    !softPathAccept &&
+    (asksPrice(text) ||
+      classifyPriceQuestion(text) ||
+      isPriceRepeatComplaint(text) ||
+      priceFollowUp)
   ) {
     const priceText = priceFollowUp
       ? `${text} c'est combien`
@@ -3131,6 +3191,36 @@ function gaillardLeadReply(conversation, text, seya, slots, extras = {}) {
     return informed(gaillard.childCompanionReply(sourceBag));
   }
 
+  if (gaillard.asksLanguageHelp(text)) {
+    return answer(gaillard.languageBarrierReply());
+  }
+
+  if (gaillard.asksWhiteHairLaser(text)) {
+    if (
+      !merged.tried &&
+      /jamais (fait|essaye|teste)|premiere fois|\bnon\b.{0,40}jamais/.test(normalize(text))
+    ) {
+      merged.tried = String(text || "").trim().slice(0, 160);
+    }
+    const zoneFromThread = gaillardLeadTexts(base, "")
+      .map((value) => {
+        const hit = value.match(
+          /\b(intime|maillot|aisselles?|jambes?|bras|levre|menton|visage|dos)\b/,
+        );
+        return hit ? hit[1] : "";
+      })
+      .find(Boolean);
+    const zoneLabel = String(merged.zone || base.qualification?.zone || zoneFromThread || "").trim();
+    return answer(gaillard.whiteHairLaserReply(text, zoneLabel));
+  }
+
+  if (gaillard.asksDeviceCompare(text)) {
+    const compared = gaillard.deviceCompareReply(text, sourceBag);
+    if (compared) {
+      return answer(compared);
+    }
+  }
+
   if (gaillard.asksBookingNow(text)) {
     return answer(gaillard.bookingCapabilityReply(handedOff));
   }
@@ -3155,7 +3245,10 @@ function gaillardLeadReply(conversation, text, seya, slots, extras = {}) {
   // Pendant la qualification, les réponses au parcours passent avant FAQ / services.
   const askedPath = gaillard.lastSeyaAskedPath(base);
   const wantsCallback =
-    gaillard.acceptsContinue(text) && (askedPath || /bilan|rappel/.test(normalize(text)));
+    gaillard.acceptsContinue(text) &&
+    (askedPath ||
+      merged.pathOffered ||
+      /bilan|rappel|(seance|bilan) (gratuit|offert)|decouverte/.test(normalize(text)));
   if (!handedOff && !asking && (!merged.declined || wantsCallback)) {
     const qualification = { ...merged };
     const said = String(text || "").trim().slice(0, 160);
@@ -3189,6 +3282,7 @@ function gaillardLeadReply(conversation, text, seya, slots, extras = {}) {
     if (
       gaillard.lastSeyaAskedTried(base) &&
       !qualification.tried &&
+      !looksLikeObjectifOnly(text) &&
       (/^(oui|non)\b/.test(normalize(text)) ||
         (!mentionsAvailability && gaillard.isAnswerLike(text)))
     ) {
@@ -3197,9 +3291,13 @@ function gaillardLeadReply(conversation, text, seya, slots, extras = {}) {
     if (
       gaillard.lastSeyaAskedKilos(base) &&
       !qualification.kilos &&
-      (/\d/.test(text) || (!mentionsAvailability && gaillard.isAnswerLike(text)))
+      (/\d/.test(text) ||
+        GAILLARD_KILOS_UNKNOWN.test(normalize(text)) ||
+        (!mentionsAvailability && gaillard.isAnswerLike(text)))
     ) {
-      qualification.kilos = said;
+      qualification.kilos = GAILLARD_KILOS_UNKNOWN.test(normalize(text))
+        ? "non chiffré"
+        : said;
     }
     const leadTexts = gaillardLeadTexts(base, text);
     const upcoming = gaillardNextQuestion(family, qualification, leadTexts, seya);
@@ -3220,6 +3318,48 @@ function gaillardLeadReply(conversation, text, seya, slots, extras = {}) {
         // Verrouillé : le polish IA ne doit pas remplacer une question ouverte par « un expert rappellera ».
         locked: true,
       });
+
+    if (gaillard.lastSeyaAskedTried(base) && !qualification.tried && looksLikeObjectifOnly(text)) {
+      if (!qualification.detail) {
+        qualification.detail = said;
+      }
+      return ask(gaillard.triedObjectifAckReply(family));
+    }
+
+    // Ballonnement : noter sans transformer en objectif kilos, puis poursuivre.
+    if (
+      gaillard.describesBloating(text) &&
+      !extras.bloatingNoted &&
+      !qualification.bloatingNoted
+    ) {
+      qualification.bloatingNoted = true;
+      const afterBloat = gaillardNextQuestion(family, qualification, leadTexts, seya);
+      const follow =
+        afterBloat?.step === "path"
+          ? gaillard.minceurPathReply(sourceBag, brief?.pricing || {})
+          : afterBloat?.text || gaillard.triedQuestion(family);
+      return ask(`${gaillard.bloatingNotedReply()} ${follow}`.trim());
+    }
+
+    // Intérêt soft (« ça peut faire du bien ») : reprendre la proposition de bilan, sans clôturer.
+    if (gaillard.expressesInterest(text) && (askedPath || qualification.pathOffered || family === "minceur")) {
+      qualification.pathOffered = true;
+      return ask(
+        [gaillard.minceurPathFacts(sourceBag, brief?.pricing || {}), gaillard.pathQuestion()]
+          .filter(Boolean)
+          .join(" "),
+      );
+    }
+
+    // Méthodes déjà testées (drainage, rééquilibrage…) après la proposition de bilan : noter, reposer le path.
+    if ((askedPath || qualification.pathOffered) && !wantsCallback) {
+      const notedTried = gaillard.noteTriedMethodsReply(text);
+      if (notedTried) {
+        qualification.tried = qualification.tried || said;
+        qualification.pathOffered = true;
+        return ask(`${notedTried} ${gaillard.pathQuestion()}`);
+      }
+    }
 
     if (nextQuestion?.step === "path") {
       // Brouillon factuel tiré de la fiche ; le modèle peut le rédiger, la question bilan est conservée par le garde-fou.
@@ -3248,7 +3388,7 @@ function gaillardLeadReply(conversation, text, seya, slots, extras = {}) {
     // Transmission seulement si le prospect accepte le bilan (minceur) ou au bout du parcours hors minceur.
     const mayClose = family !== "minceur" || wantsCallback;
     if (!mayClose) {
-      return ask(gaillard.keepConversationReply(family));
+      return ask(gaillard.pathQuestion());
     }
 
     next = {
@@ -3304,6 +3444,10 @@ function gaillardLeadReply(conversation, text, seya, slots, extras = {}) {
     return answer(faq);
   }
 
+  if (handedOff && (isHesitation(text) || gaillard.isIndecisive(text))) {
+    return answer(gaillard.hesitationClarifyReply());
+  }
+
   if (isThanks(text, base) || isHesitation(text) || refusesSlots(text)) {
     return delegate();
   }
@@ -3328,6 +3472,31 @@ function gaillardLeadReply(conversation, text, seya, slots, extras = {}) {
   }
   if (asksOpenQuestion(text)) {
     return answer(gaillard.missingPracticalReply(), next);
+  }
+  if (
+    handedOff &&
+    softPathAccept &&
+    !asksPrice(text) &&
+    !classifyPriceQuestion(text)
+  ) {
+    return fixed(next, status, "Très bien 😊 Votre demande est déjà chez l’équipe pour organiser le bilan avec la séance découverte offerte.");
+  }
+  if (
+    handedOff &&
+    gaillard.isAnswerLike(text) &&
+    !isThanks(text, base) &&
+    String(text || "").trim().length >= 3
+  ) {
+    next = {
+      ...next,
+      teamNotes: {
+        ...(next.teamNotes || {}),
+        need: [next.teamNotes?.need, String(text || "").trim().slice(0, 120)]
+          .filter(Boolean)
+          .join(" · "),
+      },
+    };
+    return fixed(next, status, gaillard.noteAfterHandoffReply(text, next));
   }
   return fixed(next, status, followUp());
 }

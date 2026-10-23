@@ -1,0 +1,285 @@
+/**
+ * Conversations Gaillard (Sandrine / Amel / Mouna / Rrushe) — parcours complets avec état.
+ * Affiche réponse, champs modifiés, nb messages Seya à chaque tour.
+ */
+const test = require("node:test");
+const assert = require("node:assert/strict");
+
+delete process.env.OPENAI_API_KEY;
+
+let aiReply = "";
+const openaiPath = require.resolve("openai");
+require.cache[openaiPath] = {
+  id: openaiPath,
+  filename: openaiPath,
+  loaded: true,
+  exports: class {
+    constructor() {
+      this.chat = {
+        completions: { create: async () => ({ choices: [{ message: { content: aiReply } }] }) },
+      };
+    }
+  },
+};
+
+const { generateSeyaReply } = require("./ai");
+const { startConversation } = require("./agent");
+
+const NOW = new Date("2026-10-14T10:00:00");
+const GAILLARD = "JFG Clinic Gaillard";
+const CLOSING = /rappellera pour échanger|rappellera pour organiser|Je transmets votre demande/i;
+const KEEP_OPEN = /Avec plaisir 😊 Je reste disponible/i;
+
+const seya = {
+  seyaMission: "qualify_callback",
+  bookAppointment: false,
+  treatmentBriefs: [
+    {
+      name: "Soin minceur",
+      brief:
+        "Après les régimes, on propose un rééquilibrage alimentaire avec suivi sur application. Technologies : cryolipolyse et radiofréquence. Le bilan et la séance découverte sont offerts.",
+      pricing: {
+        bilan: "offert",
+        discovery: "offerte",
+        sessionPolicy: "after_bilan",
+        package: "à partir de 500 euros, paiement jusqu'à 10x",
+      },
+    },
+    {
+      name: "Épilation définitive",
+      brief: "Réceptionniste. Laser inefficace sur poils blancs, blonds, roux ou gris.",
+    },
+    { name: "Soin visage", brief: "Réceptionniste." },
+  ],
+};
+
+function hours() {
+  return [1, 2, 3, 4, 5, 6, 0].map((weekday) => ({
+    weekday,
+    startTime: "09:00",
+    endTime: "19:00",
+    closed: weekday === 0,
+  }));
+}
+
+function lastSeya(conversation) {
+  return (
+    [...(conversation.messages || [])]
+      .reverse()
+      .find((item) => item.author === "seya")?.text || ""
+  );
+}
+
+function seyaMessages(conversation) {
+  return (conversation.messages || []).filter((item) => item.author === "seya");
+}
+
+function open(treatment, firstName = "Léa") {
+  return startConversation(
+    {
+      leadId: `lead-${treatment}-${firstName}-${Date.now()}`,
+      centerId: "gaillard",
+      firstName,
+      phone: "0611223344",
+      treatment,
+    },
+    GAILLARD,
+    seya,
+  );
+}
+
+async function say(conversation, text, label = "") {
+  const before = seyaMessages(conversation).length;
+  const beforeQual = JSON.stringify(conversation.qualification || {});
+  const beforeNotes = JSON.stringify(conversation.teamNotes || {});
+  const result = await generateSeyaReply({
+    conversation,
+    text,
+    seya,
+    appointments: [],
+    hours: hours(),
+    centerName: GAILLARD,
+    centerAddress: "58 rue de la Libération, 74240 Gaillard",
+    centerId: "gaillard",
+    now: NOW,
+  });
+  assert.equal(result.shouldBook, null);
+  const next = result.conversation;
+  const after = seyaMessages(next).length;
+  const sent = after - before;
+  if (process.env.SEYA_TRACE === "1") {
+    const qualChanged = JSON.stringify(next.qualification || {}) !== beforeQual;
+    const notesChanged = JSON.stringify(next.teamNotes || {}) !== beforeNotes;
+    console.error(
+      `\n[${label || text.slice(0, 40)}]\n` +
+        `  lead: ${text}\n` +
+        `  seya (${sent} msg): ${lastSeya(next)}\n` +
+        `  qual: ${JSON.stringify(next.qualification || {})}${qualChanged ? " *" : ""}\n` +
+        `  notes.handedOff: ${Boolean(next.teamNotes?.handedOffAt)}${notesChanged ? " *" : ""}\n` +
+        `  need: ${next.teamNotes?.need || ""}`,
+    );
+  }
+  assert.equal(sent, 1, `exactement 1 message Seya par tour (reçu ${sent}) pour « ${text} »`);
+  return next;
+}
+
+// ——— Sandrine ———
+test("Sandrine : parcours après transmission (fermeté, autre clinique, hésitation)", async () => {
+  let conversation = open("Soin visage", "Sandrine");
+  conversation = await say(conversation, "j'aimerais améliorer mon ovale", "ovale");
+  assert.match(lastSeya(conversation), /déjà testé/i);
+  conversation = await say(conversation, "Non pas vraiment", "tried");
+  assert.match(lastSeya(conversation), CLOSING);
+  assert.ok(conversation.teamNotes?.handedOffAt);
+
+  conversation = await say(conversation, "Qu'il soit plus ferme", "ferme");
+  assert.doesNotMatch(lastSeya(conversation), CLOSING);
+  assert.doesNotMatch(lastSeya(conversation), KEEP_OPEN);
+  assert.match(lastSeya(conversation), /raffermir.*ovale|ovale.*visage|fermeté/i);
+
+  conversation = await say(
+    conversation,
+    "Là j'ai rendez-vous dans une clinique qui fait des soins esthétiques pour voir ce que je peux faire",
+    "autre clinique",
+  );
+  assert.doesNotMatch(lastSeya(conversation), /jour|heure|créneau|préférence/i);
+  assert.match(lastSeya(conversation), /comparer/i);
+
+  conversation = await say(conversation, "Mais je n'arrive pas trop à me décider", "hésitation");
+  assert.doesNotMatch(lastSeya(conversation), KEEP_OPEN);
+  assert.doesNotMatch(lastSeya(conversation), /sans engagement/i);
+  assert.match(lastSeya(conversation), /hésiter|choix du soin|résultats|budget/i);
+});
+
+// ——— Amel ———
+test("Amel : ventre gonflé ≠ kilos ; LPG/cryo ; je ne sais pas ; prix cryo", async () => {
+  let conversation = open("Soin minceur", "Amel");
+  conversation = await say(
+    conversation,
+    "Je voudrais perdre du ventre, il est tout le temps gonflé dès que je mange",
+    "gonflé",
+  );
+  assert.doesNotMatch(lastSeya(conversation), /Combien de kilos/i);
+  assert.match(lastSeya(conversation), /gonflé|gonflement/i);
+
+  conversation = await say(
+    conversation,
+    "Je regarde la différence entre lgp et la cryothérapie",
+    "lpg/cryo",
+  );
+  assert.match(lastSeya(conversation), /LPG|cryolipolyse|comparer/i);
+  assert.doesNotMatch(lastSeya(conversation), /Combien de kilos|déjà testé/i);
+
+  conversation = await say(conversation, "Perdre du poids et affiner mon ventre", "poids");
+  assert.match(lastSeya(conversation), /kilos|objectif de poids|déjà testé|essayé/i);
+
+  if (/Combien de kilos|objectif de poids/i.test(lastSeya(conversation))) {
+    conversation = await say(conversation, "Je ne sais pas du tout", "kilos inconnu");
+    assert.doesNotMatch(lastSeya(conversation), /Combien de kilos/i);
+    assert.equal(conversation.qualification?.kilos, "non chiffré");
+  }
+
+  conversation = await say(
+    conversation,
+    "J'hésite encore quels sont les prix d'une cryothérapie",
+    "prix cryo",
+  );
+  assert.doesNotMatch(lastSeya(conversation), /500|cures commencent|à partir de 500/i);
+  assert.match(lastSeya(conversation), /cryolipolyse|pas le tarif|bilan.*offert|protocole/i);
+});
+
+test("Amel : « ça peut faire du bien » = intérêt, pas acceptation du rappel", async () => {
+  let conversation = open("Soin minceur", "AmelInterest");
+  conversation = await say(conversation, "perdre du poids ventre", "zones");
+  conversation = await say(conversation, "Je ne sais pas du tout", "kilos");
+  conversation = await say(conversation, "non jamais, j'allais juste à la salle", "tried");
+  assert.match(lastSeya(conversation), /Souhaitez-vous|bilan/i);
+  assert.equal(Boolean(conversation.teamNotes?.handedOffAt), false);
+
+  conversation = await say(
+    conversation,
+    "Pour sa je me suis dit peux être que sa peux faire du bien autre chose",
+    "intérêt",
+  );
+  assert.doesNotMatch(lastSeya(conversation), KEEP_OPEN);
+  assert.doesNotMatch(lastSeya(conversation), CLOSING);
+  assert.match(lastSeya(conversation), /Souhaitez-vous|bilan minceur offert/i);
+});
+
+// ——— Mouna ———
+test("Mouna : « Perdre » reformulé ; drainage noté ; acceptation → une transmission", async () => {
+  let conversation = open("Soin minceur", "Mouna");
+  conversation = await say(conversation, "bas du ventre et cuisses", "zones");
+  conversation = await say(conversation, "Perdre du gras je pense", "objectif");
+  assert.match(lastSeya(conversation), /déjà testé|essayé/i);
+
+  conversation = await say(conversation, "Perdre", "objectif décalé");
+  assert.match(lastSeya(conversation), /réduire la graisse|déjà essayé des soins/i);
+  assert.doesNotMatch(lastSeya(conversation), /rééquilibrage alimentaire.*Souhaitez-vous/i);
+
+  conversation = await say(conversation, "non jamais", "tried");
+  assert.match(lastSeya(conversation), /Souhaitez-vous|bilan/i);
+
+  conversation = await say(
+    conversation,
+    "Rééquilibrage oui drainage lymphatique aussi 10 séance c'est tout",
+    "drainage",
+  );
+  assert.doesNotMatch(lastSeya(conversation), KEEP_OPEN);
+  assert.doesNotMatch(lastSeya(conversation), CLOSING);
+  assert.match(lastSeya(conversation), /drainage|rééquilibrage/i);
+  assert.match(lastSeya(conversation), /Souhaitez-vous|bilan/i);
+  assert.equal(Boolean(conversation.teamNotes?.handedOffAt), false);
+
+  conversation = await say(
+    conversation,
+    "Ok je vais faire la séance gratuit ensuite je verais ce que vous proposer",
+    "acceptation",
+  );
+  assert.match(lastSeya(conversation), CLOSING);
+  assert.doesNotMatch(lastSeya(conversation), /500|tarif fixe|cures commencent/i);
+  assert.ok(conversation.teamNotes?.handedOffAt);
+  assert.equal(
+    seyaMessages(conversation).filter((item) => CLOSING.test(item.text)).length,
+    1,
+    "une seule annonce de rappel",
+  );
+});
+
+// ——— Rrushe ———
+test("Rrushe : zone intime ; cheveux blancs clarifiés ; français difficile", async () => {
+  let conversation = open("Épilation définitive", "Rrushe");
+  conversation = await say(conversation, "Zone intime", "zone");
+  assert.doesNotMatch(lastSeya(conversation), /Quelles zones souhaitez-vous traiter/);
+  assert.match(lastSeya(conversation), /déjà testé/i);
+
+  conversation = await say(
+    conversation,
+    "Non, je n'ai jamais essayé, mais maintenant j'aimerais bien. Le problème, c'est que j'ai des cheveux blancs. Est-ce que le laser est efficace ou pas ?",
+    "cheveux blancs",
+  );
+  assert.doesNotMatch(lastSeya(conversation), /bloquer un créneau|organiser le rendez-vous/i);
+  assert.match(lastSeya(conversation), /poils blancs|zone/i);
+
+  conversation = await say(conversation, "Je ne comprends pas beaucoup le français.", "langue");
+  assert.doesNotMatch(lastSeya(conversation), KEEP_OPEN);
+  assert.doesNotMatch(lastSeya(conversation), /No problem|I can keep/i);
+  assert.match(lastSeya(conversation), /Quelle langue|langue préférez/i);
+});
+
+// ——— Règles transverses ———
+test("Gaillard : « maintenant » seul ne déclenche pas une réservation", async () => {
+  const gaillard = require("./gaillard");
+  assert.equal(
+    gaillard.asksBookingNow(
+      "Non, je n'ai jamais essayé, mais maintenant j'aimerais bien. Est-ce que le laser est efficace ?",
+    ),
+    false,
+  );
+});
+
+test("Gaillard : ballonnement seul ne pose pas la question kilos", async () => {
+  let conversation = open("Soin minceur", "Bloat");
+  conversation = await say(conversation, "Mon ventre est toujours gonflé", "bloat only");
+  assert.doesNotMatch(lastSeya(conversation), /Combien de kilos/i);
+});

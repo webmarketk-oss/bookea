@@ -78,6 +78,14 @@ function classifyPriceQuestion(text) {
   if (/combien de (temps|seance|seances|rdv|fois|jours)/.test(value)) {
     return "";
   }
+  // « Ok je vais faire la séance gratuit ensuite je verrai » = acceptation, pas une demande de tarif.
+  if (
+    /(seance|bilan) (gratuit|offert)/.test(value) &&
+    !/prix|tarif|coute|cout|combien/.test(value) &&
+    (/je (vais|veux) (faire|venir)/.test(value) || /^(ok|oui|okay|d'accord|dac)\b/.test(value))
+  ) {
+    return "";
+  }
   const asks =
     /prix|tarif|coute|cout|combien|gratuit|offert/.test(value);
   if (/forfait|cure|pack/.test(value) && asks) {

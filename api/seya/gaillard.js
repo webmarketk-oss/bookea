@@ -59,16 +59,31 @@ function keepConversationReply(family) {
   return "Avec plaisir 😊 Je reste disponible si vous souhaitez une précision sur le soin.";
 }
 
+/** Acceptation explicite du bilan / rappel — pas un simple intérêt (« ça peut faire du bien »). */
 function acceptsContinue(text) {
   const value = normalize(text);
-  if (!value || value.length > 120) {
+  if (!value || value.length > 180) {
     return false;
   }
   return (
     /^(oui|ok|okay|d'accord|dac|volontiers|avec plaisir|je veux|je suis interes|pourquoi pas)\b/.test(
       value,
     ) ||
-    /\b(continuer|la suite|le bilan|ca m'interesse|ça m'intéresse|je continue|go)\b/.test(value)
+    /\b(continuer|la suite|le bilan|ca m'interesse|ça m'intéresse|je continue|go)\b/.test(value) ||
+    /je (vais|veux) (bien )?(faire |venir )?(pour )?(le |la |l')?(bilan|seance|decouverte)/.test(
+      value,
+    ) ||
+    /(seance|bilan) (gratuit|offert)/.test(value)
+  );
+}
+
+/** Intérêt soft, sans accord de rappel. */
+function expressesInterest(text) {
+  const value = normalize(text);
+  return (
+    /ca (peut|pourrait) (me )?faire du bien|faire du bien (autre chose|aussi)|peut[- ]etre que ca (peut|pourrait)|pourquoi pas (essayer|venir)/.test(
+      value,
+    ) && !acceptsContinue(text)
   );
 }
 
@@ -212,12 +227,154 @@ function asksCountry(text) {
 
 function asksBookingNow(text) {
   const value = normalize(text);
+  // « maintenant » seul (ex. « maintenant j'aimerais bien ») n'est pas une demande de créneau.
   return (
-    /prendre (un )?rdv|prendre (un )?rendez|reserver|je (peux|puis) (pas )?(prendre|venir)|tout de suite|maintenant/.test(
+    /prendre (un )?rdv|prendre (un )?rendez|reserver|je (peux|puis) (pas )?(prendre|venir)|tout de suite|bloquer (un )?(creneau|rdv)/.test(
       value,
     ) &&
-    (/rdv|rendez|creneau|venir|reserver/.test(value) || /\?/.test(String(text || "")))
+    (/rdv|rendez|creneau|venir|reserver|bloquer/.test(value) || /\?/.test(String(text || "")))
   );
+}
+
+function asksWhiteHairLaser(text) {
+  const value = normalize(text);
+  return (
+    /(cheveux|poils?) (blancs?|gris|blonds?|roux)/.test(value) ||
+    /(blancs?|gris|blonds?|roux).{0,40}(cheveux|poils?|laser)/.test(value)
+  );
+}
+
+/** Si la cliente dit « cheveux » : clarifier avant d’expliquer (souvent des poils de la zone). */
+function whiteHairLaserReply(text = "", zone = "") {
+  const value = normalize(text);
+  if (/\bcheveux\b/.test(value) && !/\bpoils?\b/.test(value)) {
+    const where = String(zone || "").trim();
+    return where
+      ? `Vous parlez des poils blancs sur la zone ${where} que vous souhaitez traiter ?`
+      : "Vous parlez des poils blancs sur la zone que vous souhaitez traiter ?";
+  }
+  return "Le laser agit sur la mélanine du poil : il est peu ou pas efficace sur les poils blancs, gris, blonds très clairs ou roux. L’équipe pourra vous confirmer la meilleure option lors du bilan.";
+}
+
+function asksLanguageHelp(text) {
+  const value = normalize(text);
+  return (
+    /ne (comprends?|parle) pas (beaucoup |tres |très |bien )?(le )?francais/.test(value) ||
+    /i (don't|do not) (speak|understand) (much |good )?french/.test(value) ||
+    /speak (in )?english|parler (en )?anglais/.test(value)
+  );
+}
+
+function languageBarrierReply() {
+  return "D’accord 😊 Quelle langue préférez-vous ?";
+}
+
+function isIndecisive(text) {
+  const value = normalize(text);
+  return (
+    /me decider|m'en decider|j'hesite|je (suis|reste) (encore )?hesitan|pas (trop |vraiment )?(decide|sure|certain)|n'arrive pas (trop )?a (me )?decid/.test(
+      value,
+    )
+  );
+}
+
+function noteAfterHandoffReply(text = "", conversation = {}) {
+  const value = normalize(text);
+  const known = normalize(
+    `${conversation?.teamNotes?.need || ""} ${conversation?.qualification?.detail || ""} ${conversation?.qualification?.zone || ""}`,
+  );
+  if (/ferme|fermete|rafferm/.test(value) && /ovale/.test(known)) {
+    return "C’est noté 😊 Vous souhaitez surtout raffermir l’ovale de votre visage. Je complète les informations pour l’équipe.";
+  }
+  if (/ferme|fermete|rafferm/.test(value)) {
+    return "C’est noté 😊 Je note la fermeté pour l’équipe.";
+  }
+  return "C’est noté pour l’équipe 😊 Elle en tiendra compte lors de votre échange.";
+}
+
+/** Hésitation : clarifier, sans pousser au rappel ni inventer « sans engagement ». */
+function hesitationClarifyReply() {
+  return "Qu’est-ce qui vous fait hésiter le plus : le choix du soin, les résultats attendus ou le budget ?";
+}
+
+/** RDV dans une autre clinique pour comparer — pas une demande Gaillard. */
+function mentionsOtherClinicVisit(text) {
+  const value = normalize(text);
+  return (
+    /rendez[- ]?vous dans (un[e]? )?(autre )?(clinique|centre|institut)/.test(value) ||
+    /j[' ]ai rendez[- ]?vous (dans|chez|a) (un[e]? )?(clinique|centre|institut)/.test(value) ||
+    /(clinique|institut).{0,40}(soins? esthetiques?|voir ce que|comparer)/.test(value)
+  );
+}
+
+function otherClinicCompareReply() {
+  return "Je comprends, vous souhaitez comparer les possibilités avant de choisir.";
+}
+
+function describesBloating(text) {
+  return /gonfl|ballonn/.test(normalize(text));
+}
+
+function bloatingNotedReply() {
+  return "Vous décrivez surtout un ventre gonflé. Les soins minceur ne permettent pas de déterminer la cause de ce gonflement ; il faudra le signaler lors du bilan.";
+}
+
+function asksDeviceCompare(text) {
+  const value = normalize(text).replace(/\blgp\b/g, "lpg");
+  return (
+    /difference.*(lpg|cryo|cryolipolyse|radiofrequ)/.test(value) ||
+    /(lpg|cryo|cryolipolyse).{0,50}(lpg|cryo|cryolipolyse|radiofrequ)/.test(value) ||
+    /je regarde la difference|comparer (le |la |l')?(lpg|cryo)/.test(value)
+  );
+}
+
+function deviceCompareReply(text, sources = []) {
+  const value = normalize(text).replace(/\blgp\b/g, "lpg");
+  const hay = normalize(sources.filter(Boolean).join(" "));
+  const hasCryo = /cryo|cryolipolyse/.test(hay);
+  const hasLpg = /\blpg\b|endermolog/.test(hay);
+  if (/lpg/.test(value) && /cryo|cryolipolyse/.test(value)) {
+    if (hasCryo && !hasLpg) {
+      return "Vous souhaitez comparer le LPG et la cryolipolyse pour le ventre, c’est bien cela ? Au centre, la cryolipolyse figure parmi les technologies proposées ; le LPG n’est pas renseigné dans la fiche. Le bilan permet de voir ce qui convient à votre cas.";
+    }
+    if (hasCryo && hasLpg) {
+      return "Vous souhaitez comparer le LPG et la cryolipolyse, c’est bien cela ? Les deux figurent parmi les approches du centre ; le bilan précise ce qui convient à votre objectif.";
+    }
+    return "Vous souhaitez comparer le LPG et la cryolipolyse pour le ventre, c’est bien cela ?";
+  }
+  return "";
+}
+
+function cryoPriceUnknownReply() {
+  return "Je n’ai pas le tarif précis d’une séance de cryolipolyse dans les informations du centre. Le bilan et la séance découverte sont offerts ; le prix du protocole est précisé après le bilan.";
+}
+
+function triedObjectifAckReply(family) {
+  if (family === "minceur") {
+    return "Oui, vous souhaitez réduire la graisse sur ces zones 😊 Avez-vous déjà essayé des soins pour cela ?";
+  }
+  if (family === "visage") {
+    return "D’accord, je note cet objectif 😊 Avez-vous déjà testé des soins pour votre peau ?";
+  }
+  return "D’accord, je note 😊 Avez-vous déjà testé une solution d’épilation définitive, comme le laser ou la lumière pulsée ?";
+}
+
+function noteTriedMethodsReply(text) {
+  const value = normalize(text);
+  const bits = [];
+  if (/reequilibrage|aliment|nutrition|regime/.test(value)) {
+    bits.push("le rééquilibrage alimentaire");
+  }
+  if (/drainage/.test(value)) {
+    const sessions = value.match(/(\d+)\s*seances?/);
+    bits.push(
+      sessions ? `les ${sessions[1]} séances de drainage` : "le drainage lymphatique",
+    );
+  }
+  if (!bits.length) {
+    return "";
+  }
+  return `D’accord, je note ${bits.join(" et ")}.`;
 }
 
 function asksProcess(text) {
@@ -557,32 +714,44 @@ module.exports = {
   asksBookingNow,
   asksChildCompanion,
   asksCountry,
+  asksDeviceCompare,
   asksIfAi,
+  asksLanguageHelp,
   asksProcess,
   asksTechnology,
+  asksWhiteHairLaser,
   availabilityContext,
   availabilityMention,
+  bloatingNotedReply,
   bookingCapabilityReply,
   breaksGaillardRules,
   changesStep,
   childCompanionReply,
   closingReply,
   countryReply,
+  cryoPriceUnknownReply,
   declinedReply,
   declinesOffer,
+  describesBloating,
+  deviceCompareReply,
   durationReply,
   expertLabel,
+  expressesInterest,
   healthNotedReply,
+  hesitationClarifyReply,
   identityReply,
   isAnswerLike,
   isGaillardCenter,
+  isIndecisive,
   keepConversationReply,
   kilosQuestion,
+  languageBarrierReply,
   lastSeyaAskedKilos,
   lastSeyaAskedNeed,
   lastSeyaAskedPath,
   lastSeyaAskedTried,
   looksLikeHandoffClose,
+  mentionsOtherClinicVisit,
   minceurPathFacts,
   minceurPathReply,
   missingPracticalReply,
@@ -590,6 +759,9 @@ module.exports = {
   modalityReply,
   modalityTopic,
   needQuestion,
+  noteAfterHandoffReply,
+  noteTriedMethodsReply,
+  otherClinicCompareReply,
   pathQuestion,
   preferenceNotedPrefix,
   preferenceReply,
@@ -602,8 +774,10 @@ module.exports = {
   serviceOfferedReply,
   supportTopicFacts,
   technologyReply,
+  triedObjectifAckReply,
   triedQuestion,
   validatedModality,
   varyQuestion,
+  whiteHairLaserReply,
   withPreference,
 };
