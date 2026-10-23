@@ -25,6 +25,7 @@ export const leadStatuses: LeadStatus[] = [
   "Message WhatsApp envoyé",
   "SMS envoyé",
   "Message vocal envoyé",
+  "Msg vocal laissé + SMS envoyé",
   "Mail envoyé",
   "Mail/SMS Injoignable",
   "Message vocal",
@@ -37,6 +38,7 @@ export const followUpLeadStatuses: LeadStatus[] = [
   "Mail envoyé",
   "Message vocal envoyé",
   "Message vocal",
+  "Msg vocal laissé + SMS envoyé",
   "À relancer",
 ];
 
@@ -66,6 +68,9 @@ const leadStatusAliasMap: Record<string, LeadStatus> = {
   "Msg WA envoyé": "Message WhatsApp envoyé",
   "Message vocal laissé": "Message vocal envoyé",
   "Msg vocal laissé": "Message vocal envoyé",
+  "Msg vocal laissé + SMS envoyé": "Msg vocal laissé + SMS envoyé",
+  "msg vocal laisser + sms envoyer": "Msg vocal laissé + SMS envoyé",
+  "Message vocal laissé + SMS envoyé": "Msg vocal laissé + SMS envoyé",
   "Msg vocal + Mail": "Message vocal",
   "Message vocal + Mail": "Message vocal",
 };
@@ -95,6 +100,7 @@ export const leadStatusClasses: Record<LeadStatus, string> = {
   "Message WhatsApp envoyé": "bg-zinc-100 text-zinc-800 ring-zinc-200",
   "SMS envoyé": "bg-zinc-100 text-zinc-800 ring-zinc-200",
   "Message vocal envoyé": "bg-zinc-100 text-zinc-800 ring-zinc-200",
+  "Msg vocal laissé + SMS envoyé": "bg-zinc-100 text-zinc-800 ring-zinc-200",
   "Mail envoyé": "bg-zinc-100 text-zinc-800 ring-zinc-200",
   "Mail/SMS Injoignable": "bg-zinc-100 text-zinc-800 ring-zinc-200",
   "Message vocal": "bg-cyan-100 text-cyan-800 ring-cyan-200",

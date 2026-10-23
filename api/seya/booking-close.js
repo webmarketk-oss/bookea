@@ -106,6 +106,7 @@ const CRM_LEAD_STATUSES = [
   "Message WhatsApp envoyé",
   "SMS envoyé",
   "Message vocal envoyé",
+  "Msg vocal laissé + SMS envoyé",
   "Mail envoyé",
   "Mail/SMS Injoignable",
   "Message vocal",
@@ -127,6 +128,9 @@ const CRM_STATUS_ALIASES = {
   "Msg WA envoyé": "Message WhatsApp envoyé",
   "Message vocal laissé": "Message vocal envoyé",
   "Msg vocal laissé": "Message vocal envoyé",
+  "Msg vocal laissé + SMS envoyé": "Msg vocal laissé + SMS envoyé",
+  "msg vocal laisser + sms envoyer": "Msg vocal laissé + SMS envoyé",
+  "Message vocal laissé + SMS envoyé": "Msg vocal laissé + SMS envoyé",
   "Msg vocal + Mail": "Message vocal",
   "Message vocal + Mail": "Message vocal",
 };

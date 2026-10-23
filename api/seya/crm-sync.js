@@ -129,6 +129,7 @@ const BEFORE_BOOKING_STATUSES = new Set([
   "Message WhatsApp envoyé",
   "SMS envoyé",
   "Message vocal envoyé",
+  "Msg vocal laissé + SMS envoyé",
   "Mail envoyé",
   "Mail/SMS Injoignable",
   "Message vocal",
