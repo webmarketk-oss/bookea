@@ -102,6 +102,42 @@ module.exports = async function handler(req, res) {
       email,
     };
     const recentId = await findRecentSameSubmission(supabase, center.id, imported);
+    const existingId =
+      recentId ||
+      (await findExistingLeadByPhone(supabase, center.id, imported.phone));
+    const existingOffer = existingId
+      ? (await loadExistingLeadOffer(supabase, existingId)) || { id: existingId }
+      : null;
+    const newOffer = incomingHasNewOffer(imported, existingOffer);
+
+    if (existingId && newOffer) {
+      await attachOfferToExistingLead(supabase, center.id, existingOffer, imported, {
+        sourceName,
+        importTool: origin.importTool,
+      });
+      const notifyFlag = firstValue(req.query?.notify, payload?.notify);
+      const notification = isNoFlag(notifyFlag)
+        ? { sent: false, reason: "notify_disabled" }
+        : await notifyNewLead(supabase, {
+            center,
+            leadId: existingId,
+            lead: {
+              ...imported,
+              offer: imported.offer || imported.campaign || imported.treatment,
+            },
+          });
+      return res.status(200).json({
+        ok: true,
+        duplicate: true,
+        attached: true,
+        id: existingId,
+        center: center.slug,
+        center_name: center.name,
+        whatsapp: { sent: false, skipped: "existing_phone" },
+        notification: { sent: notification.sent, reason: notification.reason },
+      });
+    }
+
     if (recentId) {
       await supabase.from("lead_events").insert({
         center_id: center.id,
@@ -118,11 +154,6 @@ module.exports = async function handler(req, res) {
         center_name: center.name,
       });
     }
-    const existingId = await findExistingLeadByPhone(
-      supabase,
-      center.id,
-      imported.phone,
-    );
     if (existingId && isYesFlag(firstValue(req.query?.doublon, payload?.doublon))) {
       return res.status(200).json({
         ok: true,
@@ -898,6 +929,16 @@ async function importPostedLead(supabase, centerId, mapped, options = {}) {
       note: "Origine : import de fichier.",
     });
   }
+  if (mapped.treatment || mapped.campaign) {
+    events.push({
+      center_id: centerId,
+      lead_id: crmLead.id,
+      event_type: "offer",
+      from_value: mapped.campaign || null,
+      to_value: mapped.treatment || mapped.campaign || null,
+      note: `Inscription : ${mapped.campaign || mapped.treatment}.`,
+    });
+  }
   await supabase.from("lead_events").insert(events);
 
   return crmLead.id;
@@ -940,6 +981,122 @@ async function findRecentSameSubmission(supabase, centerId, incoming, now = new 
     .limit(1)
     .maybeSingle();
   return lead?.id ?? null;
+}
+
+function normalizedOffer(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+}
+
+function sameOffer(left, right) {
+  const a = normalizedOffer(left);
+  const b = normalizedOffer(right);
+  return Boolean(a && b && a === b);
+}
+
+function incomingHasNewOffer(incoming, existing) {
+  const next = String(incoming?.campaign || incoming?.treatment || "").trim();
+  if (!normalizedOffer(next)) {
+    return false;
+  }
+  if (!existing) {
+    return true;
+  }
+  return !(
+    sameOffer(incoming.treatment, existing.treatment) ||
+    sameOffer(incoming.campaign, existing.campaign) ||
+    sameOffer(next, existing.treatment) ||
+    sameOffer(next, existing.campaign)
+  );
+}
+
+function relationName(value) {
+  const row = Array.isArray(value) ? value[0] : value;
+  return String(row?.name || "").trim();
+}
+
+async function loadExistingLeadOffer(supabase, leadId) {
+  const { data, error } = await supabase
+    .from("leads")
+    .select("id,client_id,campaigns(name),services(name),clients(first_name,last_name,email,phone)")
+    .eq("id", leadId)
+    .maybeSingle();
+  if (error) {
+    throw new Error(error.message);
+  }
+  if (!data) {
+    return null;
+  }
+  const client = Array.isArray(data.clients) ? data.clients[0] : data.clients;
+  return {
+    id: data.id,
+    clientId: data.client_id,
+    campaign: relationName(data.campaigns),
+    treatment: relationName(data.services),
+    client,
+  };
+}
+
+async function attachOfferToExistingLead(supabase, centerId, existing, mapped) {
+  const leadId = existing?.id;
+  if (!leadId) {
+    return;
+  }
+  const [campaignId, serviceId] = await Promise.all([
+    ensureCampaign(supabase, centerId, mapped.campaign),
+    ensureService(supabase, centerId, mapped.treatment),
+  ]);
+  const now = new Date().toISOString();
+  const { error: leadError } = await supabase
+    .from("leads")
+    .update({
+      campaign_id: campaignId,
+      service_id: serviceId,
+      updated_at: now,
+      last_activity_at: now,
+    })
+    .eq("id", leadId);
+  if (leadError) {
+    throw new Error(leadError.message);
+  }
+
+  const label = mapped.campaign || mapped.treatment || "nouvelle offre";
+  const { error: eventError } = await supabase.from("lead_events").insert({
+    center_id: centerId,
+    lead_id: leadId,
+    event_type: "offer",
+    from_value: mapped.campaign || null,
+    to_value: mapped.treatment || mapped.campaign || null,
+    note: `Inscription : ${label}.`,
+  });
+  if (eventError) {
+    throw new Error(eventError.message);
+  }
+
+  if (existing.clientId) {
+    const patch = {};
+    if (!existing.client?.email && mapped.email) {
+      patch.email = mapped.email;
+    }
+    if (!existing.client?.phone && mapped.phone) {
+      patch.phone = mapped.phone;
+    }
+    if (!existing.client?.last_name && mapped.lastName) {
+      patch.last_name = mapped.lastName;
+    }
+    if (Object.keys(patch).length > 0) {
+      const { error: clientError } = await supabase
+        .from("clients")
+        .update({ ...patch, updated_at: now })
+        .eq("id", existing.clientId);
+      if (clientError) {
+        throw new Error(clientError.message);
+      }
+    }
+  }
 }
 
 async function findExistingLeadByPhone(supabase, centerId, phone) {
@@ -1736,3 +1893,4 @@ module.exports.rejectOwnerEmail = rejectOwnerEmail;
 module.exports.ownerEmailsFromCenter = ownerEmailsFromCenter;
 module.exports.ownerEmailsFromPayload = ownerEmailsFromPayload;
 module.exports.isFileImport = isFileImport;
+module.exports.incomingHasNewOffer = incomingHasNewOffer;

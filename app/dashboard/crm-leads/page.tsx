@@ -1795,8 +1795,8 @@ export default function CRMLeadsPage() {
                       Doublons confirmés
                     </p>
                     <p className="mt-1 text-sm font-semibold text-slate-600">
-                      Même téléphone ou même email uniquement. Vérifiez que
-                      c’est bien la même personne avant de fusionner.
+                      Même téléphone ou même email, même si les prestations
+                      diffèrent. La fusion garde les infos des deux fiches.
                     </p>
                   </div>
 
@@ -1807,8 +1807,11 @@ export default function CRMLeadsPage() {
                         className="rounded-full bg-white px-3 py-2 text-sm font-bold text-slate-700"
                       >
                         {index + 1}. {lead.firstName} {lead.lastName}
-                        {lead.phone ? ` · ${lead.phone}` : ""}
-                        {lead.email ? ` · ${lead.email}` : ""}
+                        {lead.treatment ? ` · ${lead.treatment}` : ""}
+                        {lead.campaign && lead.campaign !== lead.treatment
+                          ? ` · ${lead.campaign}`
+                          : ""}
+                        {lead.createdAt ? ` · ${lead.createdAt}` : ""}
                       </span>
                     ))}
                     <Button

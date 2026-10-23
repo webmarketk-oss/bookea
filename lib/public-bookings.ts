@@ -1,6 +1,7 @@
 import { Appointment } from "@/types/agenda";
 import { Lead } from "@/types/lead";
 import { crmStatusChangedAfter } from "@/lib/appointment-crm-sync";
+import { joinOfferLabels } from "@/lib/lead-offer";
 
 export const PUBLIC_BOOKINGS_STORAGE_KEY = "bookea-public-bookings";
 export const PUBLIC_BOOKINGS_UPDATED_EVENT = "bookea-public-bookings-updated";
@@ -240,7 +241,15 @@ export function mergePublicBookingIntoAppointments(
   return [...currentAppointments, bookingToAppointment(booking)];
 }
 
-type DuplicateCandidate = { id: string; phone?: string; email?: string };
+type DuplicateCandidate = {
+  id: string;
+  phone?: string;
+  email?: string;
+  createdDate?: string;
+  createdAt?: string;
+  treatment?: string;
+  campaign?: string;
+};
 
 export function duplicateLeadGroupKey(leads: DuplicateCandidate[]) {
   return [...new Set(leads.map((lead) => lead.id))].sort().join("-");
@@ -293,7 +302,14 @@ export function findDuplicateLeadGroups<T extends DuplicateCandidate>(leads: T[]
 
       seenGroups.add(signature);
       return group.length > 1;
-    });
+    })
+    .map((group) =>
+      [...group].sort((left, right) =>
+        String(left.createdDate || left.createdAt || "").localeCompare(
+          String(right.createdDate || right.createdAt || ""),
+        ),
+      ),
+    );
 }
 
 export function mergeDuplicateLeads(
@@ -310,18 +326,30 @@ export function mergeDuplicateLeads(
 
   const mergedLead: Lead = {
     ...primaryLead,
+    firstName: primaryLead.firstName || duplicateLead.firstName,
+    lastName: primaryLead.lastName || duplicateLead.lastName,
     phone: primaryLead.phone || duplicateLead.phone,
     email: primaryLead.email || duplicateLead.email,
-    treatment: primaryLead.treatment || duplicateLead.treatment,
+    treatment:
+      joinOfferLabels(primaryLead.treatment, duplicateLead.treatment) ||
+      primaryLead.treatment,
     source: primaryLead.source || duplicateLead.source,
-    campaign: primaryLead.campaign || duplicateLead.campaign,
+    campaign:
+      joinOfferLabels(primaryLead.campaign, duplicateLead.campaign) ||
+      primaryLead.campaign,
     dealAmount: Math.max(primaryLead.dealAmount, duplicateLead.dealAmount),
+    latestComment:
+      [primaryLead.latestComment, duplicateLead.latestComment]
+        .map((item) => String(item || "").trim())
+        .filter(Boolean)
+        .filter((item, index, all) => all.indexOf(item) === index)
+        .join("\n") || primaryLead.latestComment,
     activityLog: [
       {
         id: `manual-merge-${duplicateLead.id}`,
         author: "Système",
         date: formatActivityDate(),
-        text: `Fiche fusionnée avec ${duplicateLead.firstName} ${duplicateLead.lastName}.`,
+        text: `Fiche fusionnée avec ${duplicateLead.firstName} ${duplicateLead.lastName} (${duplicateLead.treatment || duplicateLead.campaign || "autre inscription"}).`,
         type: "system",
       },
       ...primaryLead.activityLog,

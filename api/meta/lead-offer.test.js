@@ -13,10 +13,14 @@ const {
 } = require("./saveleads");
 const { startConversation } = require("../seya/agent");
 const {
+  incomingHasNewOffer,
+  joinOfferLabels,
   leadImportToolFromEvents,
   leadOfferLabel,
   leadSourceFromStored,
+  offersFromEvents,
 } = require("../../lib/lead-offer.ts");
+const { incomingHasNewOffer: saveleadsNewOffer } = require("./saveleads");
 
 const SAVEMYLEADS_FACEBOOK = {
   fullname: "Qayamudin Hussainkheil",
@@ -293,4 +297,39 @@ test("CRM : un ancien prospect SaveMyLeads s’affiche en Facebook, l’axe seul
   assert.equal(leadOfferLabel({ campaign: "Soin minceur", treatment: "Soin minceur" }), "");
   assert.equal(leadOfferLabel({ campaign: "Meta Lead Ads", treatment: "Soin minceur" }), "");
   assert.equal(leadOfferLabel({ campaign: "Laser1+1", treatment: "Épilation définitive" }), "Laser1+1");
+});
+
+test("laser puis minceur : la nouvelle prestation est reconnue et les deux restent affichées", () => {
+  assert.equal(
+    incomingHasNewOffer(
+      { campaign: "Bilan minceur", treatment: "Soin minceur" },
+      { campaign: "Laser1+1", treatment: "Épilation définitive" },
+    ),
+    true,
+  );
+  assert.equal(
+    saveleadsNewOffer(
+      { campaign: "Bilan minceur", treatment: "Soin minceur" },
+      { campaign: "Laser1+1", treatment: "Épilation définitive" },
+    ),
+    true,
+  );
+  assert.equal(
+    incomingHasNewOffer(
+      { campaign: "Laser1+1", treatment: "Épilation définitive" },
+      { campaign: "Laser1+1", treatment: "Épilation définitive" },
+    ),
+    false,
+  );
+  assert.equal(
+    joinOfferLabels("Épilation définitive", "Soin minceur"),
+    "Épilation définitive · Soin minceur",
+  );
+  assert.equal(
+    offersFromEvents([
+      { event_type: "offer", to_value: "Épilation définitive", from_value: "Laser1+1" },
+      { event_type: "offer", to_value: "Soin minceur", from_value: "Bilan minceur" },
+    ]).treatment,
+    "Épilation définitive · Soin minceur",
+  );
 });

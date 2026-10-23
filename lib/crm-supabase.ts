@@ -8,7 +8,13 @@ import {
 } from "@/lib/crm-stats";
 import { belongsOnClientFiche, isHiddenAgendaBlockClient } from "@/lib/appointment-position-status";
 import { sanitizePersonName } from "@/lib/seya-person-name";
-import { leadImportToolFromEvents, leadSourceFromStored } from "@/lib/lead-offer";
+import {
+  joinOfferLabels,
+  leadImportToolFromEvents,
+  leadSourceFromStored,
+  OFFER_EVENT,
+  offersFromEvents,
+} from "@/lib/lead-offer";
 import {
   IMPORT_ORIGIN_EVENT,
   importOriginNote,
@@ -899,7 +905,9 @@ export async function mergeCrmDuplicateLeads(
 
   const { data: primary, error: primaryError } = await supabase
     .from("leads")
-    .select("id,center_id,client_id,latest_comment,amount_cure_ttc,next_action,recall_date")
+    .select(
+      "id,center_id,client_id,latest_comment,amount_cure_ttc,next_action,recall_date,created_at,campaign_id,service_id,campaigns(name),services(name)",
+    )
     .eq("id", primaryLeadId)
     .single();
 
@@ -909,7 +917,9 @@ export async function mergeCrmDuplicateLeads(
 
   const { data: duplicates, error: duplicatesError } = await supabase
     .from("leads")
-    .select("id,client_id,latest_comment,amount_cure_ttc,next_action,recall_date")
+    .select(
+      "id,client_id,latest_comment,amount_cure_ttc,next_action,recall_date,created_at,campaign_id,service_id,campaigns(name),services(name)",
+    )
     .in("id", uniqueDuplicateIds);
 
   if (duplicatesError) {
@@ -918,17 +928,36 @@ export async function mergeCrmDuplicateLeads(
 
   const primaryClientId = (primary.client_id as string | null) ?? null;
   let maxAmount = Number(primary.amount_cure_ttc || 0);
-  let latestComment = String(primary.latest_comment || "");
+  const comments = [String(primary.latest_comment || "").trim()].filter(Boolean);
   let nextAction = String(primary.next_action || "");
   let recallDate = (primary.recall_date as string | null) ?? null;
+  let earliestCreated = String(primary.created_at || "");
+  let newestOffer = {
+    at: String(primary.created_at || ""),
+    campaignId: primary.campaign_id as string | null,
+    serviceId: primary.service_id as string | null,
+  };
+  const offerRows = [primary, ...(duplicates ?? [])];
 
   for (const duplicate of duplicates ?? []) {
     const duplicateId = String(duplicate.id);
     const duplicateClientId = (duplicate.client_id as string | null) ?? null;
     maxAmount = Math.max(maxAmount, Number(duplicate.amount_cure_ttc || 0));
 
-    if (!latestComment && duplicate.latest_comment) {
-      latestComment = String(duplicate.latest_comment);
+    const extraComment = String(duplicate.latest_comment || "").trim();
+    if (extraComment && !comments.includes(extraComment)) {
+      comments.push(extraComment);
+    }
+    const createdAt = String(duplicate.created_at || "");
+    if (createdAt && (!earliestCreated || createdAt < earliestCreated)) {
+      earliestCreated = createdAt;
+    }
+    if (createdAt && createdAt > newestOffer.at) {
+      newestOffer = {
+        at: createdAt,
+        campaignId: duplicate.campaign_id as string | null,
+        serviceId: duplicate.service_id as string | null,
+      };
     }
 
     if (!nextAction && duplicate.next_action) {
@@ -1001,12 +1030,29 @@ export async function mergeCrmDuplicateLeads(
 
   await updateLeadFields(supabase, primaryLeadId, {
     amount_cure_ttc: maxAmount,
-    latest_comment: latestComment || null,
+    latest_comment: comments.join("\n") || null,
     next_action: nextAction || primary.next_action,
     recall_date: recallDate,
+    ...(newestOffer.campaignId ? { campaign_id: newestOffer.campaignId } : {}),
+    ...(newestOffer.serviceId ? { service_id: newestOffer.serviceId } : {}),
+    ...(earliestCreated ? { created_at: earliestCreated } : {}),
     updated_at: new Date().toISOString(),
     last_activity_at: new Date().toISOString(),
   });
+
+  for (const row of offerRows) {
+    const campaign = relationObject(row.campaigns)?.name;
+    const treatment = relationObject(row.services)?.name;
+    if (!campaign && !treatment) {
+      continue;
+    }
+    await insertLeadEvent(supabase, primary.center_id as string, primaryLeadId, {
+      event_type: OFFER_EVENT,
+      from_value: campaign || null,
+      to_value: treatment || campaign || null,
+      note: `Inscription : ${joinOfferLabels(campaign, treatment) || treatment || campaign}.`,
+    });
+  }
 
   await insertLeadEvent(supabase, primary.center_id as string, primaryLeadId, {
     event_type: "system",
@@ -2227,6 +2273,7 @@ function toLead(row: LeadRow): Lead {
   const depositTracked = parseDepositTracked(events);
   const visitDate = parseVisitDate(events);
   const assignedName = latestAssignedPractitioner(events);
+  const recordedOffers = offersFromEvents(events);
 
   const activityLog: LeadActivity[] = events
     .slice()
@@ -2299,12 +2346,18 @@ function toLead(row: LeadRow): Lead {
     address: client?.address_line1 || "",
     postalCode: client?.postal_code || "",
     city: client?.city || "",
-    treatment: service?.name || "Soin à préciser",
+    treatment:
+      joinOfferLabels(service?.name, recordedOffers.treatment) ||
+      service?.name ||
+      "Soin à préciser",
     source,
     importTool: importTool || undefined,
     imported: importOrigin.imported,
     importCandidate: importOrigin.candidate || undefined,
-    campaign: campaign?.name?.trim() || "",
+    campaign:
+      joinOfferLabels(campaign?.name, recordedOffers.campaign) ||
+      campaign?.name?.trim() ||
+      "",
     status: normalizeLeadStatus(row.status),
     dealAmount: Number(row.amount_cure_ttc ?? 0),
     commercial: assignedName || assignee?.full_name || "Équipe",
@@ -2705,7 +2758,7 @@ function isUserFacingComment(value?: string | null) {
     return false;
   }
 
-  return !/^(Lead (créé|reçu)|Statut changé|Réservation publique)\b/i.test(
+  return !/^(Lead (créé|reçu)|Statut changé|Réservation publique|Inscription :|Praticienne :|Fiches fusionnées)\b/i.test(
     text,
   );
 }
