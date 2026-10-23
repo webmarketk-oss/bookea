@@ -181,11 +181,24 @@ test("Amel : ventre gonflé ≠ kilos ; LPG/cryo ; je ne sais pas ; prix cryo", 
 
   conversation = await say(
     conversation,
+    "La cryothérapie consiste en quoi ? Comment ça marche elle agit sur quoi ?",
+    "cryo comment",
+  );
+  assert.match(lastSeya(conversation), /bio-destruction des graisses locales/i);
+  assert.doesNotMatch(lastSeya(conversation), /radiofréquence/i);
+  assert.doesNotMatch(lastSeya(conversation), /Je n’ai pas cette information|Je reste disponible/i);
+
+  conversation = await say(
+    conversation,
     "J'hésite encore quels sont les prix d'une cryothérapie",
     "prix cryo",
   );
   assert.doesNotMatch(lastSeya(conversation), /500|cures commencent|à partir de 500/i);
-  assert.match(lastSeya(conversation), /cryolipolyse|pas le tarif|bilan.*offert|protocole/i);
+  assert.doesNotMatch(
+    lastSeya(conversation),
+    /Le bilan et la séance découverte sont offerts, c’est gratuit\. Le bilan permet de réaliser une analyse corporelle/i,
+  );
+  assert.match(lastSeya(conversation), /pas le tarif|protocole|bilan.*offert/i);
 });
 
 test("Amel : « ça peut faire du bien » = intérêt, pas acceptation du rappel", async () => {

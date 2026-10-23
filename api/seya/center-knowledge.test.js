@@ -91,7 +91,7 @@ test("« Quels appareils pour le ventre ? » en prise de RDV : appareils du vent
   assert.match(turn.said, /Quand seriez-vous disponible \?$/);
   turn = await say(RICH_BOOK, turn.conversation, "Quels appareils utilisez-vous pour le ventre ?");
   // « élimine les amas graisseux » (fiche) est une promesse : rôle sobre à la place.
-  assert.match(turn.said, /^Pour le ventre, le centre utilise la cryo, qui utilise le froid pour cibler les graisses localisées/);
+  assert.match(turn.said, /^Pour le ventre, le centre utilise la cryo, qui réalise une bio-destruction des graisses locales par le froid/);
   assert.doesNotMatch(turn.said, /élimine|pressothérapie|palper|CONSIGNES|Ne parle jamais|APPAREILS|fiche/);
   assert.ok((turn.said.match(DEVICES) || []).length <= 3);
   assert.doesNotMatch(turn.said, STEP_QUESTION);
@@ -105,7 +105,7 @@ test("« Quels appareils pour le ventre ? » en prise de RDV : appareils du vent
   turn = await say(RICH_BOOK, turn.conversation, "C'est quoi la cryolipolyse ?");
   assert.equal(
     turn.said,
-    "La cryo utilise le froid pour cibler les graisses localisées. Le bilan permet d’évaluer si cette technique est adaptée à votre besoin.",
+    "La cryo réalise une bio-destruction des graisses locales par le froid. Le bilan permet d’évaluer si cette technique est adaptée à votre besoin.",
   );
 
   turn = await say(RICH_BOOK, turn.conversation, "Vendredi matin");
@@ -137,7 +137,7 @@ test("créneaux déjà proposés : la reprise renvoie aux créneaux, sans redema
   turn = await say(RICH_BOOK, turn.conversation, "vendredi matin");
   assert.match(turn.said, /ven\. 16\/10.*09h00/);
   turn = await say(RICH_BOOK, turn.conversation, "Et la cryo ça marche comment ?");
-  assert.match(turn.said, /^La cryo utilise le froid/);
+  assert.match(turn.said, /^La cryo réalise une bio-destruction des graisses locales/);
   assert.match(turn.said, /Dites-moi si l’un des créneaux proposés vous convient\.$/);
   assert.doesNotMatch(turn.said, /Quand seriez-vous disponible|indiquez-moi vos disponibilités/);
   assert.equal(turn.conversation.status, "RDV proposé");

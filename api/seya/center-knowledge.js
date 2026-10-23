@@ -37,9 +37,9 @@ const TECHNOLOGIES = [
   {
     key: "cryo",
     family: "minceur",
-    pattern: /cryo[\s-]*lipolyse|\bcryo\b/,
+    pattern: /cryo[\s-]*lipolyse|\bcryo\b|cryotherap/,
     name: "la cryo",
-    role: "qui utilise le froid pour cibler les graisses localisées",
+    role: "qui réalise une bio-destruction des graisses locales par le froid",
     zones: /ventre|poignee|hanche|cuisse|bras|dos|menton|culotte|graisse|gras/,
   },
   {
@@ -275,7 +275,7 @@ function technologyReply({ text, family, zone, sources }) {
   const visit = VISIT_BY_FAMILY[family] || "bilan";
   const suits = ` Le ${visit} permet d’évaluer si cette technique est adaptée à votre besoin.`;
   const named = techs.filter((tech) => tech.pattern.test(value));
-  if (named.length === 1 && !asksTechnology(text)) {
+  if (named.length === 1) {
     const role = named[0].role.startsWith("qui ") ? named[0].role.slice(4) : `est ${named[0].role}`;
     return `${capitalize(named[0].name)} ${role}.${suits}`;
   }

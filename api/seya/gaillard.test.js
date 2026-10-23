@@ -566,7 +566,7 @@ test("Gaillard : question appareil pendant la qualification, réponse de la fich
   ]);
   assert.equal(
     lastSeya(conversation),
-    "Pour le ventre, le centre utilise la cryo, qui utilise le froid pour cibler les graisses localisées, et la radiofréquence, qui agit par la chaleur pour raffermir la peau. Le bilan permet de choisir ce qui convient à votre cas. Combien de kilos aimeriez-vous perdre ?",
+    "Pour le ventre, le centre utilise la cryo, qui réalise une bio-destruction des graisses locales par le froid, et la radiofréquence, qui agit par la chaleur pour raffermir la peau. Le bilan permet de choisir ce qui convient à votre cas. Combien de kilos aimeriez-vous perdre ?",
   );
   assert.equal(conversation.teamNotes?.handedOffAt, undefined);
 });

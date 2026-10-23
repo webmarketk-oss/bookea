@@ -395,8 +395,8 @@ function bloatingNotedReply() {
 function asksDeviceCompare(text) {
   const value = normalize(text).replace(/\blgp\b/g, "lpg");
   return (
-    /difference.*(lpg|cryo|cryolipolyse|radiofrequ)/.test(value) ||
-    /(lpg|cryo|cryolipolyse).{0,50}(lpg|cryo|cryolipolyse|radiofrequ)/.test(value) ||
+    /difference.*(lpg|cryo|cryolipolyse|cryotherap|radiofrequ)/.test(value) ||
+    /(lpg|cryo|cryolipolyse|cryotherap).{0,50}(lpg|cryo|cryolipolyse|cryotherap|radiofrequ)/.test(value) ||
     /je regarde la difference|comparer (le |la |l')?(lpg|cryo)/.test(value)
   );
 }
@@ -404,16 +404,18 @@ function asksDeviceCompare(text) {
 function deviceCompareReply(text, sources = []) {
   const value = normalize(text).replace(/\blgp\b/g, "lpg");
   const hay = normalize(sources.filter(Boolean).join(" "));
-  const hasCryo = /cryo|cryolipolyse/.test(hay);
+  const hasCryo = /cryo|cryolipolyse|cryotherap/.test(hay);
   const hasLpg = /\blpg\b|endermolog/.test(hay);
-  if (/lpg/.test(value) && /cryo|cryolipolyse/.test(value)) {
+  if (/lpg/.test(value) && /cryo|cryolipolyse|cryotherap/.test(value)) {
+    const cryoBit =
+      "La cryo, c’est une bio-destruction des graisses locales par le froid.";
     if (hasCryo && !hasLpg) {
-      return "Vous souhaitez comparer le LPG et la cryolipolyse pour le ventre, c’est bien cela ? Au centre, la cryolipolyse figure parmi les technologies proposées ; le LPG n’est pas renseigné dans la fiche. Le bilan permet de voir ce qui convient à votre cas.";
+      return `${cryoBit} Au centre, la cryo figure parmi les technologies proposées ; le LPG n’est pas renseigné dans la fiche. Le bilan permet de voir ce qui convient à votre cas. Vous souhaitez surtout comparer pour le ventre, c’est bien cela ?`;
     }
     if (hasCryo && hasLpg) {
-      return "Vous souhaitez comparer le LPG et la cryolipolyse, c’est bien cela ? Les deux figurent parmi les approches du centre ; le bilan précise ce qui convient à votre objectif.";
+      return `${cryoBit} Les deux figurent parmi les approches du centre ; le bilan précise ce qui convient à votre objectif. Vous souhaitez surtout comparer pour le ventre, c’est bien cela ?`;
     }
-    return "Vous souhaitez comparer le LPG et la cryolipolyse pour le ventre, c’est bien cela ?";
+    return `${cryoBit} Vous souhaitez comparer le LPG et la cryo pour le ventre, c’est bien cela ?`;
   }
   return "";
 }
