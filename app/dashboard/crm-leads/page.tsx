@@ -15,7 +15,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
 import { readActiveCenterId, saveActiveCenterId } from "@/lib/center-access";
-import { inactiveLeadStatuses, leadStatuses } from "@/lib/lead-statuses";
+import { followUpLeadStatuses, inactiveLeadStatuses, leadStatuses } from "@/lib/lead-statuses";
 import { matchesPersonSearch } from "@/lib/person-search";
 import {
   addDaysIso,
@@ -191,13 +191,7 @@ function measureFicheBox(column: HTMLElement, row: Element | null): FicheBox {
 type QuickDateFilter = CrmQuickFilter;
 
 const statusGroups: Partial<Record<LeadStatus, LeadStatus[]>> = {
-  "À relancer": [
-    "Nouveau",
-    "Apl en abs",
-    "SMS envoyé",
-    "Mail envoyé",
-    "À relancer",
-  ],
+  "À relancer": followUpLeadStatuses,
   "RDV pris": rdvBookedStatusList,
   "Client converti": ["Client converti", "Vendu"],
   "Prospect perdu": [...inactiveLeadStatuses, "Annulation"],

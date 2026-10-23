@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { Card, CardContent } from "@/components/ui/card";
-import { inactiveLeadStatuses } from "@/lib/lead-statuses";
+import { followUpLeadStatuses, inactiveLeadStatuses } from "@/lib/lead-statuses";
 import {
   addDaysIso,
   isLeadCreatedBetween,
@@ -145,15 +145,9 @@ export default function DashboardCards({
     {
       title: "À recontacter",
       value: leads.filter((lead) =>
-        [
-          "Nouveau",
-          "Apl en abs",
-          "SMS envoyé",
-          "Mail envoyé",
-          "À relancer",
-        ].includes(lead.status),
+        followUpLeadStatuses.includes(lead.status),
       ).length,
-      subtitle: "Nouveau, absents, SMS, mail",
+      subtitle: "Nouveau, absents, SMS, mail, msg vocal",
       icon: Phone,
       color: "text-orange-500",
       status: "À relancer",

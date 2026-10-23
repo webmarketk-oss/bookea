@@ -30,6 +30,16 @@ export const leadStatuses: LeadStatus[] = [
   "Message vocal",
 ];
 
+export const followUpLeadStatuses: LeadStatus[] = [
+  "Nouveau",
+  "Apl en abs",
+  "SMS envoyé",
+  "Mail envoyé",
+  "Message vocal envoyé",
+  "Message vocal",
+  "À relancer",
+];
+
 export const inactiveLeadStatuses: LeadStatus[] = [
   "Pas intéressé",
   "Prospect perdu",
@@ -55,6 +65,7 @@ const leadStatusAliasMap: Record<string, LeadStatus> = {
   "msg WA envoyé": "Message WhatsApp envoyé",
   "Msg WA envoyé": "Message WhatsApp envoyé",
   "Message vocal laissé": "Message vocal envoyé",
+  "Msg vocal laissé": "Message vocal envoyé",
   "Msg vocal + Mail": "Message vocal",
   "Message vocal + Mail": "Message vocal",
 };
