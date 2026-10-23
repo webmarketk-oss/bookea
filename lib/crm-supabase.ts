@@ -38,6 +38,16 @@ import {
   parseVisitDate,
   RDV_DATE_EVENT,
 } from "@/lib/crm-rdv";
+import {
+  authorFromStatusNote,
+  COMMERCIAL_EVENT,
+  latestAssignedPractitioner,
+  normalizePractitionerName,
+  practitionerLabel,
+  practitionerNamesMatch,
+  statusChangeNote,
+  visibleStatusChangeText,
+} from "@/lib/lead-practitioner";
 import type { WhatsAppThread } from "@/lib/lead-whatsapp";
 import { withConversationSource } from "@/api/seya/conversation-source";
 import type {
@@ -739,6 +749,10 @@ export function updateCrmLeadStatus(lead: Lead, status: LeadStatus) {
   return queueLeadWrite(lead.id, () => writeCrmLeadStatus(lead, status));
 }
 
+export function updateCrmLeadCommercial(lead: Lead, commercial: string) {
+  return queueLeadWrite(lead.id, () => writeCrmLeadCommercial(lead, commercial));
+}
+
 async function writeCrmLeadStatus(
   lead: Lead,
   status: LeadStatus,
@@ -765,7 +779,7 @@ async function writeCrmLeadStatus(
     event_type: "status",
     from_value: lead.status,
     to_value: status,
-    note: `Statut changé : ${lead.status} → ${status}.`,
+    note: statusChangeNote(lead.commercial, lead.status, status),
   });
 
   await ensureAcompteSuiviEvent(supabase, centerId, lead, status);
@@ -1313,6 +1327,42 @@ export function updateCrmLeadDetails(lead: Lead, input: NewCrmLeadInput) {
   return queueLeadWrite(lead.id, () => writeCrmLeadDetails(lead, input));
 }
 
+async function writeCrmLeadCommercial(lead: Lead, commercial: string) {
+  if (!isPersistedLeadId(lead.id)) {
+    return;
+  }
+  const nextCommercial = practitionerLabel(commercial);
+  if (practitionerNamesMatch(nextCommercial, lead.commercial)) {
+    return;
+  }
+  const supabase = createClient();
+  const centerId = await getLeadCenterId(supabase, lead.id);
+  await persistLeadCommercial(supabase, centerId, lead.id, nextCommercial);
+}
+
+async function persistLeadCommercial(
+  supabase: SupabaseClient,
+  centerId: string,
+  leadId: string,
+  commercial: string,
+) {
+  const assignedToProfileId = await findAssignedProfileId(
+    supabase,
+    centerId,
+    commercial,
+  );
+  await updateLeadFields(supabase, leadId, {
+    assigned_to_profile_id: assignedToProfileId,
+    updated_at: new Date().toISOString(),
+    last_activity_at: new Date().toISOString(),
+  });
+  await insertLeadEvent(supabase, centerId, leadId, {
+    event_type: COMMERCIAL_EVENT,
+    to_value: commercial,
+    note: `Praticienne : ${commercial}`,
+  });
+}
+
 async function writeCrmLeadDetails(lead: Lead, input: NewCrmLeadInput) {
   if (!isPersistedLeadId(lead.id)) {
     return;
@@ -1375,11 +1425,8 @@ async function writeCrmLeadDetails(lead: Lead, input: NewCrmLeadInput) {
     statusChanged &&
     isReminderDueOn(lead.reminderDate) &&
     !toDateOnlyIso(nextReminder);
-  const assignedToProfileId = await findAssignedProfileId(
-    supabase,
-    centerId,
-    input.commercial,
-  );
+  const nextCommercial = practitionerLabel(input.commercial);
+  const commercialChanged = !practitionerNamesMatch(nextCommercial, lead.commercial);
 
   await updateLeadFields(
     supabase,
@@ -1392,9 +1439,6 @@ async function writeCrmLeadDetails(lead: Lead, input: NewCrmLeadInput) {
       recall_date: toDateOnlyIso(nextReminder) || null,
       next_action: input.nextAction.trim() || "À contacter",
       amount_cure_ttc: input.dealAmount || 0,
-      ...(assignedToProfileId !== undefined
-        ? { assigned_to_profile_id: assignedToProfileId }
-        : {}),
       ...(consumedDueReminder
         ? {}
         : { updated_at: now, last_activity_at: now }),
@@ -1402,12 +1446,16 @@ async function writeCrmLeadDetails(lead: Lead, input: NewCrmLeadInput) {
     { requireRow: statusChanged },
   );
 
+  if (commercialChanged) {
+    await persistLeadCommercial(supabase, centerId, lead.id, nextCommercial);
+  }
+
   if (nextStatus !== lead.status) {
     await insertLeadEvent(supabase, centerId, lead.id, {
       event_type: "status",
       from_value: lead.status,
       to_value: nextStatus,
-      note: `Statut changé : ${lead.status} → ${nextStatus}.`,
+      note: statusChangeNote(nextCommercial, lead.status, nextStatus),
     });
 
     await ensureAcompteSuiviEvent(supabase, centerId, lead, nextStatus);
@@ -1452,9 +1500,9 @@ async function findAssignedProfileId(
   centerId: string,
   name?: string,
 ) {
-  const commercial = (name || "").trim();
+  const commercial = practitionerLabel(name);
 
-  if (!commercial || commercial === "Équipe") {
+  if (commercial === "Équipe") {
     return null;
   }
 
@@ -1468,15 +1516,19 @@ async function findAssignedProfileId(
     throw new Error(error.message);
   }
 
-  const match = (data ?? []).find((row) => {
+  const rows = data ?? [];
+  const exact = rows.find((row) => {
     const profile = Array.isArray(row.profiles) ? row.profiles[0] : row.profiles;
-    return (
-      String(profile?.full_name || "").trim().toLowerCase() ===
-      commercial.toLowerCase()
-    );
+    return normalizePractitionerName(profile?.full_name) ===
+      normalizePractitionerName(commercial);
   });
+  const fuzzy = rows.find((row) => {
+    const profile = Array.isArray(row.profiles) ? row.profiles[0] : row.profiles;
+    return practitionerNamesMatch(profile?.full_name, commercial);
+  });
+  const match = exact || fuzzy;
 
-  return (match?.profile_id as string | undefined) ?? undefined;
+  return (match?.profile_id as string | undefined) ?? null;
 }
 
 export async function loadCrmClients(options?: { includeClientId?: string | null }) {
@@ -2174,6 +2226,7 @@ function toLead(row: LeadRow): Lead {
   const depositReminderNotes = parseDepositReminderNotes(events);
   const depositTracked = parseDepositTracked(events);
   const visitDate = parseVisitDate(events);
+  const assignedName = latestAssignedPractitioner(events);
 
   const activityLog: LeadActivity[] = events
     .slice()
@@ -2181,10 +2234,11 @@ function toLead(row: LeadRow): Lead {
       .filter(
         (event) =>
           !isAcompteDepositEvent(event.event_type) &&
-          event.event_type !== RDV_DATE_EVENT,
+          event.event_type !== RDV_DATE_EVENT &&
+          event.event_type !== COMMERCIAL_EVENT,
       )
     .map((event) => {
-      const text = (event.note || event.to_value || "Activité CRM").trim();
+      const rawText = (event.note || event.to_value || "Activité CRM").trim();
       const type = normalizeEventType(event.event_type);
       const isComment =
         type === "comment" ||
@@ -2192,12 +2246,14 @@ function toLead(row: LeadRow): Lead {
           event.event_type !== IMPORT_ORIGIN_EVENT &&
           isUserFacingComment(event.note) &&
           !event.from_value);
+      const statusAuthor =
+        type === "status" ? authorFromStatusNote(event.note) : "";
 
       return {
         id: event.id,
-        author: authorFromEvent(event.event_type),
+        author: statusAuthor || authorFromEvent(event.event_type),
         date: formatLeadDateTime(event.created_at),
-        text,
+        text: type === "status" ? visibleStatusChangeText(rawText) : rawText,
         type: isComment ? ("comment" as const) : type,
         occurredAt: event.created_at,
       };
@@ -2251,7 +2307,7 @@ function toLead(row: LeadRow): Lead {
     campaign: campaign?.name?.trim() || "",
     status: normalizeLeadStatus(row.status),
     dealAmount: Number(row.amount_cure_ttc ?? 0),
-    commercial: assignee?.full_name || "Équipe",
+    commercial: assignedName || assignee?.full_name || "Équipe",
     createdAt: formatLeadDateTime(row.created_at),
     createdDate: toLocalIsoDate(row.created_at),
     lastActivityAt: row.last_activity_at,

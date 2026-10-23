@@ -837,9 +837,15 @@ export default function LeadDetails({
                     ? commercialOptions
                     : [infoForm.commercial, ...commercialOptions].filter(Boolean)
                 }
-                onChange={(value) =>
-                  setInfoForm((form) => ({ ...form, commercial: value }))
-                }
+                onChange={(value) => {
+                  const nextForm = {
+                    ...infoFormRef.current,
+                    commercial: value,
+                  };
+                  infoFormRef.current = nextForm;
+                  setInfoForm(nextForm);
+                  void saveLeadInfo();
+                }}
               />
               <label className="block rounded-xl bg-slate-50 px-3 py-2.5">
                 <span className="mb-1.5 block text-xs font-medium text-slate-500">
@@ -925,6 +931,7 @@ export default function LeadDetails({
               <TimelineItem
                 key={activity.id}
                 date={activity.date}
+                author={activity.author}
                 title={activity.text}
               />
             ))}
@@ -1233,15 +1240,28 @@ function WhatsAppHistory({
   );
 }
 
-function TimelineItem({ date, title }: { date: string; title: string }) {
+function TimelineItem({
+  date,
+  author,
+  title,
+}: {
+  date: string;
+  author?: string;
+  title: string;
+}) {
   return (
     <div className="grid gap-1 rounded-xl bg-slate-50 p-3 min-[1500px]:grid-cols-[92px_minmax(0,1fr)] min-[1500px]:gap-3">
       <span className="text-xs font-semibold leading-5 text-slate-400">
         {date}
       </span>
-      <p className="min-w-0 break-words text-sm font-medium leading-6 text-slate-700">
-        {title}
-      </p>
+      <div className="min-w-0">
+        {author ? (
+          <p className="text-xs font-semibold text-slate-500">{author}</p>
+        ) : null}
+        <p className="break-words text-sm font-medium leading-6 text-slate-700">
+          {title}
+        </p>
+      </div>
     </div>
   );
 }

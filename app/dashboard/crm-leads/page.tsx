@@ -38,11 +38,16 @@ import {
   setCrmLeadImportOrigin,
   updateCrmLeadAmount,
   updateCrmLeadDepositReminder,
+  updateCrmLeadCommercial,
   updateCrmLeadDetails,
   updateCrmLeadReminder,
   updateCrmLeadStatus,
   updateCrmLeadVisitDate,
 } from "@/lib/crm-supabase";
+import {
+  practitionerLabel,
+  practitionerNamesMatch,
+} from "@/lib/lead-practitioner";
 import {
   compareBookedLeads,
   displayVisitDate,
@@ -902,7 +907,7 @@ export default function CRMLeadsPage() {
           activityLog: [
             {
               id: crypto.randomUUID(),
-              author: "Samantha",
+              author: practitionerLabel(lead.commercial),
               date: formatActivityDate(),
               text: `Statut changé : ${lead.status} → ${status}.`,
               type: "status",
@@ -1258,25 +1263,13 @@ export default function CRMLeadsPage() {
     if (!lead) {
       return;
     }
-    void trackSave(() => updateCrmLeadDetails(lead, {
-      firstName: lead.firstName,
-      lastName: lead.lastName,
-      phone: lead.phone,
-      email: lead.email,
-      treatment: lead.treatment,
-      source: lead.source,
-      campaign: lead.campaign,
-      commercial,
-      status: lead.status,
-      dealAmount: lead.dealAmount,
-      nextAction: lead.nextAction,
-      reminderDate: lead.reminderDate,
-    })).catch((error) => {
+    void trackSave(() => updateCrmLeadCommercial(lead, commercial)).catch((error) => {
       setCrmError(
         error instanceof Error
           ? error.message
-          : "Le commercial n'a pas pu être enregistré.",
+          : "La praticienne n'a pas pu être enregistrée.",
       );
+      void refreshCrmLeads();
     });
   }
 
@@ -1311,6 +1304,13 @@ export default function CRMLeadsPage() {
     const dealAmount = Number(patch.dealAmount || 0);
     const nextStatus = patch.status;
     const statusChanged = leadBeforeUpdate.status !== nextStatus;
+    const commercialChanged = !practitionerNamesMatch(
+      patch.commercial,
+      leadBeforeUpdate.commercial,
+    );
+    const nextCommercial = commercialChanged
+      ? patch.commercial
+      : leadBeforeUpdate.commercial;
     const nextReminder = statusChanged
       ? reminderDateAfterStatusChange(
           leadBeforeUpdate.reminderDate,
@@ -1338,7 +1338,7 @@ export default function CRMLeadsPage() {
           source: patch.source,
           campaign: patch.campaign,
           treatment: patch.treatment,
-          commercial: patch.commercial,
+          commercial: commercialChanged ? patch.commercial : lead.commercial,
           status: nextStatus,
           dealAmount: Number.isFinite(dealAmount) ? dealAmount : lead.dealAmount,
           reminderDate: nextReminder,
@@ -1348,7 +1348,7 @@ export default function CRMLeadsPage() {
             ? [
                 {
                   id: crypto.randomUUID(),
-                  author: "Samantha",
+                  author: practitionerLabel(nextCommercial),
                   date: formatActivityDate(),
                   text: `Statut changé : ${lead.status} → ${nextStatus}.`,
                   type: "status" as const,
@@ -1375,7 +1375,7 @@ export default function CRMLeadsPage() {
         treatment: patch.treatment,
         source: patch.source,
         campaign: patch.campaign,
-        commercial: patch.commercial,
+        commercial: nextCommercial,
         status: nextStatus,
         dealAmount: Number.isFinite(dealAmount) ? dealAmount : leadBeforeUpdate.dealAmount,
         nextAction: patch.nextAction,
