@@ -124,31 +124,64 @@ async function say(conversation, text, label = "") {
 }
 
 // ——— Sandrine ———
-test("Sandrine : parcours après transmission (fermeté, autre clinique, hésitation)", async () => {
+test("Sandrine : ovale n’est pas un objectif ; fermeté avant rappel ; autre clinique ; hésitation", async () => {
   let conversation = open("Soin visage", "Sandrine");
-  conversation = await say(conversation, "j'aimerais améliorer mon ovale", "ovale");
+  conversation = await say(conversation, "Bonjour, j’aimerais améliorer mon ovale", "ovale");
+  assert.match(lastSeya(conversation), /ovale/i);
+  assert.match(lastSeya(conversation), /raffermir|redessiner/i);
+  assert.doesNotMatch(lastSeya(conversation), /déjà testé/i);
+  assert.doesNotMatch(lastSeya(conversation), CLOSING);
+  assert.equal(Boolean(conversation.teamNotes?.handedOffAt), false);
+
+  conversation = await say(conversation, "Qu’il soit plus ferme", "ferme");
+  assert.doesNotMatch(lastSeya(conversation), CLOSING);
+  assert.doesNotMatch(lastSeya(conversation), KEEP_OPEN);
   assert.match(lastSeya(conversation), /déjà testé/i);
+
   conversation = await say(conversation, "Non pas vraiment", "tried");
   assert.match(lastSeya(conversation), CLOSING);
   assert.ok(conversation.teamNotes?.handedOffAt);
 
-  conversation = await say(conversation, "Qu'il soit plus ferme", "ferme");
+  conversation = await say(
+    conversation,
+    "Là j’ai rendez-vous dans un une clinique qui fait des soins esthétiques pour voir ce que je peux faire",
+    "autre clinique",
+  );
+  assert.doesNotMatch(lastSeya(conversation), /jour|heure|créneau|préférence/i);
+  assert.match(lastSeya(conversation), /comparer/i);
+
+  conversation = await say(conversation, "Mais je n’arrive pas trop à me décider", "hésitation");
+  assert.doesNotMatch(lastSeya(conversation), KEEP_OPEN);
+  assert.doesNotMatch(lastSeya(conversation), /sans engagement/i);
+  assert.match(lastSeya(conversation), /hésiter|choix du soin|résultats|budget/i);
+});
+
+test("Sandrine : si le rappel est déjà parti, fermeté et autre clinique restent notés", async () => {
+  let conversation = open("Soin visage", "SandrineLate");
+  conversation = await say(conversation, "j'aimerais améliorer mon ovale", "ovale");
+  conversation = {
+    ...conversation,
+    status: "À recontacter",
+    teamNotes: {
+      ...(conversation.teamNotes || {}),
+      handedOffAt: NOW.toISOString(),
+      family: "visage",
+      need: conversation.qualification?.zone || "ovale",
+    },
+    qualification: { ...(conversation.qualification || {}), tried: "Non pas vraiment" },
+  };
+  conversation = await say(conversation, "Qu’il soit plus ferme", "ferme tard");
   assert.doesNotMatch(lastSeya(conversation), CLOSING);
   assert.doesNotMatch(lastSeya(conversation), KEEP_OPEN);
   assert.match(lastSeya(conversation), /raffermir.*ovale|ovale.*visage|fermeté/i);
 
   conversation = await say(
     conversation,
-    "Là j'ai rendez-vous dans une clinique qui fait des soins esthétiques pour voir ce que je peux faire",
-    "autre clinique",
+    "Là j’ai rendez-vous dans un une clinique qui fait des soins esthétiques pour voir ce que je peux faire",
+    "autre clinique tard",
   );
   assert.doesNotMatch(lastSeya(conversation), /jour|heure|créneau|préférence/i);
   assert.match(lastSeya(conversation), /comparer/i);
-
-  conversation = await say(conversation, "Mais je n'arrive pas trop à me décider", "hésitation");
-  assert.doesNotMatch(lastSeya(conversation), KEEP_OPEN);
-  assert.doesNotMatch(lastSeya(conversation), /sans engagement/i);
-  assert.match(lastSeya(conversation), /hésiter|choix du soin|résultats|budget/i);
 });
 
 // ——— Amel ———

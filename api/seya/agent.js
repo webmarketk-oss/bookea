@@ -1123,6 +1123,7 @@ function extractZone(text) {
     "poignees",
     "menton",
     "levre",
+    "ovale",
   ];
   if (/jambe/.test(value) && /complet|entier/.test(value)) {
     return "jambes complètes";
@@ -2806,7 +2807,7 @@ const GAILLARD_MINCEUR_OBJECTIF =
 const GAILLARD_MINCEUR_ZONE =
   /ventre|cuisse|hanche|fesse|bras|culotte de cheval|poignee d'amour|dos|jambes?/;
 const GAILLARD_VISAGE_CONCERN =
-  /ride|ridule|acne|bouton|tache|eclat|relach|teint|cerne|pore|fermete|hydrat|rajeun|terne|peau (seche|grasse|sensible)|rougeur|cicatrice|double menton|ovale|ferme/;
+  /ride|ridule|acne|bouton|tache|eclat|relach|teint|cerne|pore|fermete|hydrat|rajeun|terne|peau (seche|grasse|sensible)|rougeur|cicatrice|double menton|rafferm|\bferme/;
 const GAILLARD_EPILATION_ZONE =
   /jambe|maillot|intime|parties? intimes?|aisselle|bras|levre|menton|visage|dos|fesse|ventre|cuisse|torse|barbe|sourcil|nuque|epaule|pied|main|sillon|integral|bresilien|corps entier|joue|favori/;
 const GAILLARD_TRIED =
@@ -2865,6 +2866,21 @@ function gaillardMinceurObjectifKnown(qualification, leadTexts) {
   return leadTexts.some((value) => GAILLARD_MINCEUR_OBJECTIF.test(value));
 }
 
+function gaillardVisageConcernKnown(qualification, leadTexts) {
+  const detail = normalize(qualification.detail || "");
+  if (detail && GAILLARD_VISAGE_CONCERN.test(detail)) {
+    return true;
+  }
+  return leadTexts.some((value) => GAILLARD_VISAGE_CONCERN.test(value));
+}
+
+function gaillardVisageOvaleKnown(qualification, leadTexts) {
+  if (/ovale/.test(normalize(qualification.zone || ""))) {
+    return true;
+  }
+  return leadTexts.some((value) => /ovale/.test(value));
+}
+
 function gaillardDetailKnown(family, qualification, leadTexts) {
   if (family === "minceur") {
     return (
@@ -2872,15 +2888,13 @@ function gaillardDetailKnown(family, qualification, leadTexts) {
       gaillardMinceurObjectifKnown(qualification, leadTexts)
     );
   }
+  if (family === "visage") {
+    return gaillardVisageConcernKnown(qualification, leadTexts);
+  }
   if (qualification.zone || qualification.detail) {
     return true;
   }
-  const pattern =
-    family === "visage"
-      ? GAILLARD_VISAGE_CONCERN
-      : family === "epilation"
-        ? GAILLARD_EPILATION_ZONE
-        : null;
+  const pattern = family === "epilation" ? GAILLARD_EPILATION_ZONE : null;
   return Boolean(pattern && leadTexts.some((value) => pattern.test(value)));
 }
 
@@ -2910,6 +2924,16 @@ function gaillardNextQuestion(family, qualification, leadTexts, seya) {
     }
     if (!hasZones) {
       return { step: "need", text: gaillard.needQuestion("minceur", "zones") };
+    }
+  } else if (family === "visage") {
+    if (!gaillardVisageConcernKnown(qualification, leadTexts)) {
+      return {
+        step: "need",
+        text: gaillard.needQuestion(
+          "visage",
+          gaillardVisageOvaleKnown(qualification, leadTexts) ? "ovale" : "",
+        ),
+      };
     }
   } else if (!gaillardDetailKnown(family, qualification, leadTexts)) {
     return { step: "need", text: gaillard.needQuestion(family) };
@@ -3296,12 +3320,17 @@ function gaillardLeadReply(conversation, text, seya, slots, extras = {}) {
     }
     if (
       gaillard.lastSeyaAskedNeed(base) &&
-      !qualification.zone &&
       !qualification.detail &&
       !mentionsAvailability &&
       gaillard.isAnswerLike(text)
     ) {
-      qualification.detail = said;
+      if (family === "visage" && !gaillardVisageConcernKnown(qualification, [normalize(text)])) {
+        if (/ovale/.test(normalize(text))) {
+          qualification.zone = qualification.zone || "ovale";
+        }
+      } else {
+        qualification.detail = said;
+      }
     }
     if (
       gaillard.lastSeyaAskedTried(base) &&

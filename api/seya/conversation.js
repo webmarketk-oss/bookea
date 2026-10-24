@@ -499,6 +499,12 @@ function isAlreadyBookedElsewhere(text) {
     return false;
   }
   if (
+    /rendez[- ]?vous dans (un[e]? )*(autre )?(clinique|centre|institut)/.test(value) ||
+    /(clinique|institut).{0,60}(soins? esthetiques?|voir ce que|comparer)/.test(value)
+  ) {
+    return false;
+  }
+  if (
     /je (veux|voudrais|souhaite|aimerais|peux) (prendre|reserver|caler)/.test(value)
   ) {
     return false;

@@ -374,9 +374,9 @@ function hesitationClarifyReply() {
 function mentionsOtherClinicVisit(text) {
   const value = normalize(text);
   return (
-    /rendez[- ]?vous dans (un[e]? )?(autre )?(clinique|centre|institut)/.test(value) ||
-    /j[' ]ai rendez[- ]?vous (dans|chez|a) (un[e]? )?(clinique|centre|institut)/.test(value) ||
-    /(clinique|institut).{0,40}(soins? esthetiques?|voir ce que|comparer)/.test(value)
+    /rendez[- ]?vous dans (un[e]? )*(autre )?(clinique|centre|institut)/.test(value) ||
+    /j['’ ]ai rendez[- ]?vous (dans|chez|a) (un[e]? )*(clinique|centre|institut)/.test(value) ||
+    /(clinique|institut).{0,60}(soins? esthetiques?|voir ce que|comparer)/.test(value)
   );
 }
 
@@ -540,6 +540,9 @@ function needQuestion(family, missing = "") {
     return "Quelles zones souhaitez-vous traiter ?";
   }
   if (family === "visage") {
+    if (missing === "ovale") {
+      return "Que souhaitez-vous surtout pour l’ovale : le raffermir, le redessiner ?";
+    }
     return "Qu’est-ce qui vous préoccupe au niveau de votre peau, et qu’attendez-vous du soin ?";
   }
   return "Vous cherchez plutôt un soin minceur, un soin visage ou une épilation ?";
@@ -552,6 +555,8 @@ const QUESTION_REPHRASED = {
   "Quel est votre objectif, et quelles zones aimeriez-vous travailler ?":
     "Que recherchez-vous surtout, et sur quelles zones ?",
   "Quelles zones souhaitez-vous traiter ?": "Quelles autres zones aimeriez-vous traiter, le cas échéant ?",
+  "Que souhaitez-vous surtout pour l’ovale : le raffermir, le redessiner ?":
+    "Pour l’ovale, vous cherchez plutôt à raffermir ou à redessiner ?",
 };
 
 /** Évite d’envoyer deux fois de suite exactement la même question. */
@@ -582,7 +587,7 @@ function lastSeyaQuestion(conversation) {
 }
 
 function lastSeyaAskedNeed(conversation) {
-  return /quel est votre objectif|quelles? zones?|qu['’]est-ce qui vous pr[ée]occupe/i.test(
+  return /quel est votre objectif|quelles? zones?|qu['’]est-ce qui vous pr[ée]occupe|aimeriez-vous am[eé]liorer au niveau de votre peau|souhaitez-vous surtout pour l['’ ]ovale|raffermir, le redessiner/i.test(
     lastSeyaQuestion(conversation),
   );
 }
@@ -592,7 +597,7 @@ function lastSeyaAskedTried(conversation) {
 }
 
 const STEP_QUESTIONS = [
-  /quel est votre objectif|quelles? zones?|qu['’]est-ce qui vous pr[ée]occupe/i,
+  /quel est votre objectif|quelles? zones?|qu['’]est-ce qui vous pr[ée]occupe|souhaitez-vous surtout pour l['’ ]ovale|raffermir, le redessiner/i,
   /d[ée]j[àa] (test|essay)/i,
   /combien de kilos/i,
   /bilan (minceur )?offert|souhaitez-vous que je (fasse remonter|transmette)/i,

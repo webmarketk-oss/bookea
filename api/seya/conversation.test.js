@@ -577,6 +577,12 @@ test("j’ai déjà pris le rdv : elle arrête de proposer des créneaux", async
     true,
   );
   assert.equal(isAlreadyBookedElsewhere("je veux prendre rdv le 8 octobre"), false);
+  assert.equal(
+    isAlreadyBookedElsewhere(
+      "Là j’ai rendez-vous dans un une clinique qui fait des soins esthétiques pour voir ce que je peux faire",
+    ),
+    false,
+  );
 
   let conversation = startConversation(
     {
