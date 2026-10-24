@@ -209,6 +209,17 @@ test("Gaillard minceur : kilos déjà précisés, zones encore demandées", asyn
   assert.match(lastSeya(conversation), /déjà testé/i);
 });
 
+test("Gaillard : consigne « Ne lui applique pas l’offre » détectée comme fuite", () => {
+  const gaillard = require("./gaillard");
+  assert.equal(
+    gaillard.leaksInternalBrief(
+      "Ne lui applique pas l’offre minceur et conserve son besoin minceur initial.",
+    ),
+    true,
+  );
+  assert.equal(gaillard.leaksInternalBrief("Le bilan et la séance découverte sont offerts."), false);
+});
+
 test("Gaillard : polish IA qui recopie la fiche ou colle les mots est rejetée", async () => {
   process.env.OPENAI_API_KEY = "test";
   try {

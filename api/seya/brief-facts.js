@@ -14,9 +14,9 @@ function normalize(value) {
 const BULLET = /^\s*(?:[-–—•*▪·●]|\d{1,2}[.)])\s+/;
 const QUOTED = /[«»“”"]/;
 const INSTRUCTION_START =
-  /^(reponds?|repondre|demande[rsz]?|propose[rsz]?|pose[rsz]?|dis|dire|dites|indique[rsz]?|precise[rsz]?|explique[rsz]?|mentionne[rsz]?|insiste[rsz]?|evite[rsz]?|n'invente|ne (dis|dites|propose|demande|pose|parle|mentionne|promets?|prescris|recommande|jamais|pas)|prescris|presente[rsz]?|oriente[rsz]?|relance[rsz]?|valorise[rsz]?|mets? en avant|mettre en avant|rassure[rsz]?|enchaine[rsz]?|termine[rsz]?|conclus|toujours|jamais|interdit|important|attention|objectif|il faut|si (la|le|elle|il|on) |quand (la|le|elle|il) |lorsque|une fois que|etape \d|question \d)\b/;
+  /^(reponds?|repondre|demande[rsz]?|propose[rsz]?|pose[rsz]?|dis|dire|dites|indique[rsz]?|precise[rsz]?|explique[rsz]?|mentionne[rsz]?|insiste[rsz]?|evite[rsz]?|n'invente|ne (lui|leur|le|la|dis|dites|propose|demande|pose|parle|mentionne|promets?|prescris|recommande|applique|donne|change|conserve|jamais|pas)|prescris|presente[rsz]?|oriente[rsz]?|relance[rsz]?|valorise[rsz]?|mets? en avant|mettre en avant|rassure[rsz]?|enchaine[rsz]?|termine[rsz]?|conclus|toujours|jamais|interdit|important|attention|objectif|il faut|si (la|le|elle|il|on) |quand (la|le|elle|il) |lorsque|une fois que|etape \d|question \d)\b/;
 const INSTRUCTION_ANYWHERE =
-  /(^|[\s(,])(tu|toi|ton|ta|tes)\b|(^|\s)t'|\bseya\b|\bconsignes?\b|\bexemples?\b|\bpar ex\b|\bprospect|\blead\b|\bla cliente\b|\ble client\b|\brepond deja\b|\ba la question\b|\bquestion suivante\b|\bscript\b|\bexplique[rz]? que\b|\bprescris\b|\bobjectif calorique\b|\brestriction alimentaire\b|\binterdit de\b/;
+  /(^|[\s(,])(tu|toi|ton|ta|tes)\b|(^|\s)t'|\bseya\b|\bconsignes?\b|\bexemples?\b|\bpar ex\b|\bprospect|\blead\b|\bla cliente\b|\ble client\b|\brepond deja\b|\ba la question\b|\bquestion suivante\b|\bscript\b|\bexplique[rz]? que\b|\bprescris\b|\bobjectif calorique\b|\brestriction alimentaire\b|\binterdit de\b|\bne lui\b|\bapplique pas\b|\bconserve son besoin\b|\bbesoin minceur initial\b/;
 
 function isHeaderLine(line) {
   const letters = line.replace(/[^A-Za-zÀ-ÖØ-öø-ÿ]/g, "");

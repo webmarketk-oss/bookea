@@ -38,3 +38,16 @@ test("fiche : consignes « explique / ne prescris pas » écartées", () => {
   ]);
   assert.deepEqual(facts, ["Le suivi se fait sur une application, entre les séances."]);
 });
+
+test("fiche : « Ne lui applique pas l’offre » n’est pas une information", () => {
+  const facts = briefFacts([
+    "Le parcours comprend un accompagnement au rééquilibrage alimentaire avec un suivi sur une application.",
+    "Le centre propose des compléments alimentaires bien-être de marque Physiomins, qui peuvent compléter l’accompagnement selon les besoins identifiés lors du bilan.",
+    "Ne lui applique pas l’offre minceur et conserve son besoin minceur initial.",
+  ]);
+  assert.ok(facts.some((item) => /rééquilibrage|application/i.test(item)));
+  assert.equal(
+    facts.some((item) => /applique pas|besoin minceur initial/i.test(item)),
+    false,
+  );
+});

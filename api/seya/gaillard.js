@@ -126,13 +126,16 @@ function minceurPathFacts(sources = [], pricing = {}) {
 function supportTopicFacts(text, sources = []) {
   const value = normalize(text);
   const topic = SUPPORT_TOPICS.find((pattern) => pattern.test(value));
-  return topic ? findFacts(sources, topic, 2).join(" ") : "";
+  return topic
+    ? findFacts(sources, topic, 2)
+        .filter((fact) => !leaksInternalBrief(fact))
+        .join(" ")
+    : "";
 }
 
-/** Après la question régimes : faits de la fiche minceur puis proposition du bilan, sans clôturer. */
+/** Après la question régimes : une phrase courte, jamais la fiche ni les consignes. */
 function minceurPathReply(sources = [], pricing = {}) {
-  const facts = minceurPathFacts(sources, pricing);
-  return [facts, pathQuestion()].filter(Boolean).join(" ");
+  return [SAFE_MINCEUR_PATH, pathQuestion()].filter(Boolean).join(" ");
 }
 
 /** Refus explicite de poursuivre l’échange, quelle que soit la question posée. */
@@ -732,7 +735,7 @@ const RULE_BREAK =
   /disponibilit|quand seriez|quand etes|quel jour|quels jours|quelle heure|a quelle heure|dites-moi un (ou deux )?jours?|debut de semaine|fin de semaine|un creneau|des creneaux|ce creneau|je regarde (le planning|un creneau|les creneaux)|je (peux )?vous propose|lequel vous irait|quelle distance|habitez|loin de|pres de chez|annemasse|operatrice/;
 
 const BRIEF_LEAK =
-  /ne prescris|prescris pas|explique[rz]? que|interdit de|objectif calorique|restriction alimentaire|\bconsignes?\b|(^|[.!?]\s)(tu |toi )/;
+  /ne prescris|prescris pas|explique[rz]? que|interdit de|objectif calorique|restriction alimentaire|\bconsignes?\b|(^|[.!?]\s)(tu |toi )|ne (lui|leur) (applique|donne|propose|change|conserve)|applique pas l['']offre|conserve son besoin|besoin minceur initial/;
 
 const GLUED_FRENCH =
   /quelest|votreobjectif|pource |leparcours|comprendun|accompagnementau|alimentaireavec|unsuivi|surune|expliquieque|neprescris/i;
@@ -797,7 +800,7 @@ function promptRules(family) {
     `Mission de ${GAILLARD_NAME} : accueillir chaleureusement, comprendre le besoin, s’appuyer sur la fiche du soin, puis transmettre à l’équipe quand le prospect est prêt. Un expert ou une experte du centre rappelle ensuite.`,
     "Interdit de demander des disponibilités (ni pour venir au centre, ni pour un rappel), de proposer un créneau, de prendre ou confirmer un rendez-vous.",
     family === "minceur"
-      ? "Parcours minceur : 1) accueil, 2) besoin (objectif + zones ; kilos si perte de poids sans montant), 3) question régimes / solutions déjà testées, 4) à ce moment expliquer ce qui est dans la fiche (rééquilibrage alimentaire, suivi sur application, compléments éventuels non obligatoires, appareils), 5) proposer le bilan offert avec une question ouverte. Une seule question à la fois. Interdit de clôturer juste après les zones ou juste après « déjà testé »."
+      ? "Parcours minceur : 1) accueil, 2) besoin (objectif + zones ; kilos si perte de poids sans montant), 3) question régimes / solutions déjà testées, 4) proposer le bilan et la séance découverte offerts en une phrase, 5) question ouverte. Interdit de recopier la fiche, les compléments, les appareils ou une consigne interne. Une seule question à la fois. Interdit de clôturer juste après les zones ou juste après « déjà testé »."
       : "Parcours : 1) comprendre le besoin (épilation : zones ; visage : préoccupations), 2) demander s’il a déjà testé une solution, 3) conclure. Une seule question à la fois.",
     `Conclusion, seulement quand le prospect confirme qu’il veut être rappelé / le bilan : « ${closingReply(family)} » Interdit d’annoncer cette conclusion tant que la qualification minceur n’est pas allée jusqu’à la proposition de bilan.`,
     "Tu restes chaleureuse et tu laisses toujours une porte ouverte (question utile). Interdit de fermer le fil avec un simple « je transmets » si le prospect pose encore une question ou dit seulement « oui ».",

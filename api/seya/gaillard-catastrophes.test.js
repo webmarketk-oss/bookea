@@ -358,6 +358,52 @@ async function sayLive(conversation, text) {
   return result.conversation;
 }
 
+test("Gaillard : pavé Physiomins + « Ne lui applique pas » jamais envoyé", async () => {
+  const shame = {
+    ...seya,
+    treatmentBriefs: [
+      {
+        name: "Soin minceur",
+        brief:
+          "Le parcours comprend un accompagnement au rééquilibrage alimentaire avec un suivi sur une application. Le centre propose des compléments alimentaires bien-être de marque Physiomins, qui peuvent compléter l’accompagnement selon les besoins identifiés lors du bilan. Ne lui applique pas l’offre minceur et conserve son besoin minceur initial.",
+        pricing: { bilan: "offert", discovery: "offerte", sessionPolicy: "after_bilan" },
+      },
+    ],
+  };
+  async function sayShame(conversation, text) {
+    const result = await generateSeyaReply({
+      conversation,
+      text,
+      seya: shame,
+      appointments: [],
+      hours: hours(),
+      centerName: GAILLARD,
+      centerAddress: "58 rue de la Libération, 74240 Gaillard",
+      centerId: "gaillard",
+      now: NOW,
+    });
+    assert.equal(result.shouldBook, null);
+    return result.conversation;
+  }
+  let conversation = startConversation(
+    {
+      leadId: "lead-gaillard-shame",
+      centerId: "gaillard",
+      firstName: "Léa",
+      phone: "0611223344",
+      treatment: "Soin minceur",
+    },
+    GAILLARD,
+    shame,
+  );
+  conversation = await sayShame(conversation, "Je veux perdre du ventre");
+  conversation = await sayShame(conversation, "Non jamais");
+  const said = lastSeya(conversation);
+  assert.match(said, /Souhaitez-vous que je fasse remonter|bilan minceur offert/i);
+  assert.doesNotMatch(said, /applique pas|Physiomins|besoin minceur initial|Le parcours comprend/i);
+  assert.doesNotMatch(said, /Leparcours|comprendun|accompagnementau/i);
+});
+
 test("Gaillard capture : après graisse du ventre, une question, sans consigne ni bilan", async () => {
   let conversation = startConversation(
     {
