@@ -58,9 +58,18 @@ const leadStatusAliasMap: Record<string, LeadStatus> = {
   "À rappeler": "À relancer",
   "A rappeler": "À relancer",
   "Souhaite être rappelé(e) plus tard": "À relancer",
+  "Souhaite être rappelé(e) plus trad": "À relancer",
   "À relancer": "À relancer",
+  "À relancer, RDV PRIS": "RDV pris",
+  "À relancer, Reviendra vers nous": "Reviendra vers nous",
+  "À relancer, Doublon": "Doublon",
+  "RDV PRIS": "RDV pris",
   "RDV fixé": "RDV pris",
   "RDV programmé": "RDV pris",
+  "appel en absence": "Apl en abs",
+  "appel en absent": "Apl en abs",
+  "Appel en absence": "Apl en abs",
+  "Apl en absence": "Apl en abs",
   "Acompte validé": "Acompte reçu",
   Client: "Client converti",
   Perdu: "Prospect perdu",
@@ -106,34 +115,76 @@ export const leadStatusClasses: Record<LeadStatus, string> = {
   "Message vocal": "bg-cyan-100 text-cyan-800 ring-cyan-200",
 };
 
+function mapOneLeadStatus(raw: string): LeadStatus | "" {
+  const value = raw.trim();
+  if (!value) {
+    return "";
+  }
+  if ((leadStatuses as readonly string[]).includes(value)) {
+    return value as LeadStatus;
+  }
+  const mapped = leadStatusAliasMap[value];
+  if (mapped) {
+    return mapped;
+  }
+  const lower = value.toLowerCase();
+  const aliasMatch = Object.entries(leadStatusAliasMap).find(
+    ([alias]) => alias.toLowerCase() === lower,
+  );
+  if (aliasMatch) {
+    return aliasMatch[1];
+  }
+  const canonicalMatch = leadStatuses.find(
+    (status) => status.toLowerCase() === lower,
+  );
+  if (canonicalMatch) {
+    return canonicalMatch;
+  }
+  if (/appel en abs|apl en abs/i.test(value)) {
+    return "Apl en abs";
+  }
+  if (/\brdv pris\b/i.test(value)) {
+    return "RDV pris";
+  }
+  return "";
+}
+
+const COMBINED_STATUS_PRIORITY: LeadStatus[] = [
+  "Vendu",
+  "RDV confirmé",
+  "RDV pris",
+  "Pas intéressé",
+  "Doublon",
+  "Reviendra vers nous",
+  "À relancer",
+  "Apl en abs",
+];
+
 export function normalizeLeadStatus(value?: string | null): LeadStatus {
   const raw = (value || "").trim();
   if (!raw) {
     return "Nouveau";
   }
 
-  if ((leadStatuses as readonly string[]).includes(raw)) {
-    return raw as LeadStatus;
+  const direct = mapOneLeadStatus(raw);
+  if (direct) {
+    return direct;
   }
 
-  const mapped = leadStatusAliasMap[raw];
-  if (mapped) {
-    return mapped;
-  }
-
-  const lower = raw.toLowerCase();
-  const aliasMatch = Object.entries(leadStatusAliasMap).find(
-    ([alias]) => alias.toLowerCase() === lower
-  );
-  if (aliasMatch) {
-    return aliasMatch[1];
-  }
-
-  const canonicalMatch = leadStatuses.find(
-    (status) => status.toLowerCase() === lower
-  );
-  if (canonicalMatch) {
-    return canonicalMatch;
+  if (raw.includes(",")) {
+    const mapped = raw
+      .split(",")
+      .map((part) => mapOneLeadStatus(part))
+      .filter((status): status is LeadStatus => Boolean(status));
+    const preferred = COMBINED_STATUS_PRIORITY.find((status) =>
+      mapped.includes(status),
+    );
+    if (preferred) {
+      return preferred;
+    }
+    if (mapped[0]) {
+      return mapped[0];
+    }
   }
 
   return "Nouveau";

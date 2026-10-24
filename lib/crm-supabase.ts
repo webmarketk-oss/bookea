@@ -261,6 +261,10 @@ export type NewCrmLeadInput = {
   dealAmount: number;
   nextAction: string;
   reminderDate?: string;
+  comment?: string;
+  createdAt?: string;
+  skipNotify?: boolean;
+  skipReload?: boolean;
 };
 
 const sourceFallback: LeadSource = "Organique";
@@ -668,7 +672,9 @@ async function createCrmLeadRecord(input: NewCrmLeadInput) {
     throw new Error(clientError.message);
   }
 
-  const now = new Date().toISOString();
+  const now = input.createdAt || new Date().toISOString();
+  const comment =
+    input.comment?.trim() || `Lead créé avec le statut ${input.status}.`;
   const { data: lead, error: leadError } = await supabase
     .from("leads")
     .insert({
@@ -680,7 +686,7 @@ async function createCrmLeadRecord(input: NewCrmLeadInput) {
       status: input.status,
       recall_date: toDateOnlyIso(input.reminderDate) || null,
       next_action: input.nextAction.trim() || "À contacter",
-      latest_comment: `Lead créé avec le statut ${input.status}.`,
+      latest_comment: comment,
       amount_cure_ttc: input.dealAmount || 0,
       created_at: now,
       updated_at: now,
@@ -695,9 +701,23 @@ async function createCrmLeadRecord(input: NewCrmLeadInput) {
 
   await insertLeadEvent(supabase, context.centerId, lead.id, {
     event_type: "system",
-    note: `Lead créé avec le statut ${input.status}.`,
+    note: comment,
   });
-  void requestNewLeadNotification(supabase, lead.id);
+  if (!input.skipNotify) {
+    void requestNewLeadNotification(supabase, lead.id);
+  }
+  if (input.skipReload) {
+    return {
+      id: lead.id,
+      firstName: input.firstName.trim(),
+      lastName: input.lastName.trim(),
+      phone: input.phone.trim(),
+      email: input.email.trim(),
+      status: input.status,
+      source: input.source.trim(),
+      campaign: input.campaign.trim(),
+    } as Lead;
+  }
 
   const { leads } = await loadCrmLeads();
   const createdLead = leads.find((item) => item.id === lead.id);

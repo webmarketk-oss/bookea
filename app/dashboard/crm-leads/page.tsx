@@ -15,6 +15,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
 import { readActiveCenterId, saveActiveCenterId } from "@/lib/center-access";
+import { importPelissanneOctoberLeads } from "@/lib/pelissanne-october-import";
 import { followUpLeadStatuses, inactiveLeadStatuses, leadStatuses } from "@/lib/lead-statuses";
 import { matchesPersonSearch } from "@/lib/person-search";
 import {
@@ -250,6 +251,7 @@ export default function CRMLeadsPage() {
   const ficheColumnRef = useRef<HTMLDivElement>(null);
   const [ficheBox, setFicheBox] = useState<FicheBox | null>(null);
   const openedLeadFromQuery = useRef(false);
+  const listImportRan = useRef(false);
   const [filters, setFilters] = useState<ProspectFilters>(defaultProspectFilters);
   const [commercialNames, setCommercialNames] = useState<string[]>([]);
   const commercialOptions = useMemo(
@@ -489,6 +491,30 @@ export default function CRMLeadsPage() {
     const searchParams = new URLSearchParams(window.location.search);
     const status = searchParams.get("status");
     const quick = searchParams.get("quick");
+    if (searchParams.get("importListe") === "octobre" && !listImportRan.current) {
+      listImportRan.current = true;
+      setCrmNotice("Import Pélissanne en cours…");
+      void importPelissanneOctoberLeads()
+        .then((result) => {
+          setCrmNotice(
+            `Import Pélissanne : ${result.created} créés, ${result.skipped} déjà là${
+              result.errors.length ? `, ${result.errors.length} erreur(s)` : ""
+            }.`,
+          );
+          if (result.created > 0) {
+            void loadCrmLeads().then(({ leads, centerId, centerName }) => {
+              centerIdRef.current = centerId;
+              centerNameRef.current = centerName;
+              setLeadsCenterId(centerId);
+              setLeadList(leads);
+              saveCrmLeadsSnapshot({ leads, centerId, centerName });
+            });
+          }
+        })
+        .catch((error) => {
+          setCrmError(error instanceof Error ? error.message : "Import impossible.");
+        });
+    }
 
     if (searchParams.get("tab") === "imports") {
       // eslint-disable-next-line react-hooks/set-state-in-effect
