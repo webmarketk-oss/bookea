@@ -2,6 +2,7 @@ import { getActiveCenterContext, readActiveCenterId } from "@/lib/center-access"
 import { invoicePaymentAmounts } from "@/lib/client-balance";
 import {
   isReminderDueOn,
+  isRdvBookedStatus,
   reminderDateAfterStatusChange,
   toDateOnlyIso,
   toLocalIsoDate,
@@ -702,7 +703,17 @@ async function createCrmLeadRecord(input: NewCrmLeadInput) {
   await insertLeadEvent(supabase, context.centerId, lead.id, {
     event_type: "system",
     note: comment,
+    createdAt: now,
   });
+  if (isRdvBookedStatus(input.status)) {
+    await insertLeadEvent(supabase, context.centerId, lead.id, {
+      event_type: "status",
+      from_value: "Nouveau",
+      to_value: input.status,
+      note: statusChangeNote("Équipe", "Nouveau", input.status),
+      createdAt: now,
+    });
+  }
   if (!input.skipNotify) {
     void requestNewLeadNotification(supabase, lead.id);
   }
@@ -2106,6 +2117,7 @@ async function insertLeadEvent(
     from_value?: string | null;
     to_value?: string | null;
     note?: string | null;
+    createdAt?: string;
   },
 ) {
   return trackCrmWrite(
@@ -2117,6 +2129,7 @@ async function insertLeadEvent(
         from_value: event.from_value ?? null,
         to_value: event.to_value ?? null,
         note: event.note ?? null,
+        ...(event.createdAt ? { created_at: event.createdAt } : {}),
       });
 
       if (error) {

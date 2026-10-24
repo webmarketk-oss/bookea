@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { followUpLeadStatuses, inactiveLeadStatuses } from "@/lib/lead-statuses";
+import { isEverBookedLead } from "@/lib/crm-rdv";
 import {
   addDaysIso,
   isLeadCreatedBetween,
@@ -124,6 +125,14 @@ export default function DashboardCards({
       quickFilter: "RDV 7 jours",
     },
     {
+      title: "Tous les RDV pris",
+      value: leads.filter(isEverBookedLead).length,
+      subtitle: "Même sans date de prise",
+      icon: CalendarCheck2,
+      color: "text-violet-800",
+      status: "RDV pris",
+    },
+    {
       title: "Acompte envoyé",
       value: leads.filter((lead) => lead.status === "Acompte envoyé").length,
       subtitle: "À relancer pour encaisser",
@@ -189,9 +198,9 @@ export default function DashboardCards({
       </StatGroup>
       <StatGroup
         title="RDV pris"
-        hint="Comptés à la date où le rendez-vous a été pris, même si le statut a ensuite changé."
+        hint="Tous les RDV pris comptent, même sans date. Les cartes jour / 7 jours restent à la date de prise."
         cards={rdvStats}
-        columns="xl:grid-cols-4"
+        columns="xl:grid-cols-5"
       >
         {(stat) =>
           renderStatCard(stat, activeStatus, activeQuickFilter, onStatusFilter, onQuickFilter)

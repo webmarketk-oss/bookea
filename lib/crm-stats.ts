@@ -259,6 +259,11 @@ export function getLeadRdvTakenDates(lead: Lead) {
       if (fallback) {
         dates.add(fallback);
       }
+    } else if (rdvBookedStatuses.has(normalizeLeadStatus(lead.status))) {
+      const fallback = lead.createdDate || leadFallbackDate(lead);
+      if (fallback) {
+        dates.add(fallback);
+      }
     }
   }
 

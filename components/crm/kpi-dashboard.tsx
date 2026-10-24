@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { loadBillingInvoices, type BillingInvoice } from "@/lib/billing-supabase";
 import { buildCampaignKpiRows } from "@/lib/campaign-kpi";
+import { isEverBookedLead } from "@/lib/crm-rdv";
 import {
   getLeadRdvTakenDates,
   isRdvBookedStatus,
@@ -81,9 +82,12 @@ export default function KPIDashboard({ leads }: KPIDashboardProps) {
   const isInPeriod = (date: string) =>
     isDateInKpiPeriod(parseDate(date), period, customStartDate, customEndDate);
   const totalProspects = periodLeads.length;
-  const rdvCount = leads.filter((lead) =>
-    getLeadRdvTakenDates(lead).some(isInPeriod),
-  ).length;
+  const rdvCount = leads.filter((lead) => {
+    if (getLeadRdvTakenDates(lead).some(isInPeriod)) {
+      return true;
+    }
+    return isEverBookedLead(lead) && periodLeads.includes(lead);
+  }).length;
   const devisCount = leads.filter((lead) =>
     leadHasOutcomeBetween(lead, ["Devis"], isInPeriod),
   ).length;
@@ -178,7 +182,7 @@ export default function KPIDashboard({ leads }: KPIDashboardProps) {
     {
       title: "NB RDV pris",
       value: rdvCount,
-      subtitle: "À la date où le RDV a été pris",
+      subtitle: "Tous les RDV pris, même sans date",
       icon: CalendarDays,
       color: "text-blue-600",
     },
