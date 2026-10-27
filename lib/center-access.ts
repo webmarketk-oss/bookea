@@ -17,12 +17,54 @@ export type ActiveCenterContext = {
 };
 
 export const ACTIVE_CENTER_STORAGE_KEY = "bookea-active-center-id";
+const CENTERS_STORAGE_KEY = "bookea-accessible-centers";
 
 const CENTERS_CACHE_MS = 60000;
 const CENTERS_LOAD_TIMEOUT_MS = 8000;
 
 let cachedCenters: { at: number; value: AccessibleCenter[] } | null = null;
 let centersInFlight: Promise<AccessibleCenter[]> | null = null;
+
+/** Dernière liste chargée sur cet appareil : affichée tout de suite, rafraîchie en arrière-plan. */
+export function readStoredAccessibleCenters(): AccessibleCenter[] {
+  if (typeof window === "undefined") {
+    return [];
+  }
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(CENTERS_STORAGE_KEY) || "null");
+    const list = Array.isArray(parsed?.centers) ? parsed.centers : [];
+    return list.filter(
+      (center: Partial<AccessibleCenter>) =>
+        typeof center?.id === "string" && typeof center?.name === "string",
+    ) as AccessibleCenter[];
+  } catch {
+    return [];
+  }
+}
+
+function storeAccessibleCenters(userId: string, centers: AccessibleCenter[]) {
+  if (typeof window === "undefined") {
+    return;
+  }
+  try {
+    window.localStorage.setItem(CENTERS_STORAGE_KEY, JSON.stringify({ userId, centers }));
+  } catch {
+    // Stockage plein ou bloqué : on garde le chargement réseau.
+  }
+}
+
+/** À la connexion / déconnexion : la liste d’un autre compte ne doit jamais s’afficher. */
+export function clearCenterAccessCache() {
+  cachedCenters = null;
+  if (typeof window === "undefined") {
+    return;
+  }
+  try {
+    window.localStorage.removeItem(CENTERS_STORAGE_KEY);
+  } catch {
+    // Rien à nettoyer.
+  }
+}
 
 function withTimeout<T>(promise: Promise<T>, ms: number, message: string) {
   return new Promise<T>((resolve, reject) => {
@@ -75,24 +117,34 @@ type CenterRow = {
   } | null;
 };
 
+/** Chargement réseau partagé, sans délai maximal : un résultat tardif reste utilisable. */
+export function refreshAccessibleCenters(
+  supabase: SupabaseClient = createClient(),
+): Promise<AccessibleCenter[]> {
+  if (!centersInFlight) {
+    centersInFlight = fetchAccessibleCenters(supabase)
+      .then(({ userId, centers }) => {
+        cachedCenters = centers.length ? { at: Date.now(), value: centers } : null;
+        if (centers.length) {
+          storeAccessibleCenters(userId, centers);
+        }
+        return centers;
+      })
+      .finally(() => {
+        centersInFlight = null;
+      });
+  }
+  return centersInFlight;
+}
+
 export async function loadAccessibleCenters(
   supabase: SupabaseClient = createClient(),
 ): Promise<AccessibleCenter[]> {
   if (cachedCenters && Date.now() - cachedCenters.at < CENTERS_CACHE_MS) {
     return cachedCenters.value;
   }
-  if (!centersInFlight) {
-    centersInFlight = fetchAccessibleCenters(supabase)
-      .then((value) => {
-        cachedCenters = value.length ? { at: Date.now(), value } : null;
-        return value;
-      })
-      .finally(() => {
-        centersInFlight = null;
-      });
-  }
   return withTimeout(
-    centersInFlight,
+    refreshAccessibleCenters(supabase),
     CENTERS_LOAD_TIMEOUT_MS,
     "timeout loading centers",
   );
@@ -115,7 +167,7 @@ async function sessionUserId(supabase: SupabaseClient) {
 
 async function fetchAccessibleCenters(
   supabase: SupabaseClient,
-): Promise<AccessibleCenter[]> {
+): Promise<{ userId: string; centers: AccessibleCenter[] }> {
   const userId = await sessionUserId(supabase);
 
   // Sans session (expirée ou fermée) : c'est une reconnexion qu'il faut, pas « aucun centre ».
@@ -123,9 +175,16 @@ async function fetchAccessibleCenters(
     throw new Error("Auth session missing");
   }
 
-  const user = { id: userId };
-
-  const isAdmin = await getIsBookeaAdmin(supabase, user.id);
+  // Les deux lectures partent ensemble : un seul aller-retour au lieu de deux à la suite.
+  const [isAdmin, members] = await Promise.all([
+    getIsBookeaAdmin(supabase, userId),
+    supabase
+      .from("center_members")
+      .select("center_id,role,centers(id,name,slug,city)")
+      .eq("profile_id", userId)
+      .eq("is_active", true)
+      .order("created_at", { ascending: true }),
+  ]);
 
   if (isAdmin) {
     const { data, error } = await supabase
@@ -137,17 +196,13 @@ async function fetchAccessibleCenters(
       throw new Error(error.message);
     }
 
-    return ((data ?? []) as CenterRow[])
-      .filter(isCenterActiveRow)
-      .map(toAccessibleCenter);
+    return {
+      userId,
+      centers: ((data ?? []) as CenterRow[]).filter(isCenterActiveRow).map(toAccessibleCenter),
+    };
   }
 
-  const { data, error } = await supabase
-    .from("center_members")
-    .select("center_id,role,centers(id,name,slug,city)")
-    .eq("profile_id", user.id)
-    .eq("is_active", true)
-    .order("created_at", { ascending: true });
+  const { data, error } = members;
 
   if (error) {
     throw new Error(error.message);
@@ -169,19 +224,26 @@ async function fetchAccessibleCenters(
     }
   }
 
-  return accessibleCenters;
+  return { userId, centers: accessibleCenters };
 }
 
 export async function getActiveCenterContext(
   supabase: SupabaseClient = createClient(),
 ): Promise<ActiveCenterContext> {
+  const savedCenterId = readActiveCenterId();
+  // Centre déjà connu sur cet appareil : pas d’attente réseau, les droits restent vérifiés par la base.
+  const stored = readStoredAccessibleCenters().find((center) => center.id === savedCenterId);
+  if (stored && !(cachedCenters && Date.now() - cachedCenters.at < CENTERS_CACHE_MS)) {
+    void refreshAccessibleCenters(supabase).catch(() => null);
+    return { centerId: stored.id, centerName: stored.name, centerSlug: stored.slug };
+  }
+
   let centers: AccessibleCenter[] = [];
   try {
     centers = await loadAccessibleCenters(supabase);
   } catch {
     centers = [];
   }
-  const savedCenterId = readActiveCenterId();
   const activeCenter =
     centers.find((center) => center.id === savedCenterId) ?? centers[0];
 

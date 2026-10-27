@@ -9,6 +9,7 @@ import {
   parseAuthRedirect,
   waitForAuthSession,
 } from "@/lib/auth-recovery";
+import { clearCenterAccessCache } from "@/lib/center-access";
 import { createClient } from "@/lib/supabase";
 import { useEffect, useState } from "react";
 
@@ -68,6 +69,7 @@ export default function AuthCallbackPage() {
       }
 
       const next = auth.next || (session ? "/dashboard" : "/login");
+      clearCenterAccessCache();
       navigatePreservingAuth(next);
     }
 

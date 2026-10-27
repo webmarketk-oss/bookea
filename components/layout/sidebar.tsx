@@ -22,7 +22,7 @@ import {
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState, type MutableRefObject, type Ref } from "react";
 import { BookeaLogo } from "@/components/bookea-logo";
-import { loadIsBookeaAdmin } from "@/lib/center-access";
+import { clearCenterAccessCache, loadIsBookeaAdmin } from "@/lib/center-access";
 import { createClient } from "@/lib/supabase";
 import { CenterSwitcher } from "./center-switcher";
 import NavItem from "./nav-item";
@@ -73,6 +73,7 @@ export default function Sidebar({
 
   async function handleLogout() {
     const supabase = createClient();
+    clearCenterAccessCache();
     await supabase.auth.signOut();
     router.replace("/login");
   }

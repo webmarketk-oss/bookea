@@ -12,6 +12,7 @@ import {
   Users,
 } from "lucide-react";
 import { BookeaLogo } from "@/components/bookea-logo";
+import { clearCenterAccessCache } from "@/lib/center-access";
 import { createClient } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
 
@@ -29,6 +30,7 @@ export function MobileDashboardNav() {
 
   async function handleLogout() {
     const supabase = createClient();
+    clearCenterAccessCache();
     await supabase.auth.signOut();
     router.replace("/login");
   }

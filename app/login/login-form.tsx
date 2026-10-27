@@ -10,6 +10,7 @@ import {
   navigatePreservingAuth,
   parseAuthRedirect,
 } from "@/lib/auth-recovery";
+import { clearCenterAccessCache } from "@/lib/center-access";
 import { createClient } from "@/lib/supabase";
 import { useRouter } from "next/navigation";
 import { FormEvent, useEffect, useState } from "react";
@@ -99,6 +100,7 @@ export function LoginForm({ initialError }: LoginFormProps) {
         return;
       }
 
+      clearCenterAccessCache();
       router.push("/dashboard");
       router.refresh();
       return;

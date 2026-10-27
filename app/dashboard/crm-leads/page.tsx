@@ -502,7 +502,7 @@ export default function CRMLeadsPage() {
             }.`,
           );
           if (result.created > 0) {
-            void loadCrmLeads().then(({ leads, centerId, centerName }) => {
+            void loadCrmLeads().then(({ leads, center: { centerId, centerName } }) => {
               centerIdRef.current = centerId;
               centerNameRef.current = centerName;
               setLeadsCenterId(centerId);

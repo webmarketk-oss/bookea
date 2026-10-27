@@ -6,8 +6,9 @@ import { useEffect, useState } from "react";
 
 import {
   type AccessibleCenter,
-  loadAccessibleCenters,
   readActiveCenterId,
+  readStoredAccessibleCenters,
+  refreshAccessibleCenters,
   saveActiveCenterId,
 } from "@/lib/center-access";
 import { flushCrmWrites } from "@/lib/crm-supabase";
@@ -26,47 +27,67 @@ export function CenterSwitcher({ collapsed, onExpand }: CenterSwitcherProps) {
 
   useEffect(() => {
     let alive = true;
+    const stored = readStoredAccessibleCenters();
+    const savedId = readActiveCenterId();
 
-    loadAccessibleCenters()
+    function show(list: AccessibleCenter[]) {
+      const selectedCenter = list.find((center) => center.id === savedId) ?? list[0];
+      setCenters(list);
+      setActiveCenterId(selectedCenter?.id ?? "");
+      setError("");
+      setLoading(false);
+      return selectedCenter;
+    }
+
+    if (stored.some((center) => center.id === savedId)) {
+      show(stored);
+    }
+    const slowHint = window.setTimeout(() => {
+      if (alive && !stored.length) {
+        setError("Chargement plus long que prévu…");
+      }
+    }, 8000);
+
+    // Pas de délai maximal ici : une réponse tardive remplace le message, un échec est relancé une fois.
+    const load = () => refreshAccessibleCenters();
+    load()
+      .catch(async (firstError) => {
+        if (/auth session missing|not authenticated|jwt/i.test(String(firstError?.message))) {
+          throw firstError;
+        }
+        await new Promise((resolve) => window.setTimeout(resolve, 2000));
+        return load();
+      })
       .then((loadedCenters) => {
         if (!alive) return;
-
-        const savedId = readActiveCenterId();
-        const selectedCenter =
-          loadedCenters.find((center) => center.id === savedId) ??
-          loadedCenters[0];
-
-        setCenters(loadedCenters);
-        setActiveCenterId(selectedCenter?.id ?? "");
-        setError("");
-
-        if (selectedCenter?.id && selectedCenter.id !== savedId) {
+        const selectedCenter = show(loadedCenters);
+        if (selectedCenter?.id && selectedCenter.id !== readActiveCenterId()) {
           saveActiveCenterId(selectedCenter.id);
         }
       })
       .catch((loadError) => {
         if (!alive) return;
-
+        const raw =
+          loadError instanceof Error ? loadError.message : "Impossible de charger les centres.";
+        if (stored.length && !/auth session missing|not authenticated|jwt/i.test(raw)) {
+          // On garde la liste connue : les données restent protégées par la base.
+          show(stored);
+          return;
+        }
         setCenters([]);
         setActiveCenterId("");
-        const raw =
-          loadError instanceof Error
-            ? loadError.message
-            : "Impossible de charger les centres.";
         setError(
-          /timeout|statement/i.test(raw)
+          /timeout|statement|fetch|network|abort/i.test(raw)
             ? "Le centre met trop longtemps à charger. Recharge la page, ou reconnecte-toi."
             : raw,
         );
+        setLoading(false);
       })
-      .finally(() => {
-        if (alive) {
-          setLoading(false);
-        }
-      });
+      .finally(() => window.clearTimeout(slowHint));
 
     return () => {
       alive = false;
+      window.clearTimeout(slowHint);
     };
   }, []);
 
@@ -117,7 +138,7 @@ export function CenterSwitcher({ collapsed, onExpand }: CenterSwitcherProps) {
         Centre actif
       </span>
       {loading ? (
-        <p className="text-sm font-medium text-white/50">Chargement…</p>
+        <p className="text-sm font-medium text-white/50">{error || "Chargement…"}</p>
       ) : needsLogin ? (
         <div className="space-y-2">
           <p className="text-sm font-medium text-white/70">
