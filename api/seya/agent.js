@@ -2803,7 +2803,7 @@ function leadReplyCore(conversation, text, seya, slots, extras = {}) {
 }
 
 const GAILLARD_MINCEUR_OBJECTIF =
-  /perdre|perde|perd\b|maigrir|mincir|kilos?|\bkg\b|cellulite|peau d'orange|graisse|bourrelet|capiton|affiner|tonifier|raffermir|fermete|silhouette|gonfl|ballonn/;
+  /perdre|perde|perd\b|perte|maigrir|mincir|kilos?|\bkg\b|\bcm\b|centimetre|tour de taille|cellulite|peau d'orange|graisse|gras\b|bourrelet|capiton|affiner|tonifier|raffermir|fermete|silhouette|gonfl|ballonn|degonfl|ventre plat|\bplat\b/;
 const GAILLARD_MINCEUR_ZONE =
   /ventre|cuisse|hanche|fesse|bras|culotte de cheval|poignee d'amour|dos|jambes?/;
 const GAILLARD_VISAGE_CONCERN =
@@ -2858,7 +2858,35 @@ function gaillardMinceurZonesKnown(qualification, leadTexts) {
   return leadTexts.some((value) => GAILLARD_MINCEUR_ZONE.test(value));
 }
 
+const GAILLARD_ZONE_WORDS = [
+  ["ventre", "le ventre"],
+  ["cuisse", "les cuisses"],
+  ["hanche", "les hanches"],
+  ["fesse", "les fesses"],
+  ["bras", "les bras"],
+  ["culotte de cheval", "la culotte de cheval"],
+  ["poignee d'amour", "les poignées d’amour"],
+  ["dos", "le dos"],
+  ["jambe", "les jambes"],
+];
+
+/** « le ventre », « le ventre et les cuisses »… pour reprendre la zone dans la question objectif. */
+function gaillardMinceurZoneLabel(qualification, leadTexts) {
+  const hay = [normalize(qualification.zone || ""), ...leadTexts].join(" ");
+  const zones = GAILLARD_ZONE_WORDS.filter(([word]) => hay.includes(word)).map(([, label]) => label);
+  if (!zones.length) {
+    return "";
+  }
+  return zones.length === 1
+    ? zones[0]
+    : `${zones.slice(0, -1).join(", ")} et ${zones[zones.length - 1]}`;
+}
+
 function gaillardMinceurObjectifKnown(qualification, leadTexts) {
+  // Une réponse donnée à la question objectif compte, même formulée librement.
+  if (String(qualification.objectif || "").trim()) {
+    return true;
+  }
   const detail = normalize(qualification.detail || "");
   if (detail && GAILLARD_MINCEUR_OBJECTIF.test(detail)) {
     return true;
@@ -2920,7 +2948,10 @@ function gaillardNextQuestion(family, qualification, leadTexts, seya) {
       return { step: "need", text: gaillard.needQuestion("minceur") };
     }
     if (!hasObjectif) {
-      return { step: "need", text: gaillard.needQuestion("minceur", "objectif") };
+      return {
+        step: "need",
+        text: gaillard.needQuestion("minceur", "objectif", gaillardMinceurZoneLabel(qualification, leadTexts)),
+      };
     }
     if (!hasZones) {
       return { step: "need", text: gaillard.needQuestion("minceur", "zones") };
@@ -3332,6 +3363,21 @@ function gaillardLeadReply(conversation, text, seya, slots, extras = {}) {
         qualification.detail = said;
       }
     }
+    // Réponse à « quel est votre objectif » : on la garde telle quelle, sans redemander.
+    if (
+      family === "minceur" &&
+      gaillard.lastSeyaAskedObjectif(base) &&
+      !qualification.objectif &&
+      !mentionsAvailability &&
+      gaillard.isAnswerLike(text)
+    ) {
+      const objectifText = normalize(text);
+      const zoneOnly =
+        GAILLARD_MINCEUR_ZONE.test(objectifText) && !GAILLARD_MINCEUR_OBJECTIF.test(objectifText);
+      if (!zoneOnly && !GAILLARD_TRIED.test(objectifText)) {
+        qualification.objectif = said;
+      }
+    }
     if (
       gaillard.lastSeyaAskedTried(base) &&
       !qualification.tried &&
@@ -3448,6 +3494,9 @@ function gaillardLeadReply(conversation, text, seya, slots, extras = {}) {
         need: [
           qualification.zone,
           qualification.detail,
+          qualification.objectif && qualification.objectif !== qualification.detail
+            ? `objectif : ${qualification.objectif}`
+            : "",
           qualification.kilos ? `kilos : ${qualification.kilos}` : "",
         ]
           .filter(Boolean)

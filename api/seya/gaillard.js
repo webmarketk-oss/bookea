@@ -529,10 +529,12 @@ function missingPracticalReply() {
   return knowledge.TEAM_QUESTION_REPLY;
 }
 
-function needQuestion(family, missing = "") {
+function needQuestion(family, missing = "", zoneLabel = "") {
   if (family === "minceur") {
     if (missing === "objectif") {
-      return "Quel est votre objectif pour ce soin minceur ?";
+      return zoneLabel
+        ? `Pour ${zoneLabel}, quel est votre objectif : perdre du poids, des centimètres, affiner ou raffermir ?`
+        : "Quel est votre objectif pour ce soin minceur ?";
     }
     if (missing === "zones") {
       return "Quelles zones aimeriez-vous travailler ?";
@@ -590,8 +592,17 @@ function lastSeyaQuestion(conversation) {
 }
 
 function lastSeyaAskedNeed(conversation) {
-  return /quel est votre objectif|quelles? zones?|qu['’]est-ce qui vous pr[ée]occupe|aimeriez-vous am[eé]liorer au niveau de votre peau|souhaitez-vous surtout pour l['’ ]ovale|raffermir, le redessiner/i.test(
+  return /quel est votre objectif|que recherchez-vous|quelles? zones?|qu['’]est-ce qui vous pr[ée]occupe|aimeriez-vous am[eé]liorer au niveau de votre peau|souhaitez-vous surtout pour l['’ ]ovale|raffermir, le redessiner/i.test(
     lastSeyaQuestion(conversation),
+  );
+}
+
+/** Question objectif seule (pas la question combinée objectif + zones). */
+function lastSeyaAskedObjectif(conversation) {
+  const question = lastSeyaQuestion(conversation);
+  return (
+    /quel est votre objectif|que recherchez-vous/i.test(question) &&
+    !/quelles zones|sur quelles zones/i.test(question)
   );
 }
 
@@ -859,6 +870,7 @@ module.exports = {
   languageBarrierReply,
   lastSeyaAskedKilos,
   lastSeyaAskedNeed,
+  lastSeyaAskedObjectif,
   lastSeyaAskedPath,
   lastSeyaAskedTried,
   leaksInternalBrief,

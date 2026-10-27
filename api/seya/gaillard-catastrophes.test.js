@@ -313,6 +313,32 @@ test("Rrushe : zone intime ; cheveux blancs clarifiés ; français difficile", a
   assert.match(lastSeya(conversation), /Quelle langue|langue préférez/i);
 });
 
+// ——— Laurence / Angelo : objectif jamais redemandé ———
+test("Laurence : zones puis « Perte de cm » → objectif compris, on passe à la suite", async () => {
+  let conversation = open("Soin minceur", "Laurence");
+  conversation = await say(conversation, "Cuisse ventre fesses", "zones");
+  assert.match(lastSeya(conversation), /objectif/i);
+  assert.match(lastSeya(conversation), /ventre/i);
+  conversation = await say(conversation, "Perte de cm", "objectif cm");
+  assert.doesNotMatch(lastSeya(conversation), /objectif|que recherchez-vous/i);
+  assert.match(lastSeya(conversation), /déjà testé|essayé/i);
+});
+
+test("Angelo : « c'est pour ma chérie » puis « Plutôt le ventre » → objectif demandé une seule fois, en reprenant la zone", async () => {
+  let conversation = open("Soin minceur", "Angelo");
+  conversation = await say(conversation, "Bonjour cest pour ma chérie", "pour qui");
+  conversation = await say(conversation, "Plutot le ventre", "zone");
+  assert.match(lastSeya(conversation), /Pour le ventre, quel est votre objectif/);
+  conversation = await say(conversation, "Qu'il soit moins gros", "objectif libre");
+  assert.doesNotMatch(lastSeya(conversation), /objectif|que recherchez-vous/i);
+  assert.match(lastSeya(conversation), /déjà testé|essayé/i);
+  assert.equal(
+    seyaMessages(conversation).filter((item) => /objectif|que recherchez-vous/i.test(item.text))
+      .length <= 2,
+    true,
+  );
+});
+
 // ——— Règles transverses ———
 test("Gaillard : « maintenant » seul ne déclenche pas une réservation", async () => {
   const gaillard = require("./gaillard");
