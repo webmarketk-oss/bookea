@@ -193,6 +193,7 @@ type QuickDateFilter = CrmQuickFilter;
 
 const statusGroups: Partial<Record<LeadStatus, LeadStatus[]>> = {
   "À relancer": followUpLeadStatuses,
+  "Acompte envoyé": ["Acompte envoyé", "Acompte en attente"],
   "RDV pris": rdvBookedStatusList,
   "Client converti": ["Client converti", "Vendu"],
   "Prospect perdu": [...inactiveLeadStatuses, "Annulation"],

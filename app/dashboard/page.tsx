@@ -54,6 +54,7 @@ const soldStatuses = new Set([
   "Client converti",
   "Acompte reçu",
   "Acompte envoyé",
+  "Acompte en attente",
 ]);
 
 export default function DashboardPage() {

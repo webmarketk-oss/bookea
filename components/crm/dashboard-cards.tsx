@@ -134,7 +134,9 @@ export default function DashboardCards({
     },
     {
       title: "Acompte envoyé",
-      value: leads.filter((lead) => lead.status === "Acompte envoyé").length,
+      value: leads.filter(
+        (lead) => lead.status === "Acompte envoyé" || lead.status === "Acompte en attente",
+      ).length,
       subtitle: "À relancer pour encaisser",
       icon: Wallet,
       color: "text-amber-600",
