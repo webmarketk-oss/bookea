@@ -564,13 +564,27 @@ const QUESTION_REPHRASED = {
     "Pour l’ovale, vous cherchez plutôt à raffermir ou à redessiner ?",
 };
 
+/** Si la question objectif (avec zones) se répète, reformuler sans coller au même texte. */
+function rephraseObjectifQuestion(question) {
+  const asked = String(question || "").trim();
+  if (QUESTION_REPHRASED[asked]) {
+    return QUESTION_REPHRASED[asked];
+  }
+  if (/quel est votre objectif\s*:/i.test(asked)) {
+    return asked
+      .replace(/quel est votre objectif\s*:/i, "que recherchez-vous surtout :")
+      .replace(/^Pour /, "Et pour ");
+  }
+  return asked;
+}
+
 /** Évite d’envoyer deux fois de suite exactement la même question. */
 function varyQuestion(question, previousSeyaText) {
   const asked = String(question || "").trim();
   if (normalize(asked) !== normalize(previousSeyaText)) {
     return asked;
   }
-  return QUESTION_REPHRASED[asked] || asked;
+  return rephraseObjectifQuestion(asked);
 }
 
 function triedQuestion(family) {

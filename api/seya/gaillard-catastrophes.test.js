@@ -339,6 +339,24 @@ test("Angelo : « c'est pour ma chérie » puis « Plutôt le ventre » → obje
   );
 });
 
+// ——— Sandrine Pons : découvrir ≠ objectif ———
+test("Sandrine Pons : « découvrir / voir le résultat » n’est pas un objectif → on repose avec les zones", async () => {
+  let conversation = open("Soin minceur", "SandrinePons");
+  conversation = await say(conversation, "Bonjour le ventre les fesses et les cuisses", "zones");
+  assert.match(lastSeya(conversation), /objectif/i);
+  conversation = await say(
+    conversation,
+    "Découvrir ce soin je ne connais pas. voir le résultat !",
+    "curiosité",
+  );
+  assert.match(lastSeya(conversation), /objectif|que recherchez-vous|perdre|affiner|raffermir/i);
+  assert.doesNotMatch(lastSeya(conversation), /déjà testé|essayé/i);
+  assert.match(lastSeya(conversation), /ventre|fesses|cuisses/i);
+  conversation = await say(conversation, "Affiner un peu", "objectif");
+  assert.match(lastSeya(conversation), /déjà testé|essayé/i);
+  assert.doesNotMatch(lastSeya(conversation), /objectif|que recherchez-vous/i);
+});
+
 // ——— Règles transverses ———
 test("Gaillard : « maintenant » seul ne déclenche pas une réservation", async () => {
   const gaillard = require("./gaillard");

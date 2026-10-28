@@ -2815,6 +2815,21 @@ const GAILLARD_TRIED =
 const GAILLARD_KILOS_UNKNOWN =
   /je ne (sais|ses|cet|cest|sait) pas|je (sais|ses|cet) pas|aucune idee|pas (d'|de )?idee|pas (de )?chiffre|je (ne )?connais pas|je verr?(ai|ais) (ca |sa )?(avec vous|ensemble|sur place|au (bilan|centre))|on verra (ca |sa )?(avec vous|ensemble)/;
 
+/** « Découvrir / voir le résultat / je ne connais pas » ≠ objectif minceur (affiner, perdre…). */
+const GAILLARD_OBJECTIF_VAGUE =
+  /\bdecouvrir\b|voir (le |les )?(resultat|effets?)|curiosit|je (ne )?(connais|connait) pas|je (ne )?sais pas|sans (trop )?savoir|pas (d'|de )?idee|pour voir\b/;
+
+function looksLikeVagueObjectif(text) {
+  const value = normalize(text);
+  if (!value) {
+    return false;
+  }
+  if (GAILLARD_MINCEUR_OBJECTIF.test(value)) {
+    return false;
+  }
+  return GAILLARD_OBJECTIF_VAGUE.test(value);
+}
+
 /** « Perdre » / « affiner » seuls ne répondent pas à « déjà testé ». */
 function looksLikeObjectifOnly(text) {
   const value = normalize(text)
@@ -3364,6 +3379,7 @@ function gaillardLeadReply(conversation, text, seya, slots, extras = {}) {
       }
     }
     // Réponse à « quel est votre objectif » : on la garde telle quelle, sans redemander.
+    // Exception : curiosité (« découvrir / voir le résultat ») → on repose avec des choix concrets.
     if (
       family === "minceur" &&
       gaillard.lastSeyaAskedObjectif(base) &&
@@ -3374,7 +3390,11 @@ function gaillardLeadReply(conversation, text, seya, slots, extras = {}) {
       const objectifText = normalize(text);
       const zoneOnly =
         GAILLARD_MINCEUR_ZONE.test(objectifText) && !GAILLARD_MINCEUR_OBJECTIF.test(objectifText);
-      if (!zoneOnly && !GAILLARD_TRIED.test(objectifText)) {
+      if (
+        !zoneOnly &&
+        !GAILLARD_TRIED.test(objectifText) &&
+        !looksLikeVagueObjectif(text)
+      ) {
         qualification.objectif = said;
       }
     }
