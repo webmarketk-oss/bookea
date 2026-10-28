@@ -760,7 +760,7 @@ const RULE_BREAK =
   /disponibilit|quand seriez|quand etes|quel jour|quels jours|quelle heure|a quelle heure|dites-moi un (ou deux )?jours?|debut de semaine|fin de semaine|un creneau|des creneaux|ce creneau|je regarde (le planning|un creneau|les creneaux)|je (peux )?vous propose|lequel vous irait|quelle distance|habitez|loin de|pres de chez|annemasse|operatrice/;
 
 const BRIEF_LEAK =
-  /ne prescris|prescris pas|explique[rz]? que|interdit de|objectif calorique|restriction alimentaire|\bconsignes?\b|(^|[.!?]\s)(tu |toi )|ne (lui|leur) (applique|donne|propose|change|conserve)|applique pas l['']offre|conserve son besoin|besoin minceur initial/;
+  /ne prescris|prescris pas|explique[rz]? que|rappelle[rz]? que|interdit de|objectif calorique|restriction alimentaire|\bconsignes?\b|(^|[.!?]\s)(tu |toi )|ne (lui|leur) (applique|donne|propose|change|conserve)|applique pas l['']offre|conserve son besoin|besoin minceur initial|\*\*[^*]+\*\*/;
 
 const GLUED_FRENCH =
   /quelest|votreobjectif|pource |leparcours|comprendun|accompagnementau|alimentaireavec|unsuivi|surune|expliquieque|neprescris/i;

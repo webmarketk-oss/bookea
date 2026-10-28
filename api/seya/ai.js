@@ -69,14 +69,22 @@ const { checkAgainstCenter, familiesIn, technologiesIn } = require("./center-kno
 const { prospectText } = require("./vocabulary");
 const {
   activeLeadPause,
+  asksNearbyCatchment,
+  asksOtherSite,
   cityFromAddress,
   confirmsOtherCity,
+  extractAreaMention,
+  farAreaReply,
   hasOpenQuestion,
   isPauseRequest,
   leadCityMention,
   locationCheckReply,
+  nearbyCatchmentReply,
   otherCityReply,
+  otherSiteCityMention,
+  otherSiteReply,
   pauseReply,
+  resolveCatchment,
   resumesBooking,
   sameCity,
   stripBookingPush,
@@ -104,6 +112,18 @@ function hasAiKey() {
 }
 
 const PAUSED_FALLBACK = "Nous restons disponibles si vous avez des questions 😊";
+
+function withNearbyCatchmentPrefix(conversation, reply) {
+  const near = conversation?.nearbyCatchment;
+  const text = String(reply || "").trim();
+  if (!near?.label || !text) {
+    return text;
+  }
+  if (/proximit|tout pr[eè]s|à proximit/i.test(text)) {
+    return text;
+  }
+  return `${near.label} est à proximité de notre centre. ${text}`;
+}
 
 function guardedReply(conversation, text, reply) {
   return {
@@ -158,9 +178,48 @@ async function generateSeyaReply(input) {
     : cityFromAddress(centerAddress);
 
   const pendingCity = conversation.locationCheck?.leadCity || "";
+  const pendingKind = conversation.locationCheck?.kind || "";
   if (pendingCity) {
     conversation = { ...conversation, locationCheck: null };
-    if (centerCity && confirmsOtherCity(text, pendingCity) && !hasOpenQuestion(text)) {
+    const value = String(text || "")
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/['’]/g, "'");
+    if (pendingKind === "other_site") {
+      const stillOther = otherSiteCityMention(text, centerCity);
+      // Elle insiste encore sur l’autre site → on rappelle Clermont, sans clôturer.
+      if (stillOther && asksOtherSite(text, centerCity)) {
+        return guardedReply(
+          {
+            ...conversation,
+            locationCheck: { leadCity: stillOther, at, kind: "other_site" },
+            proposedSlots: [],
+            bookingState: { ...(conversation.bookingState || {}), lastOfferedSlots: [] },
+          },
+          text,
+          otherSiteReply(centerCity, stillOther, centerAddress),
+        );
+      }
+      // Refus clair de venir à Clermont.
+      const pendingNorm = String(pendingCity || "")
+        .toLowerCase()
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "");
+      if (
+        /^(non|nan|passe|pas possible|trop loin)\b/.test(value) ||
+        (/je (prefere|veux|voudrais) (plutot )?(aller )?(a |sur )?/.test(value) &&
+          pendingNorm &&
+          value.includes(pendingNorm))
+      ) {
+        return guardedReply(
+          withLeadPause(conversation, { at, reason: "autre_ville", text }),
+          text,
+          otherCityReply(centerCity),
+        );
+      }
+      // oui / jour donné → laisser le flux booking normal reprendre.
+    } else if (centerCity && confirmsOtherCity(text, pendingCity) && !hasOpenQuestion(text)) {
       return guardedReply(
         withLeadPause(conversation, { at, reason: "autre_ville", text }),
         text,
@@ -171,16 +230,72 @@ async function generateSeyaReply(input) {
 
   const leadCity = leadCityMention(text);
   if (leadCity && centerCity && !sameCity(leadCity, centerCity)) {
+    const leadCatchment = asksNearbyCatchment(
+      `secteur ${leadCity}`,
+      centerCity,
+      centerAddress,
+    );
+    if (leadCatchment) {
+      return guardedReply(
+        conversation,
+        text,
+        nearbyCatchmentReply(centerCity, leadCatchment, centerAddress),
+      );
+    }
+    // Hors rayon : on clarifie la ville du centre (tous centres), sans clôturer.
     return guardedReply(
       {
         ...conversation,
-        locationCheck: { leadCity, at },
+        locationCheck: { leadCity, at, kind: "city_mention" },
         proposedSlots: [],
         bookingState: { ...(conversation.bookingState || {}), lastOfferedSlots: [] },
       },
       text,
       locationCheckReply(centerCity, leadCity),
     );
+  }
+
+  // Autre établissement demandé (« centre sur X », « bilan là-bas ») ≠ secteur proche.
+  const otherSite = otherSiteCityMention(text, centerCity);
+  if (otherSite && asksOtherSite(text, centerCity)) {
+    return guardedReply(
+      {
+        ...conversation,
+        locationCheck: { leadCity: otherSite, at, kind: "other_site" },
+        proposedSlots: [],
+        bookingState: { ...(conversation.bookingState || {}), lastOfferedSlots: [] },
+      },
+      text,
+      otherSiteReply(centerCity, otherSite, centerAddress),
+    );
+  }
+
+  // Zone dans le rayon (~35 km, tous centres) : on accueille ici.
+  const nearbyTown = asksNearbyCatchment(text, centerCity, centerAddress);
+  if (nearbyTown) {
+    conversation = {
+      ...conversation,
+      nearbyCatchment: { label: nearbyTown.label, km: nearbyTown.km, at },
+    };
+    if (!wantsSlots(text, conversation) && !hasOpenQuestion(text)) {
+      return guardedReply(
+        conversation,
+        text,
+        nearbyCatchmentReply(centerCity, nearbyTown, centerAddress),
+      );
+    }
+  } else {
+    const area = extractAreaMention(text, centerCity);
+    if (area && !asksOtherSite(text, centerCity)) {
+      const far = resolveCatchment(centerCity, centerAddress, area.label);
+      if (far && far.within === false) {
+        return guardedReply(
+          conversation,
+          text,
+          farAreaReply(centerCity, area.label, centerAddress),
+        );
+      }
+    }
   }
 
   const pausing = isPauseRequest(text);
@@ -205,9 +320,31 @@ async function generateSeyaReply(input) {
   }
 
   const result = await generateCoreReply({ ...input, conversation });
-  return conversation.leadPause
+  const cleared = conversation.leadPause
     ? { ...result, conversation: { ...result.conversation, leadPause: null } }
     : result;
+  return prefixNearbyOnResult(cleared);
+}
+
+function prefixNearbyOnResult(result) {
+  const near = result?.conversation?.nearbyCatchment;
+  if (!near?.label) {
+    return result;
+  }
+  const messages = [...(result.conversation.messages || [])];
+  const index = messages.map((item) => item.author).lastIndexOf("seya");
+  if (index < 0) {
+    return result;
+  }
+  const next = withNearbyCatchmentPrefix(result.conversation, messages[index].text);
+  if (next === messages[index].text) {
+    return { ...result, conversation: { ...result.conversation, nearbyCatchment: null } };
+  }
+  messages[index] = { ...messages[index], text: next };
+  return {
+    ...result,
+    conversation: { ...result.conversation, messages, nearbyCatchment: null },
+  };
 }
 
 async function generateCoreReply({

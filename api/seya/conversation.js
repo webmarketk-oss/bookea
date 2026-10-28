@@ -783,16 +783,48 @@ function parseLaterIso(text, now) {
   return `${y}-${m}-${d}`;
 }
 
+/** « Vous avez des disponibilités / un créneau » ≠ question sur une prestation. */
+function isSchedulingVocabulary(label) {
+  return /disponibilit|\bdispos?\b|creneau|horaire|rendez[- ]?vous|\brdv\b|\bquand\b|\bjour\b|\bheure\b|matin|apres[- ]midi|soir|place (libre|cette|vendredi|lundi|mardi|mercredi|jeudi|samedi)|de la place|creneaux/.test(
+    normalize(label),
+  );
+}
+
+function isAgendaAvailabilityAsk(text) {
+  const value = normalize(text);
+  if (
+    /(soin|soins|epilation|laser|minceur|visage|cryo|lumiere pulsee|hydra|radiofrequence|massage|pilates|yoga)/.test(
+      value,
+    )
+  ) {
+    return false;
+  }
+  return /disponibilit|\bdispos?\b|creneau|quel jour|quelle heure|quand (seriez|etes|pourriez)|par hasard|de la place|place (cette|vendredi|lundi|mardi|mercredi|jeudi|samedi|demain|bientot)/.test(
+    value,
+  );
+}
+
 function askedServiceName(text) {
   const value = normalize(text)
     .replace(/[?!.…]+$/g, "")
     .replace(/\s+/g, " ")
     .trim();
+  // Agenda / dispo : jamais une demande de soin (« Vous avez des disponibilités quand ? »).
+  if (isAgendaAvailabilityAsk(text)) {
+    return "";
+  }
+  // Autre ville / autre centre (« centre sur Cournon ») ≠ prestation.
+  if (
+    /centre (sur|a|de|dans)|institut (sur|a|de|dans)|secteur |cournon|la bas\b/.test(value)
+  ) {
+    return "";
+  }
   const match = value.match(
     /(?:faites|faisiez|proposez|offrez|avez)(?:[- ]vous)?(?: aussi)?(?: le | la | l'| les | de | du | des | un | une )(.+)$/,
   );
   if (match?.[1]) {
-    return String(match[1]).replace(/\s+/g, " ").trim();
+    const asked = String(match[1]).replace(/\s+/g, " ").trim();
+    return isSchedulingVocabulary(asked) ? "" : asked;
   }
   const inverted = value.match(
     /(?:le |la |l'|les |un |une |de l[' ]|de la |du |des )?(soins?(?: visage| minceur)?|epilation(?: laser| definitive)?|laser|minceur|visage|lumiere pulsee).{0,30}vous (?:faites|faisiez|proposez|avez|offrez)/,
@@ -803,13 +835,24 @@ function askedServiceName(text) {
   const seen = value.match(
     /j[' ]ai vu que vous (?:faisiez|faites|proposiez|proposez|aviez|avez)(?: aussi)?(?: le | la | l'| les | de | du | des | un | une )?(.+)$/,
   );
-  return String(seen?.[1] || "")
+  const fromSeen = String(seen?.[1] || "")
     .replace(/\s+/g, " ")
     .trim();
+  return isSchedulingVocabulary(fromSeen) ? "" : fromSeen;
 }
 
 function isServiceAsk(text) {
   const value = normalize(text);
+  if (isAgendaAvailabilityAsk(text)) {
+    return false;
+  }
+  if (
+    /centre (sur|a|de|dans)|institut (sur|a|de|dans)|secteur |cournon|faire .{0,40}la bas/.test(
+      value,
+    )
+  ) {
+    return false;
+  }
   if (askedServiceName(text)) {
     return true;
   }
@@ -1280,7 +1323,19 @@ function wantsSlots(text, conversation) {
   ) {
     return false;
   }
-  if (/prix|tarif|combien|adresse|ou (etes|se trouve)|situe/.test(value) && !/dispo|creneau|horaire|\brdv\b/.test(value)) {
+  if (
+    /prix|tarif|combien|adresse|ou (etes|se trouve)|situe|situ[eé]/.test(value) &&
+    !/dispo|creneau|horaire|vous avez (jeudi|lundi|mardi|mercredi|vendredi|samedi)/.test(value)
+  ) {
+    return false;
+  }
+  // Autre RDV perso (« demain j’ai également un rdv ») ≠ demande de créneau.
+  if (
+    /j[' ]ai .{0,40}(rdv|rendez-vous)|egalement un (rdv|rendez-vous)/.test(value) &&
+    !/dispo|creneau|vous avez (jeudi|lundi|mardi|mercredi|vendredi|samedi)|quand (seriez|etes)|je (suis|serais) disponible/.test(
+      value,
+    )
+  ) {
     return false;
   }
   if (/ouvert|ouvrez|horaires d[' ]ouverture/.test(value) && !/creneau|\brdv\b|dispo pour/.test(value)) {

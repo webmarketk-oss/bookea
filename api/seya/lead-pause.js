@@ -18,7 +18,7 @@ const NOT_NOW =
 const BOOKING_INTENT =
   /\brdv\b|rendez[- ]vous|creneau|dispo|reserv|j'ai reflechi|je suis (decidee?|partante?|prete?)|on (peut|pourrait) (fixer|caler|prendre)|lundi|mardi|mercredi|jeudi|vendredi|samedi|\d{1,2}\s*h\b|semaine prochaine|demain|apres[- ]?midi|matin|soir|\bheure/;
 const RESUME_INTENT =
-  /\brdv\b|rendez[- ]vous|creneau|reserv|j'ai reflechi|je suis (decidee?|partante?|prete?)|on (peut|pourrait) (fixer|caler|prendre)|(je peux|je pourrais|je voudrais|je souhaite|j'aimerais|je veux) venir|je suis dispo|(des|vos|une|de la) dispo|\b(finalement|en fait)\b.*\b(lundi|mardi|mercredi|jeudi|vendredi|samedi|demain)\b/;
+  /\brdv\b|rendez[- ]vous|creneau|reserv|j'ai reflechi|je suis (decidee?|partante?|prete?)|on (peut|pourrait) (fixer|caler|prendre)|(je peux|je pourrais|je voudrais|je souhaite|j'aimerais|je veux) venir|je suis dispo|(des|vos|une|de la) dispo|\b(finalement|en fait)\b.*\b(lundi|mardi|mercredi|jeudi|vendredi|samedi|demain)\b|\b(y\s*a|ya|il y a|normalement (y\s*a|ya))\s+(du\s+)?(lundi|mardi|mercredi|jeudi|vendredi|samedi)\b|je (serai[st]?|suis) dispo|dispo (demain|lundi|mardi|mercredi|jeudi|vendredi|samedi)/;
 const OPEN_QUESTION =
   /\?|combien|prix|tarif|c'est quoi|comment (ca|se)|est-ce que|ou (se trouve|etes|est)/;
 
@@ -144,20 +144,45 @@ function confirmsOtherCity(text, leadCity) {
 }
 
 function otherCityReply(centerCity) {
-  return `D’accord, merci de me l’avoir précisé 😊 Notre centre se trouve à ${centerCity}. Si ${centerCity} vous convient, nous restons disponibles pour répondre à vos questions.`;
+  return `D’accord, merci de me l’avoir précisé 😊 Notre centre se trouve à ${centerCity}. Si vous pouvez vous déplacer jusqu’ici, dites-moi un jour qui vous arrange pour le bilan.`;
 }
 
+const {
+  CATCHMENT_RADIUS_KM,
+  asksNearbyCatchment,
+  asksOtherSite,
+  cityFromAddress: cityFromAddressCatchment,
+  extractAreaMention,
+  farAreaReply,
+  nearbyCatchmentReply,
+  otherSiteCityMention,
+  otherSiteReply,
+  resolveCatchment,
+} = require("./catchment");
+
+// cityFromAddress déjà défini plus haut dans ce fichier — on garde la version locale.
+void cityFromAddressCatchment;
+
 module.exports = {
+  CATCHMENT_RADIUS_KM,
   activeLeadPause,
+  asksNearbyCatchment,
+  asksOtherSite,
   cityFromAddress,
   confirmsOtherCity,
+  extractAreaMention,
+  farAreaReply,
   hasOpenQuestion,
   isPauseRequest,
   leadCityMention,
   locationCheckReply,
+  nearbyCatchmentReply,
   otherCityReply,
+  otherSiteCityMention,
+  otherSiteReply,
   pauseReply,
   pushesBooking,
+  resolveCatchment,
   resumesBooking,
   sameCity,
   stripBookingPush,

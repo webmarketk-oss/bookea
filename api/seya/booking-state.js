@@ -178,6 +178,23 @@ function applyBookingMessage(state, text, extras = {}) {
   const refusedDays = rejectedWeekdaysFromText(value);
   const wantedDays = namedDays.filter((day) => !refusedDays.includes(day));
 
+  // Créneau proposé trop serré (« ça fera juste ») → avant de choisir un autre jour.
+  if (
+    /ca (fera|fait) juste|trop juste|trop serre|sera juste|ca passe juste|je (ne )?pourrai(s)? pas (venir )?a (cette|cet)|pas possible (pour )?(ce|cet|le) (creneau|horaire|jour|rdv)/.test(
+      value,
+    )
+  ) {
+    next.lastOfferedSlots.forEach((slot) => {
+      if (slot?.date) {
+        next.rejectedDates = unique([...next.rejectedDates, slot.date]);
+      }
+    });
+    if (next.requestedDate) {
+      next.rejectedDates = unique([...next.rejectedDates, next.requestedDate]);
+    }
+    next.lastOfferedSlots = [];
+  }
+
   if (refusedDays.length) {
     next.rejectedWeekdays = unique([...next.rejectedWeekdays, ...refusedDays]);
     next.lastOfferedSlots
@@ -213,6 +230,16 @@ function applyBookingMessage(state, text, extras = {}) {
       if (next.requestedDate === todayIso(now) && wantedMomentIsOver(text, now)) {
         next.requestedDate = addDays(next.requestedDate, 7);
       }
+      // Jour déjà écarté (créneau trop juste, etc.) → occurrence suivante.
+      while (
+        next.requestedDate &&
+        next.rejectedDates.includes(next.requestedDate)
+      ) {
+        next.requestedDate = nextDateForWeekday(
+          wantedDays[0],
+          new Date(`${addDays(next.requestedDate, 1)}T12:00:00`),
+        );
+      }
       next.weekHalf = null;
       next.pendingQuestion = null;
     }
@@ -236,12 +263,17 @@ function applyBookingMessage(state, text, extras = {}) {
     ]);
   }
 
-  if (/\baujourd[' ]?hui\b/.test(value)) {
+  // « demain j’ai un rdv » ailleurs ≠ demande de créneau demain.
+  const mentionsOwnOtherAppointment =
+    /j[' ]ai .{0,40}(rdv|rendez-vous)|(rdv|rendez-vous) .{0,20}(demain|aujourd)|egalement un (rdv|rendez-vous)|un autre (rdv|rendez-vous)/.test(
+      value,
+    );
+  if (/\baujourd[' ]?hui\b/.test(value) && !mentionsOwnOtherAppointment) {
     next.requestedDate = todayIso(now);
     next.requestedWeekday = weekdayOf(next.requestedDate);
     next.weekHalf = null;
     next.pendingQuestion = null;
-  } else if (/\bdemain\b/.test(value) && !explicitDate) {
+  } else if (/\bdemain\b/.test(value) && !explicitDate && !mentionsOwnOtherAppointment) {
     next.requestedDate = addDays(todayIso(now), 1);
     next.requestedWeekday = weekdayOf(next.requestedDate);
     next.weekHalf = null;
@@ -316,7 +348,12 @@ function applyBookingMessage(state, text, extras = {}) {
     next.requestedDate = null;
   }
 
-  if (/suivant|prochain|un autre (lundi|mardi|mercredi|jeudi|vendredi|samedi)/.test(value)) {
+  // « jeudi prochain / prochain jeudi / un autre jeudi » — pas « mon prochain rdv ».
+  const wantsNextWeekdayOccurrence =
+    /\b(lundi|mardi|mercredi|jeudi|vendredi|samedi)\s+(suivant|prochain)\b/.test(value) ||
+    /\b(suivant|prochain)\s+(lundi|mardi|mercredi|jeudi|vendredi|samedi)\b/.test(value) ||
+    /\bun autre (lundi|mardi|mercredi|jeudi|vendredi|samedi)\b/.test(value);
+  if (wantsNextWeekdayOccurrence) {
     const weekday = namedDays[0] ?? next.requestedWeekday;
     if (next.requestedDate) {
       next.rejectedDates = unique([...next.rejectedDates, next.requestedDate]);
@@ -498,14 +535,17 @@ function shouldSearchSlots(state, text, conversation) {
 
 function asksForOtherSlots(text) {
   const value = normalize(text);
+  // « mon prochain rdv » (autre RDV perso) ≠ demande d’autres créneaux Bookea.
+  const nextWeekday =
+    /\b(lundi|mardi|mercredi|jeudi|vendredi|samedi)\s+(suivant|prochain)\b/.test(value) ||
+    /\b(suivant|prochain)\s+(lundi|mardi|mercredi|jeudi|vendredi|samedi)\b/.test(value);
   return (
     asksOtherDay(text) ||
     asksNextWeek(text) ||
     Boolean(dayPartFromText(text)) ||
     Boolean(parseClockMinutes(text).length) ||
-    /propose quoi|suivant|prochain|debut de semaine|fin de semaine|aujourd[' ]?hui/.test(
-      value,
-    ) ||
+    nextWeekday ||
+    /propose quoi|debut de semaine|fin de semaine|aujourd[' ]?hui/.test(value) ||
     /\b(lundi|mardi|mercredi|jeudi|vendredi|samedi|demain)\b/.test(value) ||
     hasDayOfMonthRequest(text)
   );
