@@ -21,7 +21,7 @@ Centres concernés au lancement : **JFG Clinic Clermont-Ferrand** et **JFG Clini
 ### Adresse et authentification
 
 ```
-Base URL : https://bookeai.fr/api/partner/v1
+Base URL : https://www.bookeai.fr/api/partner/v1
 En-tête  : Authorization: Bearer bkp_xxxxxxxxxxxx_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 ```
 
@@ -40,7 +40,7 @@ Les horaires sont renvoyés en **ISO 8601 avec décalage** (ex. `2026-11-02T09:3
 Liste les agendas (un par centre) et leurs cabines accessibles avec la clé.
 
 ```bash
-curl -s https://bookeai.fr/api/partner/v1/calendars \
+curl -s https://www.bookeai.fr/api/partner/v1/calendars \
   -H "Authorization: Bearer $BOOKEA_PARTNER_KEY"
 ```
 
@@ -81,7 +81,7 @@ Les résultats sont triés par **dernière modification** puis identifiant : la 
 #### Exemple : rendez-vous d'un agenda sur une période
 
 ```bash
-curl -s "https://bookeai.fr/api/partner/v1/appointments?calendar_id=6f1c2a8e-5d1b-4a43-9a0e-2f7f1b3c9d10&from=2026-11-01&to=2026-11-30&limit=100" \
+curl -s "https://www.bookeai.fr/api/partner/v1/appointments?calendar_id=6f1c2a8e-5d1b-4a43-9a0e-2f7f1b3c9d10&from=2026-11-01&to=2026-11-30&limit=100" \
   -H "Authorization: Bearer $BOOKEA_PARTNER_KEY"
 ```
 
@@ -128,7 +128,7 @@ curl -s "https://bookeai.fr/api/partner/v1/appointments?calendar_id=6f1c2a8e-5d1
 Le partenaire garde la date de sa dernière lecture et ne demande que les changements :
 
 ```bash
-curl -s "https://bookeai.fr/api/partner/v1/appointments?updated_since=2026-10-28T09:00:00Z&limit=500" \
+curl -s "https://www.bookeai.fr/api/partner/v1/appointments?updated_since=2026-10-28T09:00:00Z&limit=500" \
   -H "Authorization: Bearer $BOOKEA_PARTNER_KEY"
 ```
 
@@ -309,7 +309,7 @@ update public.external_calendar_connections set enabled = true where id = '<id c
 ```
 
 ```bash
-curl -X POST https://bookeai.fr/api/integrations/external-calendar-sync \
+curl -X POST https://www.bookeai.fr/api/integrations/external-calendar-sync \
   -H "Authorization: Bearer $CRON_SECRET"
 ```
 
