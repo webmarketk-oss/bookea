@@ -17,6 +17,7 @@ Centres concernés au lancement : **JFG Clinic Clermont-Ferrand** et **JFG Clini
 - Une clé donne accès **uniquement** aux agendas (centres) pour lesquels elle a été générée, éventuellement limités à certaines cabines.
 - **Aucune donnée client** n'est transmise : ni nom, ni téléphone, ni e-mail, ni soin, ni notes. Uniquement l'horaire, l'agenda, la cabine, le statut et les dates de modification.
 - Les créneaux que Bookea a lui-même importés depuis l'agenda du partenaire ne sont **jamais renvoyés** au partenaire (pas d'aller-retour).
+- Un rendez-vous rangé dans la colonne « Annulation » de l'agenda est transmis comme **annulé** (`cancelled: true`) : le créneau est libre. Cette colonne n'apparaît pas dans la liste des cabines.
 
 ### Adresse et authentification
 

@@ -10,6 +10,7 @@ const TERVILLE = "22222222-2222-4222-8222-222222222222";
 const GAILLARD = "33333333-3333-4333-8333-333333333333";
 const ROOM_A = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const ROOM_B = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+const ROOM_CANCEL = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
 const NOW = new Date("2026-10-28T10:00:00Z");
 
 const KEY = `bkp_${"a1".repeat(6)}_${"f0".repeat(24)}`;
@@ -93,7 +94,7 @@ function appointment(id, overrides = {}) {
   };
 }
 
-function seed() {
+function seed(extraAppointments = []) {
   return fakeSupabase({
     partner_api_keys: [
       keyRow(KEY),
@@ -108,6 +109,7 @@ function seed() {
     rooms: [
       { id: ROOM_A, center_id: CLERMONT, name: "Cabine 1", is_active: true, display_order: 1 },
       { id: ROOM_B, center_id: CLERMONT, name: "Cabine 2", is_active: true, display_order: 2 },
+      { id: ROOM_CANCEL, center_id: CLERMONT, name: "Annulation", is_active: true, display_order: 3 },
     ],
     appointments: [
       appointment("00000000-0000-4000-8000-000000000001"),
@@ -129,6 +131,7 @@ function seed() {
         appointment_date: "2026-07-15",
         updated_at: "2026-10-28T09:30:00.000Z",
       }),
+      ...extraAppointments,
     ],
     appointment_deletions: [
       {
@@ -258,6 +261,22 @@ test("clé limitée à une cabine : les autres cabines sont invisibles ou refus�
   assert.equal(refused.statusCode, 403);
   const otherCenter = await call(createAppointmentsHandler, { key: ROOM_KEY, query: { calendar_id: TERVILLE } });
   assert.equal(otherCenter.statusCode, 403);
+});
+
+test("colonne « Annulation » : le rendez-vous est transmis annulé (créneau libre), la colonne n'est pas listée", async () => {
+  const parked = appointment("00000000-0000-4000-8000-000000000008", {
+    room_id: ROOM_CANCEL,
+    status: "confirmed",
+  });
+  const res = await call(createAppointmentsHandler, { supabase: seed([parked]) });
+  const item = res.body.data.find((entry) => entry.id.endsWith("08"));
+  assert.equal(item.status, "cancelled");
+  assert.equal(item.cancelled, true);
+  const regular = res.body.data.find((entry) => entry.id.endsWith("01"));
+  assert.equal(regular.cancelled, false);
+
+  const calendars = await call(createCalendarsHandler);
+  assert.deepEqual(calendars.body.data[0].rooms.map((room) => room.name), ["Cabine 1", "Cabine 2"]);
 });
 
 test("pagination : le curseur reprend après le dernier élément, sans doublon", async () => {

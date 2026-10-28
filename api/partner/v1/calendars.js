@@ -1,6 +1,7 @@
 const { createServiceClient, rateLimit } = require("../../appointments/service");
 const {
   authenticatePartner,
+  isCancellationRoom,
   loadCenterTimezones,
   rejectNonGet,
   sendError,
@@ -40,7 +41,7 @@ function createCalendarsHandler({ createSupabase = createServiceClient, now = ()
           name: centers.get(id).name,
           timezone: centers.get(id).timezone,
           rooms: (roomRows || [])
-            .filter((room) => String(room.center_id) === id)
+            .filter((room) => String(room.center_id) === id && !isCancellationRoom(room.name))
             .map((room) => ({ id: String(room.id), name: String(room.name || "") })),
         }));
       return res.status(200).json({ data });

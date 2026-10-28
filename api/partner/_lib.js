@@ -13,6 +13,12 @@ const READ_SCOPE = "appointments:read";
 // Créneaux importés depuis un partenaire : jamais renvoyés aux partenaires (pas d'aller-retour).
 const PARTNER_IMPORT_ORIGIN = "partner_import";
 const BLOCK_KIND = /\[kind:(Pause|Formation|Indisponible)\]/;
+// Colonne « Annulation » de l'agenda : les rendez-vous qui y sont rangés ne bloquent pas de créneau.
+const CANCELLATION_ROOM = /annul/i;
+
+function isCancellationRoom(name) {
+  return CANCELLATION_ROOM.test(String(name || ""));
+}
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const KEY_FORMAT = /^bkp_([0-9a-f]{12})_([0-9a-f]{48})$/;
 
@@ -280,7 +286,7 @@ function addMinutesToTime(time, minutes) {
 }
 
 /** Ligne appointments → format partenaire, sans donnée personnelle. */
-function toPartnerAppointment(row, timezone = DEFAULT_TIMEZONE) {
+function toPartnerAppointment(row, timezone = DEFAULT_TIMEZONE, { cancellationRooms } = {}) {
   const date = String(row.appointment_date).slice(0, 10);
   const start = String(row.starts_at || "00:00:00");
   let end = String(row.ends_at || "");
@@ -288,7 +294,8 @@ function toPartnerAppointment(row, timezone = DEFAULT_TIMEZONE) {
     end = addMinutesToTime(start, row.duration_minutes || 0);
   }
   const block = BLOCK_KIND.exec(String(row.notes || ""));
-  const status = String(row.status || "confirmed");
+  const inCancellationRoom = Boolean(row.room_id && cancellationRooms?.has(String(row.room_id)));
+  const status = inCancellationRoom ? "cancelled" : String(row.status || "confirmed");
   return {
     id: String(row.id),
     calendar_id: String(row.center_id),
@@ -344,8 +351,24 @@ async function loadCenterTimezones(supabase, centerIds) {
  * Rendez-vous filtrés, triés par dernière modification puis identifiant (pagination stable).
  * Les suppressions sont renvoyées sur la première page quand updated_since est fourni.
  */
+async function loadCancellationRooms(supabase, centerIds) {
+  const { data, error } = await supabase
+    .from("rooms")
+    .select("id,name")
+    .in("center_id", centerIds);
+  if (error) {
+    throw new PartnerApiError(500, "calendars_unavailable", "Agendas indisponibles.");
+  }
+  return new Set(
+    (data || []).filter((room) => isCancellationRoom(room.name)).map((room) => String(room.id)),
+  );
+}
+
 async function listPartnerAppointments(supabase, filters) {
-  const centers = await loadCenterTimezones(supabase, filters.centerIds);
+  const [centers, cancellationRooms] = await Promise.all([
+    loadCenterTimezones(supabase, filters.centerIds),
+    loadCancellationRooms(supabase, filters.centerIds),
+  ]);
   let query = supabase
     .from("appointments")
     .select("id,center_id,room_id,appointment_date,starts_at,ends_at,duration_minutes,status,notes,origin,created_at,updated_at")
@@ -410,7 +433,9 @@ async function listPartnerAppointments(supabase, filters) {
   }
 
   return {
-    data: page.map((row) => toPartnerAppointment(row, timezoneOf(row.center_id))),
+    data: page.map((row) =>
+      toPartnerAppointment(row, timezoneOf(row.center_id), { cancellationRooms }),
+    ),
     deleted,
     next_cursor: hasMore && page.length ? encodeCursor(page[page.length - 1]) : null,
   };
@@ -443,6 +468,7 @@ module.exports = {
   authenticatePartner,
   decodeCursor,
   encodeCursor,
+  isCancellationRoom,
   isoToLocal,
   listPartnerAppointments,
   loadCenterTimezones,
