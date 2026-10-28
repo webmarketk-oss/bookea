@@ -63,6 +63,55 @@ async function loadTableConversations(supabase, centerId, { limit = TABLE_READ_L
   }
 }
 
+/**
+ * Lignes de la table avec leur clé et leur version (updated_at), pour écrire une conversation
+ * sans écraser une modification faite entre-temps. null si la table est illisible.
+ */
+async function loadTableConversationRows(supabase, centerId, { limit = TABLE_READ_LIMIT } = {}) {
+  try {
+    const { data, error } = await supabase
+      .from(TABLE)
+      .select("conversation_key,updated_at,data")
+      .eq("center_id", String(centerId))
+      .order("last_activity_at", { ascending: false, nullsFirst: false })
+      .limit(limit);
+    if (error) {
+      console.error("[seya/source] table rows read", error.message);
+      return null;
+    }
+    return (data || [])
+      .filter((row) => row?.conversation_key && Object.keys(asRecord(row?.data)).length > 0)
+      .map((row) => ({
+        key: String(row.conversation_key),
+        updatedAt: String(row.updated_at || ""),
+        data: { ...asRecord(row.data), centerId: String(centerId) },
+      }));
+  } catch (error) {
+    console.error("[seya/source] table rows read", error instanceof Error ? error.message : error);
+    return null;
+  }
+}
+
+/** Centres dont la table contient une conversation pour ce numéro (9 derniers chiffres). */
+async function centersWithPhoneThread(supabase, last9) {
+  if (String(last9 || "").length < 9 || typeof supabase?.from !== "function") {
+    return [];
+  }
+  try {
+    const query = supabase.from(TABLE);
+    if (typeof query?.select !== "function") {
+      return [];
+    }
+    const { data, error } = await query.select("center_id").eq("phone_last9", String(last9));
+    if (error || !Array.isArray(data)) {
+      return [];
+    }
+    return [...new Set(data.map((row) => String(row.center_id || "")).filter(Boolean))];
+  } catch {
+    return [];
+  }
+}
+
 /** Remplace seya.conversations par la table si le centre est basculé ; sinon renvoie seya tel quel. */
 async function withConversationSource(supabase, centerId, seya) {
   const record = asRecord(seya);
@@ -128,8 +177,10 @@ function clearConversationSourceCache() {
 }
 
 module.exports = {
+  centersWithPhoneThread,
   clearConversationSourceCache,
   latestThreadForPhone,
+  loadTableConversationRows,
   loadTableConversations,
   readsFromTable,
   removeMovedThreads,

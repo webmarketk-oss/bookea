@@ -1,7 +1,102 @@
-const { mirrorConversationChanges } = require("./conversation-mirror");
+const {
+  changedConversations,
+  mirrorConversationChanges,
+  writeConversationRows,
+} = require("./conversation-mirror");
+const { mergeSeyaConversationLists } = require("./conversation-key");
+const { loadTableConversationRows, readsFromTable } = require("./conversation-source");
 
 function asRecord(value) {
   return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+}
+
+function withoutConversations(settings) {
+  const seya = asRecord(settings.seya);
+  if (!("conversations" in seya)) {
+    return settings;
+  }
+  const { conversations: _omit, ...rest } = seya;
+  void _omit;
+  return { ...settings, seya: rest };
+}
+
+/**
+ * Centre lu dans la table seya_conversations : les conversations ne sont plus dans le bloc
+ * des réglages. Chaque conversation modifiée est écrite sur sa ligne ; le bloc des réglages
+ * (allégé) n'est réécrit que si un autre réglage change.
+ */
+async function mutateTableModeSettings(supabase, id, mutate, attempts) {
+  let lastError = null;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    const { data, error } = await supabase
+      .from("centers")
+      .select("settings")
+      .eq("id", id)
+      .maybeSingle();
+    if (error) {
+      throw new Error(error.message);
+    }
+    if (!data) {
+      throw new Error("center_not_found");
+    }
+    const stored = asRecord(data.settings);
+    const rows = await loadTableConversationRows(supabase, id);
+    if (!rows) {
+      throw new Error("seya_conversations_unreadable");
+    }
+    const tableList = rows.map((row) => row.data);
+    const versions = new Map(rows.map((row) => [row.key, row.updatedAt]));
+    // Conversations encore dans l'ancien bloc : reprises une fois, puis écrites dans la table.
+    const legacy = asRecord(stored.seya).conversations;
+    const baseList = Array.isArray(legacy) && legacy.length
+      ? mergeSeyaConversationLists(tableList, legacy)
+      : tableList;
+    const current = {
+      ...stored,
+      seya: { ...asRecord(stored.seya), conversations: baseList },
+    };
+    const next = asRecord(mutate(cloneJson(current), cloneJson(current)));
+    const nextList = asRecord(next.seya).conversations;
+
+    let conversationsChanged = false;
+    if (Array.isArray(nextList)) {
+      const changed = changedConversations(id, tableList, nextList);
+      if (changed.length) {
+        const wrote = await writeConversationRows(supabase, id, versions, changed);
+        if (wrote.conflict) {
+          continue;
+        }
+        if (!wrote.ok) {
+          throw new Error(wrote.error?.message || "seya_conversations_write_failed");
+        }
+        conversationsChanged = true;
+      }
+    }
+
+    const nextStored = withoutConversations(next);
+    const settingsChanged = stableStringify(nextStored) !== stableStringify(stored);
+    if (settingsChanged) {
+      const wrote = await writeSettingsCas(supabase, id, nextStored, stored);
+      if (wrote.error) {
+        lastError = wrote.error;
+        if (!wrote.retryable) {
+          throw new Error(wrote.error.message || String(wrote.error));
+        }
+        continue;
+      }
+      if (!wrote.ok) {
+        continue;
+      }
+    }
+
+    return {
+      settings: next,
+      changed: conversationsChanged || settingsChanged,
+      attempts: attempt + 1,
+      cas: true,
+    };
+  }
+  throw new Error(lastError?.message || "settings_write_conflict");
 }
 
 async function mirrorAfterWrite(supabase, centerId, previousSettings, nextSettings) {
@@ -43,6 +138,10 @@ async function mutateCenterSettings(supabase, centerId, mutate, options = {}) {
   }
   if (typeof mutate !== "function") {
     throw new Error("mutate_required");
+  }
+
+  if (await readsFromTable(supabase, id)) {
+    return mutateTableModeSettings(supabase, id, mutate, attempts);
   }
 
   let lastError = null;

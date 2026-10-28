@@ -134,6 +134,41 @@ async function upsertMirrorRows(supabase, rows) {
   return { ok: true, written };
 }
 
+/**
+ * Centre lu dans la table : écrit chaque conversation modifiée sur sa ligne.
+ * Une ligne déjà connue n'est remplacée que si personne ne l'a modifiée depuis la lecture
+ * (versions = clé → updated_at lu) ; sinon { conflict: true } pour relire et recommencer.
+ */
+async function writeConversationRows(supabase, centerId, versions, changed) {
+  const rows = uniqueRows(changed.map((item) => toMirrorRow(centerId, item)));
+  for (const row of rows) {
+    const known = versions.get(row.conversation_key);
+    if (known) {
+      const { data, error } = await supabase
+        .from(TABLE)
+        .update(row)
+        .eq("center_id", String(centerId))
+        .eq("conversation_key", row.conversation_key)
+        .eq("updated_at", known)
+        .select("id");
+      if (error) {
+        return { ok: false, conflict: false, error };
+      }
+      if (!Array.isArray(data) || data.length === 0) {
+        return { ok: false, conflict: true };
+      }
+      continue;
+    }
+    const { error } = await supabase
+      .from(TABLE)
+      .upsert(row, { onConflict: "center_id,conversation_key" });
+    if (error) {
+      return { ok: false, conflict: false, error };
+    }
+  }
+  return { ok: true, conflict: false, written: rows.length };
+}
+
 /** Après une écriture des réglages : copie seulement les conversations modifiées. */
 async function mirrorConversationChanges(supabase, centerId, previousList, nextList) {
   try {
@@ -217,4 +252,5 @@ module.exports = {
   resetMirrorAvailability,
   toMirrorRow,
   uniqueRows,
+  writeConversationRows,
 };

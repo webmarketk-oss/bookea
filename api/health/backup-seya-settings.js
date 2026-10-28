@@ -1,4 +1,5 @@
 const { createClient } = require("@supabase/supabase-js");
+const { withConversationSource } = require("../seya/conversation-source");
 
 module.exports.config = { maxDuration: 60 };
 
@@ -43,13 +44,15 @@ module.exports = async function handler(req, res) {
     }
 
     const backedUpAt = new Date().toISOString();
-    const results = (centers || []).map((center) => {
+    const results = [];
+    for (const center of centers || []) {
       const settings =
         center.settings && typeof center.settings === "object"
           ? center.settings
           : {};
-      const seya =
+      const storedSeya =
         settings.seya && typeof settings.seya === "object" ? settings.seya : {};
+      const seya = await withConversationSource(supabase, center.id, storedSeya);
       const conversations = Array.isArray(seya.conversations)
         ? seya.conversations
         : [];
@@ -69,7 +72,7 @@ module.exports = async function handler(req, res) {
               !String(brief?.title || "").trim(),
           }))
         : [];
-      return {
+      results.push({
         id: center.id,
         name: center.name,
         slug: center.slug,
@@ -78,8 +81,8 @@ module.exports = async function handler(req, res) {
         briefs,
         agent,
         ...(includeConversations ? { conversations } : {}),
-      };
-    });
+      });
+    }
 
     return res.status(200).json({
       ok: true,

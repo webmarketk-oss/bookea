@@ -56,7 +56,11 @@ import {
   visibleStatusChangeText,
 } from "@/lib/lead-practitioner";
 import type { WhatsAppThread } from "@/lib/lead-whatsapp";
-import { withConversationSource } from "@/api/seya/conversation-source";
+import {
+  loadTableConversations,
+  readsFromTable,
+  withConversationSource,
+} from "@/api/seya/conversation-source";
 import type {
   Lead,
   LeadActivity,
@@ -309,7 +313,42 @@ export function saveCrmLeadsSnapshot(snapshot: CrmLeadsSnapshot) {
   }
 }
 
-export async function loadCrmLeads() {
+// Événements utiles à la liste (statuts, KPI, imports, acomptes, RDV, praticienne, offres).
+// Les commentaires — le gros du volume — ne sont lus qu’à l’ouverture de la fiche.
+const LIST_EVENT_TYPES = [
+  "status",
+  "system",
+  IMPORT_ORIGIN_EVENT,
+  OFFER_EVENT,
+  RDV_DATE_EVENT,
+  COMMERCIAL_EVENT,
+  ACOMPTE_RELANCE_EVENT,
+  ACOMPTE_SUIVI_EVENT,
+];
+
+type CrmLeadsResult = {
+  center: CrmCenterContext;
+  leads: Lead[];
+};
+
+let crmLeadsInFlight: { centerId: string; promise: Promise<CrmLeadsResult> } | null = null;
+
+/** Liste CRM du centre ouvert. Deux écrans qui la demandent en même temps partagent la même lecture. */
+export async function loadCrmLeads(): Promise<CrmLeadsResult> {
+  const centerId = readActiveCenterId() || "";
+  if (crmLeadsInFlight && crmLeadsInFlight.centerId === centerId) {
+    return crmLeadsInFlight.promise;
+  }
+  const promise = readCrmLeads().finally(() => {
+    if (crmLeadsInFlight?.promise === promise) {
+      crmLeadsInFlight = null;
+    }
+  });
+  crmLeadsInFlight = { centerId, promise };
+  return promise;
+}
+
+async function readCrmLeads(): Promise<CrmLeadsResult> {
   const supabase = createClient();
   const context = await getCrmCenterContext(supabase);
 
@@ -320,6 +359,7 @@ export async function loadCrmLeads() {
       .from("leads")
       .select(LEAD_LIST_SELECT)
       .eq("center_id", context.centerId)
+      .in("lead_events.event_type", LIST_EVENT_TYPES)
       .order("last_activity_at", { ascending: false })
       .order("id", { ascending: true })
       .range(start, end) as unknown as PromiseLike<{
@@ -341,6 +381,46 @@ export async function loadCrmLeads() {
       }),
     ),
   };
+}
+
+/** Historique complet d’un prospect (commentaires compris), lu à l’ouverture de sa fiche. */
+export async function loadCrmLeadHistory(leadId: string): Promise<LeadActivity[]> {
+  const supabase = createClient();
+  const { data, error } = await supabase
+    .from("leads")
+    .select(LEAD_LIST_SELECT)
+    .eq("id", leadId)
+    .maybeSingle();
+  if (error) {
+    throw new Error(error.message);
+  }
+  if (!data) {
+    return [];
+  }
+  return toLead(data as unknown as LeadRow).activityLog;
+}
+
+/**
+ * Prospects utiles à la cloche : rappel du jour, nouveaux récents, activité récente.
+ * Lecture courte, sans l’historique complet de tout le centre.
+ */
+export async function loadNotificationLeads(sinceIso: string, today: string): Promise<Lead[]> {
+  const supabase = createClient();
+  const context = await getCrmCenterContext(supabase);
+  const since = sinceIso.slice(0, 10);
+  const { data, error } = await supabase
+    .from("leads")
+    .select(LEAD_LIST_SELECT)
+    .eq("center_id", context.centerId)
+    .or(`recall_date.eq.${today},created_at.gte.${since},last_activity_at.gte.${since}`)
+    .eq("lead_events.event_type", "system")
+    .gte("lead_events.created_at", since)
+    .order("last_activity_at", { ascending: false })
+    .limit(500);
+  if (error) {
+    throw new Error(error.message);
+  }
+  return ((data ?? []) as unknown as LeadRow[]).map(toLead);
 }
 
 const LEAD_LIST_SELECT = `
@@ -373,16 +453,28 @@ const LEAD_LIST_SELECT = `
   )
 `;
 
+function isStatementTimeout(message: string) {
+  return /statement timeout|canceling statement/i.test(message);
+}
+
 async function fetchAllRows<T>(
   build: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>,
 ) {
-  const pageSize = 1000;
+  // Pages courtes : chaque requête reste sous le délai maximal de la base, même avec l’historique.
+  const pageSize = 250;
   const rows: T[] = [];
-  for (let page = 0; page < 30; page += 1) {
+  for (let page = 0; page < 120; page += 1) {
     const start = page * pageSize;
-    const { data, error } = await build(start, start + pageSize - 1);
+    let { data, error } = await build(start, start + pageSize - 1);
+    if (error && isStatementTimeout(error.message)) {
+      ({ data, error } = await build(start, start + pageSize - 1));
+    }
     if (error) {
-      throw new Error(error.message);
+      throw new Error(
+        isStatementTimeout(error.message)
+          ? "La base met trop de temps à répondre. Réessayez dans quelques secondes."
+          : error.message,
+      );
     }
     const batch = data ?? [];
     rows.push(...batch);
@@ -542,6 +634,16 @@ export async function loadCrmWhatsAppThreads(): Promise<{
 }> {
   const supabase = createClient();
   const context = await getCrmCenterContext(supabase);
+  // Centre basculé sur la table : on ne relit pas tout le bloc des réglages pour rien.
+  if (await readsFromTable(supabase, context.centerId)) {
+    const fromTable = await loadTableConversations(supabase, context.centerId);
+    if (fromTable) {
+      return {
+        centerId: context.centerId,
+        threads: fromTable as WhatsAppThread[],
+      };
+    }
+  }
   const { data, error } = await supabase
     .from("centers")
     .select("conversations:settings->seya->conversations")
@@ -840,7 +942,11 @@ async function writeCrmLeadStatus(
   );
 }
 
-export async function addCrmLeadActivity(leadId: string, text: string) {
+export async function addCrmLeadActivity(
+  leadId: string,
+  text: string,
+  options: { eventId?: string } = {},
+) {
   const supabase = createClient();
   const centerId = await getLeadCenterId(supabase, leadId);
   const { data: leadRow, error: leadError } = await supabase
@@ -863,6 +969,7 @@ export async function addCrmLeadActivity(leadId: string, text: string) {
   });
 
   await insertLeadEvent(supabase, centerId, leadId, {
+    id: options.eventId,
     event_type: "comment",
     note: text,
   });
@@ -2113,6 +2220,7 @@ async function insertLeadEvent(
   centerId: string,
   leadId: string,
   event: {
+    id?: string;
     event_type: string;
     from_value?: string | null;
     to_value?: string | null;
@@ -2123,6 +2231,7 @@ async function insertLeadEvent(
   return trackCrmWrite(
     (async () => {
       const { error } = await supabase.from("lead_events").insert({
+        ...(event.id ? { id: event.id } : {}),
         center_id: centerId,
         lead_id: leadId,
         event_type: event.event_type,

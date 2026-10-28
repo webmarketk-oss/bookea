@@ -31,6 +31,7 @@ import {
   createCrmLead,
   deleteCrmLeadComment,
   loadBookedCrmLeads,
+  loadCrmLeadHistory,
   loadCrmLeads,
   loadCrmWhatsAppThreads,
   mergeCrmDuplicateLeads,
@@ -88,7 +89,20 @@ import {
 } from "@/lib/team-planning";
 import { SEYA_CONVERSATIONS_UPDATED_EVENT } from "@/lib/seya-settings";
 import { leadWhatsAppSummaries, type WhatsAppThread } from "@/lib/lead-whatsapp";
-import { Lead, LeadStatus } from "@/types/lead";
+import { Lead, LeadActivity, LeadStatus } from "@/types/lead";
+
+/** Historique complet lu sur la fiche + entrées récentes de la liste (nouveaux statuts, saisies en cours). */
+function mergeActivityLogs(full: LeadActivity[], current: LeadActivity[]) {
+  const ids = new Set(full.map((activity) => activity.id));
+  const texts = new Set(full.map((activity) => `${activity.type}|${activity.text.trim()}`));
+  const extra = current.filter(
+    (activity) =>
+      !ids.has(activity.id) &&
+      !texts.has(`${activity.type}|${activity.text.trim()}`) &&
+      !activity.id.endsWith("-created"),
+  );
+  return [...extra, ...full];
+}
 
 const emptyLeadForm = {
   firstName: "",
@@ -291,7 +305,31 @@ export default function CRMLeadsPage() {
     }
   }
 
-  async function refreshCrmLeads() {
+  // Historique complet des fiches déjà ouvertes : la liste n’en contient qu’un résumé.
+  const fullHistoryRef = useRef(new Map<string, LeadActivity[]>());
+  const [historyReloadKey, setHistoryReloadKey] = useState(0);
+
+  // Une seule lecture complète à la fois : les demandes pendant un chargement sont regroupées en une.
+  const refreshPromiseRef = useRef<Promise<void> | null>(null);
+  const refreshQueuedRef = useRef(false);
+
+  function refreshCrmLeads(): Promise<void> {
+    if (refreshPromiseRef.current) {
+      refreshQueuedRef.current = true;
+      return refreshPromiseRef.current;
+    }
+    const run = runCrmRefresh().finally(() => {
+      refreshPromiseRef.current = null;
+      if (refreshQueuedRef.current) {
+        refreshQueuedRef.current = false;
+        void refreshCrmLeads();
+      }
+    });
+    refreshPromiseRef.current = run;
+    return run;
+  }
+
+  async function runCrmRefresh() {
     setCrmError(null);
     const editSeqAtStart = editSeqRef.current;
     refreshesInFlightRef.current += 1;
@@ -303,6 +341,7 @@ export default function CRMLeadsPage() {
       if (center.centerId !== centerIdRef.current) {
         setBookedLeads(null);
         setBookedCenterId("");
+        fullHistoryRef.current.clear();
       }
       centerNameRef.current = center.centerName;
       centerIdRef.current = center.centerId;
@@ -313,7 +352,7 @@ export default function CRMLeadsPage() {
         return;
       }
       if (editSeqRef.current !== editSeqAtStart) {
-        void refreshCrmLeads();
+        refreshQueuedRef.current = true;
         return;
       }
 
@@ -325,10 +364,16 @@ export default function CRMLeadsPage() {
                 readPublicBookingsForCenter(center.centerName),
               ),
               readAppointmentStatusOverrides()
-            )
+            ).map((lead) => {
+              const full = fullHistoryRef.current.get(lead.id);
+              return full
+                ? { ...lead, activityLog: mergeActivityLogs(full, lead.activityLog) }
+                : lead;
+            })
           : [];
 
       setLeadList(nextLeads);
+      setHistoryReloadKey((key) => key + 1);
       setLeadsCenterId(center.centerId);
       setSelectedLeadId((currentId) => {
         if (nextLeads.some((lead) => lead.id === currentId)) {
@@ -366,10 +411,10 @@ export default function CRMLeadsPage() {
   }
 
   function refreshOnReturn() {
-    // Retour sur l’onglet : focus et visibilitychange arrivent ensemble.
+    // Retour sur l’onglet : pas plus d’une relecture complète par minute et par poste.
     if (
       refreshesInFlightRef.current > 0 ||
-      Date.now() - lastRefreshAtRef.current < 2000
+      Date.now() - lastRefreshAtRef.current < 60000
     ) {
       return;
     }
@@ -775,6 +820,32 @@ export default function CRMLeadsPage() {
     };
   }, [isLeadDetailsOpen, selectedLeadId]);
 
+  const openLeadId = isLeadDetailsOpen ? selectedLeadId : "";
+  useEffect(() => {
+    if (!openLeadId) {
+      return;
+    }
+    let cancelled = false;
+    void loadCrmLeadHistory(openLeadId)
+      .then((history) => {
+        if (cancelled || history.length === 0) {
+          return;
+        }
+        fullHistoryRef.current.set(openLeadId, history);
+        setLeadList((currentLeads) =>
+          currentLeads.map((lead) =>
+            lead.id === openLeadId
+              ? { ...lead, activityLog: mergeActivityLogs(history, lead.activityLog) }
+              : lead,
+          ),
+        );
+      })
+      .catch(() => null);
+    return () => {
+      cancelled = true;
+    };
+  }, [openLeadId, historyReloadKey]);
+
   useEffect(() => {
     const node = ficheRef.current;
 
@@ -969,6 +1040,7 @@ export default function CRMLeadsPage() {
   }
 
   async function handleAddActivity(leadId: string, text: string) {
+    const eventId = crypto.randomUUID();
     setLeadList((currentLeads) =>
       currentLeads.map((lead) =>
         lead.id === leadId
@@ -978,7 +1050,7 @@ export default function CRMLeadsPage() {
               latestComment: text,
               activityLog: [
                 {
-                  id: crypto.randomUUID(),
+                  id: eventId,
                   author: "Samantha",
                   date: formatActivityDate(),
                   text,
@@ -992,9 +1064,8 @@ export default function CRMLeadsPage() {
     );
 
     try {
-      await trackSave(() => addCrmLeadActivity(leadId, text));
+      await trackSave(() => addCrmLeadActivity(leadId, text, { eventId }));
       setCrmNotice(text.startsWith("SMS envoyé") ? "SMS envoyé." : "Commentaire enregistré.");
-      await refreshCrmLeads();
       return true;
     } catch (error) {
       const message =

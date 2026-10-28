@@ -8,7 +8,7 @@ import {
   readCenterSettings,
   type CenterExternalReview,
 } from "@/lib/center-settings";
-import { loadCrmLeads } from "@/lib/crm-supabase";
+import { loadNotificationLeads } from "@/lib/crm-supabase";
 import { inactiveLeadStatuses } from "@/lib/lead-statuses";
 import {
   PUBLIC_BOOKINGS_UPDATED_EVENT,
@@ -853,7 +853,7 @@ export async function loadCenterNotifications(): Promise<CenterNotification[]> {
     messagesResult,
     renewalResult,
   ] = await Promise.allSettled([
-    loadCrmLeads().then((result) => result.leads),
+    loadNotificationLeads(lookbackStart(), todayIso()),
     loadNotificationAppointments(),
     loadSmsInbox(),
     loadPublicCenterProfile(),

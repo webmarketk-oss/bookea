@@ -1,6 +1,10 @@
 const { last9Phone, persistableConversations, mergeSeyaConversationLists } = require("./conversation-key");
 const { patchCenterSeya } = require("./settings-write");
-const { removeMovedThreads } = require("./conversation-source");
+const {
+  centersWithPhoneThread,
+  removeMovedThreads,
+  withConversationSource,
+} = require("./conversation-source");
 
 function asRecord(value) {
   return value && typeof value === "object" && !Array.isArray(value) ? value : {};
@@ -371,7 +375,13 @@ function phoneThreadFilter(last9, targetCenterId) {
 async function loadCenterConversationLists(supabase, { last9, targetCenterId } = {}) {
   let query = supabase.from("centers").select("id,settings");
   if (last9 && targetCenterId) {
-    query = query.or(phoneThreadFilter(last9, targetCenterId));
+    // Centres basculés sur la table : le numéro n'apparaît plus dans le bloc des réglages.
+    const tableCenters = await centersWithPhoneThread(supabase, last9);
+    const filter = [
+      phoneThreadFilter(last9, targetCenterId),
+      ...tableCenters.map((id) => `id.eq.${id}`),
+    ].join(",");
+    query = query.or(filter);
   }
   const { data: centers, error } = await query;
   if (error) {
@@ -385,7 +395,9 @@ async function loadCenterConversationLists(supabase, { last9, targetCenterId } =
   const settingsById = new Map();
   for (const center of centers || []) {
     const settings = asRecord(center.settings);
-    const seya = asRecord(settings.seya);
+    const seya = asRecord(
+      await withConversationSource(supabase, center.id, asRecord(settings.seya)),
+    );
     lists.set(center.id, Array.isArray(seya.conversations) ? seya.conversations : []);
     settingsById.set(center.id, { settings, seya });
   }
