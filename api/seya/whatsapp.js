@@ -45,6 +45,7 @@ const {
 const { activeLeadPause, stripBookingPush } = require("./lead-pause");
 const { claimInboundMessage, settleInboundClaim } = require("./inbound-claim");
 const { latestThreadForPhone, withConversationSource } = require("./conversation-source");
+const { staffCanUseCenter } = require("./_staff-auth");
 
 const GRAPH_VERSION = "v21.0";
 const inboundLocks = new Map();
@@ -121,6 +122,15 @@ async function handler(req, res) {
   try {
     const payload = parseBody(req.body);
     if (payload.action === "send" || payload.type === "outbound") {
+      // Envoi depuis le numéro Bookea : réservé à l'équipe connectée du centre.
+      const staff = await staffCanUseCenter(
+        createServiceClient(),
+        req,
+        String(payload.centerId || "").trim(),
+      );
+      if (!staff) {
+        return res.status(401).json({ sent: false, reason: "unauthorized", error: "Connexion requise." });
+      }
       const result = await sendSharedWhatsApp(payload.phone, payload.text, {
         firstName: payload.firstName,
         centerName: payload.centerName,
@@ -696,6 +706,47 @@ async function generateSeyaReplyWithRetry(args) {
   }
 }
 
+/** Conversation sans le message d'accueil automatique (envoi ou réception gérés par l'équipe). */
+function teamConversation(context, center, seya) {
+  return {
+    ...startConversation({ ...context, centerId: center.id }, center.name, seya),
+    messages: [],
+    status: "En cours",
+    welcomeSendAt: null,
+  };
+}
+
+function findThread(conversations, leadId, phone) {
+  const phoneKey = last9Phone(phone);
+  return (
+    (leadId && conversations.find((item) => item.leadId === leadId)) ||
+    (phoneKey.length >= 9 && conversations.find((item) => last9Phone(item.phone) === phoneKey)) ||
+    null
+  );
+}
+
+async function recordInboundWithoutReply(supabase, center, seya, context, incoming) {
+  const conversations = Array.isArray(seya.conversations) ? seya.conversations : [];
+  const existing =
+    findThread(conversations, context.leadId, incoming.phone) ||
+    teamConversation(context, center, seya);
+  if (incoming.messageId && (existing.lastInboundIds || []).includes(incoming.messageId)) {
+    return false;
+  }
+  const next = {
+    ...existing,
+    centerId: center.id,
+    messages: [...(existing.messages || []), message("lead", incoming.text)],
+    lastInboundIds: [...(existing.lastInboundIds || []), incoming.messageId]
+      .filter(Boolean)
+      .slice(-40),
+    welcomeSendAt: null,
+    updatedAt: new Date().toISOString(),
+  };
+  await writeSeyaConversations(supabase, center.id, [next]);
+  return true;
+}
+
 async function handleIncoming(
   supabase,
   incoming,
@@ -742,11 +793,14 @@ async function handleIncoming(
     centerName: center.name,
   };
   if (isSeyaOff(seya)) {
+    // Seya éteinte : pas de réponse automatique, mais le message est gardé pour l'équipe (Seya CRM).
+    const recorded = await recordInboundWithoutReply(supabase, center, seya, context, incoming);
     return {
       phone: incoming.phone,
       routed: true,
       centerId: center.id,
       skipped: "agent_disabled",
+      recorded,
     };
   }
 
@@ -1974,16 +2028,66 @@ function pickWelcomeTemplate(templates, extras) {
   return pickApprovedTemplate(templates, family, extras.templateName);
 }
 
+const TEMPLATE_ROLE_ORDER = ["firstName", "centerName", "treatment"];
+
+/**
+ * Rôle de chaque {{n}} d'après les mots qui le précèdent dans le modèle Meta :
+ * « Bonjour {{1}} » = prénom, « du centre {{1}} » / « chez {{2}} » = centre,
+ * « demande pour notre {{2}} » / « offre {{3}} » = offre. Un modèle sans prénom ne décale plus tout.
+ */
+function templateSlotRoles(template) {
+  const body = (template?.components || []).find(
+    (item) => String(item.type || "").toUpperCase() === "BODY",
+  );
+  const text = String(body?.text || "");
+  const roles = new Map();
+  const pattern = /\{\{(\d+)\}\}/g;
+  let match = pattern.exec(text);
+  while (match) {
+    const index = Number(match[1]);
+    const before = text
+      .slice(Math.max(0, match.index - 40), match.index)
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/['’]/g, "'")
+      .trimEnd();
+    let role = "";
+    if (/(bonjour|bonsoir|hello|salut|coucou|cher|chere)[\s,]*$/.test(before)) {
+      role = "firstName";
+    } else if (
+      /(centre|clinique|clinic|institut|cabinet|salon|equipe|chez|seya du|seya de)(\s+(de|du|d'|des))?\s*$/.test(before)
+    ) {
+      role = "centerName";
+    } else if (
+      /(offre|soin|demande pour( notre| votre| l'| le| la| les)?|pour notre|pour votre|indique|concernant|interesse(e)? par)\s*$/.test(before)
+    ) {
+      role = "treatment";
+    }
+    if (role && !roles.has(index)) {
+      roles.set(index, role);
+    }
+    match = pattern.exec(text);
+  }
+  return roles;
+}
+
 function templateParameters(template, vars) {
   const count = templateVarCount(template);
-  const parameters = [vars.firstName, vars.centerName, vars.treatment]
-    .map((value) => String(value || "").trim())
-    .filter(Boolean);
-  return [
-    parameters[0] || "bonjour",
-    parameters[1] || "notre centre",
-    parameters[2] || "votre soin",
-  ].slice(0, Math.max(count, 0));
+  const values = {
+    firstName: String(vars.firstName || "").trim() || "bonjour",
+    centerName: String(vars.centerName || "").trim() || "notre centre",
+    treatment: String(vars.treatment || "").trim() || "votre soin",
+  };
+  const roles = templateSlotRoles(template);
+  const used = new Set(roles.values());
+  const remaining = TEMPLATE_ROLE_ORDER.filter((role) => !used.has(role));
+  const parameters = [];
+  for (let index = 1; index <= Math.max(count, 0); index += 1) {
+    const role = roles.get(index) || remaining.shift() || TEMPLATE_ROLE_ORDER[index - 1] || "treatment";
+    parameters.push(values[role]);
+  }
+  return parameters;
 }
 
 function renderTemplateText(template, vars) {
@@ -2121,6 +2225,8 @@ async function sendSharedWhatsApp(phone, text, extras = {}) {
 }
 
 handler.sendSharedWhatsApp = sendSharedWhatsApp;
+handler.teamConversation = teamConversation;
+handler.findThread = findThread;
 handler.handleIncoming = handleIncoming;
 handler.processInbound = processInbound;
 handler.contextFromSeyaThread = contextFromSeyaThread;
@@ -2131,6 +2237,8 @@ handler.replaceDraftWithSent = replaceDraftWithSent;
 handler.holdOutgoingAfterPause = holdOutgoingAfterPause;
 handler.isTemplateRequired = isTemplateRequired;
 handler.welcomeTemplateVars = welcomeTemplateVars;
+handler.templateParameters = templateParameters;
+handler.renderTemplateText = renderTemplateText;
 handler.extractIncomingMessages = extractIncomingMessages;
 handler.coalesceIncoming = coalesceIncoming;
 handler.alreadyHandledInbound = alreadyHandledInbound;

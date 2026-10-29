@@ -458,7 +458,7 @@ function genericPriceReply(policy, options = {}) {
   if (isFree(policy.bilan) || isFree(policy.discovery)) {
     parts.push(
       family === "visage"
-        ? "Le diagnostic visage n’est pas le bilan minceur offert."
+        ? "Le diagnostic visage est offert, c’est gratuit."
         : "Le bilan et la séance découverte sont offerts, c’est gratuit.",
     );
   } else if (policy.bilan || policy.discovery) {
@@ -475,7 +475,9 @@ function genericPriceReply(policy, options = {}) {
     parts.push(announceSession(policy));
   } else if (family === "visage") {
     parts.push(
-      "Ce diagnostic permet de faire le point sur la peau et de vous proposer un protocole adapté.",
+      policy.package
+        ? `Le tarif du soin dépend du protocole proposé lors du diagnostic. ${packageSentence(policy.package)}`
+        : "Le tarif du soin dépend du protocole adapté à votre peau, il vous est précisé lors du diagnostic.",
     );
   } else {
     parts.push(

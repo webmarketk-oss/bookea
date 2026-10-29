@@ -543,3 +543,33 @@ test("Gaillard laser : barbe sur devis, ventre homme/femme précisé", () => {
   const ventre = gaillardGridPrice("c'est combien le ventre en laser ?");
   assert.match(ventre, /bande du ventre \(femme\) 230 €, ventre \(homme\) 690 €/);
 });
+
+test("tarifs visage (Gaillard) : diagnostic offert, jamais « pas le bilan minceur »", async () => {
+  const seyaVisage = {
+    seyaMission: "qualify_callback",
+    bookAppointment: false,
+    treatmentBriefs: [
+      { name: "Soin minceur", brief: "Bilan offert.", pricing: { bilan: "offert", discovery: "offerte" } },
+      { name: "Soin visage", brief: "Diagnostic de peau offert.", pricing: { bilan: "offert" } },
+    ],
+  };
+  const conversation = startConversation(
+    { leadId: "lead-visage-prix", centerId: "gaillard", firstName: "Léa", phone: "0611223344", treatment: "Soin visage" },
+    "JFG Clinic Gaillard",
+    seyaVisage,
+  );
+  const result = await generateSeyaReply({
+    conversation,
+    text: "Quels sont vos tarifs ?",
+    seya: seyaVisage,
+    appointments: [],
+    hours: hours(),
+    centerName: "JFG Clinic Gaillard",
+    centerAddress: "58 rue de la Libération, 74240 Gaillard",
+    centerId: "gaillard",
+    now: NOW,
+  });
+  const said = lastSeya(result.conversation);
+  assert.doesNotMatch(said, /minceur|n’est pas le bilan/i);
+  assert.match(said, /diagnostic.*offert|offert.*diagnostic/i);
+});

@@ -69,6 +69,7 @@ import {
 } from "@/lib/seya-whatsapp";
 import { displayPersonName } from "@/lib/seya-person-name";
 import { SeyaInbox } from "@/components/seya/seya-inbox";
+import { staffAuthHeaders } from "@/lib/send-whatsapp";
 import type { Appointment } from "@/types/agenda";
 import type { Lead } from "@/types/lead";
 
@@ -535,10 +536,22 @@ export default function SeyaCrmPage() {
         savedAgentSettingsRef.current = seya.settings;
         setAgentSettings(seya.settings);
         setConversations(storedConversations);
+        // Lien « Voir dans Seya CRM » depuis la fiche prospect : ?lead=… ou ?phone=…
+        const params = new URLSearchParams(window.location.search);
+        const linkedLead = String(params.get("lead") || "").trim();
+        const linkedPhone = String(params.get("phone") || "").replace(/\D/g, "").slice(-9);
+        const linked = storedConversations.find(
+          (item) =>
+            (linkedLead && item.leadId === linkedLead) ||
+            (linkedPhone.length === 9 &&
+              String(item.phone || "").replace(/\D/g, "").slice(-9) === linkedPhone),
+        );
         setSelectedConversationId((current) =>
-          current && storedConversations.some((item) => item.id === current)
-            ? current
-            : (storedConversations[0]?.id ?? null),
+          linked
+            ? linked.id
+            : current && storedConversations.some((item) => item.id === current)
+              ? current
+              : (storedConversations[0]?.id ?? null),
         );
         loaded = true;
       } catch {
@@ -891,9 +904,10 @@ export default function SeyaCrmPage() {
   ) {
     const response = await fetch("/api/seya/whatsapp", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...(await staffAuthHeaders()) },
       body: JSON.stringify({
         action: "send",
+        centerId: centerId || readActiveCenterId() || "",
         phone: conversation.phone,
         text,
         firstName: conversation.firstName,

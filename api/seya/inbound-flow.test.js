@@ -604,12 +604,20 @@ test("prospect en pause (« je reviens vers vous ») : réponse sans relance de 
   }
 });
 
-test("Seya coupée sur le centre : aucune réponse, raison explicite", async () => {
+test("Seya coupée sur le centre : aucune réponse, mais le message est gardé pour l’équipe", async () => {
   currentDb = createFakeDb(seed(welcomeThread(), { whatsappAgentEnabled: false }));
   const meta = installMeta();
   const res = await post(webhook("Les jambes", "wamid.in.15"));
   assert.equal(res.payload.results[0].skipped, "agent_disabled");
+  assert.equal(res.payload.results[0].recorded, true);
   assert.equal(meta.sent.length, 0);
+  const last = storedThread().messages.at(-1);
+  assert.equal(last.author, "lead");
+  assert.equal(last.text, "Les jambes");
+
+  const again = await post(webhook("Les jambes", "wamid.in.15"));
+  assert.equal(again.payload.results[0].recorded, false, "webhook reçu deux fois : un seul message");
+  assert.equal(storedThread().messages.filter((item) => item.text === "Les jambes").length, 1);
 });
 
 test("rappel accepté mais transmission en échec : Seya n’annonce pas de rappel", async () => {

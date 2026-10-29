@@ -26,6 +26,7 @@ import {
   type CenterSmsSettings,
 } from "@/lib/sms-settings";
 import { sendBookeaSms } from "@/lib/send-sms";
+import { sendLeadWhatsApp } from "@/lib/send-whatsapp";
 import { reminderDateAfterStatusChange } from "@/lib/crm-stats";
 import {
   formatWhatsAppDate,
@@ -147,6 +148,11 @@ export default function LeadDetails({
   const [smsDraft, setSmsDraft] = useState("");
   const [smsSending, setSmsSending] = useState(false);
   const [smsNotice, setSmsNotice] = useState("");
+  const [isWhatsAppOpen, setIsWhatsAppOpen] = useState(false);
+  const [whatsAppDraft, setWhatsAppDraft] = useState("");
+  const [whatsAppSending, setWhatsAppSending] = useState(false);
+  const [whatsAppNotice, setWhatsAppNotice] = useState("");
+  const whatsAppTextareaRef = useRef<HTMLTextAreaElement>(null);
   const commentTextareaRef = useRef<HTMLTextAreaElement>(null);
 
   infoFormRef.current = infoForm;
@@ -363,6 +369,38 @@ export default function LeadDetails({
     window.setTimeout(() => commentTextareaRef.current?.focus(), 0);
   }
 
+  function toggleWhatsApp() {
+    setIsWhatsAppOpen((open) => !open);
+    setWhatsAppNotice("");
+    window.setTimeout(() => whatsAppTextareaRef.current?.focus(), 0);
+  }
+
+  async function sendWhatsApp() {
+    const text = whatsAppDraft.trim();
+    if (!lead.phone.trim()) {
+      setWhatsAppNotice("Ce prospect n'a pas de téléphone.");
+      return;
+    }
+    if (!text) {
+      setWhatsAppNotice("Écris le message WhatsApp.");
+      return;
+    }
+    setWhatsAppSending(true);
+    setWhatsAppNotice("");
+    const result = await sendLeadWhatsApp(lead.id, text);
+    setWhatsAppSending(false);
+    if (!result.ok) {
+      setWhatsAppNotice(result.error);
+      return;
+    }
+    setWhatsAppDraft("");
+    setWhatsAppNotice(
+      result.via === "template"
+        ? "Le prospect ne vous a pas écrit depuis plus de 24 h : WhatsApp impose le modèle approuvé, c'est lui qui est parti. Votre texte pourra partir dès qu'il répond."
+        : "WhatsApp envoyé. La conversation est dans Seya CRM.",
+    );
+  }
+
   async function sendLeadSms(messageOverride?: string) {
     const message = (messageOverride ?? (smsMode === "free" ? smsDraft : smsPreview)).trim();
 
@@ -451,6 +489,7 @@ export default function LeadDetails({
             label="WhatsApp"
             icon={<MessageCircle className="h-4 w-4" />}
             className="border-emerald-100 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+            onClick={toggleWhatsApp}
           />
           <ActionButton
             label="RDV"
@@ -490,6 +529,43 @@ export default function LeadDetails({
             )}
           </div>
         </div>
+
+        {isWhatsAppOpen && (
+          <div className="rounded-2xl border border-emerald-100 bg-emerald-50 p-3">
+            <div className="grid gap-2">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[11px] font-black uppercase text-emerald-700">
+                  Envoyer un WhatsApp
+                </span>
+                <a
+                  href={`/dashboard/seya-crm?lead=${encodeURIComponent(lead.id)}`}
+                  className="text-[11px] font-black text-emerald-700 underline"
+                >
+                  Voir dans Seya CRM
+                </a>
+              </div>
+              <textarea
+                ref={whatsAppTextareaRef}
+                value={whatsAppDraft}
+                onChange={(event) => setWhatsAppDraft(event.target.value)}
+                rows={4}
+                className="w-full rounded-xl border border-emerald-200 bg-white px-3 py-2 text-xs font-semibold leading-5 text-slate-800 outline-none"
+                placeholder="Écris le message WhatsApp (envoyé depuis le numéro Bookea, même si Seya est désactivée)."
+              />
+              <Button
+                type="button"
+                disabled={whatsAppSending}
+                onClick={() => void sendWhatsApp()}
+                className="rounded-xl bg-emerald-600 px-4 text-xs font-black text-white hover:bg-emerald-700"
+              >
+                {whatsAppSending ? "Envoi..." : "Envoyer WhatsApp"}
+              </Button>
+              {whatsAppNotice ? (
+                <p className="text-xs font-semibold text-emerald-800">{whatsAppNotice}</p>
+              ) : null}
+            </div>
+          </div>
+        )}
 
         <div className="rounded-2xl border border-blue-100 bg-blue-50 p-3">
           <div className="grid gap-2">

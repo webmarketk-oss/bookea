@@ -77,3 +77,29 @@ test.after(() => {
   if (previous.waba === undefined) delete process.env.WHATSAPP_WABA_ID;
   global.fetch = previous.fetch;
 });
+
+test("modèle sans prénom : chaque {{n}} reçoit la bonne valeur (centre, offre), sans décalage", () => {
+  const vars = { firstName: "Isabelle", centerName: "JFG Clinic Gaillard", treatment: "bilan minceur offert" };
+  const withoutName = {
+    name: "seya_acceuil_minceur",
+    components: [
+      {
+        type: "BODY",
+        text: "Bonjour 😊 Je suis Seya du centre {{1}}. Vous avez fait une demande pour notre {{2}}. Vous souhaitez plutôt affiner une zone ?",
+      },
+    ],
+  };
+  assert.deepEqual(handler.templateParameters(withoutName, vars), ["JFG Clinic Gaillard", "bilan minceur offert"]);
+  assert.equal(
+    handler.renderTemplateText(withoutName, vars),
+    "Bonjour 😊 Je suis Seya du centre JFG Clinic Gaillard. Vous avez fait une demande pour notre bilan minceur offert. Vous souhaitez plutôt affiner une zone ?",
+  );
+
+  const classic = {
+    name: "seya_accueil",
+    components: [
+      { type: "BODY", text: "Bonjour {{1}}, merci pour votre inscription chez {{2}}. Je suis Seya. Vous avez indiqué {{3}}." },
+    ],
+  };
+  assert.deepEqual(handler.templateParameters(classic, vars), ["Isabelle", "JFG Clinic Gaillard", "bilan minceur offert"]);
+});
