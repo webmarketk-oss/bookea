@@ -120,6 +120,20 @@ export default function ProspectsTable({
   const sortedLeads = leads
     .map((lead, index) => ({ lead, index }))
     .sort((current, next) => {
+      const currentDue = isOpenReminderDue(current.lead) ? 0 : 1;
+      const nextDue = isOpenReminderDue(next.lead) ? 0 : 1;
+      if (currentDue !== nextDue) {
+        return currentDue - nextDue;
+      }
+
+      if (currentDue === 0) {
+        const currentReminder = toDateOnlyIso(current.lead.reminderDate) ?? "";
+        const nextReminder = toDateOnlyIso(next.lead.reminderDate) ?? "";
+        if (currentReminder !== nextReminder) {
+          return currentReminder.localeCompare(nextReminder);
+        }
+      }
+
       const stamp = sortBy === "updated" ? leadUpdatedStamp : leadCreatedStamp;
       const dateDiff = stamp(current.lead).localeCompare(stamp(next.lead));
       if (dateDiff !== 0) {

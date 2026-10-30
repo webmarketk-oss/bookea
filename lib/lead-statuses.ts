@@ -1,4 +1,4 @@
-import { LeadStatus } from "@/types/lead";
+import type { LeadStatus } from "@/types/lead";
 
 export const leadStatuses: LeadStatus[] = [
   "Nouveau",

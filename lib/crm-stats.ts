@@ -316,14 +316,30 @@ export function isLeadRdvTakenOn(lead: Lead, date: string) {
   return getLeadRdvTakenDates(lead).includes(date);
 }
 
+function statusChangeTarget(text: string) {
+  const arrowMatch = text.match(/→\s*([^.\n]+)/);
+  return arrowMatch ? normalizeLeadStatus(arrowMatch[1].trim()) : undefined;
+}
+
+function statusChangeSource(text: string) {
+  const sourceMatch = text.match(/(?:Statut changé\s*:\s*)?([^→\n]+?)\s*→/);
+  return sourceMatch ? normalizeLeadStatus(sourceMatch[1].trim()) : undefined;
+}
+
 function isAcompteReceivedActivity(activity: LeadActivity) {
   if (activity.type === "comment") {
     return false;
   }
 
   const text = activity.text.trim();
-  const arrowMatch = text.match(/→\s*([^.\n]+)/);
-  const status = normalizeLeadStatus(arrowMatch?.[1]?.trim() || text);
+  const target = statusChangeTarget(text);
+  // Ne compter que le passage VERS « Acompte reçu », pas une sortie
+  // (ex. « Acompte reçu → Vendu ») qui contient encore le libellé.
+  if (target) {
+    return target === "Acompte reçu";
+  }
+
+  const status = normalizeLeadStatus(text);
   if (status === "Acompte reçu") {
     return true;
   }
@@ -402,19 +418,28 @@ function isRdvTakenActivity(activity: LeadActivity) {
   }
 
   const text = activity.text.trim();
-  const arrowMatch = text.match(/→\s*([^.\n]+)/);
+  const target = statusChangeTarget(text);
 
-  if (arrowMatch) {
-    return rdvBookedStatuses.has(normalizeLeadStatus(arrowMatch[1].trim()));
+  if (target) {
+    if (!rdvBookedStatuses.has(target)) {
+      return false;
+    }
+
+    // Un passage entre statuts déjà « RDV / acompte » (ex. Acompte envoyé →
+    // Acompte reçu) n’est pas une nouvelle prise de RDV.
+    const source = statusChangeSource(text);
+    if (source && rdvBookedStatuses.has(source)) {
+      return false;
+    }
+
+    return true;
   }
 
   if (rdvBookedStatuses.has(normalizeLeadStatus(text))) {
     return true;
   }
 
-  return /réservation publique confirmée|rdv posé dans l'agenda|acompte\s+(envoyé|reçu|validé|posé|en attente)|posé\s+acompte/i.test(
-    text,
-  );
+  return /réservation publique confirmée|rdv posé dans l'agenda/i.test(text);
 }
 
 function activityDateToIso(activity: LeadActivity) {
