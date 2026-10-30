@@ -45,6 +45,10 @@
     {
       "source": "/centres/:slug",
       "destination": "/centres"
+    },
+    {
+      "source": "/lead/:center",
+      "destination": "/api/leads?center=:center&source=landing"
     }
   ]
 }
