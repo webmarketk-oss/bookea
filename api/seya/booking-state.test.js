@@ -292,6 +292,33 @@ test("gpt-4o peut reformuler, mais un lundi fuité est jeté au profit du brouil
   );
 });
 
+test("la reformulation IA n’annonce jamais un RDV réservé sans réservation réelle", () => {
+  const state = emptyBookingState(CENTER_ID);
+  const draft = "Le mer. 30/12 je peux vous proposer 09h00 ou 09h30 — lequel vous irait le mieux ?";
+  for (const fake of [
+    "Parfait, je réserve le créneau pour le mercredi 30 décembre à 14h00 pour vous. Je vous confirme la réservation dès que possible 😊",
+    "Votre rendez-vous est bien confirmé pour le mercredi 30 décembre à 14h00 au centre.",
+    "C’est réservé pour mercredi 14h00 !",
+    "Je vous confirme votre rendez-vous mercredi à 14h00.",
+  ]) {
+    assert.equal(pickSafeReply(draft, fake, state, { messages: [] }), draft, fake);
+  }
+  assert.match(
+    pickSafeReply(
+      draft,
+      "Souhaitez-vous que je vous le réserve ? Le mer. 30/12 j’ai 09h00 ou 09h30.",
+      state,
+      { messages: [] },
+    ),
+    /je vous le réserve/,
+  );
+  const booked = { messages: [], bookedSlot: { date: "2026-12-30", time: "14:00", label: "mer. 30/12 à 14h00" } };
+  assert.match(
+    pickSafeReply("À très bientôt !", "Votre rendez-vous est bien confirmé mercredi 30/12 à 14h00, à très bientôt !", state, booked),
+    /bien confirmé/,
+  );
+});
+
 test("la reformulation ne recolle pas le dernier message Seya", () => {
   const state = emptyBookingState(CENTER_ID);
   const previous = "Vous êtes plutôt disponible en début de semaine, ou plutôt en fin de semaine ?";

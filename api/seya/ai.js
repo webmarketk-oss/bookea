@@ -780,6 +780,13 @@ function lastSeyaText(conversation) {
   );
 }
 
+const BOOKING_CLAIM =
+  /je (vous )?r[eé]serve (le|la|ce|cet|votre|donc|bien)\b|c['’]est (bien )?r[eé]serv[eé]|(rendez-vous|rdv|r[eé]servation|cr[eé]neau|place) (est |a [eé]t[eé] |a bien [eé]t[eé] )?(bien )?(confirm[eé]e?|r[eé]serv[eé]e?|bloqu[eé]e?|enregistr[eé]e?)(?![a-z])|je vous confirme (la|le|votre) (r[eé]servation|rendez-vous|rdv)|vous [eê]tes (bien )?(inscrite?|attendue?) (pour|le)/i;
+
+function claimsBooking(text) {
+  return BOOKING_CLAIM.test(String(text || ""));
+}
+
 function pickSafeReply(draft, polished, bookingState, conversation) {
   const candidate = sanitizeReply(polished);
   if (!candidate || candidate.length < 8) {
@@ -803,6 +810,14 @@ function pickSafeReply(draft, polished, bookingState, conversation) {
     return draft;
   }
   if (replyClosesThread(candidate) && !replyClosesThread(draft)) {
+    return draft;
+  }
+  // Seule la réservation réelle (règles → agenda) peut annoncer un RDV réservé ou confirmé.
+  if (claimsBooking(candidate) && !claimsBooking(draft) && !conversation?.bookedSlot) {
+    console.error("[seya/ai] polish_blocked_booking_claim", {
+      centerId: bookingState?.centerId,
+      preview: candidate.slice(0, 160),
+    });
     return draft;
   }
   if (replyPushesExit(candidate) && !replyPushesExit(draft)) {
