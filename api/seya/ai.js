@@ -97,6 +97,12 @@ const {
   seyaMissionPrompt,
 } = require("./mission");
 const gaillard = require("./gaillard");
+const {
+  mentionedDays,
+  mentionedTimes,
+  onlyMentionsSlots,
+  slotMatchesText,
+} = require("./slot-mentions");
 const { stepAsked } = require("./path");
 
 function seyaModel() {
@@ -176,6 +182,10 @@ async function generateSeyaReply(input) {
   const centerCity = gaillard.isGaillardCenter(input.centerName)
     ? ""
     : cityFromAddress(centerAddress);
+  // « Je pensais que c’était l’institut de X » ou « RDV déjà pris à l’instant » : pas une question de lieu.
+  // Sans ville de centre (Gaillard), pas de rayon : sa mission ne propose pas de créneau.
+  const placeText =
+    !centerCity || isWrongCenter(text) || isAlreadyBookedElsewhere(text) ? "" : text;
 
   const pendingCity = conversation.locationCheck?.leadCity || "";
   const pendingKind = conversation.locationCheck?.kind || "";
@@ -228,7 +238,7 @@ async function generateSeyaReply(input) {
     }
   }
 
-  const leadCity = leadCityMention(text);
+  const leadCity = leadCityMention(placeText);
   if (leadCity && centerCity && !sameCity(leadCity, centerCity)) {
     const leadCatchment = asksNearbyCatchment(
       `secteur ${leadCity}`,
@@ -256,8 +266,8 @@ async function generateSeyaReply(input) {
   }
 
   // Autre établissement demandé (« centre sur X », « bilan là-bas ») ≠ secteur proche.
-  const otherSite = otherSiteCityMention(text, centerCity);
-  if (otherSite && asksOtherSite(text, centerCity)) {
+  const otherSite = otherSiteCityMention(placeText, centerCity);
+  if (otherSite && asksOtherSite(placeText, centerCity)) {
     return guardedReply(
       {
         ...conversation,
@@ -271,7 +281,7 @@ async function generateSeyaReply(input) {
   }
 
   // Zone dans le rayon (~35 km, tous centres) : on accueille ici.
-  const nearbyTown = asksNearbyCatchment(text, centerCity, centerAddress);
+  const nearbyTown = asksNearbyCatchment(placeText, centerCity, centerAddress);
   if (nearbyTown) {
     conversation = {
       ...conversation,
@@ -285,8 +295,8 @@ async function generateSeyaReply(input) {
       );
     }
   } else {
-    const area = extractAreaMention(text, centerCity);
-    if (area && !asksOtherSite(text, centerCity)) {
+    const area = extractAreaMention(placeText, centerCity);
+    if (area && !asksOtherSite(placeText, centerCity)) {
       const far = resolveCatchment(centerCity, centerAddress, area.label);
       if (far && far.within === false) {
         return guardedReply(
@@ -421,6 +431,10 @@ async function generateCoreReply({
     centerProfile: agentSettings(seya).centerProfile,
   };
   const fallback = applyLeadReply(conversationWithState, text, seya, resolvedSlots, extras);
+  const recheck = confirmAnnouncedSlot(fallback, conversation, text);
+  if (recheck) {
+    return recheck;
+  }
   const draft = lastSeyaText(fallback.conversation);
   const previousSeya = lastSeyaText(conversation);
   const { locked, ...settled } = fallback;
@@ -780,6 +794,83 @@ function lastSeyaText(conversation) {
   );
 }
 
+function lastOfferText(conversation) {
+  return (
+    [...(conversation?.messages || [])]
+      .reverse()
+      .find((item) => item.author === "seya" || item.author === "centre")?.text || ""
+  );
+}
+
+function hasSlotMention(text) {
+  return mentionedTimes(text).size > 0 || mentionedDays(text).size > 0;
+}
+
+function recheckLabel(slot) {
+  const label = String(slot?.label || "").trim();
+  if (label && !/^\d{4}-\d{2}-\d{2}/.test(label)) {
+    return label;
+  }
+  const date = String(slot?.date || "");
+  const time = String(slot?.time || "").slice(0, 5);
+  const weekday = new Date(`${date}T12:00:00`).toLocaleDateString("fr-FR", { weekday: "long" });
+  return `${weekday} ${date.slice(8, 10)}/${date.slice(5, 7)} à ${time.replace(":", "h")}`;
+}
+
+/**
+ * Le « oui » ne réserve que le créneau écrit dans le dernier message du centre. Si la mémoire
+ * pointe un autre créneau (texte reformulé, ancien fil), on le redemande au lieu de réserver.
+ */
+function confirmAnnouncedSlot(result, conversation, leadText) {
+  const slot = result?.shouldBook;
+  if (!slot?.date || !slot?.time) {
+    return null;
+  }
+  const announced = lastOfferText(conversation);
+  if (!hasSlotMention(announced) || slotMatchesText(slot, announced)) {
+    return null;
+  }
+  if (
+    hasSlotMention(leadText) ||
+    /midi|matin|soir|lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche|demain|semaine/i.test(
+      String(leadText || ""),
+    )
+  ) {
+    return null;
+  }
+  console.error("[seya/ai] booking_slot_mismatch", {
+    centerId: conversation?.centerId,
+    slot: `${slot.date} ${slot.time}`,
+  });
+  const reply = `Pour être sûre de bien noter : le créneau que je peux vous réserver est le ${recheckLabel(slot)}. Souhaitez-vous que je vous le réserve ?`;
+  const next = result.conversation || conversation;
+  const messages = [...(next.messages || [])];
+  const index = messages.map((item) => item.author).lastIndexOf("seya");
+  if (index >= 0) {
+    messages[index] = { ...messages[index], text: reply };
+  }
+  const { locked: _locked, ...rest } = result;
+  void _locked;
+  return {
+    ...rest,
+    shouldBook: null,
+    via: "rules",
+    conversation: {
+      ...next,
+      messages,
+      status: conversation?.bookedSlot ? conversation.status || next.status : "RDV proposé",
+      bookedSlot: conversation?.bookedSlot,
+      proposedSlots: [slot],
+      bookingState: {
+        ...(next.bookingState || {}),
+        appointmentStatus: conversation?.bookedSlot ? "confirmed" : "proposed",
+        pendingQuestion: "offer_slots",
+        lastOfferedSlots: [slot],
+      },
+    },
+  };
+}
+
 const BOOKING_CLAIM =
   /je (vous )?r[eé]serve (le|la|ce|cet|votre|donc|bien)\b|c['’]est (bien )?r[eé]serv[eé]|(rendez-vous|rdv|r[eé]servation|cr[eé]neau|place) (est |a [eé]t[eé] |a bien [eé]t[eé] )?(bien )?(confirm[eé]e?|r[eé]serv[eé]e?|bloqu[eé]e?|enregistr[eé]e?)(?![a-z])|je vous confirme (la|le|votre) (r[eé]servation|rendez-vous|rdv)|vous [eê]tes (bien )?(inscrite?|attendue?) (pour|le)/i;
 
@@ -810,6 +901,19 @@ function pickSafeReply(draft, polished, bookingState, conversation) {
     return draft;
   }
   if (replyClosesThread(candidate) && !replyClosesThread(draft)) {
+    return draft;
+  }
+  const knownSlots = [
+    ...(conversation?.bookingState?.lastOfferedSlots || []),
+    ...(conversation?.proposedSlots || []),
+    ...(bookingState?.lastOfferedSlots || []),
+    ...(conversation?.bookedSlot ? [conversation.bookedSlot] : []),
+  ];
+  if (!onlyMentionsSlots(candidate, knownSlots, draft)) {
+    console.error("[seya/ai] polish_blocked_unknown_slot", {
+      centerId: bookingState?.centerId,
+      preview: candidate.slice(0, 160),
+    });
     return draft;
   }
   // Seule la réservation réelle (règles → agenda) peut annoncer un RDV réservé ou confirmé.

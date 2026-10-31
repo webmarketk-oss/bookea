@@ -270,7 +270,9 @@ test("message d’accueil programmé annulé si le prospect est passé en PI ent
           written = payload;
           const chain = {
             eq() { return chain; },
-            select: async () => ({ data: [{ id: "center-1" }], error: null }),
+            select: () => ({
+              maybeSingle: async () => ({ data: { id: "center-1" }, error: null }),
+            }),
             then: (resolve) => resolve({ data: [{ id: "center-1" }], error: null }),
           };
           return chain;

@@ -319,6 +319,71 @@ test("la reformulation IA n’annonce jamais un RDV réservé sans réservation 
   );
 });
 
+test("la reformulation IA ne propose que les créneaux donnés par l’agenda", () => {
+  const state = emptyBookingState(CENTER_ID);
+  const offered = [
+    { date: "2026-11-04", time: "10:00", label: "mer. 04/11 à 10h00" },
+    { date: "2026-11-04", time: "10:30", label: "mer. 04/11 à 10h30" },
+  ];
+  const conversation = { messages: [], proposedSlots: offered, bookingState: { lastOfferedSlots: offered } };
+  const draft = "Le mer. 04/11 je peux vous proposer 10h00 ou 10h30 — lequel vous irait le mieux ?";
+  assert.equal(
+    pickSafeReply(draft, "Je vous propose le mercredi 30 décembre à 14h00, cela vous convient ?", state, conversation),
+    draft,
+  );
+  assert.equal(
+    pickSafeReply(draft, "Mercredi 4 novembre, j’ai aussi 15h00 si vous préférez.", state, conversation),
+    draft,
+  );
+  assert.match(
+    pickSafeReply(draft, "Mercredi 4 novembre, je peux vous proposer 10h00 ou 10h30 : lequel préférez-vous ?", state, conversation),
+    /4 novembre/,
+  );
+  assert.match(
+    pickSafeReply(draft, "Le bilan dure environ 1h. Le mer. 04/11 j’ai 10h00 ou 10h30, lequel vous irait ?", state, conversation),
+    /environ 1h/,
+  );
+});
+
+test("un oui ne réserve que le créneau écrit dans le dernier message", async () => {
+  const now = new Date("2026-10-30T20:00:00");
+  const remembered = { date: "2026-11-04", time: "10:00", label: "mercredi 4 novembre à 10h00" };
+  let conversation = startConversation(
+    { leadId: "lead-slot", centerId: CENTER_ID, firstName: "Sandrine", phone: "0663096522", treatment: "Soin minceur" },
+    "JFG Clinique Clermont",
+    seya,
+  );
+  conversation = {
+    ...conversation,
+    status: "RDV proposé",
+    proposedSlots: [remembered],
+    bookingState: {
+      ...conversation.bookingState,
+      lastOfferedSlots: [remembered],
+      pendingQuestion: "offer_slots",
+      appointmentStatus: "proposed",
+    },
+    messages: [
+      ...conversation.messages,
+      { author: "seya", text: "Je vous propose le mercredi 30 décembre à 14h00. Souhaitez-vous que je vous le réserve ?", at: now.toISOString() },
+    ],
+  };
+  const first = await generateSeyaReply({
+    conversation, text: "Oui merci", seya, appointments: [], hours: hours(), centerName: "JFG Clinique Clermont",
+    centerAddress: ADDRESS, centerId: CENTER_ID, now,
+  });
+  assert.equal(first.shouldBook, null);
+  assert.match(lastSeya(first.conversation), /mercredi 4 novembre à 10h00/);
+  assert.doesNotMatch(lastSeya(first.conversation), /30 décembre|14h00/);
+
+  const second = await generateSeyaReply({
+    conversation: first.conversation, text: "Oui", seya, appointments: [], hours: hours(), centerName: "JFG Clinique Clermont",
+    centerAddress: ADDRESS, centerId: CENTER_ID, now,
+  });
+  assert.equal(second.shouldBook?.date, "2026-11-04");
+  assert.equal(second.shouldBook?.time, "10:00");
+});
+
 test("la reformulation ne recolle pas le dernier message Seya", () => {
   const state = emptyBookingState(CENTER_ID);
   const previous = "Vous êtes plutôt disponible en début de semaine, ou plutôt en fin de semaine ?";

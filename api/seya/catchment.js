@@ -171,9 +171,12 @@ function extractAreaMention(text, centerCity = "") {
     if (!city || city.length < 2 || samePlace(city, center)) {
       continue;
     }
-    // Évite de prendre un mot agenda pour une ville.
+    // Évite de prendre un mot agenda ou une expression de temps (« à l'instant ») pour une ville.
     if (
       /^(demain|lundi|mardi|mercredi|jeudi|vendredi|samedi|matin|soir|dispo|creneau|heure|place)$/.test(
+        city,
+      ) ||
+      /^(l'?\s?(instant|heure|avance|occasion|epoque|aise)|la (place|fois|rigueur|limite)|tout (de suite|a l'heure)|plus tard|nouveau|distance|internet|ligne|en ligne|planity|doctolib)\b/.test(
         city,
       )
     ) {
