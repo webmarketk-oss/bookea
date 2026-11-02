@@ -516,7 +516,7 @@ test("demande de rendez-vous : elle reste dans le fil, elle ne clôt pas", async
   });
   conversation = result.conversation;
   assert.match(lastSeya(conversation), /organise le bilan/i);
-  assert.match(lastSeya(conversation), /vous rappelle pour le convenir/i);
+  assert.match(lastSeya(conversation), /vous rappelle pour fixer le bilan avec vous/i);
   assert.doesNotMatch(
     lastSeya(conversation),
     /recontacte|reviendrai|conseillère du centre, elle|lequel vous irait/i,

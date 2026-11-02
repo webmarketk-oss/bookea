@@ -45,6 +45,7 @@ function emptyBookingState(centerId) {
     dayPart: null,
     rejectedDates: [],
     rejectedWeekdays: [],
+    allowedWeekdays: [],
     rejectedSlots: [],
     lastOfferedSlots: [],
     pendingQuestion: null,
@@ -70,6 +71,7 @@ function normalizeBookingState(value, centerId) {
     ...current,
     rejectedDates: unique(current.rejectedDates || []),
     rejectedWeekdays: unique(current.rejectedWeekdays || []),
+    allowedWeekdays: unique(current.allowedWeekdays || []),
     rejectedSlots: Array.isArray(current.rejectedSlots)
       ? current.rejectedSlots.filter((slot) => slot?.date && slot?.time)
       : [],
@@ -177,6 +179,14 @@ function applyBookingMessage(state, text, extras = {}) {
   ).filter((index) => index >= 0);
   const refusedDays = rejectedWeekdaysFromText(value);
   const wantedDays = namedDays.filter((day) => !refusedDays.includes(day));
+  // « mardi, jeudi ou vendredi » : on ne cherche que ces jours-là.
+  if (explicitDate || wantedDays.length === 1) {
+    next.allowedWeekdays = [];
+  } else if (wantedDays.length >= 2) {
+    next.allowedWeekdays = unique(wantedDays);
+    next.requestedWeekday = null;
+    next.requestedDate = null;
+  }
 
   // Créneau proposé trop serré (« ça fera juste ») → avant de choisir un autre jour.
   if (
@@ -580,6 +590,14 @@ function matchesDayPart(slot, state) {
   return true;
 }
 
+function matchesAllowedWeekdays(slot, state) {
+  const allowed = state.allowedWeekdays || [];
+  if (!allowed.length || state.requestedDate || state.requestedWeekday != null) {
+    return true;
+  }
+  return allowed.includes(weekdayOf(slot.date));
+}
+
 function matchesWeekHalf(slot, state) {
   const allowed = weekHalfDays(state.weekHalf);
   if (!allowed.length || state.requestedDate || state.requestedWeekday != null) {
@@ -610,6 +628,7 @@ function guardSlots(slots, state, extras = {}) {
       return true;
     }
     if (!matchesWeekHalf(slot, state)) return true;
+    if (!matchesAllowedWeekdays(slot, state)) return true;
     if (!matchesDayPart(slot, state)) return true;
     if (rejected.has(slot.date)) return true;
     if (rejectedDays.has(weekdayOf(slot.date))) return true;
@@ -647,6 +666,9 @@ function guardSlots(slots, state, extras = {}) {
       return false;
     }
     if (rejected.has(slot.date) || rejectedDays.has(weekdayOf(slot.date))) {
+      return false;
+    }
+    if (!matchesAllowedWeekdays(slot, state)) {
       return false;
     }
     if (state.searchFrom && slot.date < state.searchFrom) {

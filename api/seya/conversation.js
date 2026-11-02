@@ -650,6 +650,10 @@ function isThanks(text, conversation) {
   ) {
     return true;
   }
+  // « merci, à bientôt » seul ; pas un vrai message (zones, disponibilités…) qui finit poliment.
+  if (value.split(/\s+/).filter(Boolean).length > 8) {
+    return false;
+  }
   return /merci( beaucoup)? (et )?a bientot|a bientot merci|^a bientot$|^merci a bientot$|merci.*a bientot/.test(
     value,
   );
@@ -764,23 +768,142 @@ function isOutOfZone(text, extras = {}) {
   return /route|trajet|loin|deplacement|erreur/.test(value);
 }
 
-function isWaitUntilLater(text) {
+const LATER_MONTHS = [
+  "janvier",
+  "fevrier",
+  "mars",
+  "avril",
+  "mai",
+  "juin",
+  "juillet",
+  "aout",
+  "septembre",
+  "octobre",
+  "novembre",
+  "decembre",
+];
+const LATER_MONTH_LABELS = [
+  "janvier",
+  "février",
+  "mars",
+  "avril",
+  "mai",
+  "juin",
+  "juillet",
+  "août",
+  "septembre",
+  "octobre",
+  "novembre",
+  "décembre",
+];
+const SEASONS = [
+  ["printemps", 2, 20, "au printemps"],
+  ["ete", 5, 21, "cet été"],
+  ["automne", 8, 22, "à l’automne"],
+  ["hiver", 11, 21, "cet hiver"],
+];
+// Le prospect repousse : « pas avant », « à partir du », « de retour le »…
+const LATER_CUE =
+  /pas avant|pas tout de suite|a partir d|de retour|je rentre|je reviens|apres (le |mon |ma |les )|(plutot|prefere|preferable) (en|au|a|vers|debut|fin|mi)|on verra|attendre|reporter|plus tard|en ce moment|pas maintenant|pas pour (le moment|l'instant)|des (le|mon|ma)|vers (le |la |mi|debut|fin)|courant|l'annee prochaine|debut (d'annee|janvier)/;
+
+function isoDay(date) {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+function nextOccurrence(base, month, day) {
+  const today = new Date(base.getFullYear(), base.getMonth(), base.getDate());
+  const date = new Date(base.getFullYear(), month, day);
+  return date < today ? new Date(base.getFullYear() + 1, month, day) : date;
+}
+
+/**
+ * Date à laquelle le prospect veut être recontacté : fin du mois, saison, mois, date précise,
+ * « l’année prochaine », « dans 3 semaines ». Renvoie aussi une formulation pour la réponse.
+ */
+function laterFromText(text, now) {
   const value = normalize(text);
-  return /j[' ]attends la fin|fin (du |de )?mois|d[' ]ici (la )?fin (du |de )?mois|dans (un |1 |deux |2 )mois/.test(
-    value,
+  const base = now instanceof Date ? now : new Date();
+  if (/j[' ]attends la fin|fin (du |de )?mois|d[' ]ici (la )?fin (du |de )?mois/.test(value)) {
+    return { iso: isoDay(new Date(base.getFullYear(), base.getMonth() + 1, 0)), label: "fin du mois" };
+  }
+  const span = value.match(/dans (un|une|1|deux|2|trois|3|quatre|4|six|6) (semaines?|mois)/);
+  if (span) {
+    const count = { un: 1, une: 1, deux: 2, trois: 3, quatre: 4, six: 6 }[span[1]] || Number(span[1]);
+    const date = new Date(base.getFullYear(), base.getMonth(), base.getDate());
+    if (/semaine/.test(span[2])) {
+      date.setDate(date.getDate() + count * 7);
+    } else {
+      date.setMonth(date.getMonth() + count);
+    }
+    return { iso: isoDay(date), label: `dans ${span[1]} ${span[2]}` };
+  }
+  if (!LATER_CUE.test(value) && !/^(au |en |a l')?(printemps|ete|automne|hiver)$/.test(value)) {
+    return null;
+  }
+  const dated = value.match(
+    new RegExp(`(\\d{1,2})(?:er|e)?\\s+(${LATER_MONTHS.join("|")})`),
   );
+  if (dated) {
+    const month = LATER_MONTHS.indexOf(dated[2]);
+    const day = Number(dated[1]);
+    return {
+      iso: isoDay(nextOccurrence(base, month, day)),
+      label: `à partir du ${day === 1 ? "1er" : day} ${LATER_MONTH_LABELS[month]}`,
+      kind: "date",
+    };
+  }
+  for (const [needle, month, day, label] of SEASONS) {
+    if (new RegExp(`\\b${needle}\\b`).test(value)) {
+      return { iso: isoDay(nextOccurrence(base, month, day)), label };
+    }
+  }
+  const monthOnly = value.match(new RegExp(`\\b(${LATER_MONTHS.join("|")})\\b`));
+  if (monthOnly) {
+    const month = LATER_MONTHS.indexOf(monthOnly[1]);
+    return { iso: isoDay(nextOccurrence(base, month, 1)), label: `en ${LATER_MONTH_LABELS[month]}` };
+  }
+  if (/l'annee prochaine|debut (d'annee|janvier)/.test(value)) {
+    return { iso: isoDay(new Date(base.getFullYear() + 1, 0, 5)), label: "début d’année" };
+  }
+  return null;
+}
+
+// Absence annoncée : la date est un report, pas une disponibilité pour un créneau.
+const AWAY_CUE =
+  /pas avant|de retour|je rentre|je reviens|absente?|en vacances|en deplacement|pas dispo(nible)? avant|reporter|on verra|plus tard/;
+
+/** Report du contact. Une date proche sans absence annoncée reste une disponibilité (créneaux). */
+function waitUntilLater(text, now) {
+  const later = laterFromText(text, now);
+  if (!later) {
+    return null;
+  }
+  if (later.kind !== "date" || AWAY_CUE.test(normalize(text))) {
+    return later;
+  }
+  const base = now instanceof Date ? now : new Date();
+  const days = (Date.parse(`${later.iso}T12:00:00`) - base.getTime()) / 86_400_000;
+  return days > 21 ? later : null;
+}
+
+function isWaitUntilLater(text, now) {
+  return Boolean(waitUntilLater(text, now));
 }
 
 function parseLaterIso(text, now) {
-  if (!isWaitUntilLater(text)) {
-    return null;
+  return waitUntilLater(text, now)?.iso || null;
+}
+
+function waitUntilLaterReply(text, now, family) {
+  const later = waitUntilLater(text, now);
+  const visit = family === "visage" ? "diagnostic" : family === "epilation" ? "bilan" : "bilan";
+  if (!later || later.label === "fin du mois") {
+    return "D’accord, on se reparle fin du mois.";
   }
-  const date = now instanceof Date ? now : new Date();
-  const last = new Date(date.getFullYear(), date.getMonth() + 1, 0);
-  const y = last.getFullYear();
-  const m = String(last.getMonth() + 1).padStart(2, "0");
-  const d = String(last.getDate()).padStart(2, "0");
-  return `${y}-${m}-${d}`;
+  return `Très bien, c’est noté 😊 Nous vous recontacterons ${later.label} pour organiser votre ${visit}. Belle journée !`;
 }
 
 /** « Vous avez des disponibilités / un créneau » ≠ question sur une prestation. */
@@ -1112,10 +1235,10 @@ function crmUpdateFromLeadMessage(text, now, extras = {}) {
       reminderDate: null,
     };
   }
-  if (isServiceAsk(text) || (asksOpenQuestion(text) && !isWaitUntilLater(text))) {
+  if (isServiceAsk(text) || (asksOpenQuestion(text) && !isWaitUntilLater(text, now))) {
     return null;
   }
-  if (isWaitUntilLater(text)) {
+  if (isWaitUntilLater(text, now)) {
     return {
       status: "À relancer",
       conversationStatus: "À recontacter",
@@ -1406,6 +1529,7 @@ function speakZoneList(zone) {
     .map((item) => normalize(item))
     .filter(Boolean);
   const labels = parts.map((part) => {
+    if (/culotte de cheval/.test(part)) return "la culotte de cheval";
     if (/cuisse/.test(part)) return "les cuisses";
     if (/hanche/.test(part)) return "les hanches";
     if (/jambe/.test(part)) return "les jambes";
@@ -1726,8 +1850,12 @@ function conversationalReply(text, conversation, qualification, now, extras = {}
   if (isOutOfZone(text)) {
     return "D’accord, je note que ce n’est pas dans notre secteur. Je vous souhaite une belle journée.";
   }
-  if (isWaitUntilLater(text)) {
-    return "D’accord, on se reparle fin du mois.";
+  if (isWaitUntilLater(text, now)) {
+    return waitUntilLaterReply(
+      text,
+      now,
+      inferCareFamily(`${qualification?.need || ""} ${conversation?.treatment || ""}`),
+    );
   }
   if (isAskToWriteBack(text)) {
     const day = parseNextWeekdayIso(text, now);
@@ -1894,4 +2022,5 @@ module.exports = {
   applyCentreMessage,
   threadIsPaused,
   hasDayOfMonthRequest,
+  speakZoneList,
 };

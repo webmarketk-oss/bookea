@@ -181,8 +181,8 @@ for (const center of CALLBACK) {
   test(`${center.name} : RDV demandé alors que seul le rappel est actif → l’équipe l’organise, préférence notée, aucun créneau`, async () => {
     let turn = await say(center, open(center, "Soin minceur"), "Je voudrais un rendez-vous mardi à 14h");
     assert.match(turn.said, /C’est l’équipe du centre qui organise le bilan/);
-    assert.match(turn.said, /préférence \(mardi 20\/10 vers 14h\)/);
-    assert.match(turn.said, /vous rappelle pour le convenir avec vous \?$/);
+    assert.match(turn.said, /Je note vos disponibilités : mardi 20\/10 vers 14h\./);
+    assert.match(turn.said, /vous rappelle pour fixer le bilan avec vous \?$/);
     assert.doesNotMatch(turn.said, /lequel vous irait|14h00|confirmé/);
     assert.equal((turn.conversation.proposedSlots || []).length, 0);
 

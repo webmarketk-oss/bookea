@@ -154,8 +154,8 @@ function callbackTransmittedReply(family, preference, now) {
 /** Objectif B seulement : le prospect demande un rendez-vous, l’équipe l’organise. */
 function teamOrganisesReply(family, preference) {
   const words = familyWords(family);
-  const noted = preference ? ` Je note votre préférence (${preference}).` : "";
-  return `C’est l’équipe du centre qui organise le ${words.visit}.${noted} Souhaitez-vous qu’${words.expert} du centre vous rappelle pour le convenir avec vous ?`;
+  const noted = preference ? ` Je note vos disponibilités : ${preference}.` : "";
+  return `C’est l’équipe du centre qui organise le ${words.visit}.${noted} Souhaitez-vous qu’${words.expert} du centre vous rappelle pour fixer le ${words.visit} avec vous ?`;
 }
 
 module.exports = {

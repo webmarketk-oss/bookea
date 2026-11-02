@@ -738,12 +738,32 @@ function availabilityContext(text) {
   return "contexte non précisé";
 }
 
+const AVAILABILITY_WORDS =
+  /lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche|matin|apres[- ]?midi|soir|semaine|disponible|dispo|\d{1,2}\s*h|travaille?|horaire/;
+
+/** Dans un long message, la note équipe garde le passage sur les disponibilités, pas le début. */
+function availabilityExcerpt(text) {
+  const raw = String(text || "").trim();
+  if (raw.length <= 200) {
+    return raw;
+  }
+  const value = normalize(raw);
+  const match = value.match(AVAILABILITY_WORDS);
+  if (!match || match.index == null) {
+    return raw.slice(0, 200);
+  }
+  const before = raw.slice(0, match.index);
+  const cut = Math.max(before.lastIndexOf(","), before.lastIndexOf("."), before.lastIndexOf("\n"));
+  const start = cut >= 0 && match.index - cut < 120 ? cut + 1 : Math.max(0, match.index - 40);
+  return raw.slice(start, start + 200).trim();
+}
+
 function withPreference(conversation, text, at, context) {
   const notes = conversation?.teamNotes || {};
   const preferences = Array.isArray(notes.preferences) ? notes.preferences : [];
   const spoken = availabilityContext(text);
   const entry = {
-    text: String(text || "").trim().slice(0, 200),
+    text: availabilityExcerpt(text),
     context: spoken === "contexte non précisé" && context ? context : spoken,
     at,
   };

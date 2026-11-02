@@ -84,6 +84,7 @@ const {
   closingKind,
   dayPartFromText,
   lastSeyaText,
+  speakZoneList,
 } = require("./conversation");
 const gaillard = require("./gaillard");
 const { findFacts } = require("./brief-facts");
@@ -1128,7 +1129,7 @@ function extractZone(text) {
   if (/jambe/.test(value) && /complet|entier/.test(value)) {
     return "jambes complètes";
   }
-  return zones
+  const found = zones
     .filter((zone) => {
       if (
         zone === "visage" &&
@@ -1137,10 +1138,20 @@ function extractZone(text) {
       ) {
         return false;
       }
+      if (zone === "fesses") {
+        return /fesse|fessier/.test(value);
+      }
       return value.includes(zone);
     })
-    .map((zone) => (zone === "poignees" ? "poignées d’amour" : zone))
-    .join(", ");
+    .map((zone) => (zone === "poignees" ? "poignées d’amour" : zone));
+  if (/culotte de cheval/.test(value) && !found.includes("cuisse")) {
+    found.push("culotte de cheval");
+  }
+  // « La banane » : le pli sous les fesses, pas la culotte de cheval.
+  if (/\bbanane\b/.test(value) && !found.some((zone) => /fesse/.test(zone))) {
+    found.push("fesses");
+  }
+  return found.join(", ");
 }
 
 function extractConcern(text) {
@@ -1562,9 +1573,14 @@ function pickSlotsForState(appointments, hours, state, now, duration) {
       : Number(state.visitDuration) > 0
         ? Number(state.visitDuration)
         : BILAN_DURATION_MINUTES;
+  const allowedWeekdays = Array.isArray(state.allowedWeekdays) ? state.allowedWeekdays : [];
+  const outsideAllowed =
+    allowedWeekdays.length && !state.requestedDate && state.requestedWeekday == null
+      ? [0, 1, 2, 3, 4, 5, 6].filter((day) => !allowedWeekdays.includes(day))
+      : [];
   const base = {
     count: 2,
-    excludeWeekdays: state.rejectedWeekdays,
+    excludeWeekdays: [...new Set([...(state.rejectedWeekdays || []), ...outsideAllowed])],
     excludeDates: state.rejectedDates,
     excludeSlots: state.rejectedSlots,
     duration: slotDuration,
@@ -2283,7 +2299,7 @@ function leadReplyCore(conversation, text, seya, slots, extras = {}) {
           qualification,
           qualification.need ? "Qualifié" : "En cours",
           text,
-          teamOrganisesReply(pathFamily, preference),
+          `${newZoneAck(conversation, qualification)}${teamOrganisesReply(pathFamily, preference)}`,
           { ...bookingState, pendingQuestion: "offer_callback", lastOfferedSlots: [] },
           { proposedSlots: [] },
         ),
@@ -2719,7 +2735,7 @@ function leadReplyCore(conversation, text, seya, slots, extras = {}) {
         "quand seriez-vous disponible|protocole à votre peau|solutions qui peuvent|diagnostic permettra",
       )
         ? `${ack} ${slotsText}`
-        : slotsText;
+        : `${newZoneAck(conversation, qualification)}${slotsText}`;
     return finishLeadReply(
       conversation,
       qualification,
@@ -3710,6 +3726,15 @@ function spokenCallbackDay(bookingState) {
 }
 
 /** Préférence de rappel telle que donnée par le prospect, sans la transformer en horaire promis. */
+/** Zone donnée pour la première fois dans ce message : on la reprend avant la suite. */
+function newZoneAck(conversation, qualification) {
+  if (!qualification?.zone || conversation?.qualification?.zone) {
+    return "";
+  }
+  const label = speakZoneList(qualification.zone);
+  return label ? `C’est noté pour ${label}. ` : "";
+}
+
 function spokenPreference(conversation, text, state) {
   const clocks = parseClockMinutes(text);
   const freshMoment =
@@ -3723,6 +3748,30 @@ function spokenPreference(conversation, text, state) {
   const clock = clocks.length
     ? `${Math.floor(clocks[0] / 60)}h${String(clocks[0] % 60).padStart(2, "0").replace(/^00$/, "")}`
     : "";
+  // « dispo à partir du 9 novembre » : la date est la préférence transmise à l’équipe.
+  const fromDate = normalize(text).match(
+    /(?:a partir d[ue]|des le|apres le)\s+(1er|\d{1,2})\s+(janvier|fevrier|mars|avril|mai|juin|juillet|aout|septembre|octobre|novembre|decembre)/,
+  );
+  if (fromDate && !clocks.length) {
+    const months = { fevrier: "février", aout: "août", decembre: "décembre" };
+    return `à partir du ${fromDate[1]} ${months[fromDate[2]] || fromDate[2]}`;
+  }
+  // « mardi, jeudi et peut-être vendredi après-midi » : tous les jours cités, pas un seul.
+  const weekdays = ["lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi"].filter((name) =>
+    new RegExp(`\\b${name}s?\\b`).test(normalize(text)),
+  );
+  if (weekdays.length >= 2) {
+    const list = `${weekdays.slice(0, -1).join(", ")} ou ${weekdays[weekdays.length - 1]}`;
+    const moment =
+      bookingState.dayPart === "morning"
+        ? " matin"
+        : bookingState.dayPart === "afternoon"
+          ? " après-midi"
+          : bookingState.dayPart === "evening"
+            ? " en fin de journée"
+            : "";
+    return `le ${list}${moment}${clock ? ` vers ${clock}` : ""}`;
+  }
   if (day) {
     return clock ? `${day} vers ${clock}` : day;
   }
