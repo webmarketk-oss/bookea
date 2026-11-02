@@ -29,11 +29,27 @@ function readLocal(company: AgencyCompany): AgencyBillingState {
   }
 }
 
-function writeLocal(state: AgencyBillingState) {
+function writeLocal(state: AgencyBillingState, options: { unsaved?: boolean } = {}) {
   if (typeof window === "undefined") {
     return;
   }
-  window.localStorage.setItem(storageKey(state.company), JSON.stringify(state));
+  window.localStorage.setItem(
+    storageKey(state.company),
+    JSON.stringify(options.unsaved ? { ...state, unsaved: true } : state),
+  );
+}
+
+/** La copie de l’appareil contient une modification que le serveur n’a pas confirmée. */
+function localHasUnsavedEdits(company: AgencyCompany) {
+  if (typeof window === "undefined") {
+    return false;
+  }
+  try {
+    const raw = window.localStorage.getItem(storageKey(company));
+    return Boolean(raw && (JSON.parse(raw) as { unsaved?: unknown }).unsaved === true);
+  } catch {
+    return false;
+  }
 }
 
 export async function adminAuthHeaders() {
@@ -115,15 +131,24 @@ async function adoptRemoteBilling(
     }
     return local;
   }
-  const invoices = mergeAgencyInvoices(local.invoices, remote.invoices);
-  const clients = mergeAgencyClients(local.clients, remote.clients);
+  // Le serveur fait foi : une vieille copie de l’appareil (autre ordinateur, onglet ancien)
+  // ne doit pas remettre « En attente » sur une facture passée en « Payée » ailleurs.
+  // Seule une modification jamais confirmée par le serveur garde la priorité.
+  const unsaved = localHasUnsavedEdits(company);
+  const invoices = unsaved
+    ? mergeAgencyInvoices(local.invoices, remote.invoices)
+    : mergeAgencyInvoices(remote.invoices, local.invoices);
+  const clients = unsaved
+    ? mergeAgencyClients(local.clients, remote.clients)
+    : mergeAgencyClients(remote.clients, local.clients);
   const next = {
     ...remote,
     invoices,
     clients,
   };
-  writeLocal(next);
+  writeLocal(next, { unsaved });
   if (
+    unsaved ||
     invoices.length > remote.invoices.length ||
     clients.length > remote.clients.length
   ) {
@@ -143,7 +168,7 @@ export async function saveAgencyBilling(state: AgencyBillingState) {
     },
     remote === "error" ? null : remote,
   );
-  writeLocal(next);
+  writeLocal(next, { unsaved: true });
   if (remote === "error" && next.invoices.length === 0) {
     console.warn(
       "[admin-agency-billing] skip empty invoice save while remote billing is unread",

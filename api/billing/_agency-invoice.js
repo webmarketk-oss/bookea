@@ -324,7 +324,34 @@ function stampServerRevision(items, ids, revision) {
   );
 }
 
-function mergeServerItems(incomingItems, storedItems, base) {
+const SERVER_INVOICE_FIELDS = ["payToken", "stripeSessionIds", "stripeSessionAt", "serverRevision"];
+
+/**
+ * Facture modifiée côté serveur (lien de paiement ouvert, paiement carte, e-mail auto) pendant
+ * que l’admin la modifiait : on garde les champs du serveur sans perdre le statut ni les notes
+ * saisis par l’admin. Seul un paiement enregistré par le serveur l’emporte sur le statut.
+ */
+function mergeInvoiceWithServer(incoming, server) {
+  const merged = { ...incoming };
+  for (const key of SERVER_INVOICE_FIELDS) {
+    if (server[key] !== undefined) {
+      merged[key] = server[key];
+    }
+  }
+  if (String(server.emailedAt || "") > String(incoming.emailedAt || "")) {
+    merged.emailedAt = server.emailedAt;
+    merged.emailedTo = server.emailedTo;
+  }
+  if (server.status === "Payée" && incoming.status !== "Payée") {
+    merged.status = server.status;
+    merged.paidAt = server.paidAt;
+    merged.paymentMethod = server.paymentMethod;
+  }
+  return merged;
+}
+
+function mergeServerItems(incomingItems, storedItems, base, mergeItem) {
+  const storedById = new Map(asArray(storedItems).map((item) => [asRecord(item).id, item]));
   const fresh = new Map(
     asArray(storedItems)
       .filter((item) => (Number(asRecord(item).serverRevision) || 0) > base)
@@ -334,7 +361,16 @@ function mergeServerItems(incomingItems, storedItems, base) {
     const id = asRecord(item).id;
     const server = fresh.get(id);
     fresh.delete(id);
-    return server || item;
+    if (!mergeItem) {
+      return server || item;
+    }
+    // Un onglet ou un appareil resté sur une ancienne copie ne défait pas une modification
+    // plus récente de l’admin (ex. « Payée » posé ailleurs entre-temps).
+    const stored = storedById.get(id);
+    const newerStored =
+      stored && String(stored.editedAt || "") > String(asRecord(item).editedAt || "");
+    const winner = newerStored ? stored : item;
+    return server ? mergeItem(winner, server) : winner;
   });
   return [...fresh.values(), ...merged];
 }
@@ -346,7 +382,7 @@ function mergeIncomingBilling(stored, incoming) {
   const base = Number(incoming.revision) || 0;
   return {
     ...incoming,
-    invoices: mergeServerItems(incoming.invoices, stored.invoices, base),
+    invoices: mergeServerItems(incoming.invoices, stored.invoices, base, mergeInvoiceWithServer),
     clients: mergeServerItems(incoming.clients, stored.clients, base),
     revision: Math.max(Number(stored.revision) || 0, base) + 1,
   };

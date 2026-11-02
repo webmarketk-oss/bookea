@@ -598,6 +598,30 @@ test("en Bookea, chaque centre est proposé comme client une seule fois", () => 
   assert.equal(withCenterClients(once, [center]), once);
 });
 
+test("seule la facture réellement modifiée est datée, et la plus récente gagne", () => {
+  const current = normalizeAgencyState("webk", {
+    invoices: [
+      { id: "a", clientId: "c1", issuedOn: "2026-10-14", status: "En attente de paiement" },
+      { id: "b", clientId: "c1", issuedOn: "2026-10-14", status: "En attente de paiement" },
+    ],
+  }).invoices;
+  const next = current.map((item) =>
+    item.id === "a" ? { ...item, status: "Payée" as const } : item,
+  );
+  const stamped = keepInvoiceEdits(next, current, new Date("2026-10-30T18:05:00.000Z"));
+  const a = stamped.find((item) => item.id === "a");
+  const b = stamped.find((item) => item.id === "b");
+  assert.equal(a?.status, "Payée");
+  assert.equal(a?.editedAt, "2026-10-30T18:05:00.000Z");
+  assert.equal(b?.editedAt, undefined);
+
+  const staleDevice = current;
+  const merged = mergeAgencyInvoices(stamped, staleDevice);
+  assert.equal(merged.find((item) => item.id === "a")?.status, "Payée");
+  const reopened = mergeAgencyInvoices(staleDevice, stamped);
+  assert.equal(reopened.find((item) => item.id === "a")?.status, "Payée");
+});
+
 test("une facture payée par carte côté serveur n’est pas écrasée par la copie de l’appareil", () => {
   const local = normalizeAgencyState("bookea", {
     invoices: [

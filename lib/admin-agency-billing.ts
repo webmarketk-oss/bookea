@@ -129,6 +129,8 @@ export type AgencyInvoice = {
   stripeSessionAt?: string;
   serverRevision?: number;
   createdAt: string;
+  /** Dernière modification par l’admin : la plus récente gagne entre onglets ou appareils. */
+  editedAt?: string;
 };
 
 export type AgencyBillingState = {
@@ -317,13 +319,19 @@ export function protectInvoicesFromEmptyOverwrite(
   return { ...next, invoices: remote.invoices };
 }
 
-function newerServerCopy<T extends { serverRevision?: number }>(
+function newerServerCopy<T extends { serverRevision?: number; editedAt?: string }>(
   item: T,
   previous?: T,
 ) {
-  return previous && (previous.serverRevision || 0) > (item.serverRevision || 0)
-    ? previous
-    : item;
+  if (!previous) {
+    return item;
+  }
+  const itemEdited = String(item.editedAt || "");
+  const previousEdited = String(previous.editedAt || "");
+  if (itemEdited !== previousEdited && (itemEdited || previousEdited)) {
+    return previousEdited > itemEdited ? previous : item;
+  }
+  return (previous.serverRevision || 0) > (item.serverRevision || 0) ? previous : item;
 }
 
 export function mergeAgencyInvoices(
@@ -377,11 +385,37 @@ export function withCenterClients(
 export function keepInvoiceEdits(
   nextInvoices: AgencyInvoice[],
   currentInvoices: AgencyInvoice[],
+  now = new Date(),
 ) {
-  if (nextInvoices.length < currentInvoices.length) {
-    return nextInvoices;
+  const stamped = stampEditedInvoices(nextInvoices, currentInvoices, now);
+  if (stamped.length < currentInvoices.length) {
+    return stamped;
   }
-  return mergeAgencyInvoices(nextInvoices, currentInvoices);
+  return mergeAgencyInvoices(stamped, currentInvoices);
+}
+
+function invoiceContent(invoice: AgencyInvoice) {
+  const { editedAt: _editedAt, serverRevision: _revision, ...rest } = invoice;
+  void _editedAt;
+  void _revision;
+  return JSON.stringify(rest);
+}
+
+/** Date chaque facture réellement modifiée par l’admin (statut, commentaire, lignes…). */
+export function stampEditedInvoices(
+  nextInvoices: AgencyInvoice[],
+  currentInvoices: AgencyInvoice[],
+  now = new Date(),
+) {
+  const before = new Map(currentInvoices.map((item) => [item.id, item]));
+  const at = now.toISOString();
+  return nextInvoices.map((item) => {
+    const previous = before.get(item.id);
+    if (previous && invoiceContent(previous) === invoiceContent(item)) {
+      return item;
+    }
+    return { ...item, editedAt: at };
+  });
 }
 
 export function emptyAgencyState(company: AgencyCompany): AgencyBillingState {
@@ -1168,6 +1202,7 @@ function normalizeInvoice(value: unknown): AgencyInvoice | null {
       : undefined,
     stripeSessionAt: String(record.stripeSessionAt || "").trim() || undefined,
     createdAt: String(record.createdAt || new Date().toISOString()),
+    editedAt: String(record.editedAt || "").trim() || undefined,
     ...serverRevisionField(record),
   };
 }

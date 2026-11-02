@@ -115,6 +115,67 @@ test("une sauvegarde de l’admin garde les factures créées ou payées par le 
   assert.equal(merged.invoices.find((item) => item.id === "paid").status, "Payée");
 });
 
+test("lien de paiement ouvert pendant que l’admin passe la facture en Payée : le statut reste Payée", () => {
+  const stored = {
+    company: "webk",
+    revision: 6,
+    clients: [],
+    invoices: [
+      {
+        id: "wk20",
+        number: "WK-2026-020",
+        status: "En attente de paiement",
+        payToken: "tok",
+        stripeSessionIds: ["cs_1"],
+        stripeSessionAt: "2026-10-30T18:00:00.000Z",
+        serverRevision: 6,
+      },
+    ],
+  };
+  const incoming = {
+    company: "webk",
+    revision: 5,
+    clients: [],
+    invoices: [
+      {
+        id: "wk20",
+        number: "WK-2026-020",
+        status: "Payée",
+        payToken: "tok",
+        editedAt: "2026-10-30T18:05:00.000Z",
+      },
+    ],
+  };
+  const invoice = mergeIncomingBilling(stored, incoming).invoices.find((item) => item.id === "wk20");
+  assert.equal(invoice.status, "Payée");
+  assert.deepEqual(invoice.stripeSessionIds, ["cs_1"]);
+  assert.equal(invoice.serverRevision, 6);
+});
+
+test("un onglet resté sur une ancienne copie ne remet pas En attente une facture Payée", () => {
+  const stored = {
+    company: "webk",
+    revision: 8,
+    clients: [],
+    invoices: [
+      { id: "wk19", status: "Payée", editedAt: "2026-10-30T18:05:00.000Z" },
+      { id: "wk21", status: "En attente de paiement" },
+    ],
+  };
+  const staleTab = {
+    company: "webk",
+    revision: 4,
+    clients: [],
+    invoices: [
+      { id: "wk19", status: "En attente de paiement" },
+      { id: "wk21", status: "En attente de paiement", comments: "relance", editedAt: "2026-10-31T09:00:00.000Z" },
+    ],
+  };
+  const merged = mergeIncomingBilling(stored, staleTab);
+  assert.equal(merged.invoices.find((item) => item.id === "wk19").status, "Payée");
+  assert.equal(merged.invoices.find((item) => item.id === "wk21").comments, "relance");
+});
+
 test("une facture supprimée par l’admin après l’avoir vue ne revient pas", () => {
   const merged = mergeIncomingBilling(
     {
