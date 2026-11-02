@@ -176,7 +176,7 @@ function extractAreaMention(text, centerCity = "") {
       /^(demain|lundi|mardi|mercredi|jeudi|vendredi|samedi|matin|soir|dispo|creneau|heure|place)$/.test(
         city,
       ) ||
-      /^(l'?\s?(instant|heure|avance|occasion|epoque|aise)|la (place|fois|rigueur|limite)|tout (de suite|a l'heure)|plus tard|nouveau|distance|internet|ligne|en ligne|planity|doctolib)\b/.test(
+      /^(l'?\s?(instant|heure|avance|occasion|epoque|aise)|la (place|fois|rigueur|limite)|tout (de suite|a l'heure)|plus tard|nouveau|distance|internet|ligne|en ligne|planity|doctolib|partir|peu pres|cote|moment|bientot|chaque|vous|nous|moi|toi|quel|quelle|combien|condition|domicile|distance)\b/.test(
         city,
       )
     ) {
