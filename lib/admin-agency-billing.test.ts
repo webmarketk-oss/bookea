@@ -32,6 +32,11 @@ import {
   invoiceCommentLog,
   normalizeAgencyState,
   periodRange,
+  inferServiceKind,
+  invoiceMatchesSearch,
+  kpiRows,
+  revenueKpi,
+  withInvoiceStatus,
   protectInvoicesFromEmptyOverwrite,
   mergeAgencyInvoices,
   keepInvoiceEdits,
@@ -425,6 +430,144 @@ test("les KPI WebK séparent meta, phoning et RDV WA", () => {
     true,
   );
   assert.equal(monthlyRevenue(invoices, 2026)[9], 750);
+});
+
+test("les périodes KPI couvrent la semaine, le mois, le trimestre et l’année entiers", () => {
+  const now = new Date(2026, 10, 3, 9, 17);
+  assert.deepEqual(periodRange("semaine", now), { from: "2026-11-02", to: "2026-11-08" });
+  assert.deepEqual(periodRange("mois", now), { from: "2026-11-01", to: "2026-11-30" });
+  assert.deepEqual(periodRange("trimestre", now), { from: "2026-10-01", to: "2026-12-31" });
+  assert.deepEqual(periodRange("annee", now), { from: "2026-01-01", to: "2026-12-31" });
+  assert.deepEqual(periodRange("mois", new Date(2026, 1, 10)), {
+    from: "2026-02-01",
+    to: "2026-02-28",
+  });
+  assert.deepEqual(periodRange("semaine", new Date(2026, 10, 1)), {
+    from: "2026-10-26",
+    to: "2026-11-01",
+  });
+  assert.deepEqual(periodRange("custom", now, "2026-10-01", "2026-10-31"), {
+    from: "2026-10-01",
+    to: "2026-10-31",
+  });
+});
+
+test("CA, catégories et tendance comptent les factures émises sur la période", () => {
+  const state = normalizeAgencyState("webk", {
+    invoices: [
+      {
+        id: "oct-paid",
+        clientId: "c1",
+        issuedOn: "2026-10-14",
+        status: "Payée",
+        lines: [
+          { label: "Budget Meta", kind: "meta", quantity: 1, unitPrice: 500 },
+          { label: "Frais de gestion", kind: "gestion", quantity: 1, unitPrice: 160 },
+        ],
+      },
+      {
+        id: "oct-pending",
+        clientId: "c2",
+        issuedOn: "2026-10-14",
+        status: "En attente de paiement",
+        lines: [
+          { label: "Gestion des réseaux", kind: "autre", quantity: 1, unitPrice: 300 },
+          { label: "Offre phoning", quantity: 2, unitPrice: 100 },
+          { label: "Pack WhatsApp", kind: "whatsapp", quantity: 1, unitPrice: 79 },
+          { label: "Prestation annexe", kind: "autre", quantity: 1, unitPrice: 40 },
+        ],
+      },
+      {
+        id: "nov-later",
+        clientId: "c3",
+        issuedOn: "2026-11-20",
+        status: "En attente de paiement",
+        lines: [{ label: "RDV WhatsApp", kind: "rdv_wa", quantity: 3, unitPrice: 20 }],
+      },
+      {
+        id: "draft",
+        clientId: "c3",
+        issuedOn: "2026-10-20",
+        status: "Brouillon",
+        lines: [{ label: "Budget Meta", kind: "meta", quantity: 1, unitPrice: 999 }],
+      },
+    ],
+  });
+  const now = new Date(2026, 9, 30);
+  const range = periodRange("mois", now);
+  const october = invoicesInRange(state.invoices, range.from, range.to);
+  assert.deepEqual(revenueKpi(october), { billed: 1279, paid: 660, count: 2 });
+
+  const rows = kpiRows("webk", kpiBreakdown(october));
+  assert.deepEqual(
+    rows.map((row) => [row.label, row.value]),
+    [
+      ["Budget Meta", 500],
+      ["Phoning", 200],
+      ["Réseaux", 300],
+      ["RDV WhatsApp", 0],
+      ["Frais de gestion", 160],
+      ["Annexes", 119],
+    ],
+  );
+  assert.equal(
+    rows.reduce((sum, row) => sum + row.value, 0),
+    revenueKpi(october).billed,
+  );
+
+  const november = periodRange("mois", new Date(2026, 10, 3));
+  assert.deepEqual(
+    revenueKpi(invoicesInRange(state.invoices, november.from, november.to)),
+    { billed: 60, paid: 0, count: 1 },
+  );
+
+  const bars = monthlyRevenue(invoicesInRange(state.invoices, "2026-01-01", "2026-12-31"), 2026);
+  assert.equal(bars[9], 1279);
+  assert.equal(bars[10], 60);
+  assert.equal(bars.reduce((sum, value) => sum + value, 0), 1339);
+});
+
+test("une prestation ajoutée à la main prend la catégorie de son libellé", () => {
+  assert.equal(inferServiceKind("Budget publicitaire Meta"), "meta");
+  assert.equal(inferServiceKind("Campagne Facebook / Instagram"), "meta");
+  assert.equal(inferServiceKind("Gestion des réseaux sociaux"), "reseaux");
+  assert.equal(inferServiceKind("RDV WhatsApp"), "rdv_wa");
+  assert.equal(inferServiceKind("Frais de gestion"), "gestion");
+  assert.equal(inferServiceKind("Offre Phoning"), "phoning");
+  assert.equal(inferServiceKind("Pack WhatsApp 200 conversations Seya"), "whatsapp");
+  assert.equal(inferServiceKind("Bookea CRM + SMS"), "crm_sms");
+  assert.equal(inferServiceKind("Pack SMS 50 crédits"), "sms");
+  assert.equal(inferServiceKind("Shooting photo"), "autre");
+  assert.equal(inferServiceKind("Leads qualifiés"), "autre");
+});
+
+test("la recherche retrouve une facture par centre ou numéro, sans tenir compte des accents", () => {
+  const client = { name: "Institut Beauté Élégance", legalName: "SARL Belle Peau", city: "Pélissanne" };
+  const invoice = { clientId: "c1", number: "WK-2026-019" };
+  assert.equal(invoiceMatchesSearch(invoice, client, ""), true);
+  assert.equal(invoiceMatchesSearch(invoice, client, "elegance"), true);
+  assert.equal(invoiceMatchesSearch(invoice, client, "BEAUTE inst"), true);
+  assert.equal(invoiceMatchesSearch(invoice, client, "belle peau"), true);
+  assert.equal(invoiceMatchesSearch(invoice, client, "pelissanne"), true);
+  assert.equal(invoiceMatchesSearch(invoice, client, "wk-2026-019"), true);
+  assert.equal(invoiceMatchesSearch(invoice, client, "019"), true);
+  assert.equal(invoiceMatchesSearch(invoice, client, "020"), false);
+  assert.equal(invoiceMatchesSearch(invoice, client, "venelles"), false);
+  assert.equal(invoiceMatchesSearch(invoice, undefined, "2026-019"), true);
+});
+
+test("passer une facture en Payée date le règlement, la rouvrir l’efface", () => {
+  const [invoice] = normalizeAgencyState("webk", {
+    invoices: [{ id: "a", clientId: "c1", issuedOn: "2026-10-14", status: "En attente de paiement" }],
+  }).invoices;
+  const paid = withInvoiceStatus(invoice, "Payée", new Date("2026-11-03T08:00:00.000Z"));
+  assert.equal(paid.status, "Payée");
+  assert.equal(paid.paidAt, "2026-11-03T08:00:00.000Z");
+  assert.equal(withInvoiceStatus(paid, "Payée"), paid);
+  const reopened = withInvoiceStatus(paid, "En retard");
+  assert.equal(reopened.status, "En retard");
+  assert.equal(reopened.paidAt, undefined);
+  assert.equal("paidAt" in reopened, false);
 });
 
 test("les KPI comptent les factures en attente de règlement", () => {

@@ -881,6 +881,24 @@ export function isInvoicePayable(invoice: Pick<AgencyInvoice, "status">) {
   return invoice.status !== "Payée" && invoice.status !== "Annulée";
 }
 
+/** Changement de statut par l’admin : « Payée » date le règlement, un retour en impayé l’efface. */
+export function withInvoiceStatus(
+  invoice: AgencyInvoice,
+  status: AgencyInvoiceStatus,
+  now = new Date(),
+): AgencyInvoice {
+  if (status === invoice.status) {
+    return invoice;
+  }
+  if (status === "Payée") {
+    return { ...invoice, status, paidAt: invoice.paidAt || now.toISOString() };
+  }
+  const { paidAt: _paidAt, paymentMethod: _method, ...rest } = invoice;
+  void _paidAt;
+  void _method;
+  return { ...rest, status };
+}
+
 export function withPayToken(invoice: AgencyInvoice): AgencyInvoice {
   return invoice.payToken ? invoice : { ...invoice, payToken: createPayToken() };
 }
@@ -942,20 +960,33 @@ export function periodRange(
   if (period === "custom") {
     return { from: customFrom, to: customTo };
   }
-  const end = startOfDay(now);
-  const start = startOfDay(now);
+  // Période calendaire entière : une facture datée plus tard dans le mois compte aussi.
+  const today = startOfDay(now);
+  const year = today.getFullYear();
+  const month = today.getMonth();
   if (period === "semaine") {
-    const day = start.getDay() || 7;
-    start.setDate(start.getDate() - (day - 1));
-  } else if (period === "mois") {
-    start.setDate(1);
-  } else if (period === "trimestre") {
-    const month = start.getMonth();
-    start.setMonth(month - (month % 3), 1);
-  } else {
-    start.setMonth(0, 1);
+    const start = new Date(year, month, today.getDate() - ((today.getDay() || 7) - 1));
+    const end = new Date(start.getFullYear(), start.getMonth(), start.getDate() + 6);
+    return { from: toIsoDate(start), to: toIsoDate(end) };
   }
-  return { from: toIsoDate(start), to: toIsoDate(end) };
+  if (period === "mois") {
+    return {
+      from: toIsoDate(new Date(year, month, 1)),
+      to: toIsoDate(new Date(year, month + 1, 0)),
+    };
+  }
+  if (period === "trimestre") {
+    const first = month - (month % 3);
+    return {
+      from: toIsoDate(new Date(year, first, 1)),
+      to: toIsoDate(new Date(year, first + 3, 0)),
+    };
+  }
+  return { from: `${year}-01-01`, to: `${year}-12-31` };
+}
+
+export function localIsoDate(now = new Date()) {
+  return toIsoDate(startOfDay(now));
 }
 
 export function invoicesInRange(
@@ -977,6 +1008,31 @@ export function invoicesInRange(
   });
 }
 
+function normalizeSearch(value: string) {
+  return String(value || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+/** Recherche par nom de centre (nom, raison sociale, ville) ou numéro de facture. */
+export function invoiceMatchesSearch(
+  invoice: Pick<AgencyInvoice, "clientId" | "number">,
+  client: Pick<AgencyClient, "name" | "legalName" | "city"> | undefined,
+  query: string,
+) {
+  const tokens = normalizeSearch(query).split(" ").filter(Boolean);
+  if (tokens.length === 0) {
+    return true;
+  }
+  const haystack = normalizeSearch(
+    [client?.name, client?.legalName, client?.city, invoice.number].join(" "),
+  );
+  return tokens.every((token) => haystack.includes(token));
+}
+
 export function isPendingPayment(invoice: AgencyInvoice) {
   return (
     invoice.status === "En attente de paiement" || invoice.status === "En retard"
@@ -989,6 +1045,44 @@ export function pendingPaymentKpi(invoices: AgencyInvoice[]) {
     count: pending.length,
     amount: pending.reduce((sum, invoice) => sum + invoiceTotal(invoice), 0),
   };
+}
+
+/** Chiffre facturé (date d’émission) sur les factures données, dont la part déjà réglée. */
+export function revenueKpi(invoices: AgencyInvoice[]) {
+  let billed = 0;
+  let paid = 0;
+  for (const invoice of invoices) {
+    const total = invoiceTotal(invoice);
+    billed += total;
+    if (invoice.status === "Payée") {
+      paid += total;
+    }
+  }
+  return { billed, paid, count: invoices.length };
+}
+
+const LABEL_KINDS: Array<[RegExp, AgencyServiceKind]> = [
+  [/\b(rdv|rendez-vous)\b.*whatsapp|whatsapp.*\b(rdv|rendez-vous)\b/, "rdv_wa"],
+  [/reseaux|community|social/, "reseaux"],
+  [/\bmeta\b|facebook|instagram|\bads\b|publicit/, "meta"],
+  [/phoning|teleprospect/, "phoning"],
+  [/gestion/, "gestion"],
+  [/\bcrm\b/, "crm_sms"],
+  [/\bsms\b/, "sms"],
+  [/whatsapp|seya/, "whatsapp"],
+];
+
+/** Catégorie d’une prestation saisie librement, d’après son libellé. */
+export function inferServiceKind(label: string): AgencyServiceKind {
+  const text = String(label || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+  return LABEL_KINDS.find(([pattern]) => pattern.test(text))?.[1] || "autre";
+}
+
+function lineKpiKind(line: Pick<AgencyInvoiceLine, "kind" | "label">) {
+  return line.kind && line.kind !== "autre" ? line.kind : inferServiceKind(line.label);
 }
 
 export function kpiBreakdown(invoices: AgencyInvoice[]) {
@@ -1005,10 +1099,42 @@ export function kpiBreakdown(invoices: AgencyInvoice[]) {
   };
   for (const invoice of invoices) {
     for (const line of invoice.lines) {
-      buckets[line.kind] += lineNet(line);
+      const kind = lineKpiKind(line);
+      buckets[kind in buckets ? kind : "autre"] += lineNet(line);
     }
   }
   return buckets;
+}
+
+const KPI_ROWS: Record<AgencyCompany, Array<[string, AgencyServiceKind]>> = {
+  webk: [
+    ["Budget Meta", "meta"],
+    ["Phoning", "phoning"],
+    ["Réseaux", "reseaux"],
+    ["RDV WhatsApp", "rdv_wa"],
+    ["Frais de gestion", "gestion"],
+  ],
+  bookea: [
+    ["Formule WhatsApp", "whatsapp"],
+    ["Formule CRM + SMS", "crm_sms"],
+    ["Formule SMS", "sms"],
+  ],
+};
+
+/** Cartes KPI par catégorie : ce qui n’a pas de carte propre va dans « Annexes », le total égale le CA. */
+export function kpiRows(
+  company: AgencyCompany,
+  breakdown: Record<AgencyServiceKind, number>,
+) {
+  const rows = KPI_ROWS[company].map(([label, kind]) => ({
+    label,
+    value: breakdown[kind] || 0,
+  }));
+  const shown = new Set(KPI_ROWS[company].map(([, kind]) => kind));
+  const annexes = (Object.keys(breakdown) as AgencyServiceKind[])
+    .filter((kind) => !shown.has(kind))
+    .reduce((sum, kind) => sum + (breakdown[kind] || 0), 0);
+  return [...rows, { label: "Annexes", value: annexes }];
 }
 
 export function monthlyRevenue(invoices: AgencyInvoice[], year: number) {

@@ -1,6 +1,6 @@
 "use client";
 
-import { CalendarDays } from "lucide-react";
+import { CalendarDays, Search } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import {
@@ -18,12 +18,18 @@ import {
   invoiceTotal,
   isInvoicePayable,
   withPayToken,
+  inferServiceKind,
+  invoiceMatchesSearch,
   invoicesInRange,
   issuerAddressLines,
   kpiBreakdown,
+  kpiRows,
+  localIsoDate,
   REVERSE_CHARGE_MENTION,
   monthlyRevenue,
   pendingPaymentKpi,
+  revenueKpi,
+  withInvoiceStatus,
   nextBillingCycleOn,
   nextInvoiceNumber,
   duplicateAgencyInvoice,
@@ -94,6 +100,7 @@ export function AgencyWorkspace() {
   const [period, setPeriod] = useState<AgencyPeriod>("mois");
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo] = useState("");
+  const [search, setSearch] = useState("");
   const persistChain = useRef(Promise.resolve());
   const statesRef = useRef(states);
 
@@ -209,17 +216,37 @@ export function AgencyWorkspace() {
 
   const range = periodRange(period, new Date(), customFrom, customTo);
   const periodInvoices = invoicesInRange(state.invoices, range.from, range.to);
-  const revenue = periodInvoices.reduce((sum, item) => sum + invoiceTotal(item), 0);
+  const revenue = revenueKpi(periodInvoices);
   const pending = pendingPaymentKpi(state.invoices);
   const breakdown = kpiBreakdown(periodInvoices);
+  const year = new Date().getFullYear();
   const yearBars = monthlyRevenue(
-    invoicesInRange(state.invoices, `${new Date().getFullYear()}-01-01`, `${new Date().getFullYear()}-12-31`),
-    new Date().getFullYear(),
+    invoicesInRange(state.invoices, `${year}-01-01`, `${year}-12-31`),
+    year,
   );
   const maxBar = Math.max(...yearBars, 1);
 
   return (
     <div className="space-y-5">
+      <label className="relative block">
+        <span className="sr-only">Rechercher une facture</span>
+        <Search
+          aria-hidden
+          className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400"
+        />
+        <input
+          type="search"
+          value={search}
+          onChange={(event) => {
+            setSearch(event.target.value);
+            if (event.target.value.trim()) {
+              setSection("facturation");
+            }
+          }}
+          placeholder="Rechercher une facture : nom du centre ou n° (WK-2026-…)"
+          className="h-11 w-full rounded-xl border border-slate-200 bg-white pl-9 pr-3 text-sm font-semibold text-slate-800 outline-none focus:border-violet-400"
+        />
+      </label>
       <div className="flex flex-wrap gap-2">
         {AGENCY_COMPANIES.map((item) => (
           <button
@@ -293,6 +320,7 @@ export function AgencyWorkspace() {
           state={state}
           onChange={update}
           openInvoiceId={openInvoiceId}
+          search={search.trim()}
         />
       ) : null}
       {section === "clients" ? (
@@ -305,8 +333,10 @@ export function AgencyWorkspace() {
         <KpiSection
           company={company}
           revenue={revenue}
+          range={range}
           pending={pending}
           breakdown={breakdown}
+          year={year}
           yearBars={yearBars}
           maxBar={maxBar}
           period={period}
@@ -325,8 +355,10 @@ function BillingSection({
   state,
   onChange,
   openInvoiceId,
+  search,
 }: {
   state: AgencyBillingState;
+  search: string;
   onChange: (patch: Partial<AgencyBillingState>) => Promise<void>;
   openInvoiceId?: string | null;
 }) {
@@ -349,6 +381,16 @@ function BillingSection({
         if (statusFilter !== "tous" && invoice.status !== statusFilter) {
           return false;
         }
+        if (
+          search &&
+          !invoiceMatchesSearch(
+            invoice,
+            state.clients.find((client) => client.id === invoice.clientId),
+            search,
+          )
+        ) {
+          return false;
+        }
         if (dateFrom && invoice.issuedOn < dateFrom) {
           return false;
         }
@@ -357,7 +399,7 @@ function BillingSection({
         }
         return true;
       }),
-    [dateFrom, dateTo, state.invoices, statusFilter],
+    [dateFrom, dateTo, search, state.clients, state.invoices, statusFilter],
   );
   const hasInvoiceFilters =
     statusFilter !== "tous" || Boolean(dateFrom) || Boolean(dateTo);
@@ -406,7 +448,7 @@ function BillingSection({
     if (!draft.clientId || draft.lines.length === 0) {
       return;
     }
-    const issuedOn = draft.issuedOn || new Date().toISOString().slice(0, 10);
+    const issuedOn = draft.issuedOn || localIsoDate();
     const nextCycleOn = nextBillingCycleOn(issuedOn);
     const period = sanitizeInvoicePeriod(draft, issuedOn);
     if (editingId) {
@@ -983,7 +1025,9 @@ function BillingSection({
             ) : filteredInvoices.length === 0 ? (
               <tr>
                 <td colSpan={8} className="px-4 py-8 text-center font-semibold text-slate-400">
-                  Aucune facture ne correspond à ces filtres.
+                  {search
+                    ? `Aucune facture ne correspond à « ${search} ».`
+                    : "Aucune facture ne correspond à ces filtres."}
                 </td>
               </tr>
             ) : (
@@ -1019,10 +1063,10 @@ function BillingSection({
                           onChange({
                             invoices: state.invoices.map((item) =>
                               item.id === invoice.id
-                                ? {
-                                    ...item,
-                                    status: event.target.value as AgencyInvoice["status"],
-                                  }
+                                ? withInvoiceStatus(
+                                    item,
+                                    event.target.value as AgencyInvoice["status"],
+                                  )
                                 : item,
                             ),
                           })
@@ -1589,7 +1633,7 @@ function ServicesSection({
                   id: createId(),
                   label: label.trim(),
                   unitPrice: Number(price) || 0,
-                  kind: "autre",
+                  kind: inferServiceKind(label),
                 },
               ],
             });
@@ -1619,8 +1663,10 @@ function ServicesSection({
 function KpiSection({
   company,
   revenue,
+  range,
   pending,
   breakdown,
+  year,
   yearBars,
   maxBar,
   period,
@@ -1631,9 +1677,11 @@ function KpiSection({
   onCustomTo,
 }: {
   company: AgencyCompany;
-  revenue: number;
+  revenue: { billed: number; paid: number; count: number };
+  range: { from: string; to: string };
   pending: { count: number; amount: number };
   breakdown: Record<AgencyServiceKind, number>;
+  year: number;
   yearBars: number[];
   maxBar: number;
   period: AgencyPeriod;
@@ -1643,22 +1691,15 @@ function KpiSection({
   onCustomFrom: (value: string) => void;
   onCustomTo: (value: string) => void;
 }) {
-  const rows =
-    company === "webk"
-      ? [
-          ["Budget Meta", breakdown.meta],
-          ["Phoning", breakdown.phoning],
-          ["Réseaux", breakdown.reseaux],
-          ["RDV WhatsApp", breakdown.rdv_wa],
-          ["Frais de gestion", breakdown.gestion],
-          ["Annexes", breakdown.autre],
-        ]
-      : [
-          ["Formule WhatsApp", breakdown.whatsapp],
-          ["Formule CRM + SMS", breakdown.crm_sms],
-          ["Formule SMS", breakdown.sms],
-          ["Annexes", breakdown.autre],
-        ];
+  const rows = kpiRows(company, breakdown);
+  const rangeLabel =
+    range.from && range.to
+      ? `Du ${formatShortDate(range.from)} au ${formatShortDate(range.to)}`
+      : range.from
+        ? `Depuis le ${formatShortDate(range.from)}`
+        : range.to
+          ? `Jusqu’au ${formatShortDate(range.to)}`
+          : "Toutes les factures";
 
   return (
     <div className="space-y-4">
@@ -1700,7 +1741,12 @@ function KpiSection({
           <p className="text-xs font-black uppercase text-slate-400">
             Chiffre d’affaires
           </p>
-          <p className="mt-2 text-3xl font-black">{formatEuroAmount(revenue)}</p>
+          <p className="mt-2 text-3xl font-black">{formatEuroAmount(revenue.billed)}</p>
+          <p className="mt-1 text-sm font-semibold text-slate-500">
+            {revenue.count} facture{revenue.count > 1 ? "s" : ""} émise
+            {revenue.count > 1 ? "s" : ""} · dont réglé {formatEuroAmount(revenue.paid)}
+          </p>
+          <p className="mt-1 text-xs font-semibold text-slate-400">{rangeLabel}</p>
         </article>
         <article className="rounded-2xl border border-amber-200 bg-amber-50 p-5 shadow-sm">
           <p className="text-xs font-black uppercase text-amber-800">
@@ -1710,21 +1756,26 @@ function KpiSection({
             {formatEuroAmount(pending.amount)}
           </p>
           <p className="mt-1 text-sm font-semibold text-amber-800">
-            {pending.count} facture{pending.count > 1 ? "s" : ""}
+            {pending.count} facture{pending.count > 1 ? "s" : ""} · toutes périodes
           </p>
         </article>
         <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <p className="text-xs font-black uppercase text-slate-400">
-            Tendance annuelle
+            Tendance {year}
           </p>
-          <div className="mt-4 flex h-28 items-end gap-1">
+          <div className="mt-4 flex h-28 gap-1">
             {yearBars.map((value, index) => (
-              <div key={MONTHS[index]} className="flex flex-1 flex-col items-center gap-1">
-                <div
-                  className="w-full rounded-t bg-violet-500"
-                  style={{ height: `${Math.max(6, (value / maxBar) * 100)}%` }}
-                  title={`${MONTHS[index]} ${formatEuroAmount(value)}`}
-                />
+              <div
+                key={MONTHS[index]}
+                className="flex h-full flex-1 flex-col items-center gap-1"
+              >
+                <div className="relative w-full flex-1">
+                  <div
+                    className={`absolute inset-x-0 bottom-0 rounded-t ${value > 0 ? "bg-violet-500" : "bg-slate-100"}`}
+                    style={{ height: value > 0 ? `${Math.max(6, (value / maxBar) * 100)}%` : "2px" }}
+                    title={`${MONTHS[index]} ${formatEuroAmount(value)}`}
+                  />
+                </div>
                 <span className="text-[10px] font-bold text-slate-400">
                   {MONTHS[index]}
                 </span>
@@ -1735,15 +1786,13 @@ function KpiSection({
       </div>
 
       <div className="grid gap-3 md:grid-cols-2">
-        {rows.map(([label, value]) => (
+        {rows.map((row) => (
           <article
-            key={label}
+            key={row.label}
             className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"
           >
-            <p className="text-xs font-black uppercase text-slate-400">{label}</p>
-            <p className="mt-2 text-2xl font-black">
-              {formatEuroAmount(Number(value))}
-            </p>
+            <p className="text-xs font-black uppercase text-slate-400">{row.label}</p>
+            <p className="mt-2 text-2xl font-black">{formatEuroAmount(row.value)}</p>
           </article>
         ))}
       </div>
@@ -1776,7 +1825,7 @@ function emptyInvoiceDraft(state: AgencyBillingState) {
     discountType: "Aucune",
     discountValue: 0,
   };
-  const issuedOn = new Date().toISOString().slice(0, 10);
+  const issuedOn = localIsoDate();
   return {
     clientId: state.clients[0]?.id || "",
     issuedOn,
