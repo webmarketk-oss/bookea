@@ -25,6 +25,8 @@ type AdaptiveSelectProps = {
   onChange: (value: string) => void;
   className?: string;
   ariaLabel?: string;
+  /** Contour de chaque ligne du menu. Le menu Commercial n’en a pas. */
+  optionClassName?: (option: string) => string;
 };
 
 export function AdaptiveSelect({
@@ -33,6 +35,7 @@ export function AdaptiveSelect({
   onChange,
   className,
   ariaLabel,
+  optionClassName,
 }: AdaptiveSelectProps) {
   const listId = useId();
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -232,7 +235,18 @@ export function AdaptiveSelect({
                       option !== value && "invisible",
                     )}
                   />
-                  {option}
+                  {optionClassName ? (
+                    <span
+                      className={cn(
+                        "rounded-full border bg-white px-2 py-0.5 text-xs font-semibold leading-4",
+                        optionClassName(option),
+                      )}
+                    >
+                      {option}
+                    </span>
+                  ) : (
+                    option
+                  )}
                 </li>
               ))}
             </ul>,

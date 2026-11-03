@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   leadStatusClassName,
+  leadStatusMenuClassName,
   leadStatusClasses,
   leadStatusSelectOptions,
 } from "@/lib/lead-statuses";
@@ -67,6 +68,7 @@ type LeadInfoForm = {
   status: LeadStatus;
   dealAmount: string;
   reminderDate: string;
+  reminderTime: string;
   nextAction: string;
 };
 
@@ -111,6 +113,7 @@ function leadToInfoForm(lead: Lead): LeadInfoForm {
     status: lead.status,
     dealAmount: lead.dealAmount ? String(lead.dealAmount) : "",
     reminderDate: lead.reminderDate ?? "",
+    reminderTime: lead.reminderTime ?? "",
     nextAction: lead.nextAction,
   };
 }
@@ -185,6 +188,7 @@ export default function LeadDetails({
     lead.status,
     lead.dealAmount,
     lead.reminderDate,
+    lead.reminderTime,
     lead.nextAction,
   ]);
 
@@ -302,6 +306,10 @@ export default function LeadDetails({
         ? nextTreatment
         : form.campaign.trim() || lead.campaign;
 
+    const nextReminderDate =
+      form.status !== lead.status
+        ? reminderDateAfterStatusChange(lead.reminderDate, form.reminderDate) ?? ""
+        : form.reminderDate;
     const nextForm: LeadInfoForm = {
       ...form,
       firstName,
@@ -311,11 +319,8 @@ export default function LeadDetails({
       campaign: nextCampaign,
       treatment: nextTreatment,
       nextAction: form.nextAction.trim() || "À contacter",
-      reminderDate:
-        form.status !== lead.status
-          ? reminderDateAfterStatusChange(lead.reminderDate, form.reminderDate) ??
-            ""
-          : form.reminderDate,
+      reminderDate: nextReminderDate,
+      reminderTime: nextReminderDate ? form.reminderTime : "",
     };
 
     if (JSON.stringify(nextForm) === JSON.stringify(leadToInfoForm(lead))) {
@@ -940,6 +945,7 @@ export default function LeadDetails({
                     setInfoForm(nextForm);
                     void saveLeadInfo();
                   }}
+                  optionClassName={leadStatusMenuClassName}
                   className={`h-8 w-full rounded-full border-0 px-3 text-xs font-semibold outline-none ring-1 ${leadStatusClassName(infoForm.status)}`}
                 />
               </label>
@@ -952,15 +958,41 @@ export default function LeadDetails({
                     setInfoForm((form) => ({ ...form, dealAmount: value }))
                   }
                 />
-                <InfoField
-                  icon={<Calendar />}
-                  label="Rappel"
-                  value={infoForm.reminderDate}
-                  type="date"
-                  onChange={(value) =>
-                    setInfoForm((form) => ({ ...form, reminderDate: value }))
-                  }
-                />
+                <label className="block rounded-xl bg-slate-50 px-3 py-2.5">
+                  <span className="mb-1.5 flex items-center gap-2 text-xs font-medium text-slate-500">
+                    <span className="[&_svg]:h-4 [&_svg]:w-4">
+                      <Calendar />
+                    </span>
+                    Rappel
+                  </span>
+                  <span className="flex gap-1">
+                    <input
+                      type="date"
+                      aria-label="Date de relance"
+                      value={infoForm.reminderDate}
+                      onChange={(event) =>
+                        setInfoForm((form) => ({
+                          ...form,
+                          reminderDate: event.target.value,
+                          reminderTime: event.target.value ? form.reminderTime : "",
+                        }))
+                      }
+                      className="h-8 min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-2.5 text-sm font-semibold text-slate-800 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                    />
+                    <input
+                      type="time"
+                      aria-label="Heure de relance"
+                      value={infoForm.reminderTime}
+                      onChange={(event) =>
+                        setInfoForm((form) => ({
+                          ...form,
+                          reminderTime: event.target.value,
+                        }))
+                      }
+                      className="h-8 w-[6.25rem] shrink-0 rounded-lg border border-slate-200 bg-white px-2 text-sm font-semibold text-slate-800 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                    />
+                  </span>
+                </label>
               </div>
               <InfoField
                 label="Prochaine action"

@@ -1,6 +1,13 @@
 export type LeadStatus =
   | "Nouveau"
   | "Apl en abs"
+  | "Appel 1"
+  | "Appel 2"
+  | "Appel 3"
+  | "Appel 4"
+  | "Appel 5"
+  | "Appel 6"
+  | "Appel 7"
   | "Pas intéressé"
   | "Reviendra vers nous"
   | "En réflexion"
@@ -20,6 +27,7 @@ export type LeadStatus =
   | "Numéro invalide"
   | "Doublon"
   | "Hors zone"
+  | "Contre-indications"
   | "Message WhatsApp envoyé"
   | "SMS envoyé"
   | "Message vocal envoyé"
@@ -54,6 +62,8 @@ export interface Lead {
   updatedDate?: string;
   nextAction: string;
   reminderDate?: string;
+  /** Heure de relance (HH:mm), à côté de reminderDate. */
+  reminderTime?: string;
   /** Date du rendez-vous saisie dans le CRM (YYYY-MM-DD). Vide = effacée. Absent = non saisie. */
   visitDate?: string;
   centerId?: string;

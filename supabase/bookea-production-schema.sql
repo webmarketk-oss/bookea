@@ -246,6 +246,7 @@ create table if not exists public.leads (
   assigned_to_profile_id uuid references public.profiles(id) on delete set null,
   status text not null default 'Nouveau',
   recall_date date,
+  recall_time time,
   next_action text,
   latest_comment text,
   amount_cure_ttc numeric(10, 2) not null default 0,

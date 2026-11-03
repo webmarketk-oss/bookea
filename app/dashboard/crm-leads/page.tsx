@@ -43,6 +43,7 @@ import {
   updateCrmLeadCommercial,
   updateCrmLeadDetails,
   updateCrmLeadReminder,
+  updateCrmLeadReminderTime,
   updateCrmLeadStatus,
   updateCrmLeadVisitDate,
 } from "@/lib/crm-supabase";
@@ -117,6 +118,7 @@ const emptyLeadForm = {
   dealAmount: 0,
   nextAction: "À contacter",
   reminderDate: "",
+  reminderTime: "",
 };
 
 type CRMTab = "prospects" | "booked" | "imports" | "deposits" | "kpi";
@@ -986,6 +988,7 @@ export default function CRMLeadsPage() {
           ...lead,
           status,
           reminderDate: nextReminder,
+          reminderTime: nextReminder ? lead.reminderTime : undefined,
           depositTracked:
             lead.depositTracked ||
             status === "Acompte envoyé" ||
@@ -1281,6 +1284,7 @@ export default function CRMLeadsPage() {
           ? {
               ...lead,
               reminderDate: reminderDate || undefined,
+              reminderTime: reminderDate ? lead.reminderTime : undefined,
               updatedDate: todayIso(),
             }
           : lead
@@ -1295,6 +1299,31 @@ export default function CRMLeadsPage() {
         error instanceof Error
           ? error.message
           : "La date de rappel n'a pas pu être enregistrée."
+      );
+      await refreshCrmLeads();
+    }
+  }
+
+  async function handleReminderTimeChange(leadId: string, reminderTime: string) {
+    setLeadList((currentLeads) =>
+      currentLeads.map((lead) =>
+        lead.id === leadId
+          ? {
+              ...lead,
+              reminderTime: reminderTime || undefined,
+            }
+          : lead
+      )
+    );
+
+    try {
+      await trackSave(() => updateCrmLeadReminderTime(leadId, reminderTime));
+      setCrmNotice("Heure de relance enregistrée.");
+    } catch (error) {
+      setCrmError(
+        error instanceof Error
+          ? error.message
+          : "L'heure de relance n'a pas pu être enregistrée."
       );
       await refreshCrmLeads();
     }
@@ -1384,6 +1413,7 @@ export default function CRMLeadsPage() {
       status: LeadStatus;
       dealAmount: string;
       reminderDate: string;
+      reminderTime: string;
       nextAction: string;
     }
   ) {
@@ -1434,6 +1464,7 @@ export default function CRMLeadsPage() {
           status: nextStatus,
           dealAmount: Number.isFinite(dealAmount) ? dealAmount : lead.dealAmount,
           reminderDate: nextReminder,
+          reminderTime: nextReminder ? patch.reminderTime || undefined : undefined,
           nextAction: patch.nextAction,
           updatedDate: statusChanged ? lead.updatedDate : todayIso(),
           activityLog: statusChanged
@@ -1472,6 +1503,7 @@ export default function CRMLeadsPage() {
         dealAmount: Number.isFinite(dealAmount) ? dealAmount : leadBeforeUpdate.dealAmount,
         nextAction: patch.nextAction,
         reminderDate: nextReminder || "",
+        reminderTime: nextReminder ? patch.reminderTime : "",
       }));
       if (patch.phone) {
         void syncBirthdaySms({
@@ -1607,6 +1639,9 @@ export default function CRMLeadsPage() {
       updatedDate: new Date().toISOString().slice(0, 10),
       nextAction: newLeadForm.nextAction.trim() || "À contacter",
       reminderDate: newLeadForm.reminderDate || undefined,
+      reminderTime: newLeadForm.reminderDate
+        ? newLeadForm.reminderTime || undefined
+        : undefined,
       activityLog: [
         {
           id: crypto.randomUUID(),
@@ -1636,6 +1671,9 @@ export default function CRMLeadsPage() {
         dealAmount: newLeadForm.dealAmount,
         nextAction: newLeadForm.nextAction,
         reminderDate: newLeadForm.reminderDate || undefined,
+        reminderTime: newLeadForm.reminderDate
+          ? newLeadForm.reminderTime || undefined
+          : undefined,
       });
 
       setLeadList((currentLeads) => [
@@ -1966,6 +2004,7 @@ export default function CRMLeadsPage() {
                   onCommentDelete={handleDeleteActivity}
                   onDealAmountChange={handleDealAmountChange}
                   onReminderDateChange={handleReminderDateChange}
+                  onReminderTimeChange={handleReminderTimeChange}
                   onCommercialChange={handleCommercialChange}
                   commercialOptions={commercialOptions}
                   showDepositReminders={activeTab === "deposits"}
@@ -2148,16 +2187,32 @@ export default function CRMLeadsPage() {
               </FormField>
 
               <FormField label="Date de rappel">
-                <Input
-                  type="date"
-                  value={newLeadForm.reminderDate}
-                  onChange={(event) =>
-                    setNewLeadForm((form) => ({
-                      ...form,
-                      reminderDate: event.target.value,
-                    }))
-                  }
-                />
+                <div className="flex gap-2">
+                  <Input
+                    type="date"
+                    aria-label="Date de relance"
+                    value={newLeadForm.reminderDate}
+                    onChange={(event) =>
+                      setNewLeadForm((form) => ({
+                        ...form,
+                        reminderDate: event.target.value,
+                        reminderTime: event.target.value ? form.reminderTime : "",
+                      }))
+                    }
+                  />
+                  <Input
+                    type="time"
+                    aria-label="Heure de relance"
+                    value={newLeadForm.reminderTime}
+                    onChange={(event) =>
+                      setNewLeadForm((form) => ({
+                        ...form,
+                        reminderTime: event.target.value,
+                      }))
+                    }
+                    className="w-[7.5rem] shrink-0"
+                  />
+                </div>
               </FormField>
 
               <FormField label="Source">

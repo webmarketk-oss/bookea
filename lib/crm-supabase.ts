@@ -89,6 +89,7 @@ type LeadRow = {
   service_id: string | null;
   status: string;
   recall_date: string | null;
+  recall_time: string | null;
   next_action: string | null;
   latest_comment: string | null;
   amount_cure_ttc: number | string | null;
@@ -266,6 +267,7 @@ export type NewCrmLeadInput = {
   dealAmount: number;
   nextAction: string;
   reminderDate?: string;
+  reminderTime?: string;
   comment?: string;
   createdAt?: string;
   skipNotify?: boolean;
@@ -348,24 +350,60 @@ export async function loadCrmLeads(): Promise<CrmLeadsResult> {
   return promise;
 }
 
+let recallTimeSupported = true;
+
+function leadsSelect(select: string) {
+  return recallTimeSupported ? select : select.replace(/\n\s*recall_time,/g, "");
+}
+
+function missingRecallTime(message: string) {
+  return /recall_time/i.test(message) && /does not exist|schema cache|could not find/i.test(message);
+}
+
+function withoutRecallTime(fields: Record<string, unknown>) {
+  if (!("recall_time" in fields)) {
+    return fields;
+  }
+  const next = { ...fields };
+  delete next.recall_time;
+  return next;
+}
+
+async function withRecallTimeSelect<T>(
+  select: string,
+  run: (select: string) => Promise<T>,
+): Promise<T> {
+  try {
+    return await run(leadsSelect(select));
+  } catch (error) {
+    if (error instanceof Error && missingRecallTime(error.message) && recallTimeSupported) {
+      recallTimeSupported = false;
+      return run(leadsSelect(select));
+    }
+    throw error;
+  }
+}
+
 async function readCrmLeads(): Promise<CrmLeadsResult> {
   const supabase = createClient();
   const context = await getCrmCenterContext(supabase);
 
   const appointmentsQuery = loadCenterAppointments(supabase, context.centerId);
   // Supabase renvoie au plus 1 000 lignes par requête : au-delà, les prospects arrivent par paquets.
-  const rows = await fetchAllRows<LeadRow>((start, end) =>
-    supabase
-      .from("leads")
-      .select(LEAD_LIST_SELECT)
-      .eq("center_id", context.centerId)
-      .in("lead_events.event_type", LIST_EVENT_TYPES)
-      .order("last_activity_at", { ascending: false })
-      .order("id", { ascending: true })
-      .range(start, end) as unknown as PromiseLike<{
-      data: LeadRow[] | null;
-      error: { message: string } | null;
-    }>,
+  const rows = await withRecallTimeSelect(LEAD_LIST_SELECT, (select) =>
+    fetchAllRows<LeadRow>((start, end) =>
+      supabase
+        .from("leads")
+        .select(select)
+        .eq("center_id", context.centerId)
+        .in("lead_events.event_type", LIST_EVENT_TYPES)
+        .order("last_activity_at", { ascending: false })
+        .order("id", { ascending: true })
+        .range(start, end) as unknown as PromiseLike<{
+        data: LeadRow[] | null;
+        error: { message: string } | null;
+      }>,
+    ),
   );
   const appointmentsByLead = groupLeadAppointments(
     await appointmentsQuery,
@@ -386,11 +424,19 @@ async function readCrmLeads(): Promise<CrmLeadsResult> {
 /** Historique complet d’un prospect (commentaires compris), lu à l’ouverture de sa fiche. */
 export async function loadCrmLeadHistory(leadId: string): Promise<LeadActivity[]> {
   const supabase = createClient();
-  const { data, error } = await supabase
+  let { data, error } = await supabase
     .from("leads")
-    .select(LEAD_LIST_SELECT)
+    .select(leadsSelect(LEAD_LIST_SELECT))
     .eq("id", leadId)
     .maybeSingle();
+  if (error && missingRecallTime(error.message) && recallTimeSupported) {
+    recallTimeSupported = false;
+    ({ data, error } = await supabase
+      .from("leads")
+      .select(leadsSelect(LEAD_LIST_SELECT))
+      .eq("id", leadId)
+      .maybeSingle());
+  }
   if (error) {
     throw new Error(error.message);
   }
@@ -408,15 +454,27 @@ export async function loadNotificationLeads(sinceIso: string, today: string): Pr
   const supabase = createClient();
   const context = await getCrmCenterContext(supabase);
   const since = sinceIso.slice(0, 10);
-  const { data, error } = await supabase
+  let { data, error } = await supabase
     .from("leads")
-    .select(LEAD_LIST_SELECT)
+    .select(leadsSelect(LEAD_LIST_SELECT))
     .eq("center_id", context.centerId)
     .or(`recall_date.eq.${today},created_at.gte.${since},last_activity_at.gte.${since}`)
     .eq("lead_events.event_type", "system")
     .gte("lead_events.created_at", since)
     .order("last_activity_at", { ascending: false })
     .limit(500);
+  if (error && missingRecallTime(error.message) && recallTimeSupported) {
+    recallTimeSupported = false;
+    ({ data, error } = await supabase
+      .from("leads")
+      .select(leadsSelect(LEAD_LIST_SELECT))
+      .eq("center_id", context.centerId)
+      .or(`recall_date.eq.${today},created_at.gte.${since},last_activity_at.gte.${since}`)
+      .eq("lead_events.event_type", "system")
+      .gte("lead_events.created_at", since)
+      .order("last_activity_at", { ascending: false })
+      .limit(500));
+  }
   if (error) {
     throw new Error(error.message);
   }
@@ -432,6 +490,7 @@ const LEAD_LIST_SELECT = `
   service_id,
   status,
   recall_date,
+  recall_time,
   next_action,
   latest_comment,
   amount_cure_ttc,
@@ -491,6 +550,7 @@ const BOOKED_LEAD_SELECT = `
   client_id,
   status,
   recall_date,
+  recall_time,
   next_action,
   latest_comment,
   amount_cure_ttc,
@@ -510,11 +570,19 @@ async function fetchLeadsByIds(
   const rows: LeadRow[] = [];
   for (let index = 0; index < ids.length; index += 80) {
     const slice = ids.slice(index, index + 80);
-    const { data, error } = await supabase
+    let { data, error } = await supabase
       .from("leads")
-      .select(BOOKED_LEAD_SELECT)
+      .select(leadsSelect(BOOKED_LEAD_SELECT))
       .eq("center_id", centerId)
       .in("id", slice);
+    if (error && missingRecallTime(error.message) && recallTimeSupported) {
+      recallTimeSupported = false;
+      ({ data, error } = await supabase
+        .from("leads")
+        .select(leadsSelect(BOOKED_LEAD_SELECT))
+        .eq("center_id", centerId)
+        .in("id", slice));
+    }
     if (error) {
       throw new Error(error.message);
     }
@@ -533,17 +601,19 @@ export async function loadBookedCrmLeads(): Promise<{
   const centerId = context.centerId;
   const statuses = bookedHistoryStatuses();
   const [statusRows, appointments, visitEvents] = await Promise.all([
-    fetchAllRows<LeadRow>((start, end) =>
-      supabase
-        .from("leads")
-        .select(BOOKED_LEAD_SELECT)
-        .eq("center_id", centerId)
-        .in("status", statuses)
-        .order("last_activity_at", { ascending: false })
-        .range(start, end) as PromiseLike<{
-        data: LeadRow[] | null;
-        error: { message: string } | null;
-      }>,
+    withRecallTimeSelect(BOOKED_LEAD_SELECT, (select) =>
+      fetchAllRows<LeadRow>((start, end) =>
+        supabase
+          .from("leads")
+          .select(select)
+          .eq("center_id", centerId)
+          .in("status", statuses)
+          .order("last_activity_at", { ascending: false })
+          .range(start, end) as PromiseLike<{
+          data: LeadRow[] | null;
+          error: { message: string } | null;
+        }>,
+      ),
     ),
     fetchAllRows<CenterAppointmentRow>((start, end) =>
       supabase
@@ -778,28 +848,40 @@ async function createCrmLeadRecord(input: NewCrmLeadInput) {
   const now = input.createdAt || new Date().toISOString();
   const comment =
     input.comment?.trim() || `Lead créé avec le statut ${input.status}.`;
-  const { data: lead, error: leadError } = await supabase
+  const leadInsert = {
+    center_id: context.centerId,
+    client_id: client.id,
+    source_id: sourceId,
+    campaign_id: campaignId,
+    service_id: serviceId,
+    status: input.status,
+    recall_date: toDateOnlyIso(input.reminderDate) || null,
+    recall_time: toDateOnlyIso(input.reminderDate)
+      ? toReminderTime(input.reminderTime)
+      : null,
+    next_action: input.nextAction.trim() || "À contacter",
+    latest_comment: comment,
+    amount_cure_ttc: input.dealAmount || 0,
+    created_at: now,
+    updated_at: now,
+    last_activity_at: now,
+  };
+  let { data: lead, error: leadError } = await supabase
     .from("leads")
-    .insert({
-      center_id: context.centerId,
-      client_id: client.id,
-      source_id: sourceId,
-      campaign_id: campaignId,
-      service_id: serviceId,
-      status: input.status,
-      recall_date: toDateOnlyIso(input.reminderDate) || null,
-      next_action: input.nextAction.trim() || "À contacter",
-      latest_comment: comment,
-      amount_cure_ttc: input.dealAmount || 0,
-      created_at: now,
-      updated_at: now,
-      last_activity_at: now,
-    })
+    .insert(recallTimeSupported ? leadInsert : withoutRecallTime(leadInsert))
     .select("id")
     .single();
+  if (leadError && missingRecallTime(leadError.message) && recallTimeSupported) {
+    recallTimeSupported = false;
+    ({ data: lead, error: leadError } = await supabase
+      .from("leads")
+      .insert(withoutRecallTime(leadInsert))
+      .select("id")
+      .single());
+  }
 
-  if (leadError) {
-    throw new Error(leadError.message);
+  if (leadError || !lead) {
+    throw new Error(leadError?.message || "Le prospect n'a pas pu être créé.");
   }
 
   await insertLeadEvent(supabase, context.centerId, lead.id, {
@@ -909,7 +991,7 @@ async function writeCrmLeadStatus(
     lead.id,
     {
       status,
-      ...(consumedDueReminder ? { recall_date: null } : {}),
+      ...(consumedDueReminder ? { recall_date: null, recall_time: null } : {}),
     },
     { requireRow: true },
   );
@@ -1475,10 +1557,25 @@ async function ensureAcompteSuiviEvent(
   });
 }
 
+function toReminderTime(value: string | null | undefined) {
+  const match = String(value || "").trim().match(/^(\d{2}):(\d{2})/);
+  if (!match) {
+    return null;
+  }
+  const hours = Number(match[1]);
+  const minutes = Number(match[2]);
+  if (hours > 23 || minutes > 59) {
+    return null;
+  }
+  return `${match[1]}:${match[2]}`;
+}
+
 export async function updateCrmLeadReminder(leadId: string, reminderDate: string) {
   const supabase = createClient();
+  const recallDate = toDateOnlyIso(reminderDate) || null;
   await updateLeadFields(supabase, leadId, {
-    recall_date: toDateOnlyIso(reminderDate) || null,
+    recall_date: recallDate,
+    ...(recallDate ? {} : { recall_time: null }),
     updated_at: new Date().toISOString(),
   });
   const { data: lead } = await supabase
@@ -1497,6 +1594,14 @@ export async function updateCrmLeadReminder(leadId: string, reminderDate: string
     lead.status || "",
     toDateOnlyIso(reminderDate) || null,
   );
+}
+
+export async function updateCrmLeadReminderTime(leadId: string, reminderTime: string) {
+  const supabase = createClient();
+  await updateLeadFields(supabase, leadId, {
+    recall_time: toReminderTime(reminderTime),
+    updated_at: new Date().toISOString(),
+  });
 }
 
 export async function updateCrmLeadNextAction(leadId: string, nextAction: string) {
@@ -1621,6 +1726,9 @@ async function writeCrmLeadDetails(lead: Lead, input: NewCrmLeadInput) {
       service_id: serviceId,
       ...(statusChanged ? { status: nextStatus } : {}),
       recall_date: toDateOnlyIso(nextReminder) || null,
+      recall_time: toDateOnlyIso(nextReminder)
+        ? toReminderTime(input.reminderTime)
+        : null,
       next_action: input.nextAction.trim() || "À contacter",
       amount_cure_ttc: input.dealAmount || 0,
       ...(consumedDueReminder
@@ -2036,25 +2144,53 @@ async function updateLeadFields(
 ) {
   return trackCrmWrite(
     (async () => {
-      const query = supabase.from("leads").update(fields).eq("id", leadId);
+      const write = async (body: Record<string, unknown>) => {
+        const query = supabase.from("leads").update(body).eq("id", leadId);
 
-      if (!options.requireRow) {
-        const { error } = await query;
+        if (!options.requireRow) {
+          const { error } = await query;
+          if (error) {
+            throw new Error(error.message);
+          }
+          return;
+        }
+
+        // Sans ligne renvoyée, la base a refusé la modification sans erreur (droits ou fiche supprimée).
+        const { data, error } = await query.select("id");
         if (error) {
           throw new Error(error.message);
         }
-        return;
-      }
+        if (!data?.length) {
+          throw new Error(
+            "Le statut n'a pas été enregistré : fiche introuvable ou accès refusé.",
+          );
+        }
+      };
 
-      // Sans ligne renvoyée, la base a refusé la modification sans erreur (droits ou fiche supprimée).
-      const { data, error } = await query.select("id");
-      if (error) {
-        throw new Error(error.message);
-      }
-      if (!data?.length) {
-        throw new Error(
-          "Le statut n'a pas été enregistré : fiche introuvable ou accès refusé.",
-        );
+      const payload = recallTimeSupported ? fields : withoutRecallTime(fields);
+      try {
+        await write(payload);
+      } catch (error) {
+        if (
+          error instanceof Error &&
+          missingRecallTime(error.message) &&
+          "recall_time" in payload &&
+          recallTimeSupported
+        ) {
+          recallTimeSupported = false;
+          const rest = withoutRecallTime(payload);
+          const onlyTime = Object.keys(payload).every(
+            (key) => key === "recall_time" || key === "updated_at",
+          );
+          if (onlyTime) {
+            throw new Error(
+              "L'heure de relance n'est pas encore disponible. Lance la requête recall_time dans Supabase.",
+            );
+          }
+          await write(rest);
+          return;
+        }
+        throw error;
       }
     })(),
   );
@@ -2509,6 +2645,7 @@ function toLead(row: LeadRow): Lead {
     updatedDate: row.updated_at?.slice(0, 10),
     nextAction: row.next_action || "À contacter",
     reminderDate: toDateOnlyIso(row.recall_date) ?? undefined,
+    reminderTime: toReminderTime(row.recall_time) ?? undefined,
     ...(visitDate !== undefined ? { visitDate } : {}),
     centerId: row.center_id,
     centerName: relationObject(row.centers)?.name?.trim() || undefined,

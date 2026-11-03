@@ -134,7 +134,9 @@ export default function LeadTasksPage() {
                 <p className="font-semibold text-slate-700">{lead.nextAction}</p>
                 <p className="text-sm font-semibold text-slate-500">
                   <CalendarClock className="mr-1 inline h-4 w-4" />
-                  {lead.reminderDate ?? "Sans rappel"}
+                  {lead.reminderDate
+                    ? `${lead.reminderDate}${lead.reminderTime ? ` ${lead.reminderTime}` : ""}`
+                    : "Sans rappel"}
                 </p>
                 <Badge
                   className={cn(

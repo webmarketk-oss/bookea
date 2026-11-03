@@ -26,6 +26,7 @@ import {
 import {
   isInactiveLeadStatus,
   leadStatusClassName,
+  leadStatusMenuClassName,
   leadStatusSelectOptions,
 } from "@/lib/lead-statuses";
 import { cn } from "@/lib/utils";
@@ -50,6 +51,7 @@ interface ProspectsTableProps {
   onCommentDelete: (leadId: string, activityId: string) => void | Promise<boolean>;
   onDealAmountChange: (leadId: string, amount: number) => void;
   onReminderDateChange: (leadId: string, date: string) => void;
+  onReminderTimeChange: (leadId: string, time: string) => void;
   onCommercialChange: (leadId: string, commercial: string) => void;
   commercialOptions?: string[];
   whatsApp?: ProspectsWhatsApp;
@@ -94,6 +96,7 @@ export default function ProspectsTable({
   onCommentDelete,
   onDealAmountChange,
   onReminderDateChange,
+  onReminderTimeChange,
   onCommercialChange,
   commercialOptions = [],
   whatsApp,
@@ -353,16 +356,31 @@ export default function ProspectsTable({
               <TableCell>{lead.createdAt}</TableCell>
 
               <TableCell>
-                <AdaptiveDateInput
-                  ariaLabel="Rappel"
-                  value={toDateOnlyIso(lead.reminderDate) ?? ""}
-                  onChange={(date) => onReminderDateChange(lead.id, date)}
-                  className={cn(
-                    "h-8 w-[8.5rem] shrink-0 rounded-lg border border-slate-200 bg-white px-2 text-xs font-semibold outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100",
-                    isOpenReminderDue(lead) &&
-                      "border-amber-200 bg-amber-100 text-amber-800"
-                  )}
-                />
+                <div className="flex items-center gap-1">
+                  <AdaptiveDateInput
+                    ariaLabel="Rappel"
+                    value={toDateOnlyIso(lead.reminderDate) ?? ""}
+                    onChange={(date) => onReminderDateChange(lead.id, date)}
+                    className={cn(
+                      "h-8 w-[8.5rem] shrink-0 rounded-lg border border-slate-200 bg-white px-2 text-xs font-semibold outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100",
+                      isOpenReminderDue(lead) &&
+                        "border-amber-200 bg-amber-100 text-amber-800"
+                    )}
+                  />
+                  <input
+                    type="time"
+                    aria-label="Heure de relance"
+                    value={lead.reminderTime ?? ""}
+                    onChange={(event) =>
+                      onReminderTimeChange(lead.id, event.target.value)
+                    }
+                    className={cn(
+                      "h-8 w-[5.75rem] shrink-0 rounded-lg border border-slate-200 bg-white px-2 text-xs font-semibold outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100",
+                      isOpenReminderDue(lead) &&
+                        "border-amber-200 bg-amber-100 text-amber-800"
+                    )}
+                  />
+                </div>
               </TableCell>
 
               {showDepositReminders ? (
@@ -374,6 +392,7 @@ export default function ProspectsTable({
                     onChange={(status) =>
                       onStatusChange(lead.id, status as LeadStatus)
                     }
+                    optionClassName={leadStatusMenuClassName}
                     className={cn(
                       "h-7 w-full min-w-[8.75rem] max-w-[9.25rem] rounded-full border-0 px-2.5 text-xs font-semibold outline-none ring-1 transition-colors",
                       "focus:ring-2 focus:ring-blue-400",
@@ -414,6 +433,7 @@ export default function ProspectsTable({
                   onChange={(status) =>
                     onStatusChange(lead.id, status as LeadStatus)
                   }
+                  optionClassName={leadStatusMenuClassName}
                   className={cn(
                     "h-7 w-full min-w-[8.75rem] max-w-[9.25rem] rounded-full border-0 px-2.5 text-xs font-semibold outline-none ring-1 transition-colors",
                     "focus:ring-2 focus:ring-blue-400",
