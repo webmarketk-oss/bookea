@@ -18,6 +18,13 @@ import { cn } from "@/lib/utils";
 const OPTION_HEIGHT = 32;
 const LIST_PADDING = 8;
 const VIEWPORT_GAP = 8;
+const HISTORY_WIDTH = 272;
+
+export type AdaptiveSelectHistoryItem = {
+  at: string;
+  label: string;
+  className?: string;
+};
 
 type AdaptiveSelectProps = {
   value: string;
@@ -27,6 +34,8 @@ type AdaptiveSelectProps = {
   ariaLabel?: string;
   /** Contour de chaque ligne du menu. Le menu Commercial n’en a pas. */
   optionClassName?: (option: string) => string;
+  /** Panneau affiché à gauche du menu ouvert. */
+  history?: readonly AdaptiveSelectHistoryItem[];
 };
 
 export function AdaptiveSelect({
@@ -36,13 +45,17 @@ export function AdaptiveSelect({
   className,
   ariaLabel,
   optionClassName,
+  history,
 }: AdaptiveSelectProps) {
   const listId = useId();
   const triggerRef = useRef<HTMLButtonElement>(null);
   const listRef = useRef<HTMLUListElement>(null);
+  const historyRef = useRef<HTMLElement>(null);
   const [open, setOpen] = useState(false);
   const [activeIndex, setActiveIndex] = useState(0);
   const [style, setStyle] = useState<CSSProperties>({});
+  const [historyStyle, setHistoryStyle] = useState<CSSProperties>({});
+  const hasHistory = Boolean(history?.length);
 
   const close = useCallback((focusTrigger = false) => {
     setOpen(false);
@@ -62,14 +75,23 @@ export function AdaptiveSelect({
     const above = rect.top - VIEWPORT_GAP;
     const openUp = needed > below && above > below;
     const maxHeight = Math.max(OPTION_HEIGHT * 3, Math.min(needed, openUp ? above : below));
+    const vertical = openUp
+      ? { bottom: window.innerHeight - rect.top + 4 }
+      : { top: rect.bottom + 4 };
     setStyle({
       position: "fixed",
       left: rect.left,
       minWidth: rect.width,
       maxHeight,
-      ...(openUp
-        ? { bottom: window.innerHeight - rect.top + 4 }
-        : { top: rect.bottom + 4 }),
+      ...vertical,
+    });
+    const historyWidth = Math.min(HISTORY_WIDTH, Math.max(180, rect.left - VIEWPORT_GAP - 8));
+    setHistoryStyle({
+      position: "fixed",
+      left: Math.max(VIEWPORT_GAP, rect.left - historyWidth - 8),
+      width: historyWidth,
+      maxHeight,
+      ...vertical,
     });
   }, [options.length]);
 
@@ -102,13 +124,15 @@ export function AdaptiveSelect({
       const target = event.target as Node;
       if (
         !triggerRef.current?.contains(target) &&
-        !listRef.current?.contains(target)
+        !listRef.current?.contains(target) &&
+        !historyRef.current?.contains(target)
       ) {
         close();
       }
     };
     const onScroll = (event: Event) => {
-      if (!listRef.current?.contains(event.target as Node)) {
+      const target = event.target as Node;
+      if (!listRef.current?.contains(target) && !historyRef.current?.contains(target)) {
         close();
       }
     };
@@ -207,6 +231,40 @@ export function AdaptiveSelect({
       </button>
       {open && typeof document !== "undefined"
         ? createPortal(
+            <>
+            {hasHistory ? (
+              <aside
+                ref={historyRef}
+                style={historyStyle}
+                onClick={(event) => event.stopPropagation()}
+                onPointerDown={(event) => event.stopPropagation()}
+                className="z-[200] overflow-y-auto rounded-xl border border-slate-200 bg-white py-1 text-sm shadow-xl"
+              >
+                <p className="px-3 pb-1 pt-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+                  Historique
+                </p>
+                <ul>
+                  {history?.map((item, index) => (
+                    <li
+                      key={`${item.at}-${item.label}-${index}`}
+                      className="flex items-center justify-between gap-2 px-3 py-1"
+                    >
+                      <span className="shrink-0 text-xs font-medium text-slate-400">
+                        {item.at}
+                      </span>
+                      <span
+                        className={cn(
+                          "truncate rounded-full border bg-white px-2 py-0.5 text-xs font-semibold",
+                          item.className,
+                        )}
+                      >
+                        {item.label}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </aside>
+            ) : null}
             <ul
               ref={listRef}
               id={listId}
@@ -249,7 +307,8 @@ export function AdaptiveSelect({
                   )}
                 </li>
               ))}
-            </ul>,
+            </ul>
+            </>,
             document.body,
           )
         : null}

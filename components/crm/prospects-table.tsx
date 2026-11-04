@@ -392,6 +392,7 @@ export default function ProspectsTable({
                     onChange={(status) =>
                       onStatusChange(lead.id, status as LeadStatus)
                     }
+                    history={statusHistory(lead)}
                     optionClassName={leadStatusMenuClassName}
                     className={cn(
                       "h-7 w-full min-w-[8.75rem] max-w-[9.25rem] rounded-full border-0 px-2.5 text-xs font-semibold outline-none ring-1 transition-colors",
@@ -433,6 +434,7 @@ export default function ProspectsTable({
                   onChange={(status) =>
                     onStatusChange(lead.id, status as LeadStatus)
                   }
+                  history={statusHistory(lead)}
                   optionClassName={leadStatusMenuClassName}
                   className={cn(
                     "h-7 w-full min-w-[8.75rem] max-w-[9.25rem] rounded-full border-0 px-2.5 text-xs font-semibold outline-none ring-1 transition-colors",
@@ -552,6 +554,38 @@ export default function ProspectsTable({
     ) : null}
     </>
   );
+}
+
+function statusHistory(lead: Lead) {
+  const items = [];
+  for (const activity of lead.activityLog) {
+    if (activity.type !== "status") {
+      continue;
+    }
+    const match = activity.text.match(/→\s*(.+?)\.?\s*$/);
+    const label = match?.[1]?.trim();
+    if (!label) {
+      continue;
+    }
+    items.push({
+      at: formatHistoryStamp(activity.occurredAt || activity.date),
+      label,
+      className: leadStatusMenuClassName(label),
+    });
+  }
+  return items;
+}
+
+function formatHistoryStamp(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+  const day = String(date.getDate()).padStart(2, "0");
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const hours = String(date.getHours()).padStart(2, "0");
+  const minutes = String(date.getMinutes()).padStart(2, "0");
+  return `${day}/${month} ${hours}:${minutes}`;
 }
 
 function pagerPages(page: number, pageCount: number) {
