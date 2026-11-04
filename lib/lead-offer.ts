@@ -102,6 +102,16 @@ export function leadOfferLabel(lead: Pick<Lead, "campaign" | "treatment">) {
   return offer;
 }
 
+/** Enlève le détail technique du webhook (champs, tunnel, email déjà affiché sur la fiche). */
+export function visibleReceptionNote(text: string) {
+  return String(text || "")
+    .replace(/\s*Tunnel \/ page reçus :[\s\S]*?(?=Champs reçus :|$)/g, " ")
+    .replace(/\s*Champs reçus :[\s\S]*$/g, "")
+    .replace(/\s*(?:Email|Téléphone|Page|Formulaire) : [^.]+\./g, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
 export function leadSourceFromStored(name?: string | null) {
   return /save\s*my\s*leads/i.test(String(name || "")) ? "Facebook" : "";
 }

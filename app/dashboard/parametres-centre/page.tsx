@@ -3220,7 +3220,7 @@ function LeadOfferRoutesCard() {
       <SectionTitle
         icon={<Share2 className="h-4 w-4" />}
         title="Tunnels Systeme.io → offre affichée"
-        subtitle="Pour ce centre uniquement. Le tunnel, la page ou l’ID d’offre reçu doit être identique (voir « Tunnel / page reçus » dans l’historique du prospect). Un champ offre envoyé par l’intégration reste prioritaire. Sans correspondance, aucune offre n’est devinée."
+        subtitle="Pour ce centre uniquement. Indique le nom du tunnel, de la page ou l’ID d’offre tel que Systeme.io l’envoie. Un champ offre envoyé par l’intégration reste prioritaire. Sans correspondance, aucune offre n’est devinée."
       />
       <div className="mt-4 grid gap-3">
         {routes.map((route, index) => (

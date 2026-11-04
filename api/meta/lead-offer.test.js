@@ -205,7 +205,7 @@ test("prospect test SaveMyLeads : enregistré, affiché et transmis à Seya", as
   assert.match(note, /Source : Facebook\./);
   assert.match(note, /Import : SaveMyLeads\./);
   assert.match(note, /Offre : Laser1\+1\./);
-  assert.match(note, /Champs reçus : .*offre/);
+  assert.doesNotMatch(note, /Champs reçus|Tunnel \/ page reçus|Email :/);
   assert.equal(supabase.inserts.leads[0].latest_comment, "Zone : Ameins");
 
   const shown = { campaign: "Laser1+1", treatment: "Épilation définitive" };
@@ -257,8 +257,10 @@ test("prospect test Systeme.io : source, axe et offre du tunnel enregistrés", a
   assert.equal(supabase.inserts.services[0].name, "Soin minceur");
   const note = supabase.inserts.lead_events[0][0].note;
   assert.doesNotMatch(note, /Import :/);
-  assert.match(note, /Tunnel \/ page reçus : .*payload_offer_reference = minceur-vichy/);
-  assert.doesNotMatch(note, /webmarket/);
+  assert.match(note, /Source : Systeme\.io\./);
+  assert.match(note, /Offre : Bilan minceur offert\./);
+  assert.match(note, /Axe : Soin minceur\./);
+  assert.doesNotMatch(note, /Tunnel \/ page reçus|Champs reçus|webmarket/);
 });
 
 test("import de fichier : l’origine d’import est enregistrée dans l’historique, pas pour une campagne", async () => {

@@ -13,6 +13,7 @@ import {
   joinOfferLabels,
   leadImportToolFromEvents,
   leadSourceFromStored,
+  visibleReceptionNote,
   OFFER_EVENT,
   offersFromEvents,
 } from "@/lib/lead-offer";
@@ -2578,7 +2579,7 @@ function toLead(row: LeadRow): Lead {
         id: event.id,
         author: statusAuthor || authorFromEvent(event.event_type),
         date: formatLeadDateTime(event.created_at),
-        text: type === "status" ? visibleStatusChangeText(rawText) : rawText,
+        text: type === "status" ? visibleStatusChangeText(rawText) : visibleReceptionNote(rawText),
         type: isComment ? ("comment" as const) : type,
         occurredAt: event.created_at,
       };

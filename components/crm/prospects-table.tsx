@@ -17,6 +17,7 @@ import {
   toDatetimeLocalValue,
 } from "@/lib/crm-deposit";
 import { isOpenReminderDue, toDateOnlyIso } from "@/lib/crm-stats";
+import { loadCrmLeadHistory } from "@/lib/crm-supabase";
 import { displayVisitDate } from "@/lib/crm-rdv";
 import { leadOfferLabel } from "@/lib/lead-offer";
 import {
@@ -30,7 +31,7 @@ import {
   leadStatusSelectOptions,
 } from "@/lib/lead-statuses";
 import { cn } from "@/lib/utils";
-import { Lead, LeadStatus } from "@/types/lead";
+import { Lead, LeadActivity, LeadStatus } from "@/types/lead";
 import {
   ChevronDown,
   ChevronLeft,
@@ -110,6 +111,22 @@ export default function ProspectsTable({
   const [dateSort, setDateSort] = useState<"desc" | "asc">("desc");
   const [pageSize, setPageSize] = useState<number>(PAGE_SIZES[0]);
   const pressStartedOnControlRef = useRef(false);
+  const [fullHistory, setFullHistory] = useState<Record<string, LeadActivity[]>>({});
+  const historyRequestedRef = useRef(new Set<string>());
+
+  function requestHistory(leadId: string) {
+    if (historyRequestedRef.current.has(leadId)) {
+      return;
+    }
+    historyRequestedRef.current.add(leadId);
+    void loadCrmLeadHistory(leadId)
+      .then((log) => {
+        setFullHistory((current) => ({ ...current, [leadId]: log }));
+      })
+      .catch(() => {
+        historyRequestedRef.current.delete(leadId);
+      });
+  }
 
   useEffect(() => {
     setDateSort("desc");
@@ -392,7 +409,16 @@ export default function ProspectsTable({
                     onChange={(status) =>
                       onStatusChange(lead.id, status as LeadStatus)
                     }
-                    history={statusHistory(lead)}
+                    history={statusHistory(
+                      fullHistory[lead.id]?.length
+                        ? fullHistory[lead.id]
+                        : lead.activityLog,
+                    )}
+                    onOpenChange={(isOpen) => {
+                      if (isOpen) {
+                        requestHistory(lead.id);
+                      }
+                    }}
                     optionClassName={leadStatusMenuClassName}
                     className={cn(
                       "h-7 w-full min-w-[8.75rem] max-w-[9.25rem] rounded-full border-0 px-2.5 text-xs font-semibold outline-none ring-1 transition-colors",
@@ -434,7 +460,16 @@ export default function ProspectsTable({
                   onChange={(status) =>
                     onStatusChange(lead.id, status as LeadStatus)
                   }
-                  history={statusHistory(lead)}
+                  history={statusHistory(
+                    fullHistory[lead.id]?.length
+                      ? fullHistory[lead.id]
+                      : lead.activityLog,
+                  )}
+                  onOpenChange={(isOpen) => {
+                    if (isOpen) {
+                      requestHistory(lead.id);
+                    }
+                  }}
                   optionClassName={leadStatusMenuClassName}
                   className={cn(
                     "h-7 w-full min-w-[8.75rem] max-w-[9.25rem] rounded-full border-0 px-2.5 text-xs font-semibold outline-none ring-1 transition-colors",
@@ -556,22 +591,34 @@ export default function ProspectsTable({
   );
 }
 
-function statusHistory(lead: Lead) {
+function statusHistory(activities: LeadActivity[]) {
   const items = [];
-  for (const activity of lead.activityLog) {
-    if (activity.type !== "status") {
+  for (const activity of activities) {
+    const at = formatHistoryStamp(activity.occurredAt || activity.date);
+    if (activity.type === "status") {
+      const label = (
+        activity.text.match(/→\s*(.+?)\.?\s*$/)?.[1] ||
+        activity.text.replace(/^.*?Statut changé\s*:\s*/i, "")
+      )
+        .replace(/\.$/, "")
+        .trim();
+      if (!label) {
+        continue;
+      }
+      items.push({
+        at,
+        label,
+        className: leadStatusMenuClassName(label),
+      });
       continue;
     }
-    const match = activity.text.match(/→\s*(.+?)\.?\s*$/);
-    const label = match?.[1]?.trim();
-    if (!label) {
-      continue;
+    if (activity.type === "comment") {
+      const label = activity.text.trim();
+      if (!label) {
+        continue;
+      }
+      items.push({ at, label, note: true });
     }
-    items.push({
-      at: formatHistoryStamp(activity.occurredAt || activity.date),
-      label,
-      className: leadStatusMenuClassName(label),
-    });
   }
   return items;
 }

@@ -18,12 +18,14 @@ import { cn } from "@/lib/utils";
 const OPTION_HEIGHT = 32;
 const LIST_PADDING = 8;
 const VIEWPORT_GAP = 8;
-const HISTORY_WIDTH = 272;
+const HISTORY_WIDTH = 320;
 
 export type AdaptiveSelectHistoryItem = {
   at: string;
   label: string;
   className?: string;
+  /** Écriture libre, pas un statut. */
+  note?: boolean;
 };
 
 type AdaptiveSelectProps = {
@@ -36,6 +38,7 @@ type AdaptiveSelectProps = {
   optionClassName?: (option: string) => string;
   /** Panneau affiché à gauche du menu ouvert. */
   history?: readonly AdaptiveSelectHistoryItem[];
+  onOpenChange?: (open: boolean) => void;
 };
 
 export function AdaptiveSelect({
@@ -46,16 +49,20 @@ export function AdaptiveSelect({
   ariaLabel,
   optionClassName,
   history,
+  onOpenChange,
 }: AdaptiveSelectProps) {
   const listId = useId();
   const triggerRef = useRef<HTMLButtonElement>(null);
   const listRef = useRef<HTMLUListElement>(null);
   const historyRef = useRef<HTMLElement>(null);
+  const openedAtRef = useRef(0);
   const [open, setOpen] = useState(false);
   const [activeIndex, setActiveIndex] = useState(0);
   const [style, setStyle] = useState<CSSProperties>({});
   const [historyStyle, setHistoryStyle] = useState<CSSProperties>({});
   const hasHistory = Boolean(history?.length);
+  const onOpenChangeRef = useRef(onOpenChange);
+  onOpenChangeRef.current = onOpenChange;
 
   const close = useCallback((focusTrigger = false) => {
     setOpen(false);
@@ -73,8 +80,9 @@ export function AdaptiveSelect({
     const needed = options.length * OPTION_HEIGHT + LIST_PADDING;
     const below = window.innerHeight - rect.bottom - VIEWPORT_GAP;
     const above = rect.top - VIEWPORT_GAP;
-    const openUp = needed > below && above > below;
-    const maxHeight = Math.max(OPTION_HEIGHT * 3, Math.min(needed, openUp ? above : below));
+    // Vers le bas, avec défilement dans le menu. Vers le haut seulement collé au bord bas.
+    const openUp = below < OPTION_HEIGHT * 3 && above > below;
+    const maxHeight = Math.min(needed, Math.max(OPTION_HEIGHT * 3, openUp ? above : below));
     const vertical = openUp
       ? { bottom: window.innerHeight - rect.top + 4 }
       : { top: rect.bottom + 4 };
@@ -93,7 +101,7 @@ export function AdaptiveSelect({
       maxHeight,
       ...vertical,
     });
-  }, [options.length]);
+  }, [options.length, history?.length]);
 
   useLayoutEffect(() => {
     if (!open) {
@@ -111,9 +119,17 @@ export function AdaptiveSelect({
     if (overflow > 0) {
       list.style.left = `${Math.max(VIEWPORT_GAP, list.getBoundingClientRect().left - overflow)}px`;
     }
-    list.querySelector<HTMLElement>(`[data-index="${activeIndex}"]`)?.scrollIntoView({
-      block: "nearest",
-    });
+    const item = list.querySelector<HTMLElement>(`[data-index="${activeIndex}"]`);
+    if (!item) {
+      return;
+    }
+    const itemTop = item.offsetTop;
+    const itemBottom = itemTop + item.offsetHeight;
+    if (itemTop < list.scrollTop) {
+      list.scrollTop = itemTop;
+    } else if (itemBottom > list.scrollTop + list.clientHeight) {
+      list.scrollTop = itemBottom - list.clientHeight;
+    }
   }, [open, style, activeIndex]);
 
   useEffect(() => {
@@ -121,6 +137,9 @@ export function AdaptiveSelect({
       return;
     }
     const onPointerDown = (event: PointerEvent) => {
+      if (Date.now() - openedAtRef.current < 400) {
+        return;
+      }
       const target = event.target as Node;
       if (
         !triggerRef.current?.contains(target) &&
@@ -132,11 +151,12 @@ export function AdaptiveSelect({
     };
     const onScroll = (event: Event) => {
       const target = event.target as Node;
-      if (!listRef.current?.contains(target) && !historyRef.current?.contains(target)) {
-        close();
+      if (listRef.current?.contains(target) || historyRef.current?.contains(target)) {
+        return;
       }
+      place();
     };
-    const onResize = () => close();
+    const onResize = () => place();
     document.addEventListener("pointerdown", onPointerDown);
     window.addEventListener("scroll", onScroll, true);
     window.addEventListener("resize", onResize);
@@ -145,10 +165,21 @@ export function AdaptiveSelect({
       window.removeEventListener("scroll", onScroll, true);
       window.removeEventListener("resize", onResize);
     };
-  }, [open, close]);
+  }, [open, close, place]);
+
+  const wasOpenRef = useRef(false);
+  useEffect(() => {
+    if (open === wasOpenRef.current) {
+      return;
+    }
+    wasOpenRef.current = open;
+    onOpenChangeRef.current?.(open);
+  }, [open]);
 
   function openList() {
+    openedAtRef.current = Date.now();
     setActiveIndex(Math.max(0, options.indexOf(value)));
+    place();
     setOpen(true);
   }
 
@@ -229,7 +260,7 @@ export function AdaptiveSelect({
         <span className="truncate">{value}</span>
         <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-60" />
       </button>
-      {open && typeof document !== "undefined"
+      {open && (style.top != null || style.bottom != null) && typeof document !== "undefined"
         ? createPortal(
             <>
             {hasHistory ? (
@@ -247,19 +278,25 @@ export function AdaptiveSelect({
                   {history?.map((item, index) => (
                     <li
                       key={`${item.at}-${item.label}-${index}`}
-                      className="flex items-center justify-between gap-2 px-3 py-1"
+                      className="grid grid-cols-[4.75rem_minmax(0,1fr)] items-start gap-2 px-3 py-1"
                     >
                       <span className="shrink-0 text-xs font-medium text-slate-400">
                         {item.at}
                       </span>
-                      <span
-                        className={cn(
-                          "truncate rounded-full border bg-white px-2 py-0.5 text-xs font-semibold",
-                          item.className,
-                        )}
-                      >
-                        {item.label}
-                      </span>
+                      {item.note ? (
+                        <span className="min-w-0 whitespace-normal text-xs font-medium leading-4 text-slate-700">
+                          {item.label}
+                        </span>
+                      ) : (
+                        <span
+                          className={cn(
+                            "max-w-full truncate rounded-full border bg-white px-2 py-0.5 text-xs font-semibold",
+                            item.className,
+                          )}
+                        >
+                          {item.label}
+                        </span>
+                      )}
                     </li>
                   ))}
                 </ul>

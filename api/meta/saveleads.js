@@ -1444,20 +1444,12 @@ function resolveIncomingSource(payload, query, fallback = "Facebook", req) {
 }
 
 function buildLeadNote(lead, options = {}) {
-  const refs = funnelRefs(options.fields).map((ref) => `${ref.key} = ${ref.value}`);
-  const received = Object.keys(options.fields || {}).sort().slice(0, 40);
   return [
     "Lead reçu via webhook Bookea.",
     options.sourceName ? `Source : ${options.sourceName}.` : null,
     options.importTool ? `Import : ${options.importTool}.` : null,
-    lead.pageName ? `Page : ${lead.pageName}.` : null,
-    lead.formName ? `Formulaire : ${lead.formName}.` : null,
-    lead.phone ? `Téléphone : ${lead.phone}.` : null,
-    lead.email ? `Email : ${lead.email}.` : null,
     lead.offer ? `Offre : ${lead.offer}.` : null,
     lead.treatment ? `Axe : ${lead.treatment}.` : null,
-    refs.length ? `Tunnel / page reçus : ${refs.join(" ; ")}.` : null,
-    received.length ? `Champs reçus : ${received.join(", ")}.` : null,
   ]
     .filter(Boolean)
     .join(" ");
