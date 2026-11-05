@@ -445,9 +445,13 @@ function formatCenterProfilePrompt(profile) {
 }
 
 function asksLocation(text) {
+  const value = normalize(text);
+  if (/e[- ]?mail|courriel|@/.test(value) && !/\bou (etes|se trouve)\b/.test(value)) {
+    return false;
+  }
   return (
     /\bou (etes|etes[- ]vous|se trouve)\b|situ[eé]|adresse|\bc['’]est ou\b|vous etes ou\b|tu es (ou\b|situ)/i.test(
-      normalize(text),
+      value,
     ) || gaillard.asksCountry(text)
   );
 }
@@ -3004,11 +3008,12 @@ function gaillardNextQuestion(family, qualification, leadTexts, seya) {
   if (family === "minceur" && qualification.pathOffered) {
     return null;
   }
-  // Ballonnement ≠ objectif « kilos à perdre » : on ne force pas la question kilos.
+  // « Je ne cherche pas à perdre du poids » n’est pas une demande de kilos.
   if (
     family === "minceur" &&
     !qualification.kilos &&
     !gaillardMostlyBloating(leadTexts) &&
+    !leadTexts.some((value) => gaillard.declinesWeightLoss(value)) &&
     leadTexts.some((value) => GAILLARD_WEIGHT_LOSS.test(value)) &&
     !leadTexts.some((value) => GAILLARD_KILOS_GIVEN.test(value))
   ) {
@@ -3059,11 +3064,21 @@ function gaillardLeadReply(conversation, text, seya, slots, extras = {}) {
   const base = { ...withStaffOfferedSlots(conversation, extras.now), _seya: seya };
   // Une question du prospect n’est pas une réponse au parcours : elle ne change ni le soin
   // suivi, ni la qualification, et ne peut pas déclencher la transmission.
+  const acceptsOfferNow =
+    gaillard.acceptsContinue(text) &&
+    (gaillard.lastSeyaOfferedCallback(base) ||
+      Boolean(base.qualification?.pathOffered) ||
+      gaillard.acceptedCallbackInThread(base));
+  const statesHerNeed =
+    GAILLARD_MINCEUR_ZONE.test(normalize(text)) &&
+    (GAILLARD_MINCEUR_OBJECTIF.test(normalize(text)) || /\d/.test(normalize(text)));
   const asking =
-    isServiceAsk(text) ||
-    asksOpenQuestion(text) ||
-    gaillard.asksTechnology(text) ||
-    gaillard.asksProcess(text);
+    !statesHerNeed &&
+    !acceptsOfferNow &&
+    (isServiceAsk(text) ||
+      asksOpenQuestion(text) ||
+      gaillard.asksTechnology(text) ||
+      gaillard.asksProcess(text));
   const thread = understandThread(base, asking ? "" : text);
   const merged = asking
     ? { ...(base.qualification || {}) }
@@ -3094,7 +3109,12 @@ function gaillardLeadReply(conversation, text, seya, slots, extras = {}) {
       ? "Qualifié"
       : "En cours";
   const pendingQuestion = () => {
-    if (handedOff || merged.declined) {
+    if (
+      handedOff ||
+      merged.declined ||
+      gaillard.acceptedCallbackInThread(base) ||
+      acceptsOfferNow
+    ) {
       return "";
     }
     const pending = gaillardNextQuestion(
@@ -3227,7 +3247,13 @@ function gaillardLeadReply(conversation, text, seya, slots, extras = {}) {
       /je (vais|veux) (bien )?(faire |venir )?(pour )?(le |la |l')?(bilan|seance|decouverte)/.test(
         normalize(text),
       ));
-  if (!softPathAccept && (gaillard.asksTrialWhen(text) || gaillard.asksDiscoveryFree(text))) {
+  // « Oui, et la liste des prix » : le tarif ne doit pas empêcher la transmission.
+  const acceptsCallbackNow =
+    !handedOff &&
+    !gaillard.declinesOffer(text) &&
+    gaillard.acceptsContinue(text) &&
+    (gaillard.lastSeyaOfferedCallback(base) || Boolean(merged.pathOffered));
+  if (!softPathAccept && !acceptsCallbackNow && (gaillard.asksTrialWhen(text) || gaillard.asksDiscoveryFree(text))) {
     const offer = `${base.offerLabel || ""} ${brief?.pricing?.bilan || ""} ${brief?.pricing?.discovery || ""}`;
     const known = gaillard.asksTrialWhen(text)
       ? gaillard.trialWhenReply(brief?.pricing || {}, offer)
@@ -3238,6 +3264,7 @@ function gaillardLeadReply(conversation, text, seya, slots, extras = {}) {
   // Prix cryo demandé sans tarif séance cryo en fiche → ne pas présenter le forfait 500 € comme prix cryo.
   if (
     !softPathAccept &&
+    !acceptsCallbackNow &&
     /cryo|cryolipolyse/.test(normalize(text)) &&
     (asksPrice(text) || classifyPriceQuestion(text)) &&
     !/\d+\s*€/.test(String(brief?.pricing?.session || ""))
@@ -3246,6 +3273,7 @@ function gaillardLeadReply(conversation, text, seya, slots, extras = {}) {
   }
   if (
     !softPathAccept &&
+    !acceptsCallbackNow &&
     (asksPrice(text) ||
       classifyPriceQuestion(text) ||
       isPriceRepeatComplaint(text) ||
@@ -3291,6 +3319,49 @@ function gaillardLeadReply(conversation, text, seya, slots, extras = {}) {
   ) {
     const spoken = gaillard.durationReply(topicFamily, text);
     return spoken ? answer(spoken) : delegate();
+  }
+
+  const mailReply = gaillard.appointmentMailReply(text);
+  if (mailReply) {
+    const noted = gaillard.withMailNote(base, text);
+    const slotState = {
+      ...bookingState,
+      pendingQuestion: "callback",
+      appointmentStatus: "none",
+      callbackSlot: null,
+      lastOfferedSlots: [],
+    };
+    if (gaillard.alreadyHasAppointment(text) || handedOff) {
+      return fixed(
+        {
+          ...noted,
+          teamNotes: {
+            ...(noted.teamNotes || {}),
+            handedOffAt: noted.teamNotes?.handedOffAt || at,
+            family: noted.teamNotes?.family || family,
+          },
+        },
+        handedOff ? status : "À recontacter",
+        mailReply,
+        slotState,
+      );
+    }
+    if (gaillard.lastSeyaOfferedCallback(base) || merged.pathOffered) {
+      return fixed(
+        {
+          ...noted,
+          teamNotes: {
+            ...(noted.teamNotes || {}),
+            family,
+            handedOffAt: at,
+          },
+        },
+        "À recontacter",
+        mailReply,
+        slotState,
+      );
+    }
+    return fixed(noted, status, mailReply);
   }
 
   if (asksLocation(normalize(text)) || asksAccess(normalize(text))) {
@@ -3340,7 +3411,14 @@ function gaillardLeadReply(conversation, text, seya, slots, extras = {}) {
   }
 
   if (gaillard.asksTechnology(text)) {
+    if (gaillard.asksFatRemoval(text) && (topicFamily === "minceur" || family === "minceur")) {
+      return answer(gaillard.fatRemovalReply());
+    }
     return informed(gaillard.technologyReply(text, sourceBag, { family: topicFamily, zone: merged.zone }));
+  }
+
+  if (gaillard.isCourtesyWish(text)) {
+    return fixed(base, status, gaillard.courtesyWishReply(text));
   }
 
   const mentionsAvailability = gaillard.availabilityMention(text);
@@ -3497,6 +3575,17 @@ function gaillardLeadReply(conversation, text, seya, slots, extras = {}) {
     }
 
     if (
+      family === "minceur" &&
+      gaillard.declinesWeightLoss(text) &&
+      !qualification.tried &&
+      nextQuestion?.step !== "need" &&
+      nextQuestion?.step !== "axis"
+    ) {
+      qualification.kilos = qualification.kilos || "pas de perte de poids";
+      return ask(gaillard.shapeWithoutWeightReply(text));
+    }
+
+    if (
       nextQuestion?.step === "path" &&
       (gaillard.lastSeyaAskedNeed(base) || gaillard.lastSeyaAskedKilos(base)) &&
       !gaillard.lastSeyaAskedTried(base) &&
@@ -3519,44 +3608,65 @@ function gaillardLeadReply(conversation, text, seya, slots, extras = {}) {
     // Transmission seulement si le prospect accepte le bilan (minceur) ou au bout du parcours hors minceur.
     const mayClose = family !== "minceur" || wantsCallback;
     if (!mayClose) {
+      if (gaillard.acceptedCallbackInThread(base) || acceptsOfferNow) {
+        return fixed(next, status, "C’est bien noté 😊 Votre demande est déjà transmise à l’équipe.");
+      }
       return ask(gaillard.pathQuestion());
     }
 
+    const handoffNeed = [
+      qualification.zone,
+      qualification.detail,
+      qualification.objectif && qualification.objectif !== qualification.detail
+        ? `objectif : ${qualification.objectif}`
+        : "",
+      qualification.kilos ? `kilos : ${qualification.kilos}` : "",
+    ]
+      .filter(Boolean)
+      .join(" · ");
     next = {
       ...next,
       teamNotes: {
         ...(next.teamNotes || {}),
         family,
-        need: [
-          qualification.zone,
-          qualification.detail,
-          qualification.objectif && qualification.objectif !== qualification.detail
-            ? `objectif : ${qualification.objectif}`
-            : "",
-          qualification.kilos ? `kilos : ${qualification.kilos}` : "",
-        ]
-          .filter(Boolean)
-          .join(" · "),
+        need: handoffNeed,
         tried: qualification.tried || "",
         handedOffAt: at,
       },
     };
+    const closing = mentionsAvailability
+      ? gaillard.preferenceReply()
+      : gaillard.closingReply(family);
+    const priceBit =
+      asksPrice(text) || classifyPriceQuestion(text)
+        ? String(priceReply(seya, qualification, { ...next, _seya: seya }, text) || "")
+            .replace(/\s+/g, " ")
+            .trim()
+        : "";
+    const spoken = [priceBit, closing].filter(Boolean).join(" ");
+    const handed = finishLeadReply(
+      next,
+      { ...qualification, pathOffered: true },
+      "À recontacter",
+      text,
+      spoken,
+      {
+        ...bookingState,
+        pendingQuestion: "callback",
+        appointmentStatus: "none",
+        callbackSlot: null,
+        lastOfferedSlots: [],
+      },
+      { proposedSlots: [] },
+    );
+    const messages = [...(handed.conversation?.messages || [])];
+    const index = messages.map((item) => item.author).lastIndexOf("seya");
+    if (index >= 0 && !/rappellera/i.test(String(messages[index].text || ""))) {
+      messages[index] = { ...messages[index], text: spoken };
+    }
     return {
-      ...finishLeadReply(
-        next,
-        { ...qualification, pathOffered: true },
-        "À recontacter",
-        text,
-        mentionsAvailability ? gaillard.preferenceReply() : gaillard.closingReply(family),
-        {
-          ...bookingState,
-          pendingQuestion: "callback",
-          appointmentStatus: "none",
-          callbackSlot: null,
-          lastOfferedSlots: [],
-        },
-        { proposedSlots: [] },
-      ),
+      ...handed,
+      conversation: { ...handed.conversation, messages },
       shouldBook: null,
       locked: true,
     };
@@ -3586,7 +3696,14 @@ function gaillardLeadReply(conversation, text, seya, slots, extras = {}) {
     return delegate();
   }
 
+  if (handedOff && gaillard.acceptsContinue(text) && !mentionsAvailability) {
+    return fixed(base, status, "C’est bien noté 😊");
+  }
+
   if (mentionsAvailability) {
+    if (handedOff || gaillard.acceptedCallbackInThread(base)) {
+      return fixed(next, status, "Merci, je note votre préférence pour l’équipe 😊");
+    }
     return fixed(next, status, gaillard.preferenceReply());
   }
   // Dernière chance : question matériel / déroulement documentée dans la fiche.
@@ -4084,6 +4201,7 @@ function relanceCopy(conversation, round = 1, centerName = "", seya) {
       custom
         ? fillRelanceTemplate(custom, { prenom: firstName, centre, offre: crmOffer || care || "" })
         : "",
+      conversation,
     );
   }
   if (custom) {

@@ -209,6 +209,77 @@ test("Gaillard minceur : kilos déjà précisés, zones encore demandées", asyn
   assert.match(lastSeya(conversation), /déjà testé/i);
 });
 
+test("Gaillard minceur : plutôt mince, pas de perte de poids, pas de question kilos", async () => {
+  let conversation = open("Soin minceur");
+  conversation = await say(
+    conversation,
+    "Mon objectif est de réduire, voire éliminer, un petit amas de graisse localisé uniquement au niveau du bas du ventre, sous le nombril. Je suis plutôt mince et je ne cherche pas à perdre du poids, mais simplement à avoir un ventre plus plat.",
+  );
+  assert.match(lastSeya(conversation), /plutôt mince/i);
+  assert.match(lastSeya(conversation), /amas sous le nombril/i);
+  assert.match(lastSeya(conversation), /pas une perte de poids/i);
+  assert.match(lastSeya(conversation), /déjà essayé/i);
+  assert.doesNotMatch(lastSeya(conversation), /Combien de kilos/i);
+  assert.equal(conversation.qualification.kilos, "pas de perte de poids");
+  conversation = await say(conversation, "Non");
+  assert.doesNotMatch(lastSeya(conversation), /Combien de kilos/i);
+  assert.match(lastSeya(conversation), /bilan|Souhaitez-vous/i);
+});
+
+test("Gaillard Paula : tarifs, e-mail, rendez-vous déjà pris, et la graisse est bien éliminée", async () => {
+  let conversation = open("Soin minceur");
+  conversation = await say(
+    conversation,
+    "Bonjour Seya. J’aimerais réduire la graisse au niveau du ventre, du dos et un peu des jambes. Je souhaiterais faire un bilan minceur complet. Pourriez-vous également me renseigner sur les tarifs et me dire combien de séances seraient nécessaires pour perdre environ 2 à 3 kg de graisse ?",
+  );
+  assert.doesNotMatch(lastSeya(conversation), /Quel est votre objectif, et quelles zones/i);
+  assert.match(lastSeya(conversation), /séances se précise au bilan|offert/i);
+  assert.doesNotMatch(lastSeya(conversation), /Je n’ai pas cette information/i);
+
+  conversation = await say(conversation, "Je n’ai jamais essayé de soins minceur ni de traitements avec des appareils.");
+  assert.match(lastSeya(conversation), /Souhaitez-vous que je fasse remonter/i);
+
+  conversation = await say(
+    conversation,
+    "Bonjour, vous pouvez m'envoyer le rendez vous, sur mon mail. urquizavacapaula@gmail.com",
+  );
+  assert.match(lastSeya(conversation), /urquizavacapaula@gmail.com/);
+  assert.doesNotMatch(lastSeya(conversation), /Libération|souhaitez-vous que je fasse remonter/i);
+
+  conversation = await say(
+    conversation,
+    "Oui, j’ai parlé ce matin avec l’une de vos collègues, qui m’a fixé un rendez-vous pour ce samedi à 7h30 du matin. J’aimerais recevoir la confirmation à l’adresse e-mail urquizavacapaula@gmail.com, car celle que vous avez enregistrée n’est pas correcte.",
+  );
+  assert.match(lastSeya(conversation), /samedi 7h30/);
+  assert.match(lastSeya(conversation), /urquizavacapaula@gmail.com/);
+  assert.doesNotMatch(lastSeya(conversation), /Libération|souhaitez-vous que je fasse remonter|rappellera pour convenir/i);
+
+  conversation = await say(
+    conversation,
+    "Bonjour, j’ai vu votre publicité sur Instagram. J’aimerais savoir quelle technique vous utilisez pour réduire la graisse du ventre, du dos et des cuisses. Est-ce que ce traitement élimine réellement la graisse ou fait simplement perdre des centimètres temporairement ?",
+  );
+  assert.match(lastSeya(conversation), /plusieurs techniques/);
+  assert.match(lastSeya(conversation), /irréversible/);
+  assert.doesNotMatch(lastSeya(conversation), /Je n’ai pas cette information/i);
+});
+
+test("Gaillard Vanessa : un oui, même avec une question, transmet sans redemander", async () => {
+  let conversation = open("Soin minceur");
+  conversation = await say(conversation, "Perte de poids en général et rétention d'eau au niveau des jambes");
+  conversation = await say(conversation, "Ventre + jambes");
+  conversation = await say(conversation, "Diététicienne");
+  assert.match(lastSeya(conversation), /Souhaitez-vous que je fasse remonter/i);
+  conversation = await say(conversation, "Oui mais quelle serait vos disponibilités ? Un samedi ?");
+  assert.match(lastSeya(conversation), /transmets votre préférence|rappellera/i);
+  assert.doesNotMatch(lastSeya(conversation), /Souhaitez-vous que je fasse remonter/i);
+  assert.equal(conversation.status, "À recontacter");
+  assert.ok(conversation.teamNotes?.handedOffAt);
+  for (const reply of ["Oki", "Je suis plutôt disponible entre 12h et 14h ou après 18h en semaine pour un appel", "Ouo", "Oui"]) {
+    conversation = await say(conversation, reply);
+    assert.doesNotMatch(lastSeya(conversation), /Souhaitez-vous que je fasse remonter/i, reply);
+  }
+});
+
 test("Gaillard : consigne « Ne lui applique pas l’offre » détectée comme fuite", () => {
   const gaillard = require("./gaillard");
   assert.equal(
@@ -294,10 +365,8 @@ test("Gaillard : disponibilité spontanée gardée pour l’équipe, sans promes
   assert.doesNotMatch(mail, /opératrice/i);
 
   conversation = await say(conversation, "Samedi matin c'est mieux");
-  assert.equal(
-    lastSeya(conversation),
-    "Merci, je transmets votre préférence à l’équipe 😊 Un expert ou une experte du centre vous rappellera pour organiser votre rendez-vous.",
-  );
+  assert.equal(lastSeya(conversation), "Merci, je note votre préférence pour l’équipe 😊");
+  assert.doesNotMatch(lastSeya(conversation), /Souhaitez-vous que je fasse remonter|samedi/i);
 });
 
 test("Gaillard : pantalon et modalités non renseignées, réponse prudente", async () => {
@@ -379,20 +448,73 @@ test("Gaillard : adresse du centre uniquement, pas de distance ni d’autre cent
   assert.doesNotMatch(lastSeya(conversation), /centre à|autre centre/i);
 });
 
-test("Gaillard : relances sans demande de disponibilités ni opératrice", () => {
+test("Gaillard : oui au bilan et demande de prix transmet le rappel", async () => {
+  let conversation = open("Soin minceur");
+  conversation = await say(
+    conversation,
+    "Pour ma part, j'aimerais perdre de la graisse au niveau du ventre. Pour le reste, je peux y parvenir en faisant plus d'exercice.",
+  );
+  conversation = await say(
+    conversation,
+    "J'ai essayé la cryothérapie une fois, il y a de nombreuses années",
+  );
+  conversation = await say(
+    conversation,
+    "Oui, avec plaisir. Ce serait super d'avoir aussi une liste des prix.",
+  );
+  const reply = lastSeya(conversation);
+  assert.match(reply, /offerts, c’est gratuit|devis personnalisé/i);
+  assert.match(reply, /expert ou une experte minceur.*rappellera/i);
+  assert.doesNotMatch(reply, /ce que vous recherchez|déjà testé|quel est votre objectif/i);
+  assert.equal(conversation.status, "À recontacter");
+  assert.ok(conversation.teamNotes?.handedOffAt);
+  assert.equal(conversation.bookingState.pendingQuestion, "callback");
+  const relance = relanceCopy(conversation, 1, GAILLARD, seya);
+  assert.match(relance, /vous rappellera/);
+  assert.doesNotMatch(relance, /ce que vous recherchez/i);
+});
+
+test("Gaillard : sans texte saisi, la relance ne demande ni dispo ni opératrice", () => {
   const conversation = open("Soin minceur");
   for (const round of [1, 2, 3]) {
     const text = relanceCopy(conversation, round, GAILLARD, seya);
     assert.match(text, /expert ou une experte du centre/);
     assert.doesNotMatch(text, NO_PLANNING);
   }
+});
+
+test("Gaillard : le texte saisi part à son J+, tel quel", () => {
+  const conversation = open("Soin minceur");
   const custom = {
     ...seya,
     relances: [
-      { afterDays: 1, message: "Bonjour {prenom}, quand seriez-vous disponible pour qu’une opératrice vous rappelle ?" },
+      {
+        afterDays: 1,
+        message:
+          "Bonjour {prenom} 😊 C'est Seya de {centre}. Quel jour et à quelle heure êtes-vous disponible ? Une opératrice vous rappellera à ce moment-là",
+      },
+      {
+        afterDays: 15,
+        message:
+          "Bonjour {prenom} 😊 Votre demande est toujours enregistrée chez {centre} (offre : {offre}).",
+      },
+      {
+        afterDays: 30,
+        message:
+          "Bonjour {prenom} 🌸 N'oubliez pas : notre offre ({offre}) est toujours valable chez {centre}.",
+      },
     ],
   };
-  assert.doesNotMatch(relanceCopy(conversation, 1, GAILLARD, custom), NO_PLANNING);
+  const first = relanceCopy(conversation, 1, GAILLARD, custom);
+  assert.match(first, /Bonjour Léa/);
+  assert.match(first, /Gaillard/);
+  assert.match(first, /opératrice vous rappellera/);
+  const second = relanceCopy(conversation, 2, GAILLARD, custom);
+  assert.match(second, /toujours enregistrée chez JFG Clinic Gaillard/);
+  assert.match(second, /offre :/);
+  const third = relanceCopy(conversation, 3, GAILLARD, custom);
+  assert.match(third, /toujours valable chez JFG Clinic Gaillard/);
+  assert.doesNotMatch(third, /opératrice/);
 });
 
 test("Clermont n’est pas concerné : la mission rappel garde son fonctionnement", async () => {
@@ -623,7 +745,30 @@ test("Gaillard : bonne après-midi n'est pas une préférence d'horaire", async 
     ],
   };
   conversation = await say(conversation, "Merci bonne après midi");
-  assert.doesNotMatch(lastSeya(conversation), /préférence|après-midi|apres-midi/i);
+  assert.equal(lastSeya(conversation), "Merci, je vous souhaite également un très bel après-midi.");
+  assert.doesNotMatch(lastSeya(conversation), /préférence|rappellera|transmets/i);
+});
+
+test("Gaillard : bonne soirée après le rappel, sans répéter la transmission", async () => {
+  const gaillard = require("./gaillard");
+  let conversation = open("Soin minceur");
+  conversation = {
+    ...conversation,
+    status: "À recontacter",
+    teamNotes: { handedOffAt: NOW.toISOString(), family: "minceur" },
+    bookingState: { ...(conversation.bookingState || {}), pendingQuestion: "callback" },
+    messages: [
+      ...(conversation.messages || []),
+      {
+        author: "seya",
+        text: "Merci pour ces précisions 😊 Un expert ou une experte minceur du centre vous rappellera pour échanger sur votre besoin et convenir de votre rendez-vous.",
+      },
+    ],
+  };
+  conversation = await say(conversation, "Je vous en remercie et vous souhaite une bonne soirée .");
+  assert.equal(lastSeya(conversation), "Merci, je vous souhaite également une très belle soirée.");
+  assert.doesNotMatch(lastSeya(conversation), /transmets|rappellera|préférence/i);
+  assert.equal(gaillard.availabilityMention("Je suis dispo mardi soir"), true);
 });
 
 test("Gaillard : une rédaction IA qui annonce un rappel non déclenché est rejetée", async () => {

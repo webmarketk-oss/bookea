@@ -114,6 +114,57 @@ test("relance 3 : à J+14, puis plus rien après 3 relances", () => {
   assert.equal(pickRelanceRound(noExtra, NOW), 0);
 });
 
+test("J+1, J+15, J+30 : le message du palier atteint, pas le message du J+1", () => {
+  const relances = [
+    { afterDays: 1, message: "message J+1" },
+    { afterDays: 15, message: "message J+15" },
+    { afterDays: 30, message: "message J+30" },
+  ];
+  const roundAt = (hours, extra = {}) =>
+    pickRelanceRound(
+      conversation({
+        messages: [{ id: "m1", author: "seya", text: "Bonjour Léa", at: hoursAgo(hours) }],
+        ...extra,
+      }),
+      NOW,
+      { relances },
+    );
+
+  assert.equal(roundAt(20), 0);
+  assert.equal(roundAt(25), 1);
+  assert.equal(roundAt(10 * 24), 1);
+  assert.equal(roundAt(16 * 24), 2);
+  assert.equal(
+    roundAt(16 * 24, { relanceCount: 1, lastRelanceAt: hoursAgo(15 * 24) }),
+    2,
+  );
+  assert.equal(
+    roundAt(20 * 24, { relanceCount: 2, lastRelanceAt: hoursAgo(4 * 24) }),
+    0,
+  );
+  assert.equal(roundAt(31 * 24), 3);
+  assert.equal(
+    roundAt(31 * 24, { relanceCount: 1, lastRelanceAt: hoursAgo(20 * 24) }),
+    3,
+  );
+  assert.equal(
+    roundAt(31 * 24, { relanceCount: 3, lastRelanceAt: hoursAgo(24) }),
+    0,
+  );
+
+  const thread = conversation({
+    messages: [{ id: "m1", author: "seya", text: "Bonjour Léa", at: hoursAgo(16 * 24) }],
+  });
+  assert.equal(
+    relanceCopy(thread, roundAt(16 * 24), "Centre Test", { relances }),
+    "message J+15",
+  );
+  assert.equal(
+    relanceCopy(thread, roundAt(31 * 24), "Centre Test", { relances }),
+    "message J+30",
+  );
+});
+
 test("J+ saisi par le centre : une seule relance à J+14", () => {
   const relances = [
     { afterDays: 14, message: "" },

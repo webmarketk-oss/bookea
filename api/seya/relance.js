@@ -33,6 +33,7 @@ const { isSeyaOff, readCenterSeya, writeSeyaConversations } = require("./store")
 const { isSameSeyaConversation } = require("./conversation-key");
 const { activeLeadPause, withLeadPause } = require("./lead-pause");
 const { sendCallbackHandoff, teamHandoffRetryDue } = require("./center-notify");
+const gaillard = require("./gaillard");
 const {
   conversationOnRelanceHold,
   crmRecallDayFor,
@@ -139,9 +140,15 @@ async function relanceCenter(supabase, center, now = new Date(), preloaded = nul
     Array.isArray(seya.conversations) ? seya.conversations : [],
     now,
   );
-  const conversations = retried.conversations;
+  const recovered = await recoverGaillardCallbacks(
+    center,
+    seya,
+    retried.conversations,
+    now,
+  );
+  const conversations = recovered.conversations;
   if (!agent.relanceEnabled || isSeyaOff(seya)) {
-    await syncCrmStatusOnly(supabase, center.id, conversations, now, retried.changed);
+    await syncCrmStatusOnly(supabase, center.id, conversations, now, retried.changed || recovered.changed);
     return [];
   }
 
@@ -151,7 +158,7 @@ async function relanceCenter(supabase, center, now = new Date(), preloaded = nul
   const bookedKeys = await loadBookedVisitKeys(supabase, center.id);
   const crmHold = await loadRelanceHoldKeys(supabase, center.id, now);
   await markSeyaBookedLeads(supabase, center.id, crmHold, now);
-  let closed = retried.changed;
+  let closed = retried.changed || recovered.changed;
 
   for (const conversation of conversations) {
     const synced = await syncCrmFromConversation(
@@ -307,6 +314,100 @@ async function syncCrmStatusOnly(supabase, centerId, conversations, now = new Da
 
 function leadMessageCount(conversation) {
   return (conversation?.messages || []).filter((item) => item.author === "lead").length;
+}
+
+/** Gaillard : un oui au bilan déjà donné, sans transmission, part à l’équipe au prochain passage. */
+async function recoverGaillardCallbacks(center, seya, conversations, now) {
+  if (!gaillard.isGaillardCenter(center?.name)) {
+    return { conversations, changed: false };
+  }
+  let changed = false;
+  const next = [];
+  for (const conversation of conversations) {
+    const missed = gaillard.missedCallbackHandoff(conversation);
+    const confirmDue = Boolean(conversation?.teamNotes?.callbackConfirmDue);
+    if (!missed && !confirmDue) {
+      next.push(conversation);
+      continue;
+    }
+    let current = conversation;
+    if (missed) {
+      const family = recoveryFamily(conversation);
+      const qualification = conversation.qualification || {};
+      current = {
+        ...conversation,
+        status: "À recontacter",
+        teamNotes: {
+          ...(conversation.teamNotes || {}),
+          family,
+          need: [
+            qualification.zone,
+            qualification.detail,
+            qualification.objectif && qualification.objectif !== qualification.detail
+              ? `objectif : ${qualification.objectif}`
+              : "",
+            qualification.kilos ? `kilos : ${qualification.kilos}` : "",
+            conversation.teamNotes?.need,
+          ]
+            .filter(Boolean)
+            .join(" · "),
+          tried: qualification.tried || conversation.teamNotes?.tried || "",
+          handedOffAt: now.toISOString(),
+          callbackConfirmDue: !gaillard.alreadyPromisedCallback(conversation),
+        },
+        bookingState: {
+          ...(conversation.bookingState || {}),
+          pendingQuestion: "callback",
+          appointmentStatus: "none",
+          lastOfferedSlots: [],
+        },
+      };
+      current = await sendCallbackHandoff({ center, seya, conversation: current, now });
+      changed = true;
+    }
+    if (current.teamNotes?.callbackConfirmDue && !isRelanceQuietHours(now)) {
+      const text = gaillard.closingReply(current.teamNotes?.family || recoveryFamily(current));
+      const phone = String(current.phone || "").trim();
+      const result = phone
+        ? await sendSharedWhatsApp(phone, text, {
+            firstName: current.firstName,
+            centerName: center.name,
+            treatment: current.offerLabel || current.qualification?.need || current.treatment || "",
+            campaign: current.campaign || "",
+            offerLabel: current.offerLabel || "",
+          })
+        : { sent: false };
+      current = {
+        ...current,
+        messages: result.sent
+          ? [...(current.messages || []), message("seya", text)]
+          : current.messages,
+        teamNotes: { ...(current.teamNotes || {}), callbackConfirmDue: false },
+        updatedAt: now.toISOString(),
+      };
+      changed = true;
+    }
+    next.push(current);
+  }
+  return { conversations: next, changed };
+}
+
+function recoveryFamily(conversation) {
+  const stored = String(conversation?.teamNotes?.family || "").trim();
+  if (stored) {
+    return stored;
+  }
+  const blob = `${conversation?.treatment || ""} ${conversation?.qualification?.need || ""} ${conversation?.offerLabel || ""}`
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+  if (/epil|laser|poil/.test(blob)) {
+    return "epilation";
+  }
+  if (/visage|peau/.test(blob)) {
+    return "visage";
+  }
+  return "minceur";
 }
 
 function stillDueForRelance(seya, conversation, crmHold) {
@@ -488,16 +589,16 @@ function pickRelanceRound(conversation, now = new Date(), extras = {}) {
     return 0;
   }
 
-  if (already === 0 && idleDays >= days[0]) {
-    return 1;
+  // J+1, J+15, J+30 : le message est celui du palier atteint, pas le premier
+  // message dès que J+1 est dépassé. Un palier manqué ne décale pas les suivants.
+  let due = 0;
+  for (let index = 0; index < days.length; index += 1) {
+    if (idleDays < days[index]) {
+      break;
+    }
+    due = index + 1;
   }
-  if (already === 1 && idleDays >= days[1]) {
-    return 2;
-  }
-  if (already === 2 && idleDays >= days[2]) {
-    return 3;
-  }
-  return 0;
+  return due > already ? due : 0;
 }
 
 module.exports.isFullRelancePass = isFullRelancePass;

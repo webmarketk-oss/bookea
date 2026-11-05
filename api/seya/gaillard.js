@@ -66,7 +66,7 @@ function acceptsContinue(text) {
     return false;
   }
   return (
-    /^(oui|ok|okay|d'accord|dac|volontiers|avec plaisir|je veux|je suis interes|pourquoi pas)\b/.test(
+    /^(oui+|ok+|okay|oki+|ouo+|ouai+s?|yes|yep|dac|d'accord|volontiers|avec plaisir|je veux|je suis interes|pourquoi pas)\b/.test(
       value,
     ) ||
     /\b(continuer|la suite|le bilan|ca m'interesse|ça m'intéresse|je continue|go)\b/.test(value) ||
@@ -91,6 +91,61 @@ function lastSeyaAskedPath(conversation) {
   return /bilan (minceur )?offert|souhaitez-vous que je (fasse remonter|transmette)|ca vous parle|ça vous parle|organiser un bilan/i.test(
     lastSeyaQuestion(conversation),
   );
+}
+
+const CALLBACK_OFFER =
+  /souhaitez-vous que je (fasse remonter|transmette)|ça vous parle|ca vous parle|organiser un bilan/i;
+
+/** Le prospect a déjà dit oui au bilan / au rappel, après la proposition. */
+function acceptedCallbackInThread(conversation) {
+  if (conversation?.qualification?.declined) {
+    return false;
+  }
+  let offered = false;
+  let accepted = false;
+  for (const item of conversation?.messages || []) {
+    const text = String(item?.text || "");
+    if (item?.author === "seya" && CALLBACK_OFFER.test(text)) {
+      offered = true;
+      accepted = false;
+    }
+    if (!offered || item?.author !== "lead") {
+      continue;
+    }
+    if (declinesOffer(text)) {
+      accepted = false;
+      offered = false;
+    } else if (acceptsContinue(text)) {
+      accepted = true;
+    }
+  }
+  return accepted;
+}
+
+function lastSeyaOfferedCallback(conversation) {
+  return CALLBACK_OFFER.test(lastSeyaQuestion(conversation));
+}
+
+function alreadyPromisedCallback(conversation) {
+  return (conversation?.messages || []).some(
+    (item) =>
+      item?.author === "seya" &&
+      /vous rappellera pour (échanger|organiser)|c’est bien noté, je le transmets|je transmets votre (demande|préférence)/i.test(
+        String(item.text || ""),
+      ),
+  );
+}
+
+/** Oui déjà donné, mais la transmission à l’équipe n’a pas été enregistrée. */
+function missedCallbackHandoff(conversation) {
+  if (
+    conversation?.teamNotes?.handedOffAt ||
+    conversation?.teamHandoff?.status === "sent" ||
+    conversation?.qualification?.declined
+  ) {
+    return false;
+  }
+  return acceptedCallbackInThread(conversation);
 }
 
 function pathQuestion() {
@@ -205,6 +260,9 @@ function sessionCountReply(family, sources = []) {
   }
   if (family === "epilation") {
     return "Le nombre de séances se précise au bilan pilaire, selon la zone et la pilosité.";
+  }
+  if (family === "minceur") {
+    return "Le nombre de séances se précise au bilan, selon les zones et l’objectif.";
   }
   return "";
 }
@@ -465,16 +523,96 @@ function asksProcess(text) {
 function asksTechnology(text) {
   const value = normalize(text);
   return (
-    /technologie|machines?|appareils?|equipements?|materiel|cryolipolyse|cryo|radiofrequ|ultrasons?|lumiere pulsee|c[' ]est (du |de la )?laser/.test(
+    /technologie|technique|machines?|appareils?|equipements?|materiel|cryolipolyse|cryo|radiofrequ|ultrasons?|lumiere pulsee|c[' ]est (du |de la )?laser/.test(
       value,
     ) &&
-    (/\?|quoi|quelles|avez|utilisez|utilises|presentes|faisiez|faites|pour (la |le )?minceur|pour (l[' ]|la )?epilation/.test(
+    (/\?|quoi|quelles|avez|utilisez|utilises|presentes|faisiez|faites|pour (la |le )?minceur|pour (l[' ]|la )?epilation|graisse/.test(
       value,
     ) ||
       /lumiere pulsee|cryolipolyse|radiofrequ/.test(value))
   );
 }
 
+function asksFatRemoval(text) {
+  const value = normalize(text);
+  const aboutFat = /graisse|minceur|ventre|dos|cuisse|jambe/.test(value);
+  return (
+    aboutFat &&
+    (/technique/.test(value) ||
+      /elimine|eliminer/.test(value) ||
+      (/centimetre/.test(value) && /temporaire|graisse/.test(value)))
+  );
+}
+
+function fatRemovalReply() {
+  return "Nous avons plusieurs techniques au centre. Le bilan sert justement à déterminer laquelle correspond à votre silhouette. Oui, ces techniques éliminent réellement les graisses, de manière irréversible.";
+}
+
+function emailAddress(text) {
+  const match = String(text || "").match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i);
+  return match ? match[0] : "";
+}
+
+function appointmentWhen(text) {
+  const value = normalize(text);
+  const day = value.match(/\b(lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche)\b/);
+  const time = value.match(/\b(\d{1,2})\s*h\s*(\d{2})?\b/);
+  if (!day && !time) {
+    return "";
+  }
+  const hour = time ? `${time[1]}h${time[2] || ""}` : "";
+  return [day?.[0], hour].filter(Boolean).join(" ");
+}
+
+function alreadyHasAppointment(text) {
+  const value = normalize(text);
+  return (
+    /rendez|rdv/.test(value) &&
+    /collegue|m[' ]a fixe|deja (pris|fixe|reserve)|rendez[- ]vous pour/.test(value)
+  );
+}
+
+/** Demande d’envoi ou de correction d’e-mail pour un rendez-vous. "" sinon. */
+function appointmentMailReply(text) {
+  const email = emailAddress(text);
+  const value = normalize(text);
+  const aboutAppointment = /rendez|rdv|confirmation/.test(value);
+  const aboutMail = Boolean(email) || /e[- ]?mail|courriel|\bmail\b/.test(value);
+  if (!aboutMail || !aboutAppointment) {
+    return "";
+  }
+  if (alreadyHasAppointment(text)) {
+    const when = appointmentWhen(text);
+    const whenBit = when ? ` de ${when}` : "";
+    const mailBit = email
+      ? ` Je transmets ${email} à l’équipe pour la confirmation.`
+      : " Je transmets la bonne adresse e-mail à l’équipe.";
+    return `C’est noté, votre rendez-vous${whenBit} est bien pris.${mailBit}`;
+  }
+  if (!email) {
+    return "";
+  }
+  return `C’est noté. Je transmets ${email} à l’équipe pour vous envoyer le rendez-vous.`;
+}
+
+function withMailNote(conversation, text) {
+  const email = emailAddress(text);
+  const when = alreadyHasAppointment(text) ? appointmentWhen(text) : "";
+  const extra = [email ? `e-mail : ${email}` : "", when ? `rendez-vous déjà fixé : ${when}` : ""]
+    .filter(Boolean)
+    .join(" · ");
+  if (!extra) {
+    return conversation;
+  }
+  const notes = conversation?.teamNotes || {};
+  return {
+    ...conversation,
+    teamNotes: {
+      ...notes,
+      need: [notes.need, extra].filter(Boolean).join(" · "),
+    },
+  };
+}
 function asksChildCompanion(text) {
   const value = normalize(text);
   return /enfant|bebe|nourrisson|avec mon fils|avec ma fille/.test(value);
@@ -498,6 +636,9 @@ function processReply(family, sources = []) {
 }
 
 function technologyReply(text, sources = [], { family, zone } = {}) {
+  if (family === "minceur" && asksFatRemoval(text)) {
+    return fatRemovalReply();
+  }
   if (/lumiere pulsee|\bipl\b/.test(normalize(text))) {
     const pulsed = findFacts(sources, /lumiere pulsee|\bipl\b/, 1)[0];
     if (pulsed) {
@@ -656,6 +797,34 @@ function kilosQuestion() {
   return "Combien de kilos aimeriez-vous perdre ?";
 }
 
+function declinesWeightLoss(text) {
+  const value = normalize(text);
+  return /pas a perdre (du |de |des )?(poids|kilos?|kg)|sans perdre (du |de )?(poids|kilos?|kg)|pas (de |la )?perte de poids|sans perte de poids|pas envie de maigrir|ne (veux|souhaite|cherche|voudrais) pas (a |de )?maigrir|ne (cherche|souhaite|veux|voudrais) pas\b.{0,80}\b(perdre (du |de |des )?(poids|kilos?|kg)|maigrir|perte de poids)/.test(
+    value,
+  );
+}
+
+/** Objectif local sans perte de poids : on reformule ce qu’elle a dit, on ne demande pas les kilos. */
+function shapeWithoutWeightReply(text) {
+  const value = normalize(text);
+  const slim = /plutot mince|je suis mince|assez mince/.test(value);
+  let what = "cette zone";
+  if (/sous le nombril/.test(value)) {
+    what = "ce petit amas sous le nombril";
+  } else if (/bas du ventre/.test(value)) {
+    what = "le bas du ventre";
+  } else if (/amas/.test(value) && /ventre/.test(value)) {
+    what = "cet amas sur le ventre";
+  } else if (/ventre/.test(value)) {
+    what = "le ventre";
+  }
+  const flat = /plat/.test(value) ? ", pour un ventre plus plat" : "";
+  const who = slim
+    ? "Vous êtes plutôt mince, et ce qui vous gêne, c’est "
+    : "Ce qui vous gêne, c’est ";
+  return `Je comprends. ${who}${what}${flat}, pas une perte de poids. Vous avez déjà essayé quelque chose pour ça ?`;
+}
+
 function lastSeyaAskedKilos(conversation) {
   return /combien de kilos/i.test(lastSeyaQuestion(conversation));
 }
@@ -713,8 +882,50 @@ function asksIfAi(text, isIdentityQuestion) {
   );
 }
 
+function courtesyWishText(text) {
+  return normalize(text)
+    .replace(/[!.,;:…]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/** « Bonne soirée », « je vous remercie et vous souhaite une bonne soirée » : pas un horaire. */
+function isCourtesyWish(text) {
+  const value = courtesyWishText(text);
+  if (!value || value.length > 140) {
+    return false;
+  }
+  if (
+    /\b(dispo|disponible|plutot|vers|lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche|demain|aujourd'hui|ce soir|matin|matinee|\d{1,2}\s*h)\b/.test(
+      value,
+    )
+  ) {
+    return false;
+  }
+  return /^(je vous (en )?remercie( beaucoup)?( et)?|merci( beaucoup)?( a vous)?( et)?)?( ?(?:je )?vous souhaite| ?passez)? ?(une |un )?(tres )?(bonne|bon|belle|bel) (soiree|journee|nuit|apres[- ]?midi|fin de journee)( a vous| egalement| aussi)?$/.test(
+    value,
+  );
+}
+
+function courtesyWishReply(text) {
+  const value = courtesyWishText(text);
+  if (/\bnuit\b/.test(value)) {
+    return "Merci, je vous souhaite également une très bonne nuit.";
+  }
+  if (/apres[- ]?midi/.test(value)) {
+    return "Merci, je vous souhaite également un très bel après-midi.";
+  }
+  if (/journee/.test(value)) {
+    return "Merci, je vous souhaite également une très belle journée.";
+  }
+  return "Merci, je vous souhaite également une très belle soirée.";
+}
+
 function availabilityMention(text) {
   const value = normalize(text);
+  if (isCourtesyWish(text)) {
+    return false;
+  }
   if (
     /^(merci( beaucoup)?[, ]*)?(et )?(passez une )?(tres )?(bonne|bon) apres[- ]?midi( a vous| a toute)?[.! ]*$/.test(
       value,
@@ -823,11 +1034,22 @@ function safeGaillardText(text, family) {
     .trim();
 }
 
-function relanceText(round, firstName, care, custom) {
-  if (custom && !breaksGaillardRules(custom)) {
+function relanceText(round, firstName, care, custom, conversation) {
+  const about = care ? `votre demande pour ${care}` : "votre demande";
+  const hello = firstName ? `Bonjour ${firstName}` : "Bonjour";
+  if (
+    acceptedCallbackInThread(conversation) ||
+    conversation?.teamNotes?.handedOffAt ||
+    conversation?.bookingState?.pendingQuestion === "callback"
+  ) {
+    return `${hello}, je reviens vers vous au sujet de ${about}. C’est bien noté : un expert ou une experte du centre vous rappellera 😊`;
+  }
+  if (custom) {
     return custom;
   }
-  const about = care ? `votre demande pour ${care}` : "votre demande";
+  if (conversation?.qualification?.pathOffered && Number(round) === 1) {
+    return `${hello}, je reviens vers vous au sujet de ${about}. ${pathQuestion()}`;
+  }
   if (Number(round) >= 3) {
     const hello = firstName ? `Bonjour ${firstName} 😊` : "Bonjour 😊";
     return `${hello} Je reviens une dernière fois vers vous au sujet de ${about}. Si vous le souhaitez, un expert ou une experte du centre peut vous rappeler pour en parler.`;
@@ -836,7 +1058,6 @@ function relanceText(round, firstName, care, custom) {
     const who = firstName ? `${firstName}, je` : "Je";
     return `${who} ne veux pas vous relancer inutilement. Si ${about} est toujours d’actualité, répondez simplement à ce message : un expert ou une experte du centre vous rappellera.`;
   }
-  const hello = firstName ? `Bonjour ${firstName}` : "Bonjour";
   return `${hello}, je reviens vers vous au sujet de ${about}. Dites-moi en quelques mots ce que vous recherchez, un expert ou une experte du centre vous rappellera ensuite 😊`;
 }
 
@@ -848,7 +1069,7 @@ function promptRules(family) {
       ? "Parcours minceur : 1) accueil, 2) besoin (objectif + zones ; kilos si perte de poids sans montant), 3) question régimes / solutions déjà testées, 4) proposer le bilan et la séance découverte offerts en une phrase, 5) question ouverte. Interdit de recopier la fiche, les compléments, les appareils ou une consigne interne. Une seule question à la fois. Interdit de clôturer juste après les zones ou juste après « déjà testé »."
       : "Parcours : 1) comprendre le besoin (épilation : zones ; visage : préoccupations), 2) demander s’il a déjà testé une solution, 3) conclure. Une seule question à la fois.",
     `Conclusion, seulement quand le prospect confirme qu’il veut être rappelé / le bilan : « ${closingReply(family)} » Interdit d’annoncer cette conclusion tant que la qualification minceur n’est pas allée jusqu’à la proposition de bilan.`,
-    "Tu restes chaleureuse et tu laisses toujours une porte ouverte (question utile). Interdit de fermer le fil avec un simple « je transmets » si le prospect pose encore une question ou dit seulement « oui ».",
+    "Si le prospect accepte le bilan ou le rappel, tu transmets tout de suite, même s’il demande aussi un tarif : tu réponds au tarif, puis tu annonces le rappel dans le même message. Interdit de redemander l’objectif, les zones ou ce qu’il a déjà testé.",
     "Si le prospect donne spontanément un jour ou une heure, tu dis seulement que tu transmets sa préférence à l’équipe. Tu ne promets aucun rappel à cette heure, tu ne confirmes aucun rendez-vous, tu ne transformes pas une disponibilité pour venir en disponibilité pour un appel.",
     "Tu dis « un expert ou une experte du centre », jamais « une opératrice ».",
     "Interdit de demander où habite le prospect ou à quelle distance il se trouve, et interdit de proposer un autre centre (Annemasse ou autre). Si on te demande où est le centre, tu donnes uniquement l’adresse fournie plus bas.",
@@ -860,13 +1081,18 @@ function promptRules(family) {
 
 module.exports = {
   GAILLARD_VISIT_MINUTES,
+  acceptedCallbackInThread,
   acceptsContinue,
+  alreadyPromisedCallback,
   afterHandoffReply,
+  alreadyHasAppointment,
+  appointmentMailReply,
   asksBookingNow,
   asksChildCompanion,
   asksCountry,
   asksDeviceCompare,
   asksDiscoveryFree,
+  asksFatRemoval,
   asksIfAi,
   asksLanguageHelp,
   asksPermanence,
@@ -884,6 +1110,8 @@ module.exports = {
   childCompanionReply,
   closingReply,
   countryReply,
+  courtesyWishReply,
+  declinesWeightLoss,
   cryoPriceUnknownReply,
   declinedReply,
   declinesOffer,
@@ -893,11 +1121,13 @@ module.exports = {
   durationReply,
   expertLabel,
   expressesInterest,
+  fatRemovalReply,
   healthNotedReply,
   hesitationClarifyReply,
   identityReply,
   isAnswerLike,
   isGaillardCenter,
+  isCourtesyWish,
   isIndecisive,
   keepConversationReply,
   kilosQuestion,
@@ -907,11 +1137,13 @@ module.exports = {
   lastSeyaAskedObjectif,
   lastSeyaAskedPath,
   lastSeyaAskedTried,
+  lastSeyaOfferedCallback,
   leaksInternalBrief,
   looksGarbledFrench,
   looksLikeHandoffClose,
   mentionsOtherClinicVisit,
   minceurPathFacts,
+  missedCallbackHandoff,
   minceurPathReply,
   missingPracticalReply,
   missingPriceReply,
@@ -933,6 +1165,7 @@ module.exports = {
   safeGaillardText,
   serviceOfferedReply,
   sessionCountReply,
+  shapeWithoutWeightReply,
   supportTopicFacts,
   technologyReply,
   trialWhenReply,
@@ -941,5 +1174,6 @@ module.exports = {
   validatedModality,
   varyQuestion,
   whiteHairLaserReply,
+  withMailNote,
   withPreference,
 };
