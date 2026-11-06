@@ -127,20 +127,14 @@ export default function KPIDashboard({ leads }: KPIDashboardProps) {
     .filter((lead) => soldStatuses.includes(lead.status))
     .reduce((total, lead) => total + (Number(lead.dealAmount) || 0), 0);
 
-  const conversionSalesCount = soldLeads.filter(
-    (lead) => !(lead.dealAmount > 0) || lead.dealAmount >= 100,
-  ).length;
-  const conversionRate = ratio(
-    conversionSalesCount,
-    devisCount + conversionSalesCount,
-  );
-  const rdvRate = Math.min(100, ratio(rdvCount, totalProspects));
-  const attendanceRate = ratio(attendedLeads.length, attendedLeads.length + missedCount);
-  const depositRate = ratio(depositCount, Math.max(soldCount + rdvCount, 1));
-  const redRate = ratio(lostCount, totalProspects);
-  const remainingRate = ratio(remainingCount, totalProspects);
-  const outOfZoneCount = countByStatus(periodLeads, ["Hors zone"]);
-  const outOfZoneRate = ratio(outOfZoneCount, totalProspects);
+  const globalRates = performanceRates(periodLeads, leads, isInPeriod);
+  const conversionRate = globalRates.conversion;
+  const rdvRate = globalRates.rdv;
+  const attendanceRate = globalRates.attendance;
+  const depositRate = globalRates.deposit;
+  const redRate = globalRates.red;
+  const remainingRate = globalRates.remaining;
+  const outOfZoneRate = globalRates.outOfZone;
 
   const campaignRows = getCampaignRows(periodLeads);
   const periodInvoices = invoices.filter((invoice) =>
@@ -201,6 +195,17 @@ export default function KPIDashboard({ leads }: KPIDashboardProps) {
     .filter(
       (row) => row.prospects > 0 || row.sold > 0 || row.cancelled > 0 || row.noShow > 0,
     );
+  const axisRateRows = leadAxisOrder
+    .map((axis) => {
+      const rows = periodLeads.filter((lead) => leadAxis(lead) === axis);
+      const axisLeads = leads.filter((lead) => leadAxis(lead) === axis);
+      return {
+        axis,
+        label: leadAxisLabels[axis],
+        ...performanceRates(rows, axisLeads, isInPeriod),
+      };
+    })
+    .filter((row) => row.prospects > 0 || hasVisibleRate(row));
 
   const cards = [
     {
@@ -525,6 +530,41 @@ export default function KPIDashboard({ leads }: KPIDashboardProps) {
               </table>
             </div>
           )}
+        </CardContent>
+      </Card>
+
+      <Card className="border-slate-200 py-0 shadow-sm">
+        <CardContent className="p-5">
+          <div>
+            <h3 className="text-sm font-black uppercase text-slate-700">
+              Taux par axe
+            </h3>
+            <p className="mt-1 text-sm font-medium text-slate-500">
+              Les mêmes taux que le bloc du haut. La ligne Global est le centre entier. Chaque autre ligne ne compte que les prospects de cet axe.
+            </p>
+          </div>
+          <div className="mt-5 overflow-x-auto rounded-xl border border-slate-100">
+            <table className="w-full min-w-[920px] text-left text-sm">
+              <thead className="bg-slate-50 text-xs uppercase text-slate-500">
+                <tr>
+                  <th className="px-4 py-3">Axe</th>
+                  <th className="px-4 py-3">Transformation</th>
+                  <th className="px-4 py-3">Présentiel</th>
+                  <th className="px-4 py-3">Prise RDV</th>
+                  <th className="px-4 py-3">Acompte</th>
+                  <th className="px-4 py-3">Leads rouge</th>
+                  <th className="px-4 py-3">Hors zone</th>
+                  <th className="px-4 py-3">Reste à traiter</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                <RateAxisRow label="Global" rates={globalRates} emphasis />
+                {axisRateRows.map((row) => (
+                  <RateAxisRow key={row.axis} label={row.label} rates={row} />
+                ))}
+              </tbody>
+            </table>
+          </div>
         </CardContent>
       </Card>
 
@@ -1163,6 +1203,102 @@ function niceChartMax(value: number) {
   return Math.ceil(safe / magnitude) * magnitude;
 }
 
+type PerformanceRates = {
+  prospects: number;
+  conversion: number;
+  attendance: number;
+  rdv: number;
+  deposit: number;
+  red: number;
+  outOfZone: number;
+  remaining: number;
+};
+
+function performanceRates(
+  periodRows: Lead[],
+  allRows: Lead[],
+  isInPeriod: (date: string) => boolean,
+): PerformanceRates {
+  const totalProspects = periodRows.length;
+  const rdvCount = allRows.filter((lead) => {
+    if (getLeadRdvTakenDates(lead).some(isInPeriod)) {
+      return true;
+    }
+    return isEverBookedLead(lead) && periodRows.includes(lead);
+  }).length;
+  const devisCount = allRows.filter((lead) =>
+    leadHasOutcomeBetween(lead, ["Devis"], isInPeriod),
+  ).length;
+  const soldLeads = allRows.filter((lead) =>
+    leadHasOutcomeBetween(lead, ["Vendu"], isInPeriod),
+  );
+  const attendedLeads = allRows.filter((lead) =>
+    leadHasOutcomeBetween(lead, ["Devis", "Vendu"], isInPeriod),
+  );
+  const missedCount = allRows.filter(
+    (lead) =>
+      !attendedLeads.includes(lead) &&
+      leadHasOutcomeBetween(lead, ["Annulation", "PVPP"], isInPeriod),
+  ).length;
+  const depositCount = countByStatus(periodRows, ["Acompte reçu", "Acompte validé"]);
+  const conversionSalesCount = soldLeads.filter(
+    (lead) => !(lead.dealAmount > 0) || lead.dealAmount >= 100,
+  ).length;
+
+  return {
+    prospects: totalProspects,
+    conversion: ratio(conversionSalesCount, devisCount + conversionSalesCount),
+    attendance: ratio(attendedLeads.length, attendedLeads.length + missedCount),
+    rdv: Math.min(100, ratio(rdvCount, totalProspects)),
+    deposit: ratio(depositCount, Math.max(soldLeads.length + rdvCount, 1)),
+    red: ratio(countByStatus(periodRows, lostStatuses), totalProspects),
+    outOfZone: ratio(countByStatus(periodRows, ["Hors zone"]), totalProspects),
+    remaining: ratio(countByStatus(periodRows, openToTreatStatuses), totalProspects),
+  };
+}
+
+function hasVisibleRate(rates: PerformanceRates) {
+  return (
+    rates.conversion > 0 ||
+    rates.attendance > 0 ||
+    rates.rdv > 0 ||
+    rates.deposit > 0 ||
+    rates.red > 0 ||
+    rates.outOfZone > 0 ||
+    rates.remaining > 0
+  );
+}
+
+function formatRate(value: number) {
+  return `${value.toLocaleString("fr-FR", {
+    maximumFractionDigits: 2,
+    minimumFractionDigits: 2,
+  })}%`;
+}
+
+function RateAxisRow({
+  label,
+  rates,
+  emphasis = false,
+}: {
+  label: string;
+  rates: PerformanceRates;
+  emphasis?: boolean;
+}) {
+  return (
+    <tr className={emphasis ? "bg-slate-50 font-semibold" : undefined}>
+      <td className="px-4 py-3 font-semibold text-slate-800">{label}</td>
+      <td className="px-4 py-3 text-emerald-600">{formatRate(rates.conversion)}</td>
+      <td className="px-4 py-3 text-cyan-600">{formatRate(rates.attendance)}</td>
+      <td className="px-4 py-3 text-blue-600">{formatRate(rates.rdv)}</td>
+      <td className="px-4 py-3 text-green-600">{formatRate(rates.deposit)}</td>
+      <td className="px-4 py-3 text-red-600">{formatRate(rates.red)}</td>
+      <td className="px-4 py-3 text-rose-600">{formatRate(rates.outOfZone)}</td>
+      <td className="px-4 py-3 text-violet-600">{formatRate(rates.remaining)}</td>
+    </tr>
+  );
+}
+
 function Rate({
   label,
   value,
@@ -1176,11 +1312,7 @@ function Rate({
     <div className="p-4">
       <p className="text-xs font-black uppercase text-slate-500">{label}</p>
       <p className={`mt-2 text-2xl font-black ${color}`}>
-        {value.toLocaleString("fr-FR", {
-          maximumFractionDigits: 2,
-          minimumFractionDigits: 2,
-        })}
-        %
+        {formatRate(value)}
       </p>
     </div>
   );
