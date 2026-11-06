@@ -178,18 +178,29 @@ export default function KPIDashboard({ leads }: KPIDashboardProps) {
   const axisRows = leadAxisOrder
     .map((axis) => {
       const rows = periodLeads.filter((lead) => leadAxis(lead) === axis);
-      const sold = rows.filter((lead) => soldStatuses.includes(lead.status));
+      const axisLeads = leads.filter((lead) => leadAxis(lead) === axis);
+      const soldAmount = rows.filter((lead) => soldStatuses.includes(lead.status));
+      const countInPeriod = (outcome: "Vendu" | "Annulation" | "PVPP") =>
+        axisLeads.filter((lead) => leadHasOutcomeBetween(lead, [outcome], isInPeriod))
+          .length;
       return {
         axis,
         label: leadAxisLabels[axis],
         prospects: rows.length,
         rdv: rows.filter((lead) => leadHasTakenRdv(lead)).length,
-        sold: sold.length,
-        revenue: sold.reduce((total, lead) => total + (Number(lead.dealAmount) || 0), 0),
+        sold: countInPeriod("Vendu"),
+        cancelled: countInPeriod("Annulation"),
+        noShow: countInPeriod("PVPP"),
+        revenue: soldAmount.reduce(
+          (total, lead) => total + (Number(lead.dealAmount) || 0),
+          0,
+        ),
         remaining: countByStatus(rows, openToTreatStatuses),
       };
     })
-    .filter((row) => row.prospects > 0);
+    .filter(
+      (row) => row.prospects > 0 || row.sold > 0 || row.cancelled > 0 || row.noShow > 0,
+    );
 
   const cards = [
     {
@@ -475,7 +486,7 @@ export default function KPIDashboard({ leads }: KPIDashboardProps) {
               KPI par axe
             </h3>
             <p className="mt-1 text-sm font-medium text-slate-500">
-              Le soin décide de l’axe. Seuls les axes présents sur la période s’affichent.
+              Le soin décide de l’axe. Ventes, annulations et no-show sont à la date du rendez-vous, comme les chiffres du haut.
             </p>
           </div>
           {axisRows.length === 0 ? (
@@ -483,14 +494,16 @@ export default function KPIDashboard({ leads }: KPIDashboardProps) {
               Aucun lead sur cette période.
             </p>
           ) : (
-            <div className="mt-5 overflow-hidden rounded-xl border border-slate-100">
-              <table className="w-full text-left text-sm">
+            <div className="mt-5 overflow-x-auto rounded-xl border border-slate-100">
+              <table className="w-full min-w-[760px] text-left text-sm">
                 <thead className="bg-slate-50 text-xs uppercase text-slate-500">
                   <tr>
                     <th className="px-4 py-3">Axe</th>
                     <th className="px-4 py-3">Prospects</th>
                     <th className="px-4 py-3">RDV</th>
                     <th className="px-4 py-3">Ventes</th>
+                    <th className="px-4 py-3">Annulations</th>
+                    <th className="px-4 py-3">No show</th>
                     <th className="px-4 py-3">CA</th>
                     <th className="px-4 py-3">Reste à traiter</th>
                   </tr>
@@ -502,6 +515,8 @@ export default function KPIDashboard({ leads }: KPIDashboardProps) {
                       <td className="px-4 py-3">{row.prospects}</td>
                       <td className="px-4 py-3">{row.rdv}</td>
                       <td className="px-4 py-3">{row.sold}</td>
+                      <td className="px-4 py-3">{row.cancelled}</td>
+                      <td className="px-4 py-3">{row.noShow}</td>
                       <td className="px-4 py-3 font-semibold">{formatCurrency(row.revenue)}</td>
                       <td className="px-4 py-3">{row.remaining}</td>
                     </tr>
