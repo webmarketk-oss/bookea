@@ -57,11 +57,28 @@ export function isActiveInvoice(invoice: BillingInvoice) {
   return invoice.status !== "Annulée";
 }
 
+/** Factures et devis rattachés à un prospect arrivé sur la période, quelle que soit leur date d’émission. */
+export function invoicesOfArrivedLeads(
+  invoices: BillingInvoice[],
+  arrivedLeads: Lead[],
+  allLeads: Lead[] = arrivedLeads,
+) {
+  const ids = new Set(arrivedLeads.map((lead) => lead.id));
+  return invoices.filter((invoice) => {
+    if (!isActiveInvoice(invoice)) {
+      return false;
+    }
+    const lead = matchLeadForInvoice(invoice, allLeads);
+    return Boolean(lead && ids.has(lead.id));
+  });
+}
+
 export function buildCampaignKpiRows(
   leads: Lead[],
   invoices: BillingInvoice[],
   allLeads: Lead[],
   hasTakenRdv: (lead: Lead) => boolean,
+  hasDevis: (lead: Lead) => boolean = (lead) => lead.status === "Devis",
 ): CampaignKpiRow[] {
   const groups = new Map<string, CampaignKpiRow>();
   const devisLeadIds = new Set<string>();
@@ -82,7 +99,7 @@ export function buildCampaignKpiRows(
     if (hasTakenRdv(lead)) {
       row.rdv += 1;
     }
-    if (lead.status === "Devis") {
+    if (hasDevis(lead)) {
       row.devis += 1;
       devisLeadIds.add(lead.id);
     }

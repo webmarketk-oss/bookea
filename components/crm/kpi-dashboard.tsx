@@ -3,13 +3,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { loadBillingInvoices, type BillingInvoice } from "@/lib/billing-supabase";
-import { buildCampaignKpiRows } from "@/lib/campaign-kpi";
+import { buildCampaignKpiRows, invoicesOfArrivedLeads } from "@/lib/campaign-kpi";
 import { isEverBookedLead } from "@/lib/crm-rdv";
 import {
   getLeadOutcomes,
   getLeadRdvTakenDates,
   isRdvBookedStatus,
-  leadHasOutcomeBetween,
 } from "@/lib/crm-stats";
 import {
   countByInscriptionOutcome,
@@ -100,9 +99,6 @@ export default function KPIDashboard({ leads }: KPIDashboardProps) {
     }
     return isEverBookedLead(lead) && periodLeads.includes(lead);
   }).length;
-  const devisCount = leads.filter((lead) =>
-    leadHasOutcomeBetween(lead, ["Devis"], isInPeriod),
-  ).length;
   const arrivedOutcomes = periodLeads.map((lead) => ({
     outcomes: getLeadOutcomes(lead).map((item) => item.outcome),
   }));
@@ -130,14 +126,12 @@ export default function KPIDashboard({ leads }: KPIDashboardProps) {
   const outOfZoneRate = globalRates.outOfZone;
 
   const campaignRows = getCampaignRows(periodLeads);
-  const periodInvoices = invoices.filter((invoice) =>
-    isInvoiceInPeriod(invoice, period, customStartDate, customEndDate),
-  );
   const campaignStats = buildCampaignKpiRows(
     periodLeads,
-    periodInvoices,
+    invoicesOfArrivedLeads(invoices, periodLeads, leads),
     leads,
     leadHasTakenRdv,
+    (lead) => getLeadOutcomes(lead).some((item) => item.outcome === "Devis"),
   );
   const sourceRows = getSourceRows(periodLeads);
   const campaignChartMax = Math.max(
@@ -216,15 +210,15 @@ export default function KPIDashboard({ leads }: KPIDashboardProps) {
     },
     {
       title: "NB devis",
-      value: devisCount,
-      subtitle: "À la date du RDV",
+      value: campaignDevisTotal,
+      subtitle: "À la date d’inscription",
       icon: FileText,
       color: "text-amber-600",
     },
     {
       title: "NB factures",
       value: campaignInvoiceTotal,
-      subtitle: "Factures émises",
+      subtitle: "À la date d’inscription",
       icon: Receipt,
       color: "text-cyan-600",
     },
@@ -571,7 +565,7 @@ export default function KPIDashboard({ leads }: KPIDashboardProps) {
                 Stats par campagne
               </h3>
               <p className="mt-1 text-sm font-medium text-slate-500">
-                Leads, RDV pris, devis et factures pour chaque campagne
+                Devis et factures des prospects arrivés sur la période, à leur date d’inscription
               </p>
             </div>
             <div className="flex flex-wrap gap-3">
@@ -1393,20 +1387,6 @@ function isLeadInPeriod(
   );
 }
 
-function isInvoiceInPeriod(
-  invoice: BillingInvoice,
-  period: KPIPeriod,
-  customStartDate: string,
-  customEndDate: string,
-) {
-  return isDateInKpiPeriod(
-    parseInvoiceDate(invoice.date),
-    period,
-    customStartDate,
-    customEndDate,
-  );
-}
-
 function isDateInKpiPeriod(
   createdDate: Date | null,
   period: KPIPeriod,
@@ -1463,17 +1443,6 @@ function isDateInKpiPeriod(
     createdDate.getFullYear() === previousMonth.getFullYear() &&
     createdDate.getMonth() === previousMonth.getMonth()
   );
-}
-
-function parseInvoiceDate(value: string) {
-  const parts = value.split("/");
-  if (parts.length === 3) {
-    const [day, month, year] = parts.map(Number);
-    if (year && month && day) {
-      return new Date(year, month - 1, day);
-    }
-  }
-  return parseDate(value);
 }
 
 function parseDate(value: string) {

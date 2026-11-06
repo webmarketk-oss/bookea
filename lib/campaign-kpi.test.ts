@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { BillingInvoice } from "./billing-supabase.ts";
-import { buildCampaignKpiRows } from "./campaign-kpi.ts";
+import { buildCampaignKpiRows, invoicesOfArrivedLeads } from "./campaign-kpi.ts";
 import type { Lead } from "../types/lead.ts";
 
 function lead(overrides: Partial<Lead>): Lead {
@@ -73,4 +73,33 @@ test("un devis CRM et un devis facturation du même lead ne se comptent qu’une
   );
 
   assert.equal(rows[0].devis, 1);
+});
+
+test("une facture émise plus tard compte avec le prospect arrivé, pas une facture d’un autre mois", () => {
+  const january = lead({ id: "jan", createdDate: "2026-01-02" });
+  const march = lead({
+    id: "mar",
+    firstName: "Nora",
+    lastName: "Bernard",
+    email: "nora@test.fr",
+    phone: "0677889900",
+    createdDate: "2026-03-02",
+  });
+  const kept = invoicesOfArrivedLeads(
+    [
+      invoice({ id: "late", date: "02/03/2026", type: "Facture finale" }),
+      invoice({
+        id: "other",
+        date: "02/01/2026",
+        client: "Nora Bernard",
+        email: "nora@test.fr",
+        phone: "0677889900",
+      }),
+      invoice({ id: "cancelled", status: "Annulée" }),
+    ],
+    [january],
+    [january, march],
+  );
+
+  assert.deepEqual(kept.map((item) => item.id), ["late"]);
 });
