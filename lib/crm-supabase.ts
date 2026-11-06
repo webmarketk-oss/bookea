@@ -13,6 +13,7 @@ import {
   joinOfferLabels,
   leadImportToolFromEvents,
   leadSourceFromStored,
+  systemeIoCareLabel,
   visibleReceptionNote,
   OFFER_EVENT,
   offersFromEvents,
@@ -2625,10 +2626,12 @@ function toLead(row: LeadRow): Lead {
     address: client?.address_line1 || "",
     postalCode: client?.postal_code || "",
     city: client?.city || "",
-    treatment:
+    treatment: systemeIoCareLabel(
+      source,
       joinOfferLabels(service?.name, recordedOffers.treatment) ||
-      service?.name ||
-      "Soin à préciser",
+        service?.name ||
+        "Soin à préciser",
+    ),
     source,
     importTool: importTool || undefined,
     imported: importOrigin.imported,

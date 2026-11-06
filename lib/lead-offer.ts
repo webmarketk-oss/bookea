@@ -87,6 +87,19 @@ export function offersFromEvents(
   };
 }
 
+/** Systeme.io sans soin reconnu est le tunnel minceur. Un soin déjà nommé reste tel quel. */
+export function systemeIoCareLabel(source?: string | null, treatment?: string | null) {
+  const label = String(treatment || "").trim();
+  if (!/systeme/i.test(String(source || ""))) {
+    return label;
+  }
+  const parts = label
+    .split("·")
+    .map((part) => part.trim())
+    .filter((part) => part && !/^soin a preciser$|^a preciser$/.test(normalized(part)));
+  return parts.length ? parts.join(" · ") : "Soin minceur";
+}
+
 export function leadOfferLabel(lead: Pick<Lead, "campaign" | "treatment">) {
   const offer = String(lead.campaign || "").trim();
   const needle = normalized(offer);

@@ -10,6 +10,7 @@ const {
   mapIncomingLead,
   payloadFromBody,
   resolveIncomingSource,
+  withSystemeIoAxis,
 } = require("./saveleads");
 const { startConversation } = require("../seya/agent");
 const {
@@ -19,6 +20,7 @@ const {
   leadOfferLabel,
   leadSourceFromStored,
   offersFromEvents,
+  systemeIoCareLabel,
 } = require("../../lib/lead-offer.ts");
 const { incomingHasNewOffer: saveleadsNewOffer } = require("./saveleads");
 
@@ -333,5 +335,43 @@ test("laser puis minceur : la nouvelle prestation est reconnue et les deux reste
       { event_type: "offer", to_value: "Soin minceur", from_value: "Bilan minceur" },
     ]).treatment,
     "Épilation définitive · Soin minceur",
+  );
+});
+
+test("Systeme.io Bruz sans le mot minceur : le soin est Soin minceur, l’offre n’est pas inventée", () => {
+  const payload = payloadFromBody(
+    JSON.stringify({
+      contact: {
+        email: "lea.martin@example.fr",
+        sourceURL: "https://jfg-bruz.systeme.io/optin",
+        fields: [
+          { slug: "first_name", value: "Léa" },
+          { slug: "surname", value: "Martin" },
+          { slug: "phone_number", value: "0611111111" },
+        ],
+      },
+    }),
+  );
+  const mapped = withSystemeIoAxis(mapIncomingLead(payload, { source: "systeme.io" }), "Systeme.io");
+  assert.equal(mapped.treatment, "Soin minceur");
+  assert.equal(leadOfferLabel(mapped), "");
+  const laser = withSystemeIoAxis(
+    { treatment: "Épilation définitive", campaign: "Laser1+1", offer: "Laser1+1" },
+    "Systeme.io",
+  );
+  assert.equal(laser.treatment, "Épilation définitive");
+  assert.equal(
+    withSystemeIoAxis({ treatment: "", campaign: "Meta Lead Ads" }, "Facebook").treatment,
+    "",
+  );
+});
+
+test("fiche Systeme.io déjà enregistrée en Soin à préciser : le CRM affiche Soin minceur", () => {
+  assert.equal(systemeIoCareLabel("Systeme.io", "Soin à préciser"), "Soin minceur");
+  assert.equal(systemeIoCareLabel("Systeme.io", "Épilation définitive"), "Épilation définitive");
+  assert.equal(systemeIoCareLabel("Facebook", "Soin à préciser"), "Soin à préciser");
+  assert.equal(
+    systemeIoCareLabel("Systeme.io", "Soin à préciser · Soin visage"),
+    "Soin visage",
   );
 });

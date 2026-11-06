@@ -94,7 +94,10 @@ module.exports = async function handler(req, res) {
       await ownerEmailsForCenter(supabase, center, fields),
     );
 
-    const mapped = applyCenterOfferRoute(received, fields, center.settings);
+    const mapped = withSystemeIoAxis(
+      applyCenterOfferRoute(received, fields, center.settings),
+      sourceName,
+    );
     const imported = {
       ...mapped,
       firstName: firstName || "Prospect",
@@ -830,6 +833,22 @@ function routedOffer(settings, fields) {
     }
   }
   return offers.size === 1 ? [...offers][0] : "";
+}
+
+function withSystemeIoAxis(mapped, sourceName) {
+  if (!/systeme/i.test(String(sourceName || ""))) {
+    return mapped;
+  }
+  const family = inferCareFamily(
+    `${mapped?.treatment || ""} ${mapped?.offer || ""} ${mapped?.campaign || ""}`,
+  );
+  if (family === "epilation" || family === "visage") {
+    return mapped;
+  }
+  if (family === "minceur" && mapped?.treatment && !isJunkIncoming(mapped.treatment)) {
+    return mapped;
+  }
+  return { ...mapped, treatment: "Soin minceur" };
 }
 
 function applyCenterOfferRoute(mapped, fields, settings) {
@@ -1875,6 +1894,7 @@ module.exports.mapIncomingLead = mapIncomingLead;
 module.exports.resolveIncomingSource = resolveIncomingSource;
 module.exports.leadOrigin = leadOrigin;
 module.exports.applyCenterOfferRoute = applyCenterOfferRoute;
+module.exports.withSystemeIoAxis = withSystemeIoAxis;
 module.exports.importPostedLead = importPostedLead;
 module.exports.incomingLeadFields = incomingLeadFields;
 module.exports.extractLooseContact = extractLooseContact;
