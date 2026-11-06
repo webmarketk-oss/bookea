@@ -10,7 +10,7 @@ import {
   isRdvBookedStatus,
   leadHasOutcomeBetween,
 } from "@/lib/crm-stats";
-import { inactiveLeadStatuses } from "@/lib/lead-statuses";
+import { followUpLeadStatuses, inactiveLeadStatuses } from "@/lib/lead-statuses";
 import { Lead } from "@/types/lead";
 import {
   AlertCircle,
@@ -59,6 +59,12 @@ const rdvStatuses = [
   "Acompte en attente",
 ];
 const lostStatuses = [...inactiveLeadStatuses, "Annulation", "Perdu"];
+// Encore dans le suivi : pas un RDV, pas une vente, pas une clôture.
+const openToTreatStatuses = [
+  ...followUpLeadStatuses,
+  "Message WhatsApp envoyé",
+  "Mail/SMS Injoignable",
+];
 
 export default function KPIDashboard({ leads }: KPIDashboardProps) {
   const [period, setPeriod] = useState<KPIPeriod>("month");
@@ -115,12 +121,10 @@ export default function KPIDashboard({ leads }: KPIDashboardProps) {
   ]);
   const waitingDepositCount = countByStatus(periodLeads, ["Acompte en attente"]);
   const lostCount = countByStatus(periodLeads, lostStatuses);
-  const remainingCount = periodLeads.filter((lead) =>
-    ["Nouveau", "À relancer", "À rappeler", "Acompte envoyé", "Acompte en attente"].includes(
-      lead.status
-    )
-  ).length;
-  const revenue = soldLeads.reduce((total, lead) => total + lead.dealAmount, 0);
+  const remainingCount = countByStatus(periodLeads, openToTreatStatuses);
+  const revenue = periodLeads
+    .filter((lead) => soldStatuses.includes(lead.status))
+    .reduce((total, lead) => total + (Number(lead.dealAmount) || 0), 0);
 
   const conversionSalesCount = soldLeads.filter(
     (lead) => !(lead.dealAmount > 0) || lead.dealAmount >= 100,
@@ -182,7 +186,7 @@ export default function KPIDashboard({ leads }: KPIDashboardProps) {
     {
       title: "NB RDV pris",
       value: rdvCount,
-      subtitle: "Tous les RDV pris, même sans date",
+      subtitle: "Mois en cours, selon le filtre de date",
       icon: CalendarDays,
       color: "text-blue-600",
     },
@@ -245,7 +249,7 @@ export default function KPIDashboard({ leads }: KPIDashboardProps) {
     {
       title: "Reste à traiter",
       value: remainingCount,
-      subtitle: "Actions ouvertes",
+      subtitle: "Nouveau, appels, SMS, mails, relances",
       icon: AlertCircle,
       color: "text-cyan-600",
     },
@@ -365,7 +369,7 @@ export default function KPIDashboard({ leads }: KPIDashboardProps) {
               {formatCurrency(revenue)}
             </p>
             <p className="mt-3 text-sm font-semibold text-emerald-600">
-              Calculé depuis les leads vendus/convertis
+              Montant des ventes, à la date d’arrivée du lead
             </p>
           </CardContent>
         </Card>
