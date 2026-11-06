@@ -635,6 +635,7 @@ export default function AdminCentresPage() {
   async function handleSaveIdentity(
     centerId: string,
     identity: {
+      name: string;
       legalName: string;
       address: string;
       phone: string;
@@ -645,6 +646,11 @@ export default function AdminCentresPage() {
     setNotice(null);
 
     try {
+      const name = identity.name.trim();
+      if (!name) {
+        throw new Error("Le nom du centre est obligatoire.");
+      }
+
       const { data, error } = await supabase
         .from("centers")
         .select("settings")
@@ -667,6 +673,7 @@ export default function AdminCentresPage() {
       const { error: updateError } = await supabase
         .from("centers")
         .update({
+          name,
           email: email || null,
           phone: phone || null,
           address_line1: address || null,
@@ -680,6 +687,7 @@ export default function AdminCentresPage() {
               ...currentPublic,
               center: {
                 ...currentPublicCenter,
+                name,
                 legalName,
                 address,
                 phone,
@@ -700,6 +708,7 @@ export default function AdminCentresPage() {
           center.id === centerId
             ? {
                 ...center,
+                name,
                 legalName,
                 address,
                 phone,
@@ -711,7 +720,7 @@ export default function AdminCentresPage() {
       );
       setNotice({
         type: "success",
-        message: "Coordonnées du centre enregistrées.",
+        message: "Nom et coordonnées du centre enregistrés.",
       });
     } catch (error) {
       setNotice({
@@ -1079,6 +1088,7 @@ function CenterCard({
   onCreditSms: (amount: number) => void;
   onSetSeyaQuota: (limit: number | null) => void;
   onSaveIdentity: (identity: {
+    name: string;
     legalName: string;
     address: string;
     phone: string;
@@ -1087,6 +1097,7 @@ function CenterCard({
 }) {
   const [ownerEmail, setOwnerEmail] = useState("");
   const [identity, setIdentity] = useState({
+    name: center.name || "",
     legalName: center.legalName,
     address: center.address,
     phone: center.phone || "",
@@ -1107,12 +1118,13 @@ function CenterCard({
 
   useEffect(() => {
     setIdentity({
+      name: center.name || "",
       legalName: center.legalName,
       address: center.address,
       phone: center.phone || "",
       email: center.email || "",
     });
-  }, [center.address, center.email, center.legalName, center.phone]);
+  }, [center.address, center.email, center.legalName, center.name, center.phone]);
   const facebookConnectUrl = center.slug
     ? `/api/meta/connect?center_slug=${encodeURIComponent(center.slug)}${
         facebookPageId.trim()
@@ -1231,7 +1243,19 @@ function CenterCard({
             className="mt-5 space-y-3 rounded-2xl border border-slate-200 bg-slate-50 p-4"
           >
             <p className="text-xs font-medium text-slate-400">
-              Coordonnées du centre
+              Nom et coordonnées du centre
+            </p>
+            <TextField
+              label="Nom du centre"
+              value={identity.name}
+              onChange={(value) =>
+                setIdentity((current) => ({ ...current, name: value }))
+              }
+              placeholder="JFG Clinic Bruz"
+              required
+            />
+            <p className="-mt-1 text-xs font-medium text-slate-400">
+              Slug conservé pour les URLs de leads : {center.slug || "inchangé"}.
             </p>
             <TextField
               label="Raison sociale"
