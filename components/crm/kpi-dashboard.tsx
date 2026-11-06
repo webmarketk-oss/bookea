@@ -10,6 +10,7 @@ import {
   isRdvBookedStatus,
   leadHasOutcomeBetween,
 } from "@/lib/crm-stats";
+import { leadAxis, leadAxisLabels, leadAxisOrder } from "@/lib/lead-axis";
 import { followUpLeadStatuses, inactiveLeadStatuses } from "@/lib/lead-statuses";
 import { Lead } from "@/types/lead";
 import {
@@ -174,6 +175,21 @@ export default function KPIDashboard({ leads }: KPIDashboardProps) {
     (total, row) => total + row.invoices,
     0,
   );
+  const axisRows = leadAxisOrder
+    .map((axis) => {
+      const rows = periodLeads.filter((lead) => leadAxis(lead) === axis);
+      const sold = rows.filter((lead) => soldStatuses.includes(lead.status));
+      return {
+        axis,
+        label: leadAxisLabels[axis],
+        prospects: rows.length,
+        rdv: rows.filter((lead) => leadHasTakenRdv(lead)).length,
+        sold: sold.length,
+        revenue: sold.reduce((total, lead) => total + (Number(lead.dealAmount) || 0), 0),
+        remaining: countByStatus(rows, openToTreatStatuses),
+      };
+    })
+    .filter((row) => row.prospects > 0);
 
   const cards = [
     {
@@ -451,6 +467,51 @@ export default function KPIDashboard({ leads }: KPIDashboardProps) {
           </CardContent>
         </Card>
       </div>
+
+      <Card className="border-slate-200 py-0 shadow-sm">
+        <CardContent className="p-5">
+          <div>
+            <h3 className="text-sm font-black uppercase text-slate-700">
+              KPI par axe
+            </h3>
+            <p className="mt-1 text-sm font-medium text-slate-500">
+              Le soin décide de l’axe. Seuls les axes présents sur la période s’affichent.
+            </p>
+          </div>
+          {axisRows.length === 0 ? (
+            <p className="mt-6 text-sm font-medium text-slate-500">
+              Aucun lead sur cette période.
+            </p>
+          ) : (
+            <div className="mt-5 overflow-hidden rounded-xl border border-slate-100">
+              <table className="w-full text-left text-sm">
+                <thead className="bg-slate-50 text-xs uppercase text-slate-500">
+                  <tr>
+                    <th className="px-4 py-3">Axe</th>
+                    <th className="px-4 py-3">Prospects</th>
+                    <th className="px-4 py-3">RDV</th>
+                    <th className="px-4 py-3">Ventes</th>
+                    <th className="px-4 py-3">CA</th>
+                    <th className="px-4 py-3">Reste à traiter</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {axisRows.map((row) => (
+                    <tr key={row.axis}>
+                      <td className="px-4 py-3 font-semibold text-slate-800">{row.label}</td>
+                      <td className="px-4 py-3">{row.prospects}</td>
+                      <td className="px-4 py-3">{row.rdv}</td>
+                      <td className="px-4 py-3">{row.sold}</td>
+                      <td className="px-4 py-3 font-semibold">{formatCurrency(row.revenue)}</td>
+                      <td className="px-4 py-3">{row.remaining}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       <Card className="border-slate-200 py-0 shadow-sm">
         <CardContent className="p-5">
