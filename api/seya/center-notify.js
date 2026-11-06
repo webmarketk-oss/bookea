@@ -131,6 +131,24 @@ function centerNotifyCopy({ kind, centerName, conversation, slot, previousSlot }
       ].join("\n"),
     };
   }
+  if (kind === "absence") {
+    const absence = asRecord(notes.absence);
+    const when = slotLabel(conversation?.bookedSlot);
+    return {
+      subject: `Seya : ne vient pas — ${name}`,
+      text: [
+        `${name} ne pourra pas venir pour ${centre}.`,
+        "",
+        `Prospect : ${name}`,
+        `Téléphone : ${phone}`,
+        `Soin : ${care}`,
+        when ? `Créneau connu : ${when}` : "Aucun créneau n’est posé dans l’agenda Bookea.",
+        `Message : « ${String(absence.text || "").trim()} »`,
+        "",
+        "Seya n’a pas annulé le rendez-vous. L’équipe doit le mettre à jour.",
+      ].join("\n"),
+    };
+  }
   if (kind === "question") {
     const question = asRecord(notes.question);
     return {
@@ -318,7 +336,7 @@ async function notifyCenterSeyaAction({
   slot,
   previousSlot,
 } = {}) {
-  if (!["booked", "callback", "callback_update", "question"].includes(kind)) {
+  if (!["booked", "callback", "callback_update", "question", "absence"].includes(kind)) {
     return { sent: false, reason: "unknown_kind", conversation };
   }
   const key =
@@ -326,7 +344,9 @@ async function notifyCenterSeyaAction({
       ? `callback_update:${(asRecord(conversation?.teamNotes).preferences || []).length}`
       : kind === "question"
         ? `question:${asRecord(asRecord(conversation?.teamNotes).question).at || ""}`
-        : notifyKey(kind, slot);
+        : kind === "absence"
+          ? `absence:${asRecord(asRecord(conversation?.teamNotes).absence).at || ""}`
+          : notifyKey(kind, slot);
   if (conversation?.centerNotifyKey === key) {
     return { sent: false, reason: "already", conversation };
   }

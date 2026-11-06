@@ -1949,6 +1949,90 @@ function composeReplies(parts) {
   return parts.filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
 }
 
+function proposesAnotherMoment(text) {
+  const value = normalize(text);
+  return (
+    /plutot\s+(lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche|demain|un autre|une autre|\d)/.test(
+      value,
+    ) ||
+    /a la place|un autre (jour|horaire|creneau|moment)|decaler a |reporter (a |au |lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche|demain)/.test(
+      value,
+    ) ||
+    asksOtherDay(text)
+  );
+}
+
+/** La personne annule sa venue (maladie, empêchement), sans proposer un autre moment. */
+function announcesVisitAbsence(text) {
+  const value = normalize(text);
+  if (!value || proposesAnotherMoment(text)) {
+    return false;
+  }
+  if (
+    /\?/.test(String(text || "")) &&
+    /(est-ce|puis-je|c'est possible|possible de|je peux quand meme)/.test(value)
+  ) {
+    return false;
+  }
+  if (
+    /\bje suis (vraiment |tres |tellement |un peu )?(malade|souffrante?|alitee?|hospitalisee?|contagieu(?:se|x)?)\b/.test(
+      value,
+    )
+  ) {
+    return true;
+  }
+  if (
+    /\b(grippe|gastro|covid|fievre)\b/.test(value) &&
+    /\b(desole|venir|viens|rendez|rdv|annul)\b/.test(value)
+  ) {
+    return true;
+  }
+  if (/\bje (dois|veux|voudrais|souhaite) annuler\b/.test(value)) {
+    return true;
+  }
+  if (/annul/.test(value) && /(rendez|rdv|venir|seance|bilan)/.test(value)) {
+    return true;
+  }
+  if (
+    /\b(?:je )?(?:ne )?(?:peux|pourrai|pourrais) (?:finalement |plus )?pas venir\b/.test(value) ||
+    /\bje ne (?:viendrai|viens) pas\b/.test(value) ||
+    /\bje ne serai pas la\b/.test(value) ||
+    /\bimpossible de venir\b/.test(value) ||
+    /\bempechement\b/.test(value) ||
+    /\bje ne peux pas me deplacer\b/.test(value)
+  ) {
+    return true;
+  }
+  return false;
+}
+
+const ABSENCE_NOTIFY_SENTENCE = "Je préviens l’équipe.";
+
+function visitAbsenceReply(text, conversation) {
+  const value = normalize(text);
+  const sick = /\bmalade|souffrant|alite|hospitalis|grippe|gastro|covid|fievre|contagieu/.test(value);
+  const leadBlob = (conversation?.messages || [])
+    .filter((item) => item?.author === "lead")
+    .slice(-4)
+    .map((item) => item.text)
+    .join(" ");
+  const hasVisit = Boolean(
+    conversation?.bookedSlot?.date ||
+      /\bRDV\b/.test(String(conversation?.status || "")) ||
+      /rendez|rdv/.test(normalize(`${leadBlob} ${text}`)),
+  );
+  const where = hasVisit ? " à votre rendez-vous" : "";
+  const care = sick ? " Prenez soin de vous." : "";
+  return `C’est noté, vous ne pourrez pas venir${where}. ${ABSENCE_NOTIFY_SENTENCE}${care}`;
+}
+
+function visitAbsenceReplyWithoutMail(reply) {
+  return String(reply || "").replace(
+    ABSENCE_NOTIFY_SENTENCE,
+    "L’équipe verra votre message dans la conversation.",
+  );
+}
+
 module.exports = {
   acceptsBookingOffer,
   alreadyBookedReply,
@@ -1989,6 +2073,10 @@ module.exports = {
   isServiceAsk,
   wantsNoon,
   isRescheduleAsk,
+  announcesVisitAbsence,
+  visitAbsenceReply,
+  visitAbsenceReplyWithoutMail,
+  ABSENCE_NOTIFY_SENTENCE,
   threadWantsNoon,
   asksOpenQuestion,
   askedServiceName,

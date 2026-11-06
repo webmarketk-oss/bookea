@@ -71,6 +71,8 @@ const {
   asksOpenQuestion,
   isWaitUntilLater,
   isRescheduleAsk,
+  announcesVisitAbsence,
+  visitAbsenceReply,
   wantsNoon,
   threadWantsNoon,
   threadIsPaused,
@@ -1786,6 +1788,37 @@ function defaultHours() {
 }
 
 function applyLeadReply(conversation, text, seya, slots, extras = {}) {
+  if (announcesVisitAbsence(text)) {
+    const at = (extras.now instanceof Date ? extras.now : new Date()).toISOString();
+    const noted = {
+      ...conversation,
+      teamNotes: {
+        ...(conversation.teamNotes || {}),
+        absence: {
+          text: String(text || "").trim().slice(0, 300),
+          at,
+          status: "pending",
+        },
+      },
+    };
+    return {
+      ...finishLeadReply(
+        noted,
+        conversation.qualification || {},
+        conversation.status || "En cours",
+        text,
+        visitAbsenceReply(text, conversation),
+        {
+          ...(conversation.bookingState || emptyBookingState(extras.centerId || conversation.centerId)),
+          pendingQuestion: "no_slots",
+          lastOfferedSlots: [],
+          appointmentStatus: "none",
+        },
+        { proposedSlots: [], seya },
+      ),
+      locked: true,
+    };
+  }
   if (gaillard.isGaillardCenter(extras.centerName) && !extras.gaillardInner) {
     return gaillardLeadReply(conversation, text, seya, slots, extras);
   }

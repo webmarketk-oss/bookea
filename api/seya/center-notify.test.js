@@ -71,6 +71,28 @@ test("le mail rappel opératrice ne parle pas d’un RDV posé", () => {
   assert.match(copy.text, /Aucun rendez-vous/);
 });
 
+test("le mail d’absence reprend le message et ne dit pas que le RDV est annulé", () => {
+  const copy = centerNotifyCopy({
+    kind: "absence",
+    centerName: "JFG Clinic Gaillard",
+    conversation: {
+      firstName: "Camille",
+      phone: "0611111111",
+      treatment: "Soin minceur",
+      bookedSlot: { date: "2026-11-07", time: "10:00", label: "sam. 07/11 à 10h00" },
+      teamNotes: { absence: { text: "je suis vraiment désolé je suis malade", at: "2026-11-06T06:00:00.000Z" } },
+    },
+  });
+  assert.match(copy.subject, /ne vient pas/);
+  assert.match(copy.subject, /Camille/);
+  assert.match(copy.text, /JFG Clinic Gaillard/);
+  assert.match(copy.text, /0611111111/);
+  assert.match(copy.text, /je suis vraiment désolé je suis malade/);
+  assert.match(copy.text, /sam\. 07\/11 à 10h00/);
+  assert.match(copy.text, /n’a pas annulé/);
+  assert.doesNotMatch(copy.text, /à rappeler/);
+});
+
 test("une même action n’est notifiée qu’une fois", () => {
   assert.equal(
     notifyKey("booked", { date: "2026-10-10", time: "09:00" }),

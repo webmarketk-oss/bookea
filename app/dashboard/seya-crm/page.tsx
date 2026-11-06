@@ -39,6 +39,7 @@ import {
   inferCareFamily,
   pickApprovedTemplate,
 } from "@/api/seya/care-family";
+import { previewTemplateBody } from "@/api/seya/template-slots";
 import {
   changedSeyaSettingKeys,
   defaultSeyaAgentSettings,
@@ -364,10 +365,7 @@ function OfferMapCheck({
         ? { ok: true, text: `1er WhatsApp automatique : ${auto.name} (approuvé)` }
         : { ok: false, text: "Aucun modèle WhatsApp approuvé pour ce soin." };
   const sent = found?.status === "APPROVED" ? found : auto;
-  const preview = String(sent?.body || "")
-    .replace(/\{\{1\}\}/g, "[prénom]")
-    .replace(/\{\{2\}\}/g, "[centre]")
-    .replace(/\{\{3\}\}/g, "[offre]");
+  const preview = previewTemplateBody(sent?.body, offer.label);
 
   return (
     <div className="grid gap-2 md:col-span-4">

@@ -4,6 +4,7 @@ const { generateSeyaReply, hasAiKey } = require("./ai");
 const { inferCareFamily, pickApprovedTemplate, resolveActiveFamily } = require("./care-family");
 const { pickBookingResources } = require("./axis-resources");
 const { notifyCenterSeyaAction, sendCallbackHandoff } = require("./center-notify");
+const { TEMPLATE_ROLE_ORDER, templateSlotRoles } = require("./template-slots");
 const { withoutTeamQuestion } = require("./center-knowledge");
 const { prospectText } = require("./vocabulary");
 const { isNearDuplicate } = require("./price");
@@ -33,6 +34,7 @@ const {
   alreadyBookedReply,
   crmStatusFromLeadMessage,
   isAlreadyBookedElsewhere,
+  visitAbsenceReplyWithoutMail,
 } = require("./conversation");
 const { canSeyaSetCrmStatus } = require("./crm-sync");
 const { withCrmStatus } = require("./booking-close");
@@ -1259,6 +1261,34 @@ async function handleIncoming(
     }
   }
 
+  const absence = next.teamNotes?.absence;
+  if (absence?.status === "pending" && absence.at !== existing.teamNotes?.absence?.at) {
+    const mailed = await notifyCenterSeyaAction({
+      center,
+      seya,
+      conversation: next,
+      kind: "absence",
+      slot: next.bookedSlot,
+    }).catch((error) => {
+      console.error("[seya/whatsapp] center notify absence", error);
+      return { sent: false };
+    });
+    next.teamNotes = {
+      ...next.teamNotes,
+      absence: { ...absence, status: mailed?.sent ? "sent" : "failed" },
+    };
+    if (mailed?.conversation?.centerNotifyKey) {
+      next.centerNotifyKey = mailed.conversation.centerNotifyKey;
+    }
+    if (!mailed?.sent) {
+      draftedReply = visitAbsenceReplyWithoutMail(draftedReply);
+      const seyaIndex = (next.messages || []).map((item) => item.author).lastIndexOf("seya");
+      if (seyaIndex >= 0) {
+        next.messages[seyaIndex] = { ...next.messages[seyaIndex], text: draftedReply };
+      }
+    }
+  }
+
   let uniqueOutgoing = outgoingWhatsAppTexts(
     followUps,
     draftedReply,
@@ -2026,50 +2056,6 @@ function pickWelcomeTemplate(templates, extras) {
       `${extras.treatment || ""} ${extras.campaign || ""} ${extras.offerLabel || ""}`,
     );
   return pickApprovedTemplate(templates, family, extras.templateName);
-}
-
-const TEMPLATE_ROLE_ORDER = ["firstName", "centerName", "treatment"];
-
-/**
- * Rôle de chaque {{n}} d'après les mots qui le précèdent dans le modèle Meta :
- * « Bonjour {{1}} » = prénom, « du centre {{1}} » / « chez {{2}} » = centre,
- * « demande pour notre {{2}} » / « offre {{3}} » = offre. Un modèle sans prénom ne décale plus tout.
- */
-function templateSlotRoles(template) {
-  const body = (template?.components || []).find(
-    (item) => String(item.type || "").toUpperCase() === "BODY",
-  );
-  const text = String(body?.text || "");
-  const roles = new Map();
-  const pattern = /\{\{(\d+)\}\}/g;
-  let match = pattern.exec(text);
-  while (match) {
-    const index = Number(match[1]);
-    const before = text
-      .slice(Math.max(0, match.index - 40), match.index)
-      .toLowerCase()
-      .normalize("NFD")
-      .replace(/[\u0300-\u036f]/g, "")
-      .replace(/['’]/g, "'")
-      .trimEnd();
-    let role = "";
-    if (/(bonjour|bonsoir|hello|salut|coucou|cher|chere)[\s,]*$/.test(before)) {
-      role = "firstName";
-    } else if (
-      /(centre|clinique|clinic|institut|cabinet|salon|equipe|chez|seya du|seya de)(\s+(de|du|d'|des))?\s*$/.test(before)
-    ) {
-      role = "centerName";
-    } else if (
-      /(offre|soin|demande pour( notre| votre| l'| le| la| les)?|pour notre|pour votre|indique|concernant|interesse(e)? par)\s*$/.test(before)
-    ) {
-      role = "treatment";
-    }
-    if (role && !roles.has(index)) {
-      roles.set(index, role);
-    }
-    match = pattern.exec(text);
-  }
-  return roles;
 }
 
 function templateParameters(template, vars) {
