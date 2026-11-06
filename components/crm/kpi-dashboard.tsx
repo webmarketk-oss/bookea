@@ -6,10 +6,15 @@ import { loadBillingInvoices, type BillingInvoice } from "@/lib/billing-supabase
 import { buildCampaignKpiRows } from "@/lib/campaign-kpi";
 import { isEverBookedLead } from "@/lib/crm-rdv";
 import {
+  getLeadOutcomes,
   getLeadRdvTakenDates,
   isRdvBookedStatus,
   leadHasOutcomeBetween,
 } from "@/lib/crm-stats";
+import {
+  countByInscriptionOutcome,
+  inscriptionVisitRates,
+} from "@/lib/kpi-inscription-rates";
 import { leadAxis, leadAxisLabels, leadAxisOrder } from "@/lib/lead-axis";
 import { followUpLeadStatuses, inactiveLeadStatuses } from "@/lib/lead-statuses";
 import { Lead } from "@/types/lead";
@@ -98,24 +103,12 @@ export default function KPIDashboard({ leads }: KPIDashboardProps) {
   const devisCount = leads.filter((lead) =>
     leadHasOutcomeBetween(lead, ["Devis"], isInPeriod),
   ).length;
-  const soldLeads = leads.filter((lead) =>
-    leadHasOutcomeBetween(lead, ["Vendu"], isInPeriod),
-  );
-  const soldCount = soldLeads.length;
-  const cancelledCount = leads.filter((lead) =>
-    leadHasOutcomeBetween(lead, ["Annulation"], isInPeriod),
-  ).length;
-  const pvppCount = leads.filter((lead) =>
-    leadHasOutcomeBetween(lead, ["PVPP"], isInPeriod),
-  ).length;
-  const attendedLeads = leads.filter((lead) =>
-    leadHasOutcomeBetween(lead, ["Devis", "Vendu"], isInPeriod),
-  );
-  const missedCount = leads.filter(
-    (lead) =>
-      !attendedLeads.includes(lead) &&
-      leadHasOutcomeBetween(lead, ["Annulation", "PVPP"], isInPeriod),
-  ).length;
+  const arrivedOutcomes = periodLeads.map((lead) => ({
+    outcomes: getLeadOutcomes(lead).map((item) => item.outcome),
+  }));
+  const soldCount = countByInscriptionOutcome(arrivedOutcomes, "Vendu");
+  const cancelledCount = countByInscriptionOutcome(arrivedOutcomes, "Annulation");
+  const pvppCount = countByInscriptionOutcome(arrivedOutcomes, "PVPP");
   const depositCount = countByStatus(periodLeads, [
     "Acompte reçu",
     "Acompte validé",
@@ -172,19 +165,18 @@ export default function KPIDashboard({ leads }: KPIDashboardProps) {
   const axisRows = leadAxisOrder
     .map((axis) => {
       const rows = periodLeads.filter((lead) => leadAxis(lead) === axis);
-      const axisLeads = leads.filter((lead) => leadAxis(lead) === axis);
       const soldAmount = rows.filter((lead) => soldStatuses.includes(lead.status));
-      const countInPeriod = (outcome: "Vendu" | "Annulation" | "PVPP") =>
-        axisLeads.filter((lead) => leadHasOutcomeBetween(lead, [outcome], isInPeriod))
-          .length;
+      const arrived = rows.map((lead) => ({
+        outcomes: getLeadOutcomes(lead).map((item) => item.outcome),
+      }));
       return {
         axis,
         label: leadAxisLabels[axis],
         prospects: rows.length,
         rdv: rows.filter((lead) => leadHasTakenRdv(lead)).length,
-        sold: countInPeriod("Vendu"),
-        cancelled: countInPeriod("Annulation"),
-        noShow: countInPeriod("PVPP"),
+        sold: countByInscriptionOutcome(arrived, "Vendu"),
+        cancelled: countByInscriptionOutcome(arrived, "Annulation"),
+        noShow: countByInscriptionOutcome(arrived, "PVPP"),
         revenue: soldAmount.reduce(
           (total, lead) => total + (Number(lead.dealAmount) || 0),
           0,
@@ -239,21 +231,21 @@ export default function KPIDashboard({ leads }: KPIDashboardProps) {
     {
       title: "NB ventes",
       value: soldCount,
-      subtitle: "À la date du RDV",
+      subtitle: "À la date d’inscription",
       icon: ShoppingBag,
       color: "text-emerald-600",
     },
     {
       title: "Annulations",
       value: cancelledCount,
-      subtitle: "À la date du RDV",
+      subtitle: "À la date d’inscription",
       icon: XCircle,
       color: "text-orange-600",
     },
     {
       title: "PVPP",
       value: pvppCount,
-      subtitle: "Pas venu pas prévenu, à la date du RDV",
+      subtitle: "Pas venu pas prévenu, à la date d’inscription",
       icon: XCircle,
       color: "text-zinc-700",
     },
@@ -374,9 +366,12 @@ export default function KPIDashboard({ leads }: KPIDashboardProps) {
       <div className="grid gap-6 xl:grid-cols-12">
         <Card className="border-slate-200 py-0 shadow-sm xl:col-span-6">
           <CardContent className="p-5">
-            <h3 className="mb-5 text-sm font-black uppercase text-slate-700">
+            <h3 className="text-sm font-black uppercase text-slate-700">
               Taux & performances
             </h3>
+            <p className="mb-5 mt-1 text-sm font-medium text-slate-500">
+              Transformation et présentiel suivent la date d’inscription du prospect.
+            </p>
             <div className="grid divide-y divide-slate-100 sm:grid-cols-2 sm:divide-x sm:divide-y-0 xl:grid-cols-3">
               <Rate label="Taux de transformation" value={conversionRate} color="text-emerald-600" />
               <Rate label="Taux de présentiel" value={attendanceRate} color="text-cyan-600" />
@@ -491,7 +486,7 @@ export default function KPIDashboard({ leads }: KPIDashboardProps) {
               KPI par axe
             </h3>
             <p className="mt-1 text-sm font-medium text-slate-500">
-              Le soin décide de l’axe. Ventes, annulations et no-show sont à la date du rendez-vous, comme les chiffres du haut.
+              Le soin décide de l’axe. Ventes, annulations et no-show suivent la date d’inscription, comme les cartes du haut.
             </p>
           </div>
           {axisRows.length === 0 ? (
@@ -540,7 +535,7 @@ export default function KPIDashboard({ leads }: KPIDashboardProps) {
               Taux par axe
             </h3>
             <p className="mt-1 text-sm font-medium text-slate-500">
-              Les mêmes taux que le bloc du haut. La ligne Global est le centre entier. Chaque autre ligne ne compte que les prospects de cet axe.
+              Les mêmes taux que le bloc du haut. Transformation et présentiel suivent la date d’inscription. La ligne Global est le centre entier, les autres lignes un seul axe.
             </p>
           </div>
           <div className="mt-5 overflow-x-auto rounded-xl border border-slate-100">
@@ -1226,31 +1221,26 @@ function performanceRates(
     }
     return isEverBookedLead(lead) && periodRows.includes(lead);
   }).length;
-  const devisCount = allRows.filter((lead) =>
-    leadHasOutcomeBetween(lead, ["Devis"], isInPeriod),
-  ).length;
-  const soldLeads = allRows.filter((lead) =>
-    leadHasOutcomeBetween(lead, ["Vendu"], isInPeriod),
+  const soldOnArrival = countByInscriptionOutcome(
+    periodRows.map((lead) => ({
+      outcomes: getLeadOutcomes(lead).map((item) => item.outcome),
+    })),
+    "Vendu",
   );
-  const attendedLeads = allRows.filter((lead) =>
-    leadHasOutcomeBetween(lead, ["Devis", "Vendu"], isInPeriod),
+  const visit = inscriptionVisitRates(
+    periodRows.map((lead) => ({
+      outcomes: getLeadOutcomes(lead).map((item) => item.outcome),
+      dealAmount: Number(lead.dealAmount) || 0,
+    })),
   );
-  const missedCount = allRows.filter(
-    (lead) =>
-      !attendedLeads.includes(lead) &&
-      leadHasOutcomeBetween(lead, ["Annulation", "PVPP"], isInPeriod),
-  ).length;
   const depositCount = countByStatus(periodRows, ["Acompte reçu", "Acompte validé"]);
-  const conversionSalesCount = soldLeads.filter(
-    (lead) => !(lead.dealAmount > 0) || lead.dealAmount >= 100,
-  ).length;
 
   return {
     prospects: totalProspects,
-    conversion: ratio(conversionSalesCount, devisCount + conversionSalesCount),
-    attendance: ratio(attendedLeads.length, attendedLeads.length + missedCount),
+    conversion: visit.conversion,
+    attendance: visit.attendance,
     rdv: Math.min(100, ratio(rdvCount, totalProspects)),
-    deposit: ratio(depositCount, Math.max(soldLeads.length + rdvCount, 1)),
+    deposit: ratio(depositCount, Math.max(soldOnArrival + rdvCount, 1)),
     red: ratio(countByStatus(periodRows, lostStatuses), totalProspects),
     outOfZone: ratio(countByStatus(periodRows, ["Hors zone"]), totalProspects),
     remaining: ratio(countByStatus(periodRows, openToTreatStatuses), totalProspects),
