@@ -18,6 +18,7 @@ import { useEffect, useMemo, useState } from "react";
 import {
   billingAlerts,
   companyLabel,
+  unpaidChaseAlerts,
   type AgencyCompany,
 } from "@/lib/admin-agency-billing";
 import { loadAgencyBilling } from "@/lib/admin-agency-store";
@@ -68,6 +69,9 @@ export default function AdminNotificationsPage() {
   const [cycleAlerts, setCycleAlerts] = useState<
     Array<{ company: AgencyCompany; label: string; overdue: boolean }>
   >([]);
+  const [chaseAlerts, setChaseAlerts] = useState<
+    Array<{ company: AgencyCompany; invoiceId: string; label: string }>
+  >([]);
   const [markingId, setMarkingId] = useState<string | null>(null);
   const [fulfillingId, setFulfillingId] = useState<string | null>(null);
   const [cuttingId, setCuttingId] = useState<string | null>(null);
@@ -101,6 +105,15 @@ export default function AdminNotificationsPage() {
           company,
           label: alert.label,
           overdue: alert.overdue,
+        })),
+      ),
+    );
+    setChaseAlerts(
+      (["webk", "bookea"] as const).flatMap((company) =>
+        unpaidChaseAlerts(company === "webk" ? webk : bookea).map((alert) => ({
+          company,
+          invoiceId: alert.invoiceId,
+          label: alert.label,
         })),
       ),
     );
@@ -548,6 +561,27 @@ export default function AdminNotificationsPage() {
                 </button>
               ) : null}
             </div>
+
+            {chaseAlerts.length > 0 ? (
+              <div className="rounded-2xl border border-rose-200 bg-rose-50 p-4">
+                <p className="text-sm font-black uppercase text-rose-800">
+                  Factures à relancer
+                </p>
+                <ul className="mt-2 space-y-1 text-sm font-semibold text-rose-950">
+                  {chaseAlerts.map((alert) => (
+                    <li key={`${alert.company}-${alert.invoiceId}`}>
+                      {companyLabel(alert.company)} · {alert.label}
+                    </li>
+                  ))}
+                </ul>
+                <Link
+                  href="/dashboard/admin-gestion"
+                  className="mt-3 inline-flex h-10 items-center rounded-xl bg-slate-950 px-3 text-sm font-semibold text-white"
+                >
+                  Ouvrir la facturation
+                </Link>
+              </div>
+            ) : null}
 
             {cycleAlerts.length > 0 ? (
               <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4">

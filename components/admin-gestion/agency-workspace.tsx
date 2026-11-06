@@ -7,6 +7,7 @@ import {
   AGENCY_COMPANIES,
   AGENCY_INVOICE_STATUSES,
   billingAlerts,
+  unpaidChaseAlerts,
   buildAgencyInvoiceHtml,
   companyLabel,
   createId,
@@ -145,6 +146,10 @@ export function AgencyWorkspace() {
     () => (state ? billingAlerts(state) : []),
     [state],
   );
+  const chaseAlerts = useMemo(
+    () => (state ? unpaidChaseAlerts(state) : []),
+    [state],
+  );
 
   async function persist(...updates: AgencyBillingState[]) {
     setSaving(true);
@@ -228,25 +233,6 @@ export function AgencyWorkspace() {
 
   return (
     <div className="space-y-5">
-      <label className="relative block">
-        <span className="sr-only">Rechercher une facture</span>
-        <Search
-          aria-hidden
-          className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400"
-        />
-        <input
-          type="search"
-          value={search}
-          onChange={(event) => {
-            setSearch(event.target.value);
-            if (event.target.value.trim()) {
-              setSection("facturation");
-            }
-          }}
-          placeholder="Rechercher une facture : nom du centre ou n° (WK-2026-…)"
-          className="h-11 w-full rounded-xl border border-slate-200 bg-white pl-9 pr-3 text-sm font-semibold text-slate-800 outline-none focus:border-violet-400"
-        />
-      </label>
       <div className="flex flex-wrap gap-2">
         {AGENCY_COMPANIES.map((item) => (
           <button
@@ -292,9 +278,27 @@ export function AgencyWorkspace() {
           <p className="text-sm font-black uppercase text-amber-800">
             Cycles à traiter · {companyLabel(company)}
           </p>
+          <p className="mt-1 text-xs font-semibold text-amber-800/80">
+            À partir de 3 semaines et 5 jours après l’émission. Disparaît dès qu’une nouvelle facture est émise.
+          </p>
           <ul className="mt-2 space-y-1 text-sm font-semibold text-amber-900">
             {alerts.map((alert) => (
               <li key={alert.clientId}>{alert.label}</li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+      {chaseAlerts.length > 0 ? (
+        <div className="rounded-2xl border border-rose-200 bg-rose-50 p-4">
+          <p className="text-sm font-black uppercase text-rose-800">
+            À relancer · {companyLabel(company)}
+          </p>
+          <p className="mt-1 text-xs font-semibold text-rose-800/80">
+            Impayée depuis 6 jours. Reste ici jusqu’au statut Payée.
+          </p>
+          <ul className="mt-2 space-y-1 text-sm font-semibold text-rose-900">
+            {chaseAlerts.map((alert) => (
+              <li key={alert.invoiceId}>{alert.label}</li>
             ))}
           </ul>
         </div>
@@ -320,7 +324,8 @@ export function AgencyWorkspace() {
           state={state}
           onChange={update}
           openInvoiceId={openInvoiceId}
-          search={search.trim()}
+          search={search}
+          onSearch={setSearch}
         />
       ) : null}
       {section === "clients" ? (
@@ -356,9 +361,11 @@ function BillingSection({
   onChange,
   openInvoiceId,
   search,
+  onSearch,
 }: {
   state: AgencyBillingState;
   search: string;
+  onSearch: (value: string) => void;
   onChange: (patch: Partial<AgencyBillingState>) => Promise<void>;
   openInvoiceId?: string | null;
 }) {
@@ -382,7 +389,7 @@ function BillingSection({
           return false;
         }
         if (
-          search &&
+          search.trim() &&
           !invoiceMatchesSearch(
             invoice,
             state.clients.find((client) => client.id === invoice.clientId),
@@ -402,7 +409,7 @@ function BillingSection({
     [dateFrom, dateTo, search, state.clients, state.invoices, statusFilter],
   );
   const hasInvoiceFilters =
-    statusFilter !== "tous" || Boolean(dateFrom) || Boolean(dateTo);
+    statusFilter !== "tous" || Boolean(dateFrom) || Boolean(dateTo) || Boolean(search.trim());
 
   function addLine() {
     const service = state.services[0];
@@ -941,6 +948,22 @@ function BillingSection({
       </section>
 
       <section className="overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <div className="border-b border-slate-100 px-4 pt-4">
+          <label className="relative block">
+            <span className="sr-only">Rechercher une facture</span>
+            <Search
+              aria-hidden
+              className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400"
+            />
+            <input
+              type="search"
+              value={search}
+              onChange={(event) => onSearch(event.target.value)}
+              placeholder="Rechercher une facture : nom du centre ou n° (WK-2026-…)"
+              className="h-11 w-full rounded-xl border border-slate-200 bg-white pl-9 pr-3 text-sm font-semibold text-slate-800 outline-none focus:border-violet-400"
+            />
+          </label>
+        </div>
         <div className="flex flex-wrap items-end gap-3 border-b border-slate-100 px-4 py-4">
           <label>
             <span className="mb-1.5 block text-xs font-black uppercase text-slate-500">
@@ -990,6 +1013,7 @@ function BillingSection({
                 setStatusFilter("tous");
                 setDateFrom("");
                 setDateTo("");
+                onSearch("");
               }}
               className="h-11 rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 hover:bg-slate-50"
             >

@@ -926,29 +926,88 @@ export function defaultAgencyInvoiceMail(
   };
 }
 
+/** Renouvellement : 3 semaines et 5 jours après la date d’émission. */
+export const RENEWAL_REMINDER_AFTER_DAYS = 26;
+/** Relance impayée : 6 jours après la date d’émission, jusqu’au passage en Payée. */
+export const UNPAID_CHASE_AFTER_DAYS = 6;
+
+function latestBillableInvoice(invoices: AgencyInvoice[], clientId: string) {
+  let latest: AgencyInvoice | undefined;
+  for (const invoice of invoices) {
+    if (invoice.clientId !== clientId) {
+      continue;
+    }
+    if (invoice.status === "Annulée" || invoice.status === "Brouillon") {
+      continue;
+    }
+    if (!latest || invoice.issuedOn > latest.issuedOn) {
+      latest = invoice;
+    }
+  }
+  return latest;
+}
+
 export function billingAlerts(
   state: AgencyBillingState,
   now = new Date(),
 ) {
+  const today = localIsoDate(now);
   return state.clients
-    .filter((client) => client.active && client.nextInvoiceOn)
+    .filter((client) => client.active)
     .map((client) => {
-      const overdue = isOverdueCycle(client.nextInvoiceOn, now);
-      const soon = isWithinReminderWindow(client.nextInvoiceOn, now);
-      if (!overdue && !soon) {
+      const latest = latestBillableInvoice(state.invoices, client.id);
+      const dueOn = latest
+        ? latest.nextCycleOn || nextBillingCycleOn(latest.issuedOn)
+        : client.nextInvoiceOn;
+      const remindOn = latest
+        ? addDaysIso(latest.issuedOn, RENEWAL_REMINDER_AFTER_DAYS)
+        : dueOn
+          ? addDaysIso(dueOn, RENEWAL_REMINDER_AFTER_DAYS - 30)
+          : "";
+      if (!dueOn || !remindOn || today < remindOn) {
         return null;
       }
+      const overdue = today > dueOn;
       return {
         clientId: client.id,
         clientName: client.name,
-        nextInvoiceOn: client.nextInvoiceOn,
+        nextInvoiceOn: dueOn,
         overdue,
         label: overdue
-          ? `${client.name} : cycle dépassé depuis le ${formatShortDate(client.nextInvoiceOn)}`
-          : `${client.name} : facture à émettre d’ici le ${formatShortDate(client.nextInvoiceOn)}`,
+          ? `${client.name} : cycle dépassé depuis le ${formatShortDate(dueOn)}`
+          : `${client.name} : renouvellement à émettre depuis le ${formatShortDate(remindOn)}`,
       };
     })
     .filter((item): item is NonNullable<typeof item> => Boolean(item));
+}
+
+export function unpaidChaseAlerts(
+  state: AgencyBillingState,
+  now = new Date(),
+) {
+  const today = localIsoDate(now);
+  return state.invoices
+    .filter((invoice) => {
+      if (
+        invoice.status !== "En attente de paiement" &&
+        invoice.status !== "En retard"
+      ) {
+        return false;
+      }
+      return today >= addDaysIso(invoice.issuedOn, UNPAID_CHASE_AFTER_DAYS);
+    })
+    .sort((left, right) => left.issuedOn.localeCompare(right.issuedOn))
+    .map((invoice) => {
+      const client = state.clients.find((item) => item.id === invoice.clientId);
+      const name = client?.name || "Centre";
+      return {
+        invoiceId: invoice.id,
+        clientId: invoice.clientId,
+        number: invoice.number,
+        issuedOn: invoice.issuedOn,
+        label: `${name} · ${invoice.number} : impayée depuis le ${formatShortDate(invoice.issuedOn)}`,
+      };
+    });
 }
 
 export function periodRange(

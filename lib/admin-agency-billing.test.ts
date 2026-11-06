@@ -6,6 +6,7 @@ import {
   AGENCY_LEGAL_ENTITY,
   REVERSE_CHARGE_MENTION,
   billingAlerts,
+  unpaidChaseAlerts,
   billingCenterContactFromRow,
   buildAgencyInvoiceHtml,
   defaultAgencyIdentity,
@@ -355,6 +356,82 @@ test("seuls les clients actifs génèrent une notification de cycle", () => {
   assert.equal(alerts.length, 1);
   assert.equal(alerts[0]?.clientName, "JFG");
   assert.equal(alerts[0]?.overdue, false);
+});
+
+test("le renouvellement remonte 3 semaines et 5 jours après l’émission, puis disparaît", () => {
+  const client = {
+    id: "c1",
+    name: "JFG Clinic Clermont-ferrand",
+    active: true,
+    nextInvoiceOn: "2026-11-07",
+  };
+  const issued = {
+    id: "f1",
+    number: "WK-2026-010",
+    clientId: "c1",
+    issuedOn: "2026-10-08",
+    nextCycleOn: "2026-11-07",
+    status: "Payée",
+  };
+  const before = billingAlerts(
+    normalizeAgencyState("webk", { clients: [client], invoices: [issued] }),
+    new Date("2026-11-02T10:00:00"),
+  );
+  assert.equal(before.length, 0);
+  const due = billingAlerts(
+    normalizeAgencyState("webk", { clients: [client], invoices: [issued] }),
+    new Date("2026-11-03T10:00:00"),
+  );
+  assert.equal(due.length, 1);
+  assert.match(due[0]?.label || "", /renouvellement/);
+  const renewed = billingAlerts(
+    normalizeAgencyState("webk", {
+      clients: [{ ...client, nextInvoiceOn: "2026-12-03" }],
+      invoices: [
+        issued,
+        {
+          id: "f2",
+          number: "WK-2026-011",
+          clientId: "c1",
+          issuedOn: "2026-11-03",
+          nextCycleOn: "2026-12-03",
+          status: "En attente de paiement",
+        },
+      ],
+    }),
+    new Date("2026-11-03T10:00:00"),
+  );
+  assert.equal(renewed.length, 0);
+});
+
+test("une facture impayée entre en relance au bout de 6 jours et en sort une fois payée", () => {
+  const invoice = {
+    id: "f1",
+    number: "WK-2026-012",
+    clientId: "c1",
+    issuedOn: "2026-10-31",
+    status: "En attente de paiement",
+  };
+  const client = { id: "c1", name: "HELIASKIN INSTITUT", active: true };
+  const early = unpaidChaseAlerts(
+    normalizeAgencyState("webk", { clients: [client], invoices: [invoice] }),
+    new Date("2026-11-05T10:00:00"),
+  );
+  assert.equal(early.length, 0);
+  const due = unpaidChaseAlerts(
+    normalizeAgencyState("webk", { clients: [client], invoices: [invoice] }),
+    new Date("2026-11-06T10:00:00"),
+  );
+  assert.equal(due.length, 1);
+  assert.match(due[0]?.label || "", /HELIASKIN/);
+  const paid = unpaidChaseAlerts(
+    normalizeAgencyState("webk", {
+      clients: [client],
+      invoices: [{ ...invoice, status: "Payée" }],
+    }),
+    new Date("2026-11-20T10:00:00"),
+  );
+  assert.equal(paid.length, 0);
 });
 
 test("une notif de souscription prépare une facture Bookea sans doublon", () => {
