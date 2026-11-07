@@ -28,6 +28,7 @@ const {
   threadHasConfirmedVisit,
   closesAfterOffer,
   refusedInThread,
+  parseLaterIso,
 } = require("./conversation");
 const { isSeyaOff, readCenterSeya, writeSeyaConversations } = require("./store");
 const { isSameSeyaConversation } = require("./conversation-key");
@@ -560,6 +561,19 @@ function roundAfterRecall(conversation, now, recallStart, days) {
   return due === sentAfter + 1 ? due : 0;
 }
 
+function laterHoldStart(conversation) {
+  const lastLead = [...(conversation?.messages || [])]
+    .reverse()
+    .find((item) => item.author === "lead");
+  if (!lastLead?.text) {
+    return NaN;
+  }
+  const spoken = Date.parse(lastLead.at || "");
+  const base = Number.isFinite(spoken) ? new Date(spoken) : new Date();
+  const iso = parseLaterIso(lastLead.text, base);
+  return iso ? Date.parse(`${iso}T00:00:00Z`) : NaN;
+}
+
 function pickRelanceRound(conversation, now = new Date(), extras = {}) {
   if (isRelanceQuietHours(now) || shouldSkipRelance(conversation, extras)) {
     return 0;
@@ -581,8 +595,10 @@ function pickRelanceRound(conversation, now = new Date(), extras = {}) {
 
   const recall = crmRecallDayFor(conversation, extras.crmHold);
   const recallStart = recall ? Date.parse(`${recall}T00:00:00Z`) : NaN;
-  if (Number.isFinite(recallStart) && !(lastLead && Date.parse(lastLead) >= recallStart)) {
-    return roundAfterRecall(conversation, now, recallStart, days);
+  const laterStart = laterHoldStart(conversation);
+  const holdStart = Number.isFinite(recallStart) ? recallStart : laterStart;
+  if (Number.isFinite(holdStart) && !(lastLead && Date.parse(lastLead) >= holdStart)) {
+    return roundAfterRecall(conversation, now, holdStart, days);
   }
 
   if (already >= 3) {

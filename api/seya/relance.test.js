@@ -41,6 +41,18 @@ function conversation(overrides = {}) {
   };
 }
 
+test("« Pas avant le printemps » : aucune relance avant la date dite", () => {
+  const said = new Date("2026-10-31T13:00:00Z").toISOString();
+  const thread = conversation({
+    messages: [
+      { id: "m1", author: "seya", text: "Souhaitez-vous qu’un expert vous rappelle ?", at: said },
+      { id: "m2", author: "lead", text: "Pas avant le printemps", at: said },
+    ],
+  });
+  assert.equal(pickRelanceRound(thread, new Date("2026-11-07T10:00:00Z")), 0);
+  assert.equal(pickRelanceRound(thread, new Date("2027-03-21T10:00:00Z")), 1);
+});
+
 test("relance 1 : à J+1, pas avant", () => {
   const early = conversation({
     messages: [
