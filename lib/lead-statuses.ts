@@ -48,25 +48,40 @@ export const leadStatuses: LeadStatus[] = [
 /** Visible seulement dans le menu du centre de Sallanches. */
 export const sallanchesOnlyLeadStatuses: LeadStatus[] = ["Pour Gaillard"];
 
-export function isSallanchesCenter(centerName?: string | null) {
-  const key = String(centerName || "")
+/** Visible seulement dans le menu du centre de Gaillard. */
+export const gaillardOnlyLeadStatuses: LeadStatus[] = ["Pour Sallanches"];
+
+function centerKey(centerName?: string | null) {
+  return String(centerName || "")
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase();
+}
+
+export function isSallanchesCenter(centerName?: string | null) {
+  const key = centerKey(centerName);
   return key.includes("sallanches") || key.includes("salanches");
 }
 
+export function isGaillardCenter(centerName?: string | null) {
+  return centerKey(centerName).includes("gaillard");
+}
+
 export function leadStatusesForCenter(centerName?: string | null): LeadStatus[] {
-  if (!isSallanchesCenter(centerName)) {
-    return leadStatuses;
+  if (isSallanchesCenter(centerName)) {
+    return [...leadStatuses, ...sallanchesOnlyLeadStatuses];
   }
-  return [...leadStatuses, ...sallanchesOnlyLeadStatuses];
+  if (isGaillardCenter(centerName)) {
+    return [...leadStatuses, ...gaillardOnlyLeadStatuses];
+  }
+  return leadStatuses;
 }
 
 function isListedLeadStatus(value: string) {
   return (
     (leadStatuses as readonly string[]).includes(value) ||
-    (sallanchesOnlyLeadStatuses as readonly string[]).includes(value)
+    (sallanchesOnlyLeadStatuses as readonly string[]).includes(value) ||
+    (gaillardOnlyLeadStatuses as readonly string[]).includes(value)
   );
 }
 
@@ -135,6 +150,7 @@ const leadStatusAliasMap: Record<string, LeadStatus> = {
   "Message vocal laissé + SMS envoyé": "Msg vocal laissé + SMS envoyé",
   "Msg vocal + Mail": "Message vocal",
   "Message vocal + Mail": "Message vocal",
+  "pour salanches": "Pour Sallanches",
 };
 
 export const leadStatusClasses: Record<LeadStatus, string> = {
@@ -181,6 +197,7 @@ export const leadStatusClasses: Record<LeadStatus, string> = {
   "Mail/SMS Injoignable": "bg-zinc-100 text-zinc-800 ring-zinc-200",
   "Message vocal": "bg-cyan-100 text-cyan-800 ring-cyan-200",
   "Pour Gaillard": "bg-violet-100 text-violet-800 ring-violet-200",
+  "Pour Sallanches": "bg-sky-100 text-sky-800 ring-sky-200",
 };
 
 function mapOneLeadStatus(raw: string): LeadStatus | "" {
@@ -202,7 +219,11 @@ function mapOneLeadStatus(raw: string): LeadStatus | "" {
   if (aliasMatch) {
     return aliasMatch[1];
   }
-  const canonicalMatch = [...leadStatuses, ...sallanchesOnlyLeadStatuses].find(
+  const canonicalMatch = [
+    ...leadStatuses,
+    ...sallanchesOnlyLeadStatuses,
+    ...gaillardOnlyLeadStatuses,
+  ].find(
     (status) => status.toLowerCase() === lower,
   );
   if (canonicalMatch) {
@@ -314,6 +335,7 @@ const leadStatusMenuClasses: Record<LeadStatus, string> = {
   "Mail/SMS Injoignable": "border-zinc-400 text-zinc-700",
   "Message vocal": "border-cyan-500 text-cyan-800",
   "Pour Gaillard": "border-violet-400 text-violet-800",
+  "Pour Sallanches": "border-sky-400 text-sky-800",
 };
 
 export function leadStatusMenuClassName(status: string) {

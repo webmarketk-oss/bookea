@@ -95,7 +95,7 @@ async function markMessagedNouveauLeads(supabase, centerId, conversations) {
 }
 
 const CRM_HOLD_STATUS =
-  /reviendra vers nous|pas int[eé]ress|hors[- ]?zone|intraitable|contre[- ]?indication|revue sant[eé]|prospect perdu|client perdu|no[- ]?show|doublon|num[eé]ro invalide|pour gaillard/i;
+  /reviendra vers nous|pas int[eé]ress|hors[- ]?zone|intraitable|contre[- ]?indication|revue sant[eé]|prospect perdu|client perdu|no[- ]?show|doublon|num[eé]ro invalide|pour gaillard|pour sall?anches/i;
 const CRM_RELANCE_HOLD_STATUS =
   /en r[eé]flexion|acompte|devis|vendu|rdv pris|rdv confirm|client converti/i;
 

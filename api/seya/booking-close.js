@@ -156,6 +156,7 @@ const CRM_STATUS_ALIASES = {
   "Message vocal laissé + SMS envoyé": "Msg vocal laissé + SMS envoyé",
   "Msg vocal + Mail": "Message vocal",
   "Message vocal + Mail": "Message vocal",
+  "pour salanches": "Pour Sallanches",
 };
 
 function crmStatusLabel(value) {
@@ -163,7 +164,11 @@ function crmStatusLabel(value) {
   if (!raw) {
     return "Nouveau";
   }
-  if (CRM_LEAD_STATUSES.includes(raw) || raw === "Pour Gaillard") {
+  if (
+    CRM_LEAD_STATUSES.includes(raw) ||
+    raw === "Pour Gaillard" ||
+    raw === "Pour Sallanches"
+  ) {
     return raw;
   }
   if (CRM_STATUS_ALIASES[raw]) {
@@ -176,6 +181,9 @@ function crmStatusLabel(value) {
   }
   if (lower === "pour gaillard") {
     return "Pour Gaillard";
+  }
+  if (lower === "pour sallanches" || lower === "pour salanches") {
+    return "Pour Sallanches";
   }
   return CRM_LEAD_STATUSES.find((status) => status.toLowerCase() === lower) || "Nouveau";
 }

@@ -16,7 +16,7 @@ import { Input } from "@/components/ui/input";
 
 import { readActiveCenterId, saveActiveCenterId } from "@/lib/center-access";
 import { importPelissanneOctoberLeads } from "@/lib/pelissanne-october-import";
-import { followUpLeadStatuses, inactiveLeadStatuses, leadStatuses, leadStatusesForCenter, sallanchesOnlyLeadStatuses } from "@/lib/lead-statuses";
+import { followUpLeadStatuses, gaillardOnlyLeadStatuses, inactiveLeadStatuses, leadStatuses, leadStatusesForCenter, sallanchesOnlyLeadStatuses } from "@/lib/lead-statuses";
 import { matchesPersonSearch } from "@/lib/person-search";
 import {
   addDaysIso,
@@ -2530,7 +2530,8 @@ function isLeadStatusFilter(value: string): value is ProspectFilters["status"] {
   return (
     value === "Tous" ||
     leadStatuses.includes(value as LeadStatus) ||
-    sallanchesOnlyLeadStatuses.includes(value as LeadStatus)
+    sallanchesOnlyLeadStatuses.includes(value as LeadStatus) ||
+    gaillardOnlyLeadStatuses.includes(value as LeadStatus)
   );
 }
 
