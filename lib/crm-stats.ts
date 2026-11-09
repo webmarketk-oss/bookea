@@ -15,6 +15,7 @@ export type CrmQuickFilter =
   | "RDV aujourd'hui"
   | "RDV hier"
   | "RDV 7 jours"
+  | "RDV ce mois"
   | "Acompte reçu aujourd'hui";
 
 export const rdvBookedStatusList: LeadStatus[] = [
@@ -37,6 +38,11 @@ export function todayIso() {
 
 export function monthStartIso(date = todayIso()) {
   return `${date.slice(0, 7)}-01`;
+}
+
+export function monthEndIso(date = todayIso()) {
+  const [year, month] = date.split("-").map(Number);
+  return toLocalIsoDate(new Date(year, month, 0));
 }
 
 export function addDaysIso(date: string, days: number) {
@@ -107,26 +113,13 @@ export function isReminderDueOn(date?: string | null, today = todayIso()) {
 }
 
 export function isOpenReminderDue(
-  lead: Pick<Lead, "reminderDate" | "activityLog">,
+  lead: Pick<Lead, "reminderDate">,
   today = todayIso(),
 ) {
-  if (!isReminderDueOn(lead.reminderDate, today)) {
-    return false;
-  }
-
-  const reminder = toDateOnlyIso(lead.reminderDate);
-  if (!reminder) {
-    return false;
-  }
-
-  return !lead.activityLog.some((activity) => {
-    if (activity.type !== "status") {
-      return false;
-    }
-
-    const handledOn = activityDateToIso(activity);
-    return Boolean(handledOn && handledOn >= reminder);
-  });
+  // Tant que la date de relance est aujourd’hui ou dépassée, le prospect reste en haut.
+  // Un changement de statut ce jour-là ne le cache plus : la date est retirée seulement
+  // quand l’équipe enregistre un nouveau statut et que la relance était déjà due.
+  return isReminderDueOn(lead.reminderDate, today);
 }
 
 export function reminderDateAfterStatusChange(
@@ -407,6 +400,10 @@ export function matchesCrmQuickFilter(lead: Lead, filter: CrmQuickFilter) {
 
   if (filter === "RDV hier") {
     return isLeadRdvTakenOn(lead, yesterday);
+  }
+
+  if (filter === "RDV ce mois") {
+    return isLeadRdvTakenBetween(lead, monthStartIso(today), monthEndIso(today));
   }
 
   return isLeadRdvTakenBetween(lead, last7Start, today);

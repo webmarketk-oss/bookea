@@ -17,8 +17,10 @@ registerHooks({
 const {
   getLeadRdvTakenDates,
   isLeadAcompteReceivedOn,
+  isLeadRdvTakenBetween,
   isLeadRdvTakenOn,
   isOpenReminderDue,
+  monthEndIso,
 } = await import("./crm-stats.ts");
 
 function lead(partial: Partial<Lead>): Lead {
@@ -118,6 +120,28 @@ describe("crm-stats acompte / RDV KPI", () => {
   });
 });
 
+describe("crm-stats mois calendaire", () => {
+  it("ferme le mois au 30 ou au 31, et au 28 ou 29 en février", () => {
+    assert.equal(monthEndIso("2026-11-09"), "2026-11-30");
+    assert.equal(monthEndIso("2026-12-01"), "2026-12-31");
+    assert.equal(monthEndIso("2026-02-01"), "2026-02-28");
+    assert.equal(monthEndIso("2028-02-01"), "2028-02-29");
+  });
+
+  it("compte un RDV pris dans le mois, pas celui du mois d’après", () => {
+    const booked = (bookedOn: string) =>
+      lead({
+        status: "RDV pris",
+        activityLog: [
+          activity("Statut changé : Nouveau → RDV pris.", `${bookedOn}T10:00:00.000Z`),
+        ],
+      });
+
+    assert.equal(isLeadRdvTakenBetween(booked("2026-11-02"), "2026-11-01", "2026-11-30"), true);
+    assert.equal(isLeadRdvTakenBetween(booked("2026-12-01"), "2026-11-01", "2026-11-30"), false);
+  });
+});
+
 describe("crm-stats relances dues", () => {
   it("détecte une relance ouverte à date échue", () => {
     assert.equal(
@@ -138,6 +162,16 @@ describe("crm-stats relances dues", () => {
           activityLog: [
             activity("Statut changé : Nouveau → À relancer.", "2026-03-15T12:00:00.000Z"),
           ],
+        }),
+        "2026-03-15",
+      ),
+      true,
+    );
+    assert.equal(
+      isOpenReminderDue(
+        lead({
+          reminderDate: "2026-03-16",
+          activityLog: [],
         }),
         "2026-03-15",
       ),

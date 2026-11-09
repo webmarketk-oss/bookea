@@ -1,7 +1,6 @@
 import type { ReactNode } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { followUpLeadStatuses, inactiveLeadStatuses } from "@/lib/lead-statuses";
-import { isEverBookedLead } from "@/lib/crm-rdv";
 import {
   addDaysIso,
   isLeadCreatedBetween,
@@ -10,6 +9,7 @@ import {
   isLeadCreatedSince,
   isLeadRdvTakenBetween,
   isLeadRdvTakenOn,
+  monthEndIso,
   monthStartIso,
   todayIso,
   type CrmQuickFilter,
@@ -59,6 +59,8 @@ export default function DashboardCards({
   const yesterday = addDaysIso(today, -1);
   const sevenDaysAgo = addDaysIso(today, -6);
   const monthStart = monthStartIso(today);
+  const monthEnd = monthEndIso(today);
+  const monthLastDay = Number(monthEnd.slice(8));
 
   const acquisitionStats: StatCard[] = [
     {
@@ -126,11 +128,13 @@ export default function DashboardCards({
     },
     {
       title: "Tous les RDV pris",
-      value: leads.filter(isEverBookedLead).length,
-      subtitle: "Même sans date de prise",
+      value: leads.filter((lead) =>
+        isLeadRdvTakenBetween(lead, monthStart, monthEnd),
+      ).length,
+      subtitle: `Du 1er au ${monthLastDay}`,
       icon: CalendarCheck2,
       color: "text-violet-800",
-      status: "RDV pris",
+      quickFilter: "RDV ce mois",
     },
     {
       title: "Acompte envoyé",
@@ -200,7 +204,7 @@ export default function DashboardCards({
       </StatGroup>
       <StatGroup
         title="RDV pris"
-        hint="Tous les RDV pris comptent, même sans date. Les cartes jour / 7 jours restent à la date de prise."
+        hint="À la date où le rendez-vous a été pris. Tous les RDV pris couvre le mois en cours, du 1er au dernier jour."
         cards={rdvStats}
         columns="xl:grid-cols-5"
       >

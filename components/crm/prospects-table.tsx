@@ -16,7 +16,7 @@ import {
   DEPOSIT_REMINDER_LABELS,
   toDatetimeLocalValue,
 } from "@/lib/crm-deposit";
-import { isOpenReminderDue, toDateOnlyIso } from "@/lib/crm-stats";
+import { isOpenReminderDue, todayIso, toDateOnlyIso } from "@/lib/crm-stats";
 import { loadCrmLeadHistory } from "@/lib/crm-supabase";
 import { displayVisitDate } from "@/lib/crm-rdv";
 import { leadOfferLabel } from "@/lib/lead-offer";
@@ -140,17 +140,30 @@ export default function ProspectsTable({
   const sortedLeads = leads
     .map((lead, index) => ({ lead, index }))
     .sort((current, next) => {
-      const currentDue = isOpenReminderDue(current.lead) ? 0 : 1;
-      const nextDue = isOpenReminderDue(next.lead) ? 0 : 1;
+      const pins = (lead: Lead) =>
+        isOpenReminderDue(lead) && !isInactiveLeadStatus(lead.status);
+      const currentDue = pins(current.lead) ? 0 : 1;
+      const nextDue = pins(next.lead) ? 0 : 1;
       if (currentDue !== nextDue) {
         return currentDue - nextDue;
       }
 
       if (currentDue === 0) {
+        const today = todayIso();
         const currentReminder = toDateOnlyIso(current.lead.reminderDate) ?? "";
         const nextReminder = toDateOnlyIso(next.lead.reminderDate) ?? "";
+        const currentRank = currentReminder === today ? 0 : 1;
+        const nextRank = nextReminder === today ? 0 : 1;
+        if (currentRank !== nextRank) {
+          return currentRank - nextRank;
+        }
         if (currentReminder !== nextReminder) {
-          return currentReminder.localeCompare(nextReminder);
+          return nextReminder.localeCompare(currentReminder);
+        }
+        const currentTime = current.lead.reminderTime || "";
+        const nextTime = next.lead.reminderTime || "";
+        if (currentTime !== nextTime) {
+          return currentTime.localeCompare(nextTime);
         }
       }
 
@@ -323,7 +336,7 @@ export default function ProspectsTable({
                 isInactive && "bg-slate-50 hover:bg-slate-100",
                 isOpenReminderDue(lead) &&
                   !isInactive &&
-                  "bg-amber-50 hover:bg-amber-50",
+                  "bg-orange-50 hover:bg-orange-50",
                 isLeadDetailsOpen &&
                   selectedLead.id === lead.id &&
                   "border-l-4 border-l-blue-600 bg-blue-50 hover:bg-blue-50"
@@ -545,7 +558,7 @@ export default function ProspectsTable({
                   isInactive && "bg-slate-50",
                   isOpenReminderDue(lead) &&
                     !isInactive &&
-                    "bg-amber-50",
+                    "bg-orange-50",
                   selectedLead.id === lead.id && "bg-blue-50",
                   commentsOpen ? "min-w-[14rem] w-[14rem]" : "w-10 min-w-10"
                 )}
