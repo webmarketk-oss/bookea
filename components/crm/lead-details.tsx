@@ -82,6 +82,7 @@ interface LeadDetailsProps {
   ) => void | Promise<void>;
   onClose: () => void;
   commercialOptions?: string[];
+  statusOptions?: LeadStatus[];
   whatsAppMessages?: LeadWhatsAppMessage[] | "loading" | "error";
 }
 
@@ -125,6 +126,7 @@ export default function LeadDetails({
   onUpdateLead,
   onClose,
   commercialOptions = [],
+  statusOptions,
   whatsAppMessages,
 }: LeadDetailsProps) {
   const fullName = `${lead.firstName} ${lead.lastName}`;
@@ -935,7 +937,13 @@ export default function LeadDetails({
                 <AdaptiveSelect
                   ariaLabel="Statut"
                   value={infoForm.status}
-                  options={leadStatusSelectOptions(infoForm.status)}
+                  options={
+                    statusOptions
+                      ? statusOptions.includes(infoForm.status)
+                        ? statusOptions
+                        : [infoForm.status, ...statusOptions]
+                      : leadStatusSelectOptions(infoForm.status)
+                  }
                   onChange={(status) => {
                     const nextForm = {
                       ...infoFormRef.current,

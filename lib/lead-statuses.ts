@@ -45,6 +45,31 @@ export const leadStatuses: LeadStatus[] = [
   "Message vocal",
 ];
 
+/** Visible seulement dans le menu du centre de Sallanches. */
+export const sallanchesOnlyLeadStatuses: LeadStatus[] = ["Pour Gaillard"];
+
+export function isSallanchesCenter(centerName?: string | null) {
+  const key = String(centerName || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+  return key.includes("sallanches") || key.includes("salanches");
+}
+
+export function leadStatusesForCenter(centerName?: string | null): LeadStatus[] {
+  if (!isSallanchesCenter(centerName)) {
+    return leadStatuses;
+  }
+  return [...leadStatuses, ...sallanchesOnlyLeadStatuses];
+}
+
+function isListedLeadStatus(value: string) {
+  return (
+    (leadStatuses as readonly string[]).includes(value) ||
+    (sallanchesOnlyLeadStatuses as readonly string[]).includes(value)
+  );
+}
+
 export const followUpLeadStatuses: LeadStatus[] = [
   "Nouveau",
   "Apl en abs",
@@ -155,6 +180,7 @@ export const leadStatusClasses: Record<LeadStatus, string> = {
   "Mail envoyé": "bg-zinc-100 text-zinc-800 ring-zinc-200",
   "Mail/SMS Injoignable": "bg-zinc-100 text-zinc-800 ring-zinc-200",
   "Message vocal": "bg-cyan-100 text-cyan-800 ring-cyan-200",
+  "Pour Gaillard": "bg-violet-100 text-violet-800 ring-violet-200",
 };
 
 function mapOneLeadStatus(raw: string): LeadStatus | "" {
@@ -162,7 +188,7 @@ function mapOneLeadStatus(raw: string): LeadStatus | "" {
   if (!value) {
     return "";
   }
-  if ((leadStatuses as readonly string[]).includes(value)) {
+  if (isListedLeadStatus(value)) {
     return value as LeadStatus;
   }
   const mapped = leadStatusAliasMap[value];
@@ -176,7 +202,7 @@ function mapOneLeadStatus(raw: string): LeadStatus | "" {
   if (aliasMatch) {
     return aliasMatch[1];
   }
-  const canonicalMatch = leadStatuses.find(
+  const canonicalMatch = [...leadStatuses, ...sallanchesOnlyLeadStatuses].find(
     (status) => status.toLowerCase() === lower,
   );
   if (canonicalMatch) {
@@ -287,6 +313,7 @@ const leadStatusMenuClasses: Record<LeadStatus, string> = {
   "Mail envoyé": "border-zinc-400 text-zinc-700",
   "Mail/SMS Injoignable": "border-zinc-400 text-zinc-700",
   "Message vocal": "border-cyan-500 text-cyan-800",
+  "Pour Gaillard": "border-violet-400 text-violet-800",
 };
 
 export function leadStatusMenuClassName(status: string) {
@@ -296,10 +323,11 @@ export function leadStatusMenuClassName(status: string) {
   );
 }
 
-export function leadStatusSelectOptions(current: string) {
-  if ((leadStatuses as readonly string[]).includes(current)) {
-    return leadStatuses;
+export function leadStatusSelectOptions(current: string, centerName?: string | null) {
+  const options = leadStatusesForCenter(centerName);
+  if ((options as readonly string[]).includes(current)) {
+    return options;
   }
 
-  return [current as LeadStatus, ...leadStatuses];
+  return [current as LeadStatus, ...options];
 }

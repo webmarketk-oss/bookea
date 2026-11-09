@@ -45,6 +45,7 @@ type FiltersProps = {
   commercialOptions?: string[];
   sourceOptions?: string[];
   campaignOptions?: string[];
+  statusOptions?: LeadStatus[];
 };
 
 export default function Filters({
@@ -55,6 +56,7 @@ export default function Filters({
   commercialOptions = [],
   sourceOptions = [],
   campaignOptions = [],
+  statusOptions = leadStatuses,
 }: FiltersProps) {
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
   const [draft, setDraft] = useState<ProspectFilters>(filters);
@@ -163,7 +165,7 @@ export default function Filters({
             label="Statut"
             allLabel="Tous"
             selected={draft.statuses}
-            options={leadStatuses}
+            options={statusOptions}
             onChange={(value) => updateDraft("statuses", value as LeadStatus[])}
           />
 

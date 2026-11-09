@@ -163,7 +163,7 @@ function crmStatusLabel(value) {
   if (!raw) {
     return "Nouveau";
   }
-  if (CRM_LEAD_STATUSES.includes(raw)) {
+  if (CRM_LEAD_STATUSES.includes(raw) || raw === "Pour Gaillard") {
     return raw;
   }
   if (CRM_STATUS_ALIASES[raw]) {
@@ -173,6 +173,9 @@ function crmStatusLabel(value) {
   const alias = Object.keys(CRM_STATUS_ALIASES).find((key) => key.toLowerCase() === lower);
   if (alias) {
     return CRM_STATUS_ALIASES[alias];
+  }
+  if (lower === "pour gaillard") {
+    return "Pour Gaillard";
   }
   return CRM_LEAD_STATUSES.find((status) => status.toLowerCase() === lower) || "Nouveau";
 }

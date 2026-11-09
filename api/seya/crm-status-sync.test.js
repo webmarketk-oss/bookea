@@ -314,6 +314,7 @@ test("libellés CRM identiques entre Seya et lib/lead-statuses.ts", () => {
   assert.equal(crmStatusLabel("PI"), "Pas intéressé");
   assert.equal(crmStatusLabel("pi"), "Pas intéressé");
   assert.equal(crmStatusLabel("Perdu"), "Prospect perdu");
+  assert.equal(crmStatusLabel("pour gaillard"), "Pour Gaillard");
 });
 
 test("Seya met à jour le CRM entre PI, En réflexion, Reviendra vers nous et Hors zone", () => {

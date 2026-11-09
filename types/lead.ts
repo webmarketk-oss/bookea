@@ -40,7 +40,8 @@ export type LeadStatus =
   | "Msg vocal laissé + SMS envoyé"
   | "Mail envoyé"
   | "Mail/SMS Injoignable"
-  | "Message vocal";
+  | "Message vocal"
+  | "Pour Gaillard";
 
 export interface Lead {
   id: string;

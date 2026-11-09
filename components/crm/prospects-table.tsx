@@ -55,6 +55,7 @@ interface ProspectsTableProps {
   onReminderTimeChange: (leadId: string, time: string) => void;
   onCommercialChange: (leadId: string, commercial: string) => void;
   commercialOptions?: string[];
+  statusOptions?: LeadStatus[];
   whatsApp?: ProspectsWhatsApp;
   /** Colonnes Relance acompte 1–4 (onglet Gestion des acomptes). */
   showDepositReminders?: boolean;
@@ -100,6 +101,7 @@ export default function ProspectsTable({
   onReminderTimeChange,
   onCommercialChange,
   commercialOptions = [],
+  statusOptions,
   whatsApp,
   showDepositReminders = false,
   onDepositReminderChange,
@@ -418,7 +420,13 @@ export default function ProspectsTable({
                   <AdaptiveSelect
                     ariaLabel="Statut"
                     value={lead.status}
-                    options={leadStatusSelectOptions(lead.status)}
+                    options={
+                      statusOptions
+                        ? statusOptions.includes(lead.status)
+                          ? statusOptions
+                          : [lead.status, ...statusOptions]
+                        : leadStatusSelectOptions(lead.status)
+                    }
                     onChange={(status) =>
                       onStatusChange(lead.id, status as LeadStatus)
                     }
@@ -469,7 +477,13 @@ export default function ProspectsTable({
                 <AdaptiveSelect
                   ariaLabel="Statut"
                   value={lead.status}
-                  options={leadStatusSelectOptions(lead.status)}
+                  options={
+                      statusOptions
+                        ? statusOptions.includes(lead.status)
+                          ? statusOptions
+                          : [lead.status, ...statusOptions]
+                        : leadStatusSelectOptions(lead.status)
+                    }
                   onChange={(status) =>
                     onStatusChange(lead.id, status as LeadStatus)
                   }

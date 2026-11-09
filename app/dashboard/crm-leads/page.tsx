@@ -16,7 +16,7 @@ import { Input } from "@/components/ui/input";
 
 import { readActiveCenterId, saveActiveCenterId } from "@/lib/center-access";
 import { importPelissanneOctoberLeads } from "@/lib/pelissanne-october-import";
-import { followUpLeadStatuses, inactiveLeadStatuses, leadStatuses } from "@/lib/lead-statuses";
+import { followUpLeadStatuses, inactiveLeadStatuses, leadStatuses, leadStatusesForCenter, sallanchesOnlyLeadStatuses } from "@/lib/lead-statuses";
 import { matchesPersonSearch } from "@/lib/person-search";
 import {
   addDaysIso,
@@ -258,6 +258,10 @@ export default function CRMLeadsPage() {
   const [leadsCenterId, setLeadsCenterId] = useState(
     initialSnapshot?.centerId ?? "",
   );
+  const [leadsCenterName, setLeadsCenterName] = useState(
+    initialSnapshot?.centerName ?? "",
+  );
+  const statusOptions = leadStatusesForCenter(leadsCenterName);
   const [whatsAppThreads, setWhatsAppThreads] = useState<{
     centerId: string;
     threads: WhatsAppThread[];
@@ -350,6 +354,7 @@ export default function CRMLeadsPage() {
       }
       centerNameRef.current = center.centerName;
       centerIdRef.current = center.centerId;
+      setLeadsCenterName(center.centerName);
 
       // Une liste lue avant une modification de l’équipe écraserait le statut ou le commentaire saisi.
       if (pendingSavesRef.current > 0) {
@@ -615,6 +620,7 @@ export default function CRMLeadsPage() {
             void loadCrmLeads().then(({ leads, center: { centerId, centerName } }) => {
               centerIdRef.current = centerId;
               centerNameRef.current = centerName;
+              setLeadsCenterName(centerName);
               setLeadsCenterId(centerId);
               setLeadList(leads);
               saveCrmLeadsSnapshot({ leads, centerId, centerName });
@@ -1911,6 +1917,7 @@ export default function CRMLeadsPage() {
               }}
               onReset={() => setQuickDateFilter("Tous")}
               onNewLead={openNewLeadModal}
+              statusOptions={statusOptions}
             />
 
             {activeTab === "deposits" ? (
@@ -2069,6 +2076,7 @@ export default function CRMLeadsPage() {
                   onReminderTimeChange={handleReminderTimeChange}
                   onCommercialChange={handleCommercialChange}
                   commercialOptions={commercialOptions}
+                  statusOptions={statusOptions}
                   showDepositReminders={activeTab === "deposits"}
                   onDepositReminderChange={handleDepositReminderChange}
                   showVisitDate={activeTab === "prospects"}
@@ -2107,6 +2115,7 @@ export default function CRMLeadsPage() {
                     onUpdateLead={handleUpdateLead}
                     onClose={() => setIsLeadDetailsOpen(false)}
                     commercialOptions={commercialOptions}
+                    statusOptions={statusOptions}
                     whatsAppMessages={
                       whatsAppState === "ready"
                         ? whatsAppByLead.get(selectedLead.id)?.messages ?? []
@@ -2331,7 +2340,7 @@ export default function CRMLeadsPage() {
                       status: value as LeadStatus,
                     }))
                   }
-                  options={leadStatuses}
+                  options={statusOptions}
                 />
               </FormField>
 
@@ -2518,7 +2527,11 @@ function Select({
 }
 
 function isLeadStatusFilter(value: string): value is ProspectFilters["status"] {
-  return value === "Tous" || leadStatuses.includes(value as LeadStatus);
+  return (
+    value === "Tous" ||
+    leadStatuses.includes(value as LeadStatus) ||
+    sallanchesOnlyLeadStatuses.includes(value as LeadStatus)
+  );
 }
 
 function isQuickDateFilter(value: string): value is QuickDateFilter {
