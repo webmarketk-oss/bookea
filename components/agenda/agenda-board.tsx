@@ -128,6 +128,7 @@ import {
   mondayIso,
   practitionerColorOptions,
   saveTeamPlanning,
+  stageTeamPlanning,
   teamAbsenceTypes,
   upsertWeekHours,
   weekHasValidatedHours,
@@ -416,7 +417,8 @@ export default function AgendaBoard() {
   const deletingAppointmentIdsRef = useRef(new Set<string>());
   const centerNameRef = useRef("");
   const centerIdRef = useRef("");
-  const teamSaveTimerRef = useRef<number | null>(null);
+  const teamUpdatedAtRef = useRef(0);
+  const teamLoadedRef = useRef(false);
   const cabinSaveTimerRef = useRef<number | null>(null);
   const agendaNoticeTimerRef = useRef(0);
   const cabinListRef = useRef(cabins);
@@ -474,11 +476,21 @@ export default function AgendaBoard() {
       if (nextHours) {
         setCenterDayHours(nextHours);
       }
-      const nextPractitioners = team?.practitioners ?? practitionerList;
+      const teamIsCurrent = !teamLoadedRef.current
+        ? Boolean(team)
+        : Boolean(team) &&
+          (team?.updatedAt || 0) >= teamUpdatedAtRef.current;
+      if (team) {
+        teamLoadedRef.current = true;
+      }
+      const nextPractitioners = teamIsCurrent && team
+        ? team.practitioners
+        : teamPlanningRef.current.practitioners;
       const nextCabins = loadedCabins.length > 0 ? loadedCabins : cabins;
       cabinListRef.current = nextCabins;
       setCabinList(nextCabins);
-      if (team) {
+      if (teamIsCurrent && team) {
+        teamUpdatedAtRef.current = team.updatedAt || 0;
         teamPlanningRef.current = {
           practitioners: team.practitioners,
           schedules: team.schedules,
@@ -1283,55 +1295,55 @@ export default function AgendaBoard() {
         next?.practitioners ?? teamPlanningRef.current.practitioners,
       schedules: next?.schedules ?? teamPlanningRef.current.schedules,
     };
-    if (teamSaveTimerRef.current) {
-      window.clearTimeout(teamSaveTimerRef.current);
+    if (!teamLoadedRef.current || !centerIdRef.current) {
+      return;
     }
-    teamSaveTimerRef.current = window.setTimeout(() => {
-      void saveTeamPlanning(teamPlanningRef.current).catch(() => null);
-    }, 400);
+    const staged = stageTeamPlanning(
+      centerIdRef.current,
+      teamPlanningRef.current,
+    );
+    if (!staged) {
+      return;
+    }
+    teamUpdatedAtRef.current = staged.updatedAt;
+    void saveTeamPlanning({
+      practitioners: staged.practitioners,
+      schedules: staged.schedules,
+      updatedAt: staged.updatedAt,
+    }).catch(() => null);
   }
 
   function flushTeamPlanning() {
-    if (teamSaveTimerRef.current) {
-      window.clearTimeout(teamSaveTimerRef.current);
-      teamSaveTimerRef.current = 0;
-    }
-    void saveTeamPlanning(teamPlanningRef.current).catch(() => null);
+    persistTeamPlanning();
   }
 
   function updateTeamSchedule(
     practitionerId: string,
     updates: Partial<TeamSchedule>
   ) {
-    setTeamSchedules((currentSchedules) => {
-      const nextSchedules = currentSchedules.map((schedule) =>
-        schedule.practitionerId === practitionerId
-          ? { ...schedule, ...updates }
-          : schedule
-      );
-      persistTeamPlanning({ schedules: nextSchedules });
-      return nextSchedules;
-    });
+    const nextSchedules = teamPlanningRef.current.schedules.map((schedule) =>
+      schedule.practitionerId === practitionerId
+        ? { ...schedule, ...updates }
+        : schedule
+    );
+    setTeamSchedules(nextSchedules);
+    persistTeamPlanning({ schedules: nextSchedules });
   }
 
   function updatePractitioner(
     practitionerId: string,
     updates: Partial<Practitioner>,
   ) {
-    setPractitionerList((current) => {
-      const next = current.map((practitioner) =>
-        practitioner.id === practitionerId
-          ? { ...practitioner, ...updates }
-          : practitioner
-      );
-      persistTeamPlanning({
-        practitioners: next.map((practitioner) => ({
-          ...practitioner,
-          name: practitioner.name.trim() || "Praticienne",
-        })),
-      });
-      return next;
-    });
+    const source = teamPlanningRef.current.practitioners.length
+      ? teamPlanningRef.current.practitioners
+      : practitionerList;
+    const next = source.map((practitioner) =>
+      practitioner.id === practitionerId
+        ? { ...practitioner, ...updates }
+        : practitioner
+    );
+    setPractitionerList(next);
+    persistTeamPlanning({ practitioners: next });
   }
 
   function addPractitioner() {
@@ -4176,6 +4188,15 @@ function TeamPractitionerCard({
                     name: event.target.value,
                   })
                 }
+                onBlur={() => {
+                  const trimmed = practitioner.name.trim();
+                  if (trimmed === practitioner.name) {
+                    return;
+                  }
+                  onPractitionerChange(schedule.practitionerId, {
+                    name: trimmed || "Praticienne",
+                  });
+                }}
                 className="h-10 font-medium"
                 aria-label="Nom de la praticienne"
               />

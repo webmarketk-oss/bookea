@@ -1,5 +1,6 @@
 import { getActiveCenterContext } from "@/lib/center-access";
 import { practitioners as defaultPractitioners } from "@/lib/agenda-data";
+import { pickTeamPlanning } from "@/lib/team-planning-choice";
 import { createClient } from "@/lib/supabase";
 import type { Practitioner } from "@/types/agenda";
 
@@ -135,6 +136,18 @@ function asString(value: unknown, fallback = "") {
 function storageKey(centerId: string) {
   return `bookea-team-planning:${centerId}`;
 }
+
+export const TEAM_PLANNING_UPDATED_EVENT = "bookea-team-planning-updated";
+
+export function teamPlanningStorageKey(centerId: string) {
+  return storageKey(centerId);
+}
+
+export type TeamPlanningSnapshot = {
+  practitioners: Practitioner[];
+  schedules: TeamSchedule[];
+  updatedAt: number;
+};
 
 export function emptyTeamSchedule(practitionerId: string): TeamSchedule {
   return {
@@ -389,7 +402,7 @@ export function normalizeTeamPractitioner(value: unknown): Practitioner | null {
   const id = asString(row.id);
   const name = asString(row.name);
 
-  if (!id || !name) {
+  if (!id) {
     return null;
   }
 
@@ -471,14 +484,14 @@ export function isPractitionerWorkingOnDate(schedule: TeamSchedule, date: string
   return resolvedHoursForDate(schedule, date).workingDays.includes(day);
 }
 
-function readLocalTeamPlanning(centerId: string) {
+function readLocalTeamPlanning(centerId: string): TeamPlanningSnapshot | null {
   if (typeof window === "undefined" || !centerId) {
     return null;
   }
 
   try {
     const stored = window.localStorage.getItem(storageKey(centerId));
-    return stored ? JSON.parse(stored) : null;
+    return stored ? parseTeamPlanning(JSON.parse(stored)) : null;
   } catch {
     return null;
   }
@@ -488,6 +501,7 @@ function writeLocalTeamPlanning(
   centerId: string,
   practitioners: Practitioner[],
   schedules: TeamSchedule[],
+  updatedAt: number,
 ) {
   if (typeof window === "undefined" || !centerId) {
     return;
@@ -495,11 +509,20 @@ function writeLocalTeamPlanning(
 
   window.localStorage.setItem(
     storageKey(centerId),
-    JSON.stringify({ practitioners, schedules }),
+    JSON.stringify({ practitioners, schedules, updatedAt }),
+  );
+  window.dispatchEvent(
+    new CustomEvent(TEAM_PLANNING_UPDATED_EVENT, {
+      detail: {
+        centerId,
+        names: commercialNamesFromTeam(practitioners),
+        updatedAt,
+      },
+    }),
   );
 }
 
-export function parseTeamPlanning(value: unknown) {
+export function parseTeamPlanning(value: unknown): TeamPlanningSnapshot {
   const record = asRecord(value);
   const practitioners = Array.isArray(record.practitioners)
     ? record.practitioners
@@ -514,55 +537,35 @@ export function parseTeamPlanning(value: unknown) {
         ),
       )
     : [];
-
-  return { practitioners, schedules };
-}
-
-export async function loadTeamPlanning() {
-  const context = await getActiveCenterContext();
-  const local = parseTeamPlanning(readLocalTeamPlanning(context.centerId));
-  const supabase = createClient();
-  const { data } = await supabase
-    .from("centers")
-    .select("settings")
-    .eq("id", context.centerId)
-    .maybeSingle();
-
-  const remote = parseTeamPlanning(
-    asRecord(asRecord(data?.settings).agenda).team,
-  );
-  const practitioners =
-    remote.practitioners.length > 0
-      ? remote.practitioners
-      : local.practitioners.length > 0
-        ? local.practitioners
-        : defaultPractitioners;
-  const schedulesSource =
-    remote.schedules.length > 0
-      ? remote.schedules
-      : local.schedules.length > 0
-        ? local.schedules
-        : defaultTeamSchedules();
-  const schedules = practitioners.map(
-    (practitioner) =>
-      schedulesSource.find((item) => item.practitionerId === practitioner.id) ??
-      emptyTeamSchedule(practitioner.id),
-  );
-
-  writeLocalTeamPlanning(context.centerId, practitioners, schedules);
+  const updatedAt = Number(record.updatedAt);
 
   return {
-    centerId: context.centerId,
     practitioners,
     schedules,
+    updatedAt: Number.isFinite(updatedAt) && updatedAt > 0 ? updatedAt : 0,
   };
 }
 
-export async function saveTeamPlanning(input: {
+export function chooseTeamPlanning(
+  local: TeamPlanningSnapshot | null,
+  remote: TeamPlanningSnapshot | null,
+) {
+  // Un nom vient d’être saisi : il est déjà sur cet appareil, le serveur a encore l’ancienne liste.
+  return pickTeamPlanning(
+    local,
+    remote,
+    (practitioner) => emptyTeamSchedule(practitioner.id),
+    () => ({
+      practitioners: defaultPractitioners,
+      schedules: defaultTeamSchedules(),
+    }),
+  );
+}
+
+function normalizeTeamInput(input: {
   practitioners: Practitioner[];
   schedules: TeamSchedule[];
 }) {
-  const context = await getActiveCenterContext();
   const practitioners = input.practitioners
     .map((item) => normalizeTeamPractitioner(item))
     .filter((item): item is Practitioner => Boolean(item));
@@ -575,13 +578,32 @@ export async function saveTeamPlanning(input: {
       ),
   );
 
-  writeLocalTeamPlanning(context.centerId, practitioners, schedules);
+  return { practitioners, schedules };
+}
+
+let pendingRemoteTeam: { centerId: string; snapshot: TeamPlanningSnapshot } | null = null;
+let remoteTeamChain: Promise<void> = Promise.resolve();
+
+function queueRemoteTeamSave(centerId: string, snapshot: TeamPlanningSnapshot) {
+  pendingRemoteTeam = { centerId, snapshot };
+  remoteTeamChain = remoteTeamChain
+    .catch(() => undefined)
+    .then(() => flushRemoteTeamSave());
+  return remoteTeamChain;
+}
+
+async function flushRemoteTeamSave() {
+  const job = pendingRemoteTeam;
+  if (!job) {
+    return;
+  }
+  pendingRemoteTeam = null;
 
   const supabase = createClient();
   const { data } = await supabase
     .from("centers")
     .select("settings")
-    .eq("id", context.centerId)
+    .eq("id", job.centerId)
     .maybeSingle();
   const currentSettings = asRecord(data?.settings);
   const currentAgenda = asRecord(currentSettings.agenda);
@@ -592,17 +614,136 @@ export async function saveTeamPlanning(input: {
         ...currentSettings,
         agenda: {
           ...currentAgenda,
-          team: { practitioners, schedules },
+          team: {
+            practitioners: job.snapshot.practitioners,
+            schedules: job.snapshot.schedules,
+            updatedAt: job.snapshot.updatedAt,
+          },
         },
       },
     })
-    .eq("id", context.centerId);
+    .eq("id", job.centerId);
 
   if (error) {
     throw new Error(error.message);
   }
+}
 
-  return { practitioners, schedules };
+export function stageTeamPlanning(
+  centerId: string,
+  input: {
+    practitioners: Practitioner[];
+    schedules: TeamSchedule[];
+  },
+) {
+  if (!centerId) {
+    return null;
+  }
+
+  const snapshot = normalizeTeamInput(input);
+  const updatedAt = Date.now();
+  writeLocalTeamPlanning(
+    centerId,
+    snapshot.practitioners,
+    snapshot.schedules,
+    updatedAt,
+  );
+  return { ...snapshot, updatedAt };
+}
+
+export function cachedTeamCommercial(centerId: string) {
+  const local = readLocalTeamPlanning(centerId);
+  return {
+    names: commercialNamesFromTeam(local?.practitioners ?? []),
+    updatedAt: local?.updatedAt || 0,
+  };
+}
+
+export function cachedCommercialNames(centerId: string) {
+  return cachedTeamCommercial(centerId).names;
+}
+
+export async function loadTeamPlanning() {
+  const context = await getActiveCenterContext();
+  const supabase = createClient();
+  const { data } = await supabase
+    .from("centers")
+    .select("settings")
+    .eq("id", context.centerId)
+    .maybeSingle();
+  const remote = parseTeamPlanning(
+    asRecord(asRecord(data?.settings).agenda).team,
+  );
+  const local = readLocalTeamPlanning(context.centerId);
+  const chosen = chooseTeamPlanning(local, remote);
+
+  if (chosen.source === "local" && chosen.updatedAt > remote.updatedAt) {
+    void queueRemoteTeamSave(context.centerId, chosen).catch(() => undefined);
+    return {
+      centerId: context.centerId,
+      practitioners: chosen.practitioners,
+      schedules: chosen.schedules,
+      updatedAt: chosen.updatedAt,
+    };
+  }
+
+  const freshest = readLocalTeamPlanning(context.centerId);
+  if (freshest && freshest.updatedAt > chosen.updatedAt && freshest.practitioners.length > 0) {
+    void queueRemoteTeamSave(context.centerId, freshest).catch(() => undefined);
+    return {
+      centerId: context.centerId,
+      practitioners: freshest.practitioners,
+      schedules: freshest.schedules,
+      updatedAt: freshest.updatedAt,
+    };
+  }
+
+  writeLocalTeamPlanning(
+    context.centerId,
+    chosen.practitioners,
+    chosen.schedules,
+    chosen.updatedAt,
+  );
+
+  return {
+    centerId: context.centerId,
+    practitioners: chosen.practitioners,
+    schedules: chosen.schedules,
+    updatedAt: chosen.updatedAt,
+  };
+}
+
+export async function saveTeamPlanning(input: {
+  practitioners: Practitioner[];
+  schedules: TeamSchedule[];
+  updatedAt?: number;
+}) {
+  const context = await getActiveCenterContext();
+  const local = readLocalTeamPlanning(context.centerId);
+  const requestedAt = input.updatedAt || 0;
+  const snapshot =
+    local && local.practitioners.length > 0 && local.updatedAt > requestedAt
+      ? local
+      : {
+          ...normalizeTeamInput(input),
+          updatedAt: requestedAt || Date.now(),
+        };
+
+  if (!local || local.updatedAt < snapshot.updatedAt) {
+    writeLocalTeamPlanning(
+      context.centerId,
+      snapshot.practitioners,
+      snapshot.schedules,
+      snapshot.updatedAt,
+    );
+  }
+
+  await queueRemoteTeamSave(context.centerId, snapshot);
+  return {
+    practitioners: snapshot.practitioners,
+    schedules: snapshot.schedules,
+    updatedAt: snapshot.updatedAt,
+  };
 }
 
 export function commercialNamesFromTeam(practitioners: Practitioner[]) {

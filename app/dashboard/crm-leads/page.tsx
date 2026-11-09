@@ -84,9 +84,12 @@ import {
   readCenterSettings,
 } from "@/lib/center-settings";
 import {
+  cachedTeamCommercial,
   commercialNamesFromTeam,
   commercialSelectOptions,
   loadTeamPlanning,
+  TEAM_PLANNING_UPDATED_EVENT,
+  teamPlanningStorageKey,
 } from "@/lib/team-planning";
 import { SEYA_CONVERSATIONS_UPDATED_EVENT } from "@/lib/seya-settings";
 import { leadWhatsAppSummaries, type WhatsAppThread } from "@/lib/lead-whatsapp";
@@ -456,18 +459,77 @@ export default function CRMLeadsPage() {
 
   useEffect(() => {
     let cancelled = false;
-    void loadTeamPlanning()
-      .then((team) => {
-        if (cancelled || !team?.practitioners?.length) {
-          return;
-        }
-        setCommercialNames(commercialNamesFromTeam(team.practitioners));
-      })
-      .catch(() => {});
+    let newestAt = 0;
+
+    function applyNames(names: string[], updatedAt = 0) {
+      if (cancelled || updatedAt < newestAt) {
+        return;
+      }
+      if (updatedAt) {
+        newestAt = updatedAt;
+      }
+      if (names.length > 0) {
+        setCommercialNames(names);
+      }
+    }
+
+    function applyCached() {
+      const cached = cachedTeamCommercial(readActiveCenterId() || "");
+      applyNames(cached.names, cached.updatedAt);
+    }
+
+    function refreshNames() {
+      applyCached();
+      void loadTeamPlanning()
+        .then((team) => {
+          applyNames(
+            commercialNamesFromTeam(team?.practitioners ?? []),
+            team?.updatedAt || 0,
+          );
+        })
+        .catch(() => {});
+    }
+
+    function onTeamPlanning(event: Event) {
+      const detail = (event as CustomEvent<{
+        centerId?: string;
+        names?: string[];
+        updatedAt?: number;
+      }>).detail;
+      if (!detail || detail.centerId !== readActiveCenterId()) {
+        return;
+      }
+      applyNames(detail.names || [], detail.updatedAt || 0);
+    }
+
+    function onTeamStorage(event: StorageEvent) {
+      const centerId = readActiveCenterId() || "";
+      if (event.key !== teamPlanningStorageKey(centerId)) {
+        return;
+      }
+      applyCached();
+    }
+
+    function refreshIfVisible() {
+      if (document.visibilityState === "visible") {
+        refreshNames();
+      }
+    }
+
+    refreshNames();
+    window.addEventListener(TEAM_PLANNING_UPDATED_EVENT, onTeamPlanning);
+    window.addEventListener("storage", onTeamStorage);
+    window.addEventListener("focus", refreshIfVisible);
+    document.addEventListener("visibilitychange", refreshIfVisible);
     return () => {
       cancelled = true;
+      window.removeEventListener(TEAM_PLANNING_UPDATED_EVENT, onTeamPlanning);
+      window.removeEventListener("storage", onTeamStorage);
+      window.removeEventListener("focus", refreshIfVisible);
+      document.removeEventListener("visibilitychange", refreshIfVisible);
     };
   }, []);
+
 
   useEffect(() => {
     setDismissedDuplicateKeys(readDismissedDuplicateKeys());
