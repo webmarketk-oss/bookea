@@ -243,10 +243,8 @@ export default function ProspectsTable({
                 </span>
               </button>
             </TableHead>
+            <TableHead className="w-[9.25rem] min-w-[9.25rem]">Statut</TableHead>
             <TableHead>Rappel</TableHead>
-            {showDepositReminders ? (
-              <TableHead className="w-[9.25rem] min-w-[9.25rem]">Statut</TableHead>
-            ) : null}
             {showDepositReminders
               ? DEPOSIT_REMINDER_INDEXES.map((index) => (
                   <TableHead
@@ -257,9 +255,6 @@ export default function ProspectsTable({
                   </TableHead>
                 ))
               : null}
-            {showDepositReminders ? null : (
-              <TableHead className="w-[9.25rem] min-w-[9.25rem]">Statut</TableHead>
-            )}
             {showVisitDate ? (
               <TableHead className="w-[9.5rem] min-w-[9.5rem]">Date du RDV</TableHead>
             ) : null}
@@ -388,6 +383,39 @@ export default function ProspectsTable({
               <TableCell>{lead.createdAt}</TableCell>
 
               <TableCell>
+                <AdaptiveSelect
+                  ariaLabel="Statut"
+                  value={lead.status}
+                  options={
+                    statusOptions
+                      ? statusOptions.includes(lead.status)
+                        ? statusOptions
+                        : [lead.status, ...statusOptions]
+                      : leadStatusSelectOptions(lead.status)
+                  }
+                  onChange={(status) =>
+                    onStatusChange(lead.id, status as LeadStatus)
+                  }
+                  history={statusHistory(
+                    fullHistory[lead.id]?.length
+                      ? fullHistory[lead.id]
+                      : lead.activityLog,
+                  )}
+                  onOpenChange={(isOpen) => {
+                    if (isOpen) {
+                      requestHistory(lead.id);
+                    }
+                  }}
+                  optionClassName={leadStatusMenuClassName}
+                  className={cn(
+                    "h-7 w-full min-w-[8.75rem] max-w-[9.25rem] rounded-full border-0 px-2.5 text-xs font-semibold outline-none ring-1 transition-colors",
+                    "focus:ring-2 focus:ring-blue-400",
+                    leadStatusClassName(lead.status)
+                  )}
+                />
+              </TableCell>
+
+              <TableCell>
                 <div className="flex items-center gap-1">
                   <AdaptiveDateInput
                     ariaLabel="Rappel"
@@ -415,41 +443,6 @@ export default function ProspectsTable({
                 </div>
               </TableCell>
 
-              {showDepositReminders ? (
-                <TableCell>
-                  <AdaptiveSelect
-                    ariaLabel="Statut"
-                    value={lead.status}
-                    options={
-                      statusOptions
-                        ? statusOptions.includes(lead.status)
-                          ? statusOptions
-                          : [lead.status, ...statusOptions]
-                        : leadStatusSelectOptions(lead.status)
-                    }
-                    onChange={(status) =>
-                      onStatusChange(lead.id, status as LeadStatus)
-                    }
-                    history={statusHistory(
-                      fullHistory[lead.id]?.length
-                        ? fullHistory[lead.id]
-                        : lead.activityLog,
-                    )}
-                    onOpenChange={(isOpen) => {
-                      if (isOpen) {
-                        requestHistory(lead.id);
-                      }
-                    }}
-                    optionClassName={leadStatusMenuClassName}
-                    className={cn(
-                      "h-7 w-full min-w-[8.75rem] max-w-[9.25rem] rounded-full border-0 px-2.5 text-xs font-semibold outline-none ring-1 transition-colors",
-                      "focus:ring-2 focus:ring-blue-400",
-                      leadStatusClassName(lead.status)
-                    )}
-                  />
-                </TableCell>
-              ) : null}
-
               {showDepositReminders
                 ? DEPOSIT_REMINDER_INDEXES.map((index) => (
                     <TableCell key={`${lead.id}-deposit-${index}`}>
@@ -471,41 +464,6 @@ export default function ProspectsTable({
                     </TableCell>
                   ))
                 : null}
-
-              {showDepositReminders ? null : (
-              <TableCell>
-                <AdaptiveSelect
-                  ariaLabel="Statut"
-                  value={lead.status}
-                  options={
-                      statusOptions
-                        ? statusOptions.includes(lead.status)
-                          ? statusOptions
-                          : [lead.status, ...statusOptions]
-                        : leadStatusSelectOptions(lead.status)
-                    }
-                  onChange={(status) =>
-                    onStatusChange(lead.id, status as LeadStatus)
-                  }
-                  history={statusHistory(
-                    fullHistory[lead.id]?.length
-                      ? fullHistory[lead.id]
-                      : lead.activityLog,
-                  )}
-                  onOpenChange={(isOpen) => {
-                    if (isOpen) {
-                      requestHistory(lead.id);
-                    }
-                  }}
-                  optionClassName={leadStatusMenuClassName}
-                  className={cn(
-                    "h-7 w-full min-w-[8.75rem] max-w-[9.25rem] rounded-full border-0 px-2.5 text-xs font-semibold outline-none ring-1 transition-colors",
-                    "focus:ring-2 focus:ring-blue-400",
-                    leadStatusClassName(lead.status)
-                  )}
-                />
-              </TableCell>
-              )}
 
               {showVisitDate ? (
                 <TableCell>
