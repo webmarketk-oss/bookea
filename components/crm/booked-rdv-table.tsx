@@ -12,7 +12,7 @@ import {
 } from "@/components/ui/table";
 import { Input } from "@/components/ui/input";
 import { compareBookedLeads, displayVisitDate } from "@/lib/crm-rdv";
-import { matchesPersonSearch } from "@/lib/person-search";
+import { matchesPersonSearch, matchesPhoneSearch } from "@/lib/person-search";
 import type { Lead } from "@/types/lead";
 
 export default function BookedRdvTable({
@@ -36,10 +36,9 @@ export default function BookedRdvTable({
         if (!needle) {
           return true;
         }
-        const phone = (lead.phone || "").toLowerCase();
         return (
           matchesPersonSearch(query, lead.firstName, lead.lastName) ||
-          phone.includes(needle)
+          matchesPhoneSearch(needle, lead.phone)
         );
       })
       .sort(compareBookedLeads);

@@ -11,6 +11,43 @@ function searchTokens(value: string) {
   return normalizeSearch(value).split(/\s+/).filter(Boolean);
 }
 
+function phoneDigitKeys(value: string) {
+  const digits = String(value || "").replace(/\D/g, "");
+  if (digits.length < 2) {
+    return [];
+  }
+  const keys = new Set([digits]);
+  if (digits.startsWith("0033") && digits.length > 4) {
+    keys.add(digits.slice(2));
+    keys.add(`0${digits.slice(4)}`);
+  } else if (digits.startsWith("33") && digits.length > 2) {
+    keys.add(`0${digits.slice(2)}`);
+  } else if (digits.startsWith("0") && digits.length > 1) {
+    keys.add(`33${digits.slice(1)}`);
+  }
+  return [...keys];
+}
+
+/** 06, +336 et 00336 désignent le même numéro, y compris en recherche partielle. */
+export function matchesPhoneSearch(query: string, phone?: string | null) {
+  const rawQuery = String(query || "").trim().toLowerCase();
+  const rawPhone = String(phone || "").trim().toLowerCase();
+  if (!rawQuery || !rawPhone) {
+    return false;
+  }
+  if (rawPhone.includes(rawQuery)) {
+    return true;
+  }
+  const queryKeys = phoneDigitKeys(rawQuery);
+  if (queryKeys.length === 0) {
+    return false;
+  }
+  const phoneKeys = phoneDigitKeys(rawPhone);
+  return queryKeys.some((needle) =>
+    phoneKeys.some((candidate) => candidate.includes(needle)),
+  );
+}
+
 export function matchesPersonSearch(
   query: string,
   firstName?: string | null,

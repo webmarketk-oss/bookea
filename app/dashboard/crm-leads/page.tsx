@@ -17,7 +17,7 @@ import { Input } from "@/components/ui/input";
 import { readActiveCenterId, saveActiveCenterId } from "@/lib/center-access";
 import { importPelissanneOctoberLeads } from "@/lib/pelissanne-october-import";
 import { followUpLeadStatuses, gaillardOnlyLeadStatuses, inactiveLeadStatuses, leadStatuses, leadStatusesForCenter, sallanchesOnlyLeadStatuses } from "@/lib/lead-statuses";
-import { matchesPersonSearch } from "@/lib/person-search";
+import { matchesPersonSearch, matchesPhoneSearch } from "@/lib/person-search";
 import {
   addDaysIso,
   matchesCrmQuickFilter,
@@ -807,7 +807,7 @@ export default function CRMLeadsPage() {
     const matchesSearch =
       search.length === 0 ||
       matchesPersonSearch(search, lead.firstName, lead.lastName) ||
-      lead.phone.toLowerCase().includes(search) ||
+      matchesPhoneSearch(search, lead.phone) ||
       lead.email.toLowerCase().includes(search) ||
       lead.treatment.toLowerCase().includes(search);
 
