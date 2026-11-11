@@ -465,6 +465,7 @@ async function generateCoreReply({
     stepAsked(draft) ||
     isBriefClosing(draft, seya, conversationWithState, text) ||
     isWelcomeRelanceOnly(seya) ||
+    /i-Probe|moitié du visage/i.test(draft || "") ||
     (replyClosesThread(previousSeya) && !replyClosesThread(draft))
   ) {
     return { ...settled, via: fallback.shouldBook ? "book" : "rules" };

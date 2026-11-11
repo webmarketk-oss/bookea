@@ -293,6 +293,24 @@ function isOptOut(text, conversation) {
   return isLeadRefusal(text, conversation);
 }
 
+function isAlpineVisageCenter(centerName) {
+  const key = normalize(centerName);
+  return /\bgaillard\b/.test(key) || /\bsallanches\b/.test(key) || /\bsalanches\b/.test(key);
+}
+
+function asksDiscoveryMeaning(text) {
+  const value = normalize(text);
+  if (!/decouverte/.test(value)) {
+    return false;
+  }
+  return /correspond|c[' ]est quoi|a quoi|en quoi|consiste|qu[' ]est[- ]ce|comment (se )?deroule|comment ca se passe|ca veut dire/.test(
+    value,
+  );
+}
+
+const VISAGE_DISCOVERY_REPLY =
+  "Le soin découverte correspond à un traitement sur la moitié du visage, pour tester les technologies et avoir le ressenti. C’est aussi un diagnostic complet : grâce à l’analyse i-Probe et à l’intelligence artificielle i-Diag, nous étudions votre peau pour vous proposer un programme de soins personnalisé.";
+
 function faqReply(text, extras = {}) {
   const value = normalize(text);
   if (/^\?+$/.test(String(text || "").trim())) {
@@ -336,6 +354,15 @@ function faqReply(text, extras = {}) {
   }
   if (/fait mal|douloureux|douleur/.test(value)) {
     return "Le bilan est indolore. Pour une séance, ça dépend de la zone, on vous l’explique sur place.";
+  }
+  if (asksDiscoveryMeaning(text)) {
+    const family = inferCareFamily(
+      `${extras.conversation?.qualification?.need || ""} ${extras.conversation?.treatment || ""}`,
+    );
+    const centerName = extras.centerName || extras.conversation?.centerName || "";
+    if (family === "visage" && isAlpineVisageCenter(centerName)) {
+      return VISAGE_DISCOVERY_REPLY;
+    }
   }
   if (/enfant|bebe|nourrisson|avec mon fils|avec ma fille/.test(value)) {
     const extrasText = normalizeCenterProfile(
@@ -2538,7 +2565,11 @@ function leadReplyCore(conversation, text, seya, slots, extras = {}) {
     );
   }
 
-  const faq = faqReply(text, { seya, conversation: { ...conversation, qualification } });
+  const faq = faqReply(text, {
+    seya,
+    centerName: extras.centerName,
+    conversation: { ...conversation, qualification },
+  });
   if (faq) {
     const slotsPending = conversation.status === "RDV proposé" && (bookingState.lastOfferedSlots || []).length > 0;
     return finishLeadReply(
@@ -3714,6 +3745,7 @@ function gaillardLeadReply(conversation, text, seya, slots, extras = {}) {
 
   const faq = faqReply(text, {
     seya,
+    centerName: extras.centerName,
     conversation: { ...base, qualification: merged },
     centerProfile: profile,
   });

@@ -139,6 +139,35 @@ test("Gaillard épilation : zones, déjà testé, rappel d’un expert en épila
   assert.match(lastSeya(conversation), /expert ou une experte en épilation du centre vous rappellera/);
 });
 
+test("Gaillard et Sallanches visage : le soin découverte est un essai sur la moitié du visage et un diagnostic i-Probe", async () => {
+  const expected = /moitié du visage.*i-Probe.*i-Diag/is;
+  let gaillard = open("Soin visage");
+  gaillard = await say(gaillard, "Le soin découverte cela correspond à quoi?");
+  assert.match(lastSeya(gaillard), expected);
+  assert.match(lastSeya(gaillard), /tester les technologies et avoir le ressenti/i);
+  assert.doesNotMatch(lastSeya(gaillard), /Je n’ai pas cette information/i);
+  gaillard = await say(gaillard, "J'ai des rides et la peau terne");
+  assert.match(lastSeya(gaillard), /déjà testé/i);
+  assert.doesNotMatch(lastSeya(gaillard), /i-Probe/i);
+
+  let sallanches = open("Soin visage", "JFG Clinic Sallanches");
+  sallanches = await say(
+    sallanches,
+    "À quoi correspond le soin découverte ?",
+    "JFG Clinic Sallanches",
+  );
+  assert.match(lastSeya(sallanches), expected);
+  assert.doesNotMatch(lastSeya(sallanches), /Je n’ai pas cette information/i);
+
+  let minceur = open("Soin minceur");
+  minceur = await say(minceur, "Le soin découverte cela correspond à quoi?");
+  assert.doesNotMatch(lastSeya(minceur), /i-Probe|moitié du visage/i);
+
+  let bruz = open("Soin visage", "JFG Clinic Bruz");
+  bruz = await say(bruz, "Le soin découverte cela correspond à quoi?", "JFG Clinic Bruz");
+  assert.doesNotMatch(lastSeya(bruz), /i-Probe|moitié du visage/i);
+});
+
 test("Gaillard visage : préoccupations et attentes, un simple bonjour ne compte pas comme réponse", async () => {
   let conversation = open("Soin visage");
   conversation = await say(conversation, "Bonjour");
