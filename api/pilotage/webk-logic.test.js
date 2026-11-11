@@ -38,7 +38,7 @@ function fakeSupabase({ user, admin, profile }) {
   };
 }
 
-test("Cynthia admin ouvre le pilotage, un autre admin non", async () => {
+test("Cynthia, Samantha et le compte admin ouvrent le pilotage", async () => {
   const cynthia = await requireWebkPilotage(
     fakeSupabase({
       user: { id: "c1", email: "cynthia@webkagency.net" },
@@ -60,11 +60,22 @@ test("Cynthia admin ouvre le pilotage, un autre admin non", async () => {
   assert.equal(samantha.ok, true);
   assert.equal(samantha.authorName, "Samantha Kahlaoui");
 
-  const otherAdmin = await requireWebkPilotage(
+  const bookeaAdmin = await requireWebkPilotage(
     fakeSupabase({
       user: { id: "a1", email: "webmarket.k@gmail.com" },
       admin: { label: "Admin Bookea" },
       profile: { full_name: "Admin Bookea" },
+    }),
+    { headers: { authorization: "Bearer token" } },
+  );
+  assert.equal(bookeaAdmin.ok, true);
+  assert.equal(bookeaAdmin.authorName, "Admin Bookea");
+
+  const otherAdmin = await requireWebkPilotage(
+    fakeSupabase({
+      user: { id: "o1", email: "autre@exemple.fr" },
+      admin: { label: "Autre" },
+      profile: { full_name: "Autre admin" },
     }),
     { headers: { authorization: "Bearer token" } },
   );
@@ -90,7 +101,7 @@ test("Cynthia admin ouvre le pilotage, un autre admin non", async () => {
       fullName: "Admin Bookea",
       adminLabel: "Admin Bookea",
     }),
-    false,
+    true,
   );
 });
 

@@ -38,6 +38,7 @@ as $$
     where admin.profile_id = auth.uid()
       and (
         lower(profile.email::text) = 'cynthia@webkagency.net'
+        or lower(profile.email::text) = 'webmarket.k@gmail.com'
         or lower(profile.email::text) ~ '(^|[^a-z])samantha([^a-z]|$)'
         or lower(coalesce(profile.full_name, '')) ~ '(^|[^a-z])samantha([^a-z]|$)'
         or lower(coalesce(profile.full_name, '')) ~ '(^|[^a-z])cynthia([^a-z]|$)'

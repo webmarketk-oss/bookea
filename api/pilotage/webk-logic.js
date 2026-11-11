@@ -1,4 +1,5 @@
 const CYNTHIA_EMAIL = "cynthia@webkagency.net";
+const ADMIN_EMAIL = "webmarket.k@gmail.com";
 const DEFAULT_THRESHOLD = 1;
 
 function normalizeIdentity(value) {
@@ -9,10 +10,10 @@ function normalizeIdentity(value) {
     .trim();
 }
 
-/** Samantha ou Cynthia, d’après le compte connecté. Un autre admin ne passe pas. */
+/** Samantha, Cynthia, ou le compte admin Bookea. Un autre admin ne passe pas. */
 function isWebkPilotageIdentity({ email, fullName, adminLabel } = {}) {
   const mail = normalizeIdentity(email);
-  if (mail === CYNTHIA_EMAIL) {
+  if (mail === CYNTHIA_EMAIL || mail === ADMIN_EMAIL) {
     return true;
   }
   const blob = `${mail} ${normalizeIdentity(fullName)} ${normalizeIdentity(adminLabel)}`;

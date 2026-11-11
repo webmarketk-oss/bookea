@@ -20,9 +20,11 @@ import { followUpLeadStatuses, gaillardOnlyLeadStatuses, inactiveLeadStatuses, l
 import { matchesPersonSearch, matchesPhoneSearch } from "@/lib/person-search";
 import {
   addDaysIso,
+  isLeadCreatedSince,
   matchesCrmQuickFilter,
   rdvBookedStatusList,
   reminderDateAfterStatusChange,
+  threeMonthStartIso,
   todayIso,
   type CrmQuickFilter,
 } from "@/lib/crm-stats";
@@ -802,6 +804,7 @@ export default function CRMLeadsPage() {
     { ...filters, sortBy: undefined },
   ]);
 
+  const threeMonthStart = threeMonthStartIso();
   const filteredLeads = scopeLeads.filter((lead) => {
     const search = filters.search.trim().toLowerCase();
     const matchesSearch =
@@ -828,6 +831,11 @@ export default function CRMLeadsPage() {
       filters.campaigns.length === 0 ||
       filters.campaigns.includes(lead.campaign.trim());
     const matchesQuickDate = matchesCrmQuickFilter(lead, quickDateFilter);
+    const matchesRecentCategory =
+      (filters.status !== "À relancer" &&
+        filters.status !== "Prospect perdu" &&
+        filters.status !== "Reviendra vers nous") ||
+      isLeadCreatedSince(lead, threeMonthStart);
     const matchesCreatedDate = isDateInRange(
       lead.createdDate,
       filters.createdFrom,
@@ -849,6 +857,7 @@ export default function CRMLeadsPage() {
       matchesStatus &&
       matchesCampaign &&
       matchesQuickDate &&
+      matchesRecentCategory &&
       matchesCreatedDate &&
       matchesUpdatedDate &&
       matchesDepositPhase

@@ -11,6 +11,7 @@ import {
   isLeadRdvTakenOn,
   monthEndIso,
   monthStartIso,
+  threeMonthStartIso,
   todayIso,
   type CrmQuickFilter,
 } from "@/lib/crm-stats";
@@ -59,6 +60,7 @@ export default function DashboardCards({
   const yesterday = addDaysIso(today, -1);
   const sevenDaysAgo = addDaysIso(today, -6);
   const monthStart = monthStartIso(today);
+  const threeMonthStart = threeMonthStartIso(today);
   const monthEnd = monthEndIso(today);
   const monthLastDay = Number(monthEnd.slice(8));
 
@@ -159,18 +161,24 @@ export default function DashboardCards({
     },
     {
       title: "À recontacter",
-      value: leads.filter((lead) =>
-        followUpLeadStatuses.includes(lead.status),
+      value: leads.filter(
+        (lead) =>
+          followUpLeadStatuses.includes(lead.status) &&
+          isLeadCreatedSince(lead, threeMonthStart),
       ).length,
-      subtitle: "Nouveau, absents, SMS, mail, msg vocal",
+      subtitle: "Sur 3 mois · nouveau, absents, SMS, mail, msg vocal",
       icon: Phone,
       color: "text-orange-500",
       status: "À relancer",
     },
     {
       title: "Reviendra vers nous",
-      value: leads.filter((lead) => lead.status === "Reviendra vers nous").length,
-      subtitle: "Pas de relance, on attend leur retour",
+      value: leads.filter(
+        (lead) =>
+          lead.status === "Reviendra vers nous" &&
+          isLeadCreatedSince(lead, threeMonthStart),
+      ).length,
+      subtitle: "Sur 3 mois · pas de relance, on attend leur retour",
       icon: Hourglass,
       color: "text-indigo-600",
       status: "Reviendra vers nous",
@@ -186,9 +194,9 @@ export default function DashboardCards({
       title: "Perdus",
       value: leads.filter((lead) =>
         (inactiveLeadStatuses.includes(lead.status) || lead.status === "Annulation") &&
-        isLeadCreatedSince(lead, monthStart),
+        isLeadCreatedSince(lead, threeMonthStart),
       ).length,
-      subtitle: "Leads rouge du mois",
+      subtitle: "Leads rouge sur 3 mois",
       icon: CircleX,
       color: "text-red-600",
       status: "Prospect perdu",

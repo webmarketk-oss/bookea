@@ -40,6 +40,14 @@ export function monthStartIso(date = todayIso()) {
   return `${date.slice(0, 7)}-01`;
 }
 
+/** 1er du mois, deux mois en arrière : le mois en cours et les deux précédents. */
+export function threeMonthStartIso(date = todayIso()) {
+  const [year, month] = date.split("-").map(Number);
+  const start = new Date(year, month - 1 - 2, 1);
+  const startMonth = String(start.getMonth() + 1).padStart(2, "0");
+  return `${start.getFullYear()}-${startMonth}-01`;
+}
+
 export function monthEndIso(date = todayIso()) {
   const [year, month] = date.split("-").map(Number);
   return toLocalIsoDate(new Date(year, month, 0));

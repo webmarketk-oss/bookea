@@ -7,7 +7,7 @@ function bearerToken(req) {
 }
 
 /**
- * Réservé à Samantha et Cynthia, déjà admins Bookea.
+ * Réservé à Samantha, Cynthia et au compte admin Bookea.
  * Un autre admin, ou un centre nommé Samantha, est refusé.
  */
 async function requireWebkPilotage(supabase, req) {
