@@ -170,7 +170,7 @@ export function defaultAgencyIdentity(company: AgencyCompany): AgencyIdentity {
     country: AGENCY_LEGAL_ENTITY.country,
     siret: "",
     email: "",
-    phone: "",
+    phone: AGENCY_LEGAL_ENTITY.phone,
     vatNumber: "",
   };
 }
@@ -220,6 +220,7 @@ export function issuerAddressLines(identity: AgencyIdentity) {
     identity.address,
     [identity.postalCode, identity.city].filter(Boolean).join(" "),
     identity.country,
+    identity.phone,
   ].filter(Boolean);
 }
 
@@ -486,7 +487,7 @@ export function normalizeAgencyState(
       country: String(identity.country || fallback.identity.country),
       siret: String(identity.siret || ""),
       email: String(identity.email || ""),
-      phone: String(identity.phone || ""),
+      phone: String(identity.phone || fallback.identity.phone),
       vatNumber: String(identity.vatNumber || ""),
     },
     bank: normalizeBank(record.bank),

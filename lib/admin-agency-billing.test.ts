@@ -53,6 +53,8 @@ test("les deux marques partagent la même société US et la mention d’autoliq
   assert.equal(webk.legalName, AGENCY_LEGAL_ENTITY.legalName);
   assert.equal(bookea.legalName, AGENCY_LEGAL_ENTITY.legalName);
   assert.equal(webk.city, "ALBUQUERQUE");
+  assert.equal(webk.phone, "+1 505 364 3767");
+  assert.equal(bookea.phone, "+1 505 364 3767");
   assert.match(REVERSE_CHARGE_MENTION, /Art\. 283-2 du CGI/);
   const migrated = normalizeAgencyState("bookea", { identity: { name: "Bookea" } });
   assert.equal(migrated.identity.name, "Bookea Powered by Webk");
@@ -103,6 +105,7 @@ test("les deux marques partagent la même société US et la mention d’autoliq
   assert.match(html, /12 rue de la Paix, 63000 Clermont-Ferrand/);
   assert.match(html, /04 73 00 00 00/);
   assert.match(html, /contact@jfg\.fr/);
+  assert.match(html, /\+1 505 364 3767/);
   assert.doesNotMatch(html, /font-family: Arial, sans-serif/);
   assert.equal(migrated.bank.iban, "BE21 9055 5762 3503");
   assert.equal(DEFAULT_AGENCY_BANK.accountName, "SFK WEBK AGENCY LLC");

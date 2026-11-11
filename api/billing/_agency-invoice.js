@@ -9,6 +9,7 @@ const AGENCY_LEGAL_ENTITY = {
   postalCode: "87110",
   city: "ALBUQUERQUE",
   country: "États-Unis",
+  phone: "+1 505 364 3767",
 };
 
 const REVERSE_CHARGE_MENTION =
