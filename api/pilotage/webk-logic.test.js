@@ -312,3 +312,31 @@ test("le mois en cours compare la même longueur de jours", () => {
     ["Pélissanne", "Bruz"],
   );
 });
+
+test("visage, laser et minceur restent à part du global", () => {
+  const rows = buildPilotageCenters({
+    centers: [{ id: "b", name: "Bruz", city: "Bruz" }],
+    counts: [{ centerId: "b", leads48h: 3, leads7d: 10, leadsPrev7d: 4, leadsMonth: 12, leadsPrevMonth: 8 }],
+    rdvCounts: [],
+    thresholds: [{ centerId: "b", minLeads48h: 1, minRdv48h: 1 }],
+    actions: [],
+    campaigns: [],
+    leadAxes: [
+      { centerId: "b", axis: "visage", leads48h: 0, leads7d: 4, leadsPrev7d: 1, leadsMonth: 5, leadsPrevMonth: 2 },
+      { centerId: "b", axis: "epilation", leads48h: 2, leads7d: 6, leadsPrev7d: 3, leadsMonth: 7, leadsPrevMonth: 6 },
+      { centerId: "b", axis: "diet", leads48h: 1, leads7d: 1, leadsPrev7d: 0, leadsMonth: 1, leadsPrevMonth: 0 },
+    ],
+    rdvAxes: [
+      { centerId: "b", axis: "minceur", rdv48h: 0, rdv7d: 2, rdvPrev7d: 1, rdvMonth: 2, rdvPrevMonth: 1 },
+    ],
+  });
+  const bruz = rows[0];
+  assert.equal(bruz.leads7d, 10);
+  assert.equal(bruz.axes.visage.leads7d, 4);
+  assert.equal(bruz.axes.visage.alert, true);
+  assert.equal(bruz.axes.epilation.leads48h, 2);
+  assert.equal(bruz.axes.epilation.alert, false);
+  assert.equal(bruz.axes.minceur.rdv7d, 2);
+  assert.equal(bruz.axes.minceur.rdvAlert, true);
+  assert.equal(bruz.axes.diet, undefined);
+});

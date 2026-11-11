@@ -45,19 +45,29 @@ function isoDay(value) {
 
 async function readDashboard(supabase) {
   const since = new Date();
-  const [{ data: centers, error: centersError }, countsResult, rdvResult, thresholdsResult, actionsResult, campaignsResult] =
-    await Promise.all([
-      supabase.from("centers").select("id,name,city,admin:settings->admin").order("name"),
-      supabase.rpc("webk_pilotage_counts"),
-      supabase.rpc("webk_pilotage_rdv_counts"),
-      supabase.from("webk_pilotage_thresholds").select("center_id,min_leads_48h,min_rdv_48h"),
-      supabase
-        .from("webk_pilotage_actions")
-        .select("id,center_id,acted_on,campaign,change_text,review_on,author_name,created_at")
-        .order("acted_on", { ascending: false })
-        .order("created_at", { ascending: false }),
-      supabase.from("campaigns").select("center_id,name").eq("is_active", true),
-    ]);
+  const [
+    { data: centers, error: centersError },
+    countsResult,
+    rdvResult,
+    thresholdsResult,
+    actionsResult,
+    campaignsResult,
+    leadAxesResult,
+    rdvAxesResult,
+  ] = await Promise.all([
+    supabase.from("centers").select("id,name,city,admin:settings->admin").order("name"),
+    supabase.rpc("webk_pilotage_counts"),
+    supabase.rpc("webk_pilotage_rdv_counts"),
+    supabase.from("webk_pilotage_thresholds").select("center_id,min_leads_48h,min_rdv_48h"),
+    supabase
+      .from("webk_pilotage_actions")
+      .select("id,center_id,acted_on,campaign,change_text,review_on,author_name,created_at")
+      .order("acted_on", { ascending: false })
+      .order("created_at", { ascending: false }),
+    supabase.from("campaigns").select("center_id,name").eq("is_active", true),
+    supabase.rpc("webk_pilotage_lead_axes"),
+    supabase.rpc("webk_pilotage_rdv_axes"),
+  ]);
 
   if (centersError) {
     throw new Error(centersError.message);
@@ -89,6 +99,37 @@ async function readDashboard(supabase) {
       throw error;
     }
   }
+  const axesReady = !leadAxesResult.error && !rdvAxesResult.error;
+  if (!axesReady) {
+    const missing = /webk_pilotage_lead_axes|webk_pilotage_rdv_axes|schema cache|PGRST202/i.test(
+      `${leadAxesResult.error?.message || ""} ${rdvAxesResult.error?.message || ""}`,
+    );
+    if (!missing) {
+      const error = new Error("Les axes n’ont pas pu être lus.");
+      error.status = 500;
+      throw error;
+    }
+  }
+
+  const mapAxis = (row, kind) => ({
+    centerId: row.center_id,
+    axis: row.axis,
+    ...(kind === "leads"
+      ? {
+          leads48h: row.leads_48h,
+          leads7d: row.leads_7d,
+          leadsPrev7d: row.leads_prev_7d,
+          leadsMonth: row.leads_month,
+          leadsPrevMonth: row.leads_prev_month,
+        }
+      : {
+          rdv48h: row.rdv_48h,
+          rdv7d: row.rdv_7d,
+          rdvPrev7d: row.rdv_prev_7d,
+          rdvMonth: row.rdv_month,
+          rdvPrevMonth: row.rdv_prev_month,
+        }),
+  });
 
   const rows = buildPilotageCenters({
     centers: centers || [],
@@ -124,11 +165,14 @@ async function readDashboard(supabase) {
       createdAt: row.created_at,
     })),
     campaigns: campaignsResult.data || [],
+    leadAxes: axesReady ? (leadAxesResult.data || []).map((row) => mapAxis(row, "leads")) : [],
+    rdvAxes: axesReady ? (rdvAxesResult.data || []).map((row) => mapAxis(row, "rdv")) : [],
   });
 
   return {
     ok: true,
     generatedAt: since.toISOString(),
+    axesReady,
     centers: sortPilotageCenters(rows, "desc"),
   };
 }

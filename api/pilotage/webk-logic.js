@@ -117,6 +117,105 @@ function sortActions(actions) {
   });
 }
 
+const PILOTAGE_AXES = ["visage", "epilation", "minceur"];
+
+function axisCount(row, camel, snake) {
+  return Number(row?.[camel] ?? row?.[snake]) || 0;
+}
+
+function axisFigures(leadRow, rdvRow, minLeads, minRdv) {
+  const leads48h = axisCount(leadRow, "leads48h", "leads_48h");
+  const leads7d = axisCount(leadRow, "leads7d", "leads_7d");
+  const leadsPrev7d = axisCount(leadRow, "leadsPrev7d", "leads_prev_7d");
+  const leadsMonth = axisCount(leadRow, "leadsMonth", "leads_month");
+  const leadsPrevMonth = axisCount(leadRow, "leadsPrevMonth", "leads_prev_month");
+  const rdv48h = axisCount(rdvRow, "rdv48h", "rdv_48h");
+  const rdv7d = axisCount(rdvRow, "rdv7d", "rdv_7d");
+  const rdvPrev7d = axisCount(rdvRow, "rdvPrev7d", "rdv_prev_7d");
+  const rdvMonth = axisCount(rdvRow, "rdvMonth", "rdv_month");
+  const rdvPrevMonth = axisCount(rdvRow, "rdvPrevMonth", "rdv_prev_month");
+  const figures = {
+    leads48h,
+    leads7d,
+    leadsPrev7d,
+    delta: leads7d - leadsPrev7d,
+    leadsMonth,
+    leadsPrevMonth,
+    monthDelta: leadsMonth - leadsPrevMonth,
+    alert: isPilotageAlert(leads48h, minLeads),
+    rdv48h,
+    rdv7d,
+    rdvPrev7d,
+    rdvDelta: rdv7d - rdvPrev7d,
+    rdvMonth,
+    rdvPrevMonth,
+    rdvMonthDelta: rdvMonth - rdvPrevMonth,
+    rdvAlert: isPilotageAlert(rdv48h, minRdv),
+  };
+  const active = [
+    leads48h,
+    leads7d,
+    leadsPrev7d,
+    leadsMonth,
+    leadsPrevMonth,
+    rdv48h,
+    rdv7d,
+    rdvPrev7d,
+    rdvMonth,
+    rdvPrevMonth,
+  ].some((value) => value > 0);
+  return active ? figures : null;
+}
+
+function axesByCenter(leadAxes, rdvAxes, thresholdByCenter) {
+  const leads = new Map();
+  const rdvs = new Map();
+  for (const row of leadAxes || []) {
+    const axis = String(row.axis || "");
+    if (!PILOTAGE_AXES.includes(axis)) {
+      continue;
+    }
+    const centerId = String(row.centerId || row.center_id || "");
+    const bucket = leads.get(centerId) || {};
+    bucket[axis] = row;
+    leads.set(centerId, bucket);
+  }
+  for (const row of rdvAxes || []) {
+    const axis = String(row.axis || "");
+    if (!PILOTAGE_AXES.includes(axis)) {
+      continue;
+    }
+    const centerId = String(row.centerId || row.center_id || "");
+    const bucket = rdvs.get(centerId) || {};
+    bucket[axis] = row;
+    rdvs.set(centerId, bucket);
+  }
+  const centerIds = new Set([...leads.keys(), ...rdvs.keys()]);
+  const result = new Map();
+  for (const centerId of centerIds) {
+    const limits = thresholdByCenter.get(centerId) || {
+      leads: DEFAULT_THRESHOLD,
+      rdv: DEFAULT_THRESHOLD,
+    };
+    const axes = {};
+    for (const axis of PILOTAGE_AXES) {
+      const figures = axisFigures(
+        leads.get(centerId)?.[axis],
+        rdvs.get(centerId)?.[axis],
+        limits.leads,
+        limits.rdv,
+      );
+      if (figures) {
+        axes[axis] = figures;
+      }
+    }
+    if (Object.keys(axes).length > 0) {
+      result.set(centerId, axes);
+    }
+  }
+  return result;
+}
+
 function buildPilotageCenters({
   centers,
   counts,
@@ -124,6 +223,8 @@ function buildPilotageCenters({
   thresholds,
   actions,
   campaigns,
+  leadAxes,
+  rdvAxes,
 }) {
   const countByCenter = new Map(
     (counts || []).map((row) => [String(row.centerId || row.center_id), row]),
@@ -160,6 +261,7 @@ function buildPilotageCenters({
     }
     campaignsByCenter.set(centerId, list);
   }
+  const axisByCenter = axesByCenter(leadAxes, rdvAxes, thresholdByCenter);
 
   return (centers || [])
     .filter((center) => isCenterActive(center.admin))
@@ -209,6 +311,7 @@ function buildPilotageCenters({
         campaigns: campaignsByCenter.get(id) || [],
         lastAction: history[0] || null,
         history,
+        axes: axisByCenter.get(id) || {},
       };
     });
 }

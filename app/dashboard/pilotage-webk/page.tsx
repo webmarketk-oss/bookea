@@ -45,6 +45,78 @@ type PilotageCenter = {
   campaigns: string[];
   lastAction: PilotageAction | null;
   history: PilotageAction[];
+  axes?: Partial<Record<PilotageAxis, AxisFigures>>;
+};
+
+type PilotageAxis = "visage" | "epilation" | "minceur";
+
+type AxisFigures = Pick<
+  PilotageCenter,
+  | "leads48h"
+  | "leads7d"
+  | "leadsPrev7d"
+  | "delta"
+  | "leadsMonth"
+  | "leadsPrevMonth"
+  | "monthDelta"
+  | "alert"
+  | "rdv48h"
+  | "rdv7d"
+  | "rdvPrev7d"
+  | "rdvDelta"
+  | "rdvMonth"
+  | "rdvPrevMonth"
+  | "rdvMonthDelta"
+  | "rdvAlert"
+>;
+
+const axisTables: { key: PilotageAxis; title: string }[] = [
+  { key: "visage", title: "Visage" },
+  { key: "epilation", title: "Laser" },
+  { key: "minceur", title: "Minceur" },
+];
+
+function axisPreview(
+  counts: [number, number, number, number, number, number, number, number, number, number],
+  minLeads: number,
+  minRdv: number,
+): AxisFigures {
+  const [leads48h, leads7d, leadsPrev7d, leadsMonth, leadsPrevMonth, rdv48h, rdv7d, rdvPrev7d, rdvMonth, rdvPrevMonth] = counts;
+  return {
+    leads48h,
+    leads7d,
+    leadsPrev7d,
+    delta: leads7d - leadsPrev7d,
+    leadsMonth,
+    leadsPrevMonth,
+    monthDelta: leadsMonth - leadsPrevMonth,
+    alert: leads48h === 0 || leads48h < minLeads,
+    rdv48h,
+    rdv7d,
+    rdvPrev7d,
+    rdvDelta: rdv7d - rdvPrev7d,
+    rdvMonth,
+    rdvPrevMonth,
+    rdvMonthDelta: rdvMonth - rdvPrevMonth,
+    rdvAlert: rdv48h === 0 || rdv48h < minRdv,
+  };
+}
+
+const previewAxes: Record<string, PilotageCenter["axes"]> = {
+  pelissanne: {
+    visage: axisPreview([0, 1, 3, 6, 8, 1, 2, 3, 2, 3], 1, 1),
+    epilation: axisPreview([0, 2, 4, 7, 10, 1, 3, 3, 2, 4], 1, 1),
+    minceur: axisPreview([0, 1, 2, 5, 6, 0, 1, 2, 1, 2], 1, 1),
+  },
+  bruz: {
+    visage: axisPreview([2, 8, 6, 10, 7, 0, 1, 2, 4, 3], 2, 2),
+    epilation: axisPreview([1, 6, 5, 8, 6, 0, 1, 1, 3, 2], 2, 2),
+    minceur: axisPreview([3, 14, 10, 12, 9, 0, 1, 2, 5, 3], 2, 2),
+  },
+  gaillard: {
+    visage: axisPreview([1, 7, 6, 4, 4, 1, 3, 2, 1, 2], 3, 3),
+    epilation: axisPreview([0, 4, 5, 2, 2, 0, 1, 2, 1, 2], 3, 3),
+  },
 };
 
 const previewCenters: PilotageCenter[] = [
@@ -407,6 +479,14 @@ function todayIso() {
   return `${date.getFullYear()}-${month}-${day}`;
 }
 
+function projectAxis(center: PilotageCenter, axis: PilotageAxis) {
+  const figures = center.axes?.[axis];
+  if (!figures) {
+    return null;
+  }
+  return { ...center, ...figures };
+}
+
 function centerView(center: PilotageCenter, metric: PilotageMetric, period: PilotagePeriod) {
   const monthly = period === "month";
   if (metric === "rdv") {
@@ -465,17 +545,21 @@ export default function PilotageWebkPage() {
   const [leadThresholds, setLeadThresholds] = useState<Record<string, string>>({});
   const [rdvThresholds, setRdvThresholds] = useState<Record<string, string>>({});
   const [savingId, setSavingId] = useState("");
+  const [axesReady, setAxesReady] = useState(false);
 
   async function load() {
     if (isLocalPreview()) {
       setPreview(true);
-      setCenters(previewCenters);
+      setCenters(
+        previewCenters.map((center) => ({ ...center, axes: previewAxes[center.id] })),
+      );
       setLeadThresholds(
         Object.fromEntries(previewCenters.map((center) => [center.id, String(center.minLeads48h)])),
       );
       setRdvThresholds(
         Object.fromEntries(previewCenters.map((center) => [center.id, String(center.minRdv48h)])),
       );
+      setAxesReady(true);
       setDenied(false);
       setLoading(false);
       return;
@@ -503,6 +587,7 @@ export default function PilotageWebkPage() {
     setRdvThresholds(
       Object.fromEntries(next.map((center) => [center.id, String(center.minRdv48h)])),
     );
+    setAxesReady(body.axesReady === true);
     setDenied(false);
     setLoading(false);
   }
@@ -518,6 +603,23 @@ export default function PilotageWebkPage() {
       : centers;
     return sortPilotageCenters(source, direction, metric, period);
   }, [alertsOnly, centers, direction, metric, period]);
+  const axisRankings = useMemo(
+    () =>
+      axisTables.map((axis) => {
+        const source = centers.flatMap((center) => {
+          const projected = projectAxis(center, axis.key);
+          return projected ? [projected] : [];
+        });
+        const visible = alertsOnly
+          ? source.filter((center) => centerView(center, metric, period).alert)
+          : source;
+        return {
+          ...axis,
+          rows: sortPilotageCenters(visible, direction, metric, period),
+        };
+      }),
+    [alertsOnly, centers, direction, metric, period],
+  );
   const columns = monthPeriod(new Date());
   const currentColumn = period === "month" ? columns.currentLabel : "7 jours";
   const previousColumn = period === "month" ? columns.previousLabel : "7 jours précédents";
@@ -749,7 +851,7 @@ export default function PilotageWebkPage() {
           </div>
           <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
             <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">
-              {period === "month"
+              Tous les axes · {period === "month"
                 ? metric === "rdv"
                   ? "Classement des RDV du mois"
                   : "Classement des leads du mois"
@@ -867,6 +969,60 @@ export default function PilotageWebkPage() {
               </tbody>
             </table>
           </div>
+          {axesReady ? (
+            axisRankings.map((axis) => (
+              <div key={axis.key} className="mt-8 border-t border-slate-100 pt-6">
+                <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-500">
+                  {axis.title}
+                </h3>
+                <p className="mt-1 text-sm text-slate-500">
+                  Classé par le soin, puis par le nom de l’offre. Diététique et Autre restent dans le global.
+                </p>
+                {axis.rows.length === 0 ? (
+                  <p className="mt-4 text-sm font-medium text-slate-600">Aucun centre sur cet axe.</p>
+                ) : (
+                  <div className="mt-4 overflow-x-auto">
+                    <table className="w-full min-w-[520px] text-left text-sm">
+                      <thead className="text-xs uppercase tracking-wide text-slate-400">
+                        <tr>
+                          <th className="py-2 pr-3 font-medium">Centre</th>
+                          <th className={`py-2 pr-3 font-medium ${period === "month" ? "normal-case" : ""}`}>{currentColumn}</th>
+                          <th className={`py-2 pr-3 font-medium ${period === "month" ? "normal-case" : ""}`}>{previousColumn}</th>
+                          <th className="py-2 font-medium">Évolution</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {axis.rows.map((center) => {
+                          const view = centerView(center, metric, period);
+                          return (
+                            <tr key={center.id} className="border-t border-slate-100">
+                              <td className="py-3 pr-3 font-semibold">
+                                {center.name}
+                                {view.alert ? (
+                                  <span className="ml-2 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-900">
+                                    Alerte
+                                  </span>
+                                ) : null}
+                              </td>
+                              <td className="py-3 pr-3">{view.week}</td>
+                              <td className="py-3 pr-3">{view.previous}</td>
+                              <td className={`py-3 font-semibold ${view.delta < 0 ? "text-rose-600" : view.delta > 0 ? "text-emerald-700" : "text-slate-500"}`}>
+                                {view.delta > 0 ? `+${view.delta}` : view.delta}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            ))
+          ) : (
+            <p className="mt-6 border-t border-slate-100 pt-4 text-sm text-slate-500">
+              Les tableaux Visage, Laser et Minceur s’affichent dès que les axes sont installés dans la base.
+            </p>
+          )}
         </section>
       </div>
     </main>

@@ -292,3 +292,224 @@ create index if not exists webk_pilotage_status_events_idx
 
 create index if not exists webk_pilotage_appointments_taken_idx
   on public.appointments (lead_id, created_at);
+
+-- Même ordre que le CRM : diététique, laser, visage, minceur. Le soin prime sur l’offre.
+create or replace function public.webk_pilotage_axis(care text, offer text)
+returns text
+language sql
+immutable
+as $$
+  with folded as (
+    select
+      translate(lower(coalesce(care, '')), 'àáâäãåéèêëíìîïóòôöõúùûüýÿçñ', 'aaaaaaeeeeiiiiooooouuuuyycn') as care_text,
+      translate(lower(coalesce(offer, '')), 'àáâäãåéèêëíìîïóòôöõúùûüýÿçñ', 'aaaaaaeeeeiiiiooooouuuuyycn') as offer_text
+  ),
+  chosen as (
+    select
+      case
+        when care_text = '' or care_text ~ 'a preciser|non precise|inconnu' then ''
+        when care_text ~ 'diet|diete|dietetique|nutrition|reequilibr' then 'diet'
+        when care_text ~ 'laser|epil|depil|pilaire|definitive' then 'epilation'
+        when care_text ~ 'visage|hydrafacial|acne' then 'visage'
+        when care_text ~ 'minceur|cryo|cellulite|aminc' then 'minceur'
+        else ''
+      end as from_care,
+      case
+        when offer_text ~ 'diet|diete|dietetique|nutrition|reequilibr' then 'diet'
+        when offer_text ~ 'laser|epil|depil|pilaire|definitive' then 'epilation'
+        when offer_text ~ 'visage|hydrafacial|acne' then 'visage'
+        when offer_text ~ 'minceur|cryo|cellulite|aminc' then 'minceur'
+        else ''
+      end as from_offer
+    from folded
+  )
+  select coalesce(nullif(from_care, ''), nullif(from_offer, ''), 'autre')
+  from chosen;
+$$;
+
+drop function if exists public.webk_pilotage_lead_axes(timestamptz);
+
+create function public.webk_pilotage_lead_axes(now_at timestamptz default now())
+returns table (
+  center_id uuid,
+  axis text,
+  leads_48h bigint,
+  leads_7d bigint,
+  leads_prev_7d bigint,
+  leads_month bigint,
+  leads_prev_month bigint
+)
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select
+    leads.center_id,
+    public.webk_pilotage_axis(services.name, campaigns.name),
+    count(*) filter (where leads.created_at >= period.instant - interval '48 hours'),
+    count(*) filter (where leads.created_at >= period.instant - interval '7 days'),
+    count(*) filter (
+      where leads.created_at >= period.instant - interval '14 days'
+        and leads.created_at < period.instant - interval '7 days'
+    ),
+    count(*) filter (
+      where leads.created_at >= period.month_start
+        and leads.created_at < period.tomorrow
+        and leads.created_at <= period.instant
+    ),
+    count(*) filter (
+      where leads.created_at >= period.prev_start
+        and leads.created_at < period.prev_end
+    )
+  from public.leads
+  cross join public.webk_pilotage_period(now_at) as period
+  left join public.services on services.id = leads.service_id
+  left join public.campaigns on campaigns.id = leads.campaign_id
+  where leads.created_at >= period.prev_start
+    and leads.created_at <= period.instant
+  group by leads.center_id, 2;
+$$;
+
+drop function if exists public.webk_pilotage_rdv_axes(timestamptz);
+
+create function public.webk_pilotage_rdv_axes(now_at timestamptz default now())
+returns table (
+  center_id uuid,
+  axis text,
+  rdv_48h bigint,
+  rdv_7d bigint,
+  rdv_prev_7d bigint,
+  rdv_month bigint,
+  rdv_prev_month bigint
+)
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  with classified as (
+    select
+      events.lead_id,
+      events.center_id,
+      events.created_at,
+      case
+        when translate(lower(coalesce(events.to_value, '')), 'àáâäãåéèêëíìîïóòôöõúùûüýÿçñ', 'aaaaaaeeeeiiiiooooouuuuyycn') in (
+          'rdv pris', 'rdv fixe', 'rdv programme', 'rdv confirme', 'a relancer, rdv pris'
+        ) then 'booked'
+        when translate(lower(coalesce(events.to_value, '')), 'àáâäãåéèêëíìîïóòôöõúùûüýÿçñ', 'aaaaaaeeeeiiiiooooouuuuyycn') in (
+          'acompte recu', 'acompte valide'
+        ) then 'deposit'
+        else null
+      end as kind
+    from public.lead_events events
+    where events.event_type = 'status'
+  ),
+  status_signals as (
+    select
+      lead_id,
+      (array_agg(center_id order by created_at))[1] as center_id,
+      min(created_at) filter (where kind = 'booked') as booked_at,
+      min(created_at) filter (where kind = 'deposit') as deposit_at
+    from classified
+    where kind is not null
+    group by lead_id
+  ),
+  ranked as (
+    select
+      appointments.center_id,
+      appointments.lead_id,
+      appointments.created_at,
+      row_number() over (
+        partition by appointments.lead_id
+        order by appointments.created_at, appointments.id
+      ) as n
+    from public.appointments
+    where appointments.lead_id is not null
+      and appointments.status::text in (
+        'confirmed', 'present', 'cancelled', 'no_show', 'sold', 'in_progress', 'done'
+      )
+  ),
+  first_appt as (
+    select lead_id, center_id, created_at
+    from ranked
+    where n = 1
+  ),
+  credits as (
+    select
+      coalesce(first_appt.center_id, status_signals.center_id) as center_id,
+      coalesce(first_appt.lead_id, status_signals.lead_id) as lead_id,
+      null::uuid as appointment_id,
+      (
+        select min(stamp)
+        from unnest(array[
+          status_signals.booked_at,
+          status_signals.deposit_at,
+          first_appt.created_at
+        ]) as stamp
+      ) as taken_at
+    from status_signals
+    full join first_appt on first_appt.lead_id = status_signals.lead_id
+    union all
+    select ranked.center_id, ranked.lead_id, null::uuid, ranked.created_at
+    from ranked
+    where ranked.n > 1
+    union all
+    select appointments.center_id, null::uuid, appointments.id, appointments.created_at
+    from public.appointments
+    where appointments.lead_id is null
+      and appointments.status::text in (
+        'confirmed', 'present', 'cancelled', 'no_show', 'sold', 'in_progress', 'done'
+      )
+  ),
+  labeled as (
+    select
+      credits.center_id,
+      credits.taken_at,
+      public.webk_pilotage_axis(
+        coalesce(lead_service.name, appointment_service.name),
+        coalesce(lead_campaign.name, appointment_campaign.name)
+      ) as axis
+    from credits
+    left join public.leads on leads.id = credits.lead_id
+    left join public.services as lead_service on lead_service.id = leads.service_id
+    left join public.campaigns as lead_campaign on lead_campaign.id = leads.campaign_id
+    left join public.appointments on appointments.id = credits.appointment_id
+    left join public.services as appointment_service on appointment_service.id = appointments.service_id
+    left join public.campaigns as appointment_campaign on appointment_campaign.id = appointments.campaign_id
+  )
+  select
+    labeled.center_id,
+    labeled.axis,
+    count(*) filter (
+      where labeled.taken_at >= period.instant - interval '48 hours'
+        and labeled.taken_at <= period.instant
+    ),
+    count(*) filter (
+      where labeled.taken_at >= period.instant - interval '7 days'
+        and labeled.taken_at <= period.instant
+    ),
+    count(*) filter (
+      where labeled.taken_at >= period.instant - interval '14 days'
+        and labeled.taken_at < period.instant - interval '7 days'
+    ),
+    count(*) filter (
+      where labeled.taken_at >= period.month_start
+        and labeled.taken_at < period.tomorrow
+        and labeled.taken_at <= period.instant
+    ),
+    count(*) filter (
+      where labeled.taken_at >= period.prev_start
+        and labeled.taken_at < period.prev_end
+    )
+  from labeled
+  cross join public.webk_pilotage_period(now_at) as period
+  where labeled.center_id is not null
+    and labeled.taken_at >= period.prev_start
+    and labeled.taken_at <= period.instant
+  group by labeled.center_id, labeled.axis;
+$$;
+
+revoke all on function public.webk_pilotage_axis(text, text) from public, anon, authenticated;
+revoke all on function public.webk_pilotage_lead_axes(timestamptz) from public, anon, authenticated;
+revoke all on function public.webk_pilotage_rdv_axes(timestamptz) from public, anon, authenticated;
