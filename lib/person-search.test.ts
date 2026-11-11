@@ -17,6 +17,14 @@ test("la recherche téléphone accepte 06 et +336", () => {
   assert.equal(matchesPhoneSearch("00336682313155", "+336682313155"), true);
   assert.equal(matchesPhoneSearch("0612345678", "+336682313155"), false);
   assert.equal(matchesPhoneSearch("marie", "+336682313155"), false);
+  assert.equal(matchesPhoneSearch("64", "0606442089"), true);
+});
+
+test("une adresse e-mail ne sert pas de recherche téléphone", () => {
+  assert.equal(matchesPhoneSearch("lena64@outlook.fr", "0606442089"), false);
+  assert.equal(matchesPhoneSearch("lena64@outlook.fr", "+33669237064"), false);
+  assert.equal(matchesPhoneSearch("lena64@outlook.fr", "06 68 23 13 15"), false);
+  assert.equal(matchesPhoneSearch("jean.06@gmail.com", "0606442089"), false);
 });
 
 test("la recherche prospect garde les correspondances simples", () => {

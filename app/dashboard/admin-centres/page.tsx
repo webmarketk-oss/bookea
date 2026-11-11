@@ -23,7 +23,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import { formatEuro } from "@/lib/bookea-tarifs";
 import { setCenterSeyaQuota } from "@/lib/center-billing";
-import { saveActiveCenterId } from "@/lib/center-access";
+import { loadIsBookeaAdmin, saveActiveCenterId } from "@/lib/center-access";
 import {
   formatOfferDate,
   mergeOfferHistory,
@@ -140,6 +140,7 @@ export default function AdminCentresPage() {
   const supabase = useMemo(() => createClient(), []);
   const [centers, setCenters] = useState<CenterCardData[]>([]);
   const [loading, setLoading] = useState(true);
+  const [adminAllowed, setAdminAllowed] = useState(false);
   const [saving, setSaving] = useState(false);
   const [attachingCenterId, setAttachingCenterId] = useState<string | null>(null);
   const [removingMemberKey, setRemovingMemberKey] = useState<string | null>(null);
@@ -167,11 +168,32 @@ export default function AdminCentresPage() {
   });
 
   useEffect(() => {
-    void loadCenters();
+    let alive = true;
+    void loadIsBookeaAdmin().then((isAdmin) => {
+      if (!alive) return;
+      setAdminAllowed(isAdmin);
+      if (!isAdmin) {
+        setCenters([]);
+        setLoading(false);
+        return;
+      }
+      void loadCenters();
+    });
+    return () => {
+      alive = false;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function loadCenters() {
+    const isAdmin = await loadIsBookeaAdmin();
+    if (!isAdmin) {
+      setAdminAllowed(false);
+      setCenters([]);
+      setLoading(false);
+      return;
+    }
+
     setLoading(true);
 
     try {
@@ -831,6 +853,31 @@ export default function AdminCentresPage() {
       return haystack.includes(query);
     });
   }, [activityFilter, centers, search]);
+
+  if (!adminAllowed) {
+    return (
+      <main className="min-h-screen bg-[#f4f7fb] text-slate-950">
+        <div className="mx-auto grid min-h-screen max-w-lg place-items-center p-8">
+          <div className="rounded-[2rem] border border-dashed border-slate-200 bg-white p-10 text-center">
+            {loading ? (
+              <div className="flex items-center justify-center gap-3 font-semibold text-slate-500">
+                <Loader2 className="h-5 w-5 animate-spin" />
+                Chargement...
+              </div>
+            ) : (
+              <>
+                <ShieldCheck className="mx-auto h-10 w-10 text-slate-300" />
+                <p className="mt-4 text-base font-semibold">Accès réservé</p>
+                <p className="mt-2 font-medium text-slate-500">
+                  Cet espace est réservé à l’équipe Bookea.
+                </p>
+              </>
+            )}
+          </div>
+        </div>
+      </main>
+    );
+  }
 
   return (
     <main className="min-h-screen bg-[#f4f7fb] text-slate-950">

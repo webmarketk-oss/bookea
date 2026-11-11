@@ -28,6 +28,11 @@ function phoneDigitKeys(value: string) {
   return [...keys];
 }
 
+/** Chiffres, espaces et signes de numéro. Une adresse e-mail n’en fait pas partie. */
+function looksLikePhoneQuery(value: string) {
+  return /^[\d\s+()./-]+$/.test(value) && value.replace(/\D/g, "").length >= 2;
+}
+
 /** 06, +336 et 00336 désignent le même numéro, y compris en recherche partielle. */
 export function matchesPhoneSearch(query: string, phone?: string | null) {
   const rawQuery = String(query || "").trim().toLowerCase();
@@ -37,6 +42,9 @@ export function matchesPhoneSearch(query: string, phone?: string | null) {
   }
   if (rawPhone.includes(rawQuery)) {
     return true;
+  }
+  if (!looksLikePhoneQuery(rawQuery)) {
+    return false;
   }
   const queryKeys = phoneDigitKeys(rawQuery);
   if (queryKeys.length === 0) {

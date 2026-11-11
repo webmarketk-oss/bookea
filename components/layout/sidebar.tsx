@@ -283,17 +283,16 @@ export default function Sidebar({
               collapsed={collapsed}
               onExpand={() => onCollapsedChange(false)}
             />
+            <NavItem
+              href="/dashboard/admin-centres"
+              label="Admin centres"
+              icon={ShieldCheck}
+              active={pathname.startsWith("/dashboard/admin-centres")}
+              collapsed={collapsed}
+              onExpand={() => onCollapsedChange(false)}
+            />
           </>
         ) : null}
-
-        <NavItem
-          href="/dashboard/admin-centres"
-          label="Admin centres"
-          icon={ShieldCheck}
-          active={pathname.startsWith("/dashboard/admin-centres")}
-          collapsed={collapsed}
-          onExpand={() => onCollapsedChange(false)}
-        />
       </nav>
 
       <button
