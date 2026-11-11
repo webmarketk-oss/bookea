@@ -443,10 +443,13 @@ function isLocalPreview() {
   );
 }
 
-async function authHeaders() {
+async function authHeaders(): Promise<Record<string, string>> {
   const { data } = await createClient().auth.getSession();
   const token = data.session?.access_token;
-  return token ? { Authorization: `Bearer ${token}` } : {};
+  if (!token) {
+    return {};
+  }
+  return { Authorization: `Bearer ${token}` };
 }
 
 export default function PilotageWebkPage() {
