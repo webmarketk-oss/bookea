@@ -22,6 +22,7 @@ import {
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState, type MutableRefObject, type Ref } from "react";
 import { BookeaLogo } from "@/components/bookea-logo";
+import { canOpenWebkPilotage } from "@/api/pilotage/webk-logic";
 import { clearCenterAccessCache, loadIsBookeaAdmin } from "@/lib/center-access";
 import { createClient } from "@/lib/supabase";
 import { CenterSwitcher } from "./center-switcher";
@@ -48,6 +49,7 @@ export default function Sidebar({
   const pathname = usePathname();
   const router = useRouter();
   const [isBookeaAdmin, setIsBookeaAdmin] = useState(false);
+  const [showPilotage, setShowPilotage] = useState(false);
   const crmOpen =
     pathname.startsWith("/dashboard/crm-leads") ||
     pathname.startsWith("/dashboard/crm-clients") ||
@@ -66,6 +68,29 @@ export default function Sidebar({
         setIsBookeaAdmin(allowed);
       }
     });
+    void (async () => {
+      const supabase = createClient();
+      const { data } = await supabase.auth.getUser();
+      const user = data.user;
+      if (!user || !alive) {
+        return;
+      }
+      const [{ data: admin }, { data: profile }] = await Promise.all([
+        supabase.from("bookea_admins").select("label").eq("profile_id", user.id).maybeSingle(),
+        supabase.from("profiles").select("full_name").eq("id", user.id).maybeSingle(),
+      ]);
+      if (!alive) {
+        return;
+      }
+      setShowPilotage(
+        canOpenWebkPilotage({
+          isAdmin: Boolean(admin),
+          email: user.email,
+          fullName: profile?.full_name,
+          adminLabel: admin?.label,
+        }),
+      );
+    })();
     return () => {
       alive = false;
     };
@@ -292,6 +317,16 @@ export default function Sidebar({
               onExpand={() => onCollapsedChange(false)}
             />
           </>
+        ) : null}
+        {showPilotage ? (
+          <NavItem
+            href="/dashboard/pilotage-webk"
+            label="Pilotage WEBK"
+            icon={BarChart3}
+            active={pathname.startsWith("/dashboard/pilotage-webk")}
+            collapsed={collapsed}
+            onExpand={() => onCollapsedChange(false)}
+          />
         ) : null}
       </nav>
 
