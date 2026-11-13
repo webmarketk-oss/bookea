@@ -1004,7 +1004,14 @@ export function billingAlerts(
         : dueOn
           ? addDaysIso(dueOn, RENEWAL_REMINDER_AFTER_DAYS - 30)
           : "";
-      if (!dueOn || !remindOn || today < remindOn) {
+      if (!dueOn || !remindOn) {
+        return null;
+      }
+      // Facture déjà Payée : plus rien à traiter tant que le prochain cycle n’est pas dépassé.
+      if (latest?.status === "Payée" && today <= dueOn) {
+        return null;
+      }
+      if (today < remindOn) {
         return null;
       }
       const overdue = today > dueOn;

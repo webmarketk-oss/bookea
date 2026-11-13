@@ -374,7 +374,7 @@ test("le renouvellement remonte 3 semaines et 5 jours après l’émission, puis
     clientId: "c1",
     issuedOn: "2026-10-08",
     nextCycleOn: "2026-11-07",
-    status: "Payée",
+    status: "En attente de paiement",
   };
   const before = billingAlerts(
     normalizeAgencyState("webk", { clients: [client], invoices: [issued] }),
@@ -387,6 +387,23 @@ test("le renouvellement remonte 3 semaines et 5 jours après l’émission, puis
   );
   assert.equal(due.length, 1);
   assert.match(due[0]?.label || "", /renouvellement/);
+  const paid = billingAlerts(
+    normalizeAgencyState("webk", {
+      clients: [client],
+      invoices: [{ ...issued, status: "Payée" }],
+    }),
+    new Date("2026-11-03T10:00:00"),
+  );
+  assert.equal(paid.length, 0);
+  const overduePaid = billingAlerts(
+    normalizeAgencyState("webk", {
+      clients: [client],
+      invoices: [{ ...issued, status: "Payée" }],
+    }),
+    new Date("2026-11-08T10:00:00"),
+  );
+  assert.equal(overduePaid.length, 1);
+  assert.match(overduePaid[0]?.label || "", /cycle dépassé/);
   const renewed = billingAlerts(
     normalizeAgencyState("webk", {
       clients: [{ ...client, nextInvoiceOn: "2026-12-03" }],

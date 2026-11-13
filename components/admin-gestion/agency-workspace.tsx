@@ -308,7 +308,7 @@ export function AgencyWorkspace() {
             Cycles à traiter · {companyLabel(company)}
           </p>
           <p className="mt-1 text-xs font-semibold text-amber-800/80">
-            À partir de 3 semaines et 5 jours après l’émission. Disparaît dès qu’une nouvelle facture est émise.
+            À partir de 3 semaines et 5 jours après l’émission. Disparaît dès que la facture est Payée, ou dès qu’une nouvelle facture est émise.
           </p>
           <ul className="mt-2 space-y-1 text-sm font-semibold text-amber-900">
             {alerts.map((alert) => (
