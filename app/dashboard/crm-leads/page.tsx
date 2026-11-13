@@ -468,8 +468,8 @@ export default function CRMLeadsPage() {
     let cancelled = false;
     let newestAt = 0;
 
-    function applyNames(names: string[], updatedAt = 0) {
-      if (cancelled || updatedAt < newestAt) {
+    function applyNames(names: string[], updatedAt = 0, force = false) {
+      if (cancelled || (!force && updatedAt < newestAt)) {
         return;
       }
       if (updatedAt) {
@@ -487,11 +487,12 @@ export default function CRMLeadsPage() {
 
     function refreshNames() {
       applyCached();
-      void loadTeamPlanning()
+      void loadTeamPlanning(readActiveCenterId() || undefined)
         .then((team) => {
           applyNames(
             commercialNamesFromTeam(team?.practitioners ?? []),
             team?.updatedAt || 0,
+            true,
           );
         })
         .catch(() => {});
@@ -523,15 +524,25 @@ export default function CRMLeadsPage() {
       }
     }
 
+    function onActiveCenterChanged() {
+      newestAt = 0;
+      refreshNames();
+    }
+
     refreshNames();
     window.addEventListener(TEAM_PLANNING_UPDATED_EVENT, onTeamPlanning);
     window.addEventListener("storage", onTeamStorage);
+    window.addEventListener("bookea-active-center-changed", onActiveCenterChanged);
     window.addEventListener("focus", refreshIfVisible);
     document.addEventListener("visibilitychange", refreshIfVisible);
     return () => {
       cancelled = true;
       window.removeEventListener(TEAM_PLANNING_UPDATED_EVENT, onTeamPlanning);
       window.removeEventListener("storage", onTeamStorage);
+      window.removeEventListener(
+        "bookea-active-center-changed",
+        onActiveCenterChanged,
+      );
       window.removeEventListener("focus", refreshIfVisible);
       document.removeEventListener("visibilitychange", refreshIfVisible);
     };

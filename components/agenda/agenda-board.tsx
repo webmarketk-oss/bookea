@@ -20,7 +20,7 @@ import { Button } from "@/components/ui/button";
 import { askAlert, askConfirm } from "@/components/ui/app-dialog";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { cabins, practitioners } from "@/lib/agenda-data";
+import { cabins } from "@/lib/agenda-data";
 import {
   CABIN_COLUMN_MIN_PX,
   VERTICAL_SCROLLBAR_GUTTER_PX,
@@ -118,7 +118,6 @@ import {
   addDaysToIso,
   dayHoursForSchedule,
   dayHoursForWeekHours,
-  defaultTeamSchedules,
   emptyTeamSchedule,
   formatWeekRange,
   hoursForWeek,
@@ -333,13 +332,13 @@ export default function AgendaBoard() {
     emptyClientBalanceDueIndex,
   );
   const [cabinList, setCabinList] = useState(cabins);
-  const [practitionerList, setPractitionerList] = useState(practitioners);
+  const [practitionerList, setPractitionerList] = useState<Practitioner[]>([]);
   const [isLoadingAgenda, setIsLoadingAgenda] = useState(true);
   const [agendaError, setAgendaError] = useState("");
   const [agendaNotice, setAgendaNotice] = useState("");
   const [activeTab, setActiveTab] = useState<AgendaTab>("agenda");
   const [agendaView, setAgendaView] = useState<AgendaView>("day");
-  const [teamSchedules, setTeamSchedules] = useState(defaultTeamSchedules);
+  const [teamSchedules, setTeamSchedules] = useState<TeamSchedule[]>([]);
   const [selectedDate, setSelectedDate] = useState(
     agendaFocus?.date ?? rdvPrefill?.date ?? todayIso()
   );
@@ -422,9 +421,12 @@ export default function AgendaBoard() {
   const cabinSaveTimerRef = useRef<number | null>(null);
   const agendaNoticeTimerRef = useRef(0);
   const cabinListRef = useRef(cabins);
-  const teamPlanningRef = useRef({
-    practitioners,
-    schedules: defaultTeamSchedules(),
+  const teamPlanningRef = useRef<{
+    practitioners: Practitioner[];
+    schedules: TeamSchedule[];
+  }>({
+    practitioners: [],
+    schedules: [],
   });
 
   function beginAgendaWrite() {
@@ -1307,6 +1309,7 @@ export default function AgendaBoard() {
     }
     teamUpdatedAtRef.current = staged.updatedAt;
     void saveTeamPlanning({
+      centerId: centerIdRef.current,
       practitioners: staged.practitioners,
       schedules: staged.schedules,
       updatedAt: staged.updatedAt,
@@ -6577,7 +6580,7 @@ function TreatmentPicker({
   cabinList,
   duration,
   onChange,
-  practitionerList = practitioners,
+  practitionerList = [],
   value,
 }: {
   cabinList: Cabin[];
@@ -6808,7 +6811,7 @@ function findCabinIdForService(
 
 function findPractitionerIdForService(
   service: CenterServiceSetting | undefined,
-  practitionerList: Practitioner[] = practitioners,
+  practitionerList: Practitioner[] = [],
 ) {
   const practitionerName = findAssignedName(service?.practitioners);
   if (!practitionerName) {
