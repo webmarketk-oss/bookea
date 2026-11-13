@@ -821,6 +821,33 @@ test("en Bookea, chaque centre est proposé comme client une seule fois", () => 
   assert.equal(withCenterClients(once, [center]), once);
 });
 
+test("Payée gagne même si la copie En attente a un serverRevision plus récent", () => {
+  const paid = normalizeAgencyState("webk", {
+    invoices: [
+      {
+        id: "a",
+        clientId: "c1",
+        issuedOn: "2026-10-14",
+        status: "Payée",
+        editedAt: "2026-11-13T16:00:00.000Z",
+      },
+    ],
+  }).invoices;
+  const pending = normalizeAgencyState("webk", {
+    invoices: [
+      {
+        id: "a",
+        clientId: "c1",
+        issuedOn: "2026-10-14",
+        status: "En attente de paiement",
+        serverRevision: 12,
+      },
+    ],
+  }).invoices;
+  assert.equal(mergeAgencyInvoices(pending, paid)[0]?.status, "Payée");
+  assert.equal(mergeAgencyInvoices(paid, pending)[0]?.status, "Payée");
+});
+
 test("seule la facture réellement modifiée est datée, et la plus récente gagne", () => {
   const current = normalizeAgencyState("webk", {
     invoices: [

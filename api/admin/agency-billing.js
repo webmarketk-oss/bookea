@@ -7,6 +7,7 @@ const {
   ensureBucket,
   isMissingObject,
   readBilling,
+  updateServerBilling,
   writeBilling,
 } = require("./_agency-billing-store");
 
@@ -173,16 +174,23 @@ async function handler(req, res) {
     if (!incoming || typeof incoming !== "object" || incoming.company !== company) {
       return res.status(400).json({ ok: false, error: "Facturation invalide." });
     }
-    const state = mergeIncomingBilling(
-      await readBilling(supabase, company),
-      incoming,
-    );
-    await writeBilling(supabase, company, state);
+    const result = await updateServerBilling(supabase, company, (current) => {
+      const state = mergeIncomingBilling(current, incoming);
+      return {
+        state: { ...state, revision: current.revision },
+        invoiceIds: Array.isArray(incoming.invoices)
+          ? incoming.invoices.map((item) => String(asRecord(item).id || "").trim()).filter(Boolean)
+          : [],
+        clientIds: Array.isArray(incoming.clients)
+          ? incoming.clients.map((item) => String(asRecord(item).id || "").trim()).filter(Boolean)
+          : [],
+      };
+    });
     return res.status(200).json({
       ok: true,
-      updatedAt: state.updatedAt || null,
-      revision: state.revision,
-      state,
+      updatedAt: result.state.updatedAt || null,
+      revision: result.state.revision,
+      state: result.state,
     });
   } catch (error) {
     console.error("[admin/agency-billing]", error);

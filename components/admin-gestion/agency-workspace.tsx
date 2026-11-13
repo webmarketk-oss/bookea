@@ -45,6 +45,9 @@ import {
   withCenterClients,
   withSyncedCenterContacts,
   keepInvoiceEdits,
+  mergeAgencyClients,
+  mergeAgencyInvoices,
+  uniqueIds,
   type AgencyBillingState,
   type AgencyClient,
   type AgencyCompany,
@@ -158,10 +161,26 @@ export function AgencyWorkspace() {
       const current = statesRef.current;
       if (current) {
         const next = { ...current };
-        for (const [index, saved] of savedList.entries()) {
-          if (current[saved.company] === updates[index]) {
+        for (const saved of savedList) {
+          const live = current[saved.company];
+          if (!live) {
             next[saved.company] = saved;
+            continue;
           }
+          const deletedInvoiceIds = uniqueIds([
+            ...(live.deletedInvoiceIds || []),
+            ...(saved.deletedInvoiceIds || []),
+          ]);
+          const deleted = new Set(deletedInvoiceIds);
+          next[saved.company] = {
+            ...saved,
+            invoices: mergeAgencyInvoices(
+              live.invoices.filter((item) => !deleted.has(item.id)),
+              saved.invoices.filter((item) => !deleted.has(item.id)),
+            ),
+            clients: mergeAgencyClients(live.clients, saved.clients),
+            deletedInvoiceIds,
+          };
         }
         statesRef.current = next;
         setStates(next);
@@ -185,6 +204,16 @@ export function AgencyWorkspace() {
     const resolved = { ...patch };
     if (patch.invoices) {
       resolved.invoices = keepInvoiceEdits(patch.invoices, prev.invoices);
+      const kept = new Set(resolved.invoices.map((item) => item.id));
+      const removed = prev.invoices
+        .filter((item) => !kept.has(item.id))
+        .map((item) => item.id);
+      if (removed.length) {
+        resolved.deletedInvoiceIds = uniqueIds([
+          ...(prev.deletedInvoiceIds || []),
+          ...removed,
+        ]);
+      }
     }
     const next = { ...current, [company]: { ...prev, ...resolved } };
     statesRef.current = next;

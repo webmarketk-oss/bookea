@@ -111,7 +111,7 @@ test("une sauvegarde de l’admin garde les factures créées ou payées par le 
   };
   const merged = mergeIncomingBilling(stored, incoming);
   assert.equal(merged.revision, 6);
-  assert.deepEqual(merged.invoices.map((item) => item.id).sort(), ["auto", "paid"]);
+  assert.deepEqual(merged.invoices.map((item) => item.id).sort(), ["auto", "old", "paid"]);
   assert.equal(merged.invoices.find((item) => item.id === "paid").status, "Payée");
 });
 
@@ -184,9 +184,75 @@ test("une facture supprimée par l’admin après l’avoir vue ne revient pas",
       clients: [],
       invoices: [{ id: "auto", status: "En attente de paiement", serverRevision: 5 }],
     },
-    { company: "bookea", revision: 5, clients: [], invoices: [] },
+    {
+      company: "bookea",
+      revision: 5,
+      clients: [],
+      invoices: [],
+      deletedInvoiceIds: ["auto"],
+    },
   );
   assert.deepEqual(merged.invoices, []);
+  assert.deepEqual(merged.deletedInvoiceIds, ["auto"]);
+});
+
+test("une sauvegarde incomplète ne fait pas disparaître une facture déjà enregistrée", () => {
+  const stored = {
+    company: "webk",
+    revision: 12,
+    clients: [],
+    invoices: [
+      { id: "wk-old", number: "WK-2026-040", status: "Payée", serverRevision: 4 },
+      {
+        id: "wk-new",
+        number: "WK-2026-041",
+        status: "En attente de paiement",
+        editedAt: "2026-11-12T18:00:00.000Z",
+      },
+    ],
+  };
+  const incoming = {
+    company: "webk",
+    revision: 12,
+    clients: [],
+    invoices: [{ id: "wk-old", number: "WK-2026-040", status: "Payée" }],
+  };
+  const merged = mergeIncomingBilling(stored, incoming);
+  assert.deepEqual(merged.invoices.map((item) => item.id).sort(), ["wk-new", "wk-old"]);
+});
+
+test("un Payée ne redescend pas En attente si un onglet plus vieux a un serverRevision plus haut", () => {
+  const stored = {
+    company: "webk",
+    revision: 9,
+    clients: [],
+    invoices: [
+      {
+        id: "wk20",
+        status: "Payée",
+        editedAt: "2026-11-13T16:00:00.000Z",
+        paidAt: "2026-11-13T16:00:00.000Z",
+      },
+    ],
+  };
+  const incoming = {
+    company: "webk",
+    revision: 8,
+    clients: [],
+    invoices: [
+      {
+        id: "wk20",
+        status: "En attente de paiement",
+        serverRevision: 9,
+        stripeSessionIds: ["cs_1"],
+      },
+    ],
+  };
+  const invoice = mergeIncomingBilling(stored, incoming).invoices.find(
+    (item) => item.id === "wk20",
+  );
+  assert.equal(invoice.status, "Payée");
+  assert.equal(invoice.paidAt, "2026-11-13T16:00:00.000Z");
 });
 
 test("une souscription ne crée qu’une seule facture", () => {

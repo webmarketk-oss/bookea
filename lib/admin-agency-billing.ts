@@ -142,6 +142,8 @@ export type AgencyBillingState = {
   invoices: AgencyInvoice[];
   updatedAt: string;
   revision?: number;
+  deletedInvoiceIds?: string[];
+  deletedClientIds?: string[];
 };
 
 export const AGENCY_COMPANIES: Array<{
@@ -312,23 +314,54 @@ export function withSyncedCenterContacts(
 
 export function protectInvoicesFromEmptyOverwrite(
   next: AgencyBillingState,
-  remote: Pick<AgencyBillingState, "invoices"> | null,
+  remote: Pick<AgencyBillingState, "invoices" | "deletedInvoiceIds"> | null,
 ) {
   if (!remote?.invoices.length || next.invoices.length > 0) {
+    return next;
+  }
+  const deleted = new Set(next.deletedInvoiceIds || []);
+  if (remote.invoices.every((item) => deleted.has(item.id))) {
     return next;
   }
   return { ...next, invoices: remote.invoices };
 }
 
-function newerServerCopy<T extends { serverRevision?: number; editedAt?: string }>(
-  item: T,
-  previous?: T,
-) {
+export function uniqueIds(values: unknown[] | undefined) {
+  const seen = new Set<string>();
+  const ids: string[] = [];
+  for (const value of values || []) {
+    const id = String(value || "").trim();
+    if (!id || seen.has(id)) {
+      continue;
+    }
+    seen.add(id);
+    ids.push(id);
+  }
+  return ids;
+}
+
+function newerServerCopy<
+  T extends { serverRevision?: number; editedAt?: string; status?: string },
+>(item: T, previous?: T) {
   if (!previous) {
     return item;
   }
   const itemEdited = String(item.editedAt || "");
   const previousEdited = String(previous.editedAt || "");
+  if (
+    previous.status === "Payée" &&
+    item.status !== "Payée" &&
+    !(itemEdited > previousEdited)
+  ) {
+    return previous;
+  }
+  if (
+    item.status === "Payée" &&
+    previous.status !== "Payée" &&
+    !(previousEdited > itemEdited)
+  ) {
+    return item;
+  }
   if (itemEdited !== previousEdited && (itemEdited || previousEdited)) {
     return previousEdited > itemEdited ? previous : item;
   }
@@ -504,6 +537,12 @@ export function normalizeAgencyState(
       : [],
     updatedAt: String(record.updatedAt || new Date().toISOString()),
     ...(Number(record.revision) > 0 ? { revision: Number(record.revision) } : {}),
+    ...(Array.isArray(record.deletedInvoiceIds)
+      ? { deletedInvoiceIds: uniqueIds(record.deletedInvoiceIds) }
+      : {}),
+    ...(Array.isArray(record.deletedClientIds)
+      ? { deletedClientIds: uniqueIds(record.deletedClientIds) }
+      : {}),
   };
 }
 

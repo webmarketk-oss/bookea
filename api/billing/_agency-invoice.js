@@ -332,6 +332,43 @@ const SERVER_INVOICE_FIELDS = ["payToken", "stripeSessionIds", "stripeSessionAt"
  * que l’admin la modifiait : on garde les champs du serveur sans perdre le statut ni les notes
  * saisis par l’admin. Seul un paiement enregistré par le serveur l’emporte sur le statut.
  */
+function uniqueIds(values) {
+  const seen = new Set();
+  const ids = [];
+  for (const value of asArray(values)) {
+    const id = String(value || "").trim();
+    if (!id || seen.has(id)) {
+      continue;
+    }
+    seen.add(id);
+    ids.push(id);
+  }
+  return ids;
+}
+
+function pickBillingItem(incoming, stored) {
+  if (!stored) {
+    return incoming;
+  }
+  const item = asRecord(incoming);
+  const previous = asRecord(stored);
+  const incomingEdited = String(item.editedAt || "");
+  const storedEdited = String(previous.editedAt || "");
+  // « Payée » ne redescend pas en attente sauf si l’admin l’a rouverte plus récemment.
+  if (previous.status === "Payée" && item.status !== "Payée" && !(incomingEdited > storedEdited)) {
+    return stored;
+  }
+  if (item.status === "Payée" && previous.status !== "Payée" && !(storedEdited > incomingEdited)) {
+    return incoming;
+  }
+  if (incomingEdited !== storedEdited && (incomingEdited || storedEdited)) {
+    return storedEdited > incomingEdited ? stored : incoming;
+  }
+  return (Number(previous.serverRevision) || 0) > (Number(item.serverRevision) || 0)
+    ? stored
+    : incoming;
+}
+
 function mergeInvoiceWithServer(incoming, server) {
   const merged = { ...incoming };
   for (const key of SERVER_INVOICE_FIELDS) {
@@ -344,36 +381,54 @@ function mergeInvoiceWithServer(incoming, server) {
     merged.emailedTo = server.emailedTo;
   }
   if (server.status === "Payée" && incoming.status !== "Payée") {
-    merged.status = server.status;
-    merged.paidAt = server.paidAt;
-    merged.paymentMethod = server.paymentMethod;
+    const incomingEdited = String(incoming.editedAt || "");
+    const serverEdited = String(server.editedAt || "");
+    if (!(incomingEdited > serverEdited)) {
+      merged.status = server.status;
+      merged.paidAt = server.paidAt;
+      merged.paymentMethod = server.paymentMethod;
+    }
   }
   return merged;
 }
 
-function mergeServerItems(incomingItems, storedItems, base, mergeItem) {
-  const storedById = new Map(asArray(storedItems).map((item) => [asRecord(item).id, item]));
+function mergeServerItems(incomingItems, storedItems, base, mergeItem, deletedIds) {
+  const deleted = deletedIds instanceof Set ? deletedIds : new Set();
+  const storedById = new Map();
+  for (const item of asArray(storedItems)) {
+    const id = String(asRecord(item).id || "").trim();
+    if (id && !deleted.has(id)) {
+      storedById.set(id, item);
+    }
+  }
   const fresh = new Map(
     asArray(storedItems)
-      .filter((item) => (Number(asRecord(item).serverRevision) || 0) > base)
-      .map((item) => [item.id, item]),
+      .filter((item) => {
+        const id = String(asRecord(item).id || "").trim();
+        return id && !deleted.has(id) && (Number(asRecord(item).serverRevision) || 0) > base;
+      })
+      .map((item) => [String(asRecord(item).id), item]),
   );
-  const merged = asArray(incomingItems).map((item) => {
-    const id = asRecord(item).id;
-    const server = fresh.get(id);
-    fresh.delete(id);
-    if (!mergeItem) {
-      return server || item;
+  const merged = [];
+  const seen = new Set();
+  for (const item of asArray(incomingItems)) {
+    const id = String(asRecord(item).id || "").trim();
+    if (!id || deleted.has(id) || seen.has(id)) {
+      continue;
     }
-    // Un onglet ou un appareil resté sur une ancienne copie ne défait pas une modification
-    // plus récente de l’admin (ex. « Payée » posé ailleurs entre-temps).
+    seen.add(id);
+    const server = fresh.get(id);
     const stored = storedById.get(id);
-    const newerStored =
-      stored && String(stored.editedAt || "") > String(asRecord(item).editedAt || "");
-    const winner = newerStored ? stored : item;
-    return server ? mergeItem(winner, server) : winner;
-  });
-  return [...fresh.values(), ...merged];
+    const winner = mergeItem ? pickBillingItem(item, stored) : server || item;
+    merged.push(server && mergeItem ? mergeItem(winner, server) : winner);
+  }
+  const keptStored = [];
+  for (const [id, item] of storedById) {
+    if (!seen.has(id)) {
+      keptStored.push(item);
+    }
+  }
+  return [...keptStored, ...merged];
 }
 
 function mergeIncomingBilling(stored, incoming) {
@@ -381,10 +436,32 @@ function mergeIncomingBilling(stored, incoming) {
     return { ...incoming, revision: (Number(incoming.revision) || 0) + 1 };
   }
   const base = Number(incoming.revision) || 0;
+  const deletedInvoiceIds = uniqueIds([
+    ...asArray(stored.deletedInvoiceIds),
+    ...asArray(incoming.deletedInvoiceIds),
+  ]).slice(-200);
+  const deletedClientIds = uniqueIds([
+    ...asArray(stored.deletedClientIds),
+    ...asArray(incoming.deletedClientIds),
+  ]).slice(-200);
   return {
     ...incoming,
-    invoices: mergeServerItems(incoming.invoices, stored.invoices, base, mergeInvoiceWithServer),
-    clients: mergeServerItems(incoming.clients, stored.clients, base),
+    invoices: mergeServerItems(
+      incoming.invoices,
+      stored.invoices,
+      base,
+      mergeInvoiceWithServer,
+      new Set(deletedInvoiceIds),
+    ),
+    clients: mergeServerItems(
+      incoming.clients,
+      stored.clients,
+      base,
+      null,
+      new Set(deletedClientIds),
+    ),
+    deletedInvoiceIds,
+    deletedClientIds,
     revision: Math.max(Number(stored.revision) || 0, base) + 1,
   };
 }

@@ -5,6 +5,7 @@ import {
   mergeAgencyInvoices,
   normalizeAgencyState,
   protectInvoicesFromEmptyOverwrite,
+  uniqueIds,
   type AgencyBillingState,
   type AgencyCompany,
   type BillingCenterContact,
@@ -33,10 +34,14 @@ function writeLocal(state: AgencyBillingState, options: { unsaved?: boolean } = 
   if (typeof window === "undefined") {
     return;
   }
-  window.localStorage.setItem(
-    storageKey(state.company),
-    JSON.stringify(options.unsaved ? { ...state, unsaved: true } : state),
-  );
+  try {
+    window.localStorage.setItem(
+      storageKey(state.company),
+      JSON.stringify(options.unsaved ? { ...state, unsaved: true } : state),
+    );
+  } catch (error) {
+    console.warn("[admin-agency-billing] localStorage", error);
+  }
 }
 
 /** La copie de l’appareil contient une modification que le serveur n’a pas confirmée. */
@@ -135,9 +140,16 @@ async function adoptRemoteBilling(
   // ne doit pas remettre « En attente » sur une facture passée en « Payée » ailleurs.
   // Seule une modification jamais confirmée par le serveur garde la priorité.
   const unsaved = localHasUnsavedEdits(company);
+  const deletedInvoiceIds = uniqueIds([
+    ...(remote.deletedInvoiceIds || []),
+    ...(local.deletedInvoiceIds || []),
+  ]);
+  const deleted = new Set(deletedInvoiceIds);
+  const localInvoices = local.invoices.filter((item) => !deleted.has(item.id));
+  const remoteInvoices = remote.invoices.filter((item) => !deleted.has(item.id));
   const invoices = unsaved
-    ? mergeAgencyInvoices(local.invoices, remote.invoices)
-    : mergeAgencyInvoices(remote.invoices, local.invoices);
+    ? mergeAgencyInvoices(localInvoices, remoteInvoices)
+    : mergeAgencyInvoices(remoteInvoices, localInvoices);
   const clients = unsaved
     ? mergeAgencyClients(local.clients, remote.clients)
     : mergeAgencyClients(remote.clients, local.clients);
@@ -145,6 +157,7 @@ async function adoptRemoteBilling(
     ...remote,
     invoices,
     clients,
+    deletedInvoiceIds: deletedInvoiceIds.length ? deletedInvoiceIds : remote.deletedInvoiceIds,
   };
   writeLocal(next, { unsaved });
   if (
@@ -159,25 +172,77 @@ async function adoptRemoteBilling(
   return next;
 }
 
+const saveQueue = new Map<AgencyCompany, Promise<void>>();
+
+function mergeBillingCopies(
+  primary: AgencyBillingState,
+  ...copies: Array<AgencyBillingState | null | undefined>
+): AgencyBillingState {
+  const deletedInvoiceIds = uniqueIds([
+    ...(primary.deletedInvoiceIds || []),
+    ...copies.flatMap((copy) => copy?.deletedInvoiceIds || []),
+  ]);
+  const deleted = new Set(deletedInvoiceIds);
+  let invoices = primary.invoices.filter((item) => !deleted.has(item.id));
+  let clients = primary.clients;
+  for (const copy of copies) {
+    if (!copy) {
+      continue;
+    }
+    invoices = mergeAgencyInvoices(
+      invoices,
+      copy.invoices.filter((item) => !deleted.has(item.id)),
+    );
+    clients = mergeAgencyClients(clients, copy.clients);
+  }
+  return {
+    ...primary,
+    invoices,
+    clients,
+    deletedInvoiceIds: deletedInvoiceIds.length ? deletedInvoiceIds : primary.deletedInvoiceIds,
+    revision: Math.max(
+      primary.revision || 0,
+      ...copies.map((copy) => copy?.revision || 0),
+    ),
+  };
+}
+
 export async function saveAgencyBilling(state: AgencyBillingState) {
+  const previous = saveQueue.get(state.company) ?? Promise.resolve();
+  const next = previous.catch(() => undefined).then(() => saveAgencyBillingUnlocked(state));
+  saveQueue.set(
+    state.company,
+    next.then(
+      () => undefined,
+      () => undefined,
+    ),
+  );
+  return next;
+}
+
+async function saveAgencyBillingUnlocked(state: AgencyBillingState) {
   const remote = await loadRemote(state.company);
+  const local = readLocal(state.company);
+  const merged = mergeBillingCopies(
+    state,
+    local,
+    remote === "error" ? null : remote,
+  );
   const next = protectInvoicesFromEmptyOverwrite(
     {
-      ...state,
+      ...merged,
       updatedAt: new Date().toISOString(),
     },
     remote === "error" ? null : remote,
   );
   writeLocal(next, { unsaved: true });
-  if (remote === "error" && next.invoices.length === 0) {
-    console.warn(
-      "[admin-agency-billing] skip empty invoice save while remote billing is unread",
-    );
-    return next;
+  if (remote === "error") {
+    throw new Error("Factures non enregistrées en ligne. Réessayez.");
   }
   const saved = await saveRemote(next);
-  writeLocal(saved);
-  return saved;
+  const confirmed = mergeBillingCopies(saved, readLocal(state.company));
+  writeLocal(confirmed);
+  return confirmed;
 }
 
 export async function loadBookeaCentersForBilling(): Promise<
