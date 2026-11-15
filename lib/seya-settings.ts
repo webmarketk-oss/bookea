@@ -1333,6 +1333,7 @@ export async function saveSeyaAgentSettings(
   try {
     response = await fetch(endpoint, {
       method: "POST",
+      credentials: "include",
       headers: {
         "Content-Type": "application/json",
         ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}),

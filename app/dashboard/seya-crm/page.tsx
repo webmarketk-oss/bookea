@@ -2195,7 +2195,10 @@ export default function SeyaCrmPage() {
             Ajouter un soin
           </button>
         </div>
-        <p className="mt-2 text-xs font-medium text-slate-400">
+        <p className="mt-2 text-xs font-semibold text-violet-600">
+          Enregistrement Seya 15 nov — ce centre uniquement
+        </p>
+        <p className="mt-1 text-xs font-medium text-slate-400">
           {savingAgent ? "Enregistrement…" : agentFeedback || `Centre : ${centerName}`}
         </p>
       </section>
