@@ -1290,6 +1290,9 @@ export function seyaSettingsSaveErrorMessage(error: unknown) {
   if (code.includes("conflict") || code.includes("en même temps")) {
     return "Un autre enregistrement a eu lieu en même temps. Réessayez. Vos modifications restent dans le formulaire.";
   }
+  if (code.includes("trop de temps")) {
+    return "L’enregistrement a pris trop de temps. Recharge la page puis réessaie. Tes modifications restent dans le formulaire.";
+  }
   if (raw && raw.length < 180 && !code.includes("failed to fetch") && !code.includes("network")) {
     return `${raw.replace(/\.*$/, "")}. Vos modifications restent dans le formulaire.`;
   }
@@ -1309,19 +1312,36 @@ export async function saveSeyaAgentSettings(
   const {
     data: { session },
   } = await createClient().auth.getSession();
-  const response = await fetch("/api/seya/agent-settings", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}),
-    },
-    body: JSON.stringify({
-      centerId,
-      settings,
-      changedKeys,
-      removedTreatmentNames: options?.removedTreatmentNames,
-    }),
-  });
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 15000);
+  let response: Response;
+  try {
+    response = await fetch("/api/seya/agent-settings", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}),
+      },
+      body: JSON.stringify({
+        centerId,
+        settings,
+        changedKeys,
+        removedTreatmentNames: options?.removedTreatmentNames,
+      }),
+      signal: controller.signal,
+    });
+  } catch (error) {
+    const aborted =
+      (error instanceof DOMException && error.name === "AbortError") ||
+      (error instanceof Error && error.name === "AbortError");
+    throw new Error(
+      aborted
+        ? "L’enregistrement a pris trop de temps. Recharge la page puis réessaie."
+        : "Impossible de joindre Bookea pour enregistrer les réglages.",
+    );
+  } finally {
+    clearTimeout(timer);
+  }
   const payload = (await response.json().catch(() => ({}))) as Record<string, unknown>;
   if (!response.ok || payload.ok !== true) {
     throw new Error(

@@ -163,6 +163,60 @@ function isJsonFilterUnsupported(error) {
 }
 
 /**
+ * Fiche Seya (soins, briefs, mission) : n'ouvre jamais la table des conversations.
+ * Sinon un centre avec beaucoup de fils WhatsApp reste bloqué sur « Enregistrement… ».
+ */
+async function mutateSettingsOnly(supabase, id, mutate, attempts) {
+  let lastError = null;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    const { data, error } = await supabase
+      .from("centers")
+      .select("settings")
+      .eq("id", id)
+      .maybeSingle();
+    if (error) {
+      throw new Error(error.message);
+    }
+    if (!data) {
+      throw new Error("center_not_found");
+    }
+
+    const stored = asRecord(data.settings);
+    const isolated = withoutConversations(stored);
+    const next = withoutConversations(
+      asRecord(mutate(cloneJson(isolated), cloneJson(isolated))),
+    );
+
+    if (stableStringify(next) === stableStringify(isolated)) {
+      return {
+        settings: isolated,
+        changed: false,
+        attempts: attempt + 1,
+        cas: true,
+      };
+    }
+
+    const wrote = await writeSettingsCas(supabase, id, next, stored);
+    if (wrote.error) {
+      lastError = wrote.error;
+      if (!wrote.retryable) {
+        throw new Error(wrote.error.message || String(wrote.error));
+      }
+      continue;
+    }
+    if (wrote.ok) {
+      return {
+        settings: next,
+        changed: true,
+        attempts: attempt + 1,
+        cas: wrote.cas,
+      };
+    }
+  }
+  throw new Error(lastError?.message || "settings_write_conflict");
+}
+
+/**
  * Met à jour centers.settings avec reprise si un autre écrit entre-temps.
  * mutate reçoit un clone des settings courants et doit renvoyer les settings suivants.
  */
@@ -174,6 +228,10 @@ async function mutateCenterSettings(supabase, centerId, mutate, options = {}) {
   }
   if (typeof mutate !== "function") {
     throw new Error("mutate_required");
+  }
+
+  if (options.settingsOnly) {
+    return mutateSettingsOnly(supabase, id, mutate, attempts);
   }
 
   if (await readsFromTable(supabase, id)) {

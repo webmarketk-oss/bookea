@@ -8,7 +8,7 @@ export function mutateCenterSettings(
     draft: Record<string, unknown>,
     current: Record<string, unknown>,
   ) => Record<string, unknown>,
-  options?: { attempts?: number },
+  options?: { attempts?: number; settingsOnly?: boolean },
 ): Promise<{
   settings: Record<string, unknown>;
   changed: boolean;

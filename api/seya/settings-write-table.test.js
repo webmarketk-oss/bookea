@@ -24,6 +24,7 @@ function fakeDb({ settings, rows = [], readSource = "table", conversationsError 
     rows: rows.map((row) => ({ ...row, updated_at: `v${(clock += 1)}` })),
     settingsWrites: 0,
     rowWrites: 0,
+    conversationReads: 0,
     beforeRowUpdate: null,
   };
 
@@ -56,8 +57,9 @@ function fakeDb({ settings, rows = [], readSource = "table", conversationsError 
       select: () => ({
         eq: () => ({
           order: () => ({
-            limit: async () =>
-              conversationsError
+            limit: async () => {
+              db.conversationReads += 1;
+              return conversationsError
                 ? { data: null, error: { message: conversationsError } }
                 : {
                     data: db.rows.map((row) => ({
@@ -66,7 +68,8 @@ function fakeDb({ settings, rows = [], readSource = "table", conversationsError 
                       data: row.data,
                     })),
                     error: null,
-                  },
+                  };
+            },
           }),
         }),
       }),
@@ -240,6 +243,42 @@ test("table illisible : un soin s’enregistre quand même, sans toucher aux con
   assert.equal(result.changed, true);
   assert.equal(supabase.db.settingsWrites, 1);
   assert.equal(supabase.db.settings.seya.treatmentBriefs.length, 2);
+  assert.equal(supabase.db.settings.seya.treatmentBriefs[1].name, "Nouveau soin");
+  assert.equal(supabase.db.settings.seya.conversations, undefined);
+});
+
+test("table : settingsOnly enregistre un soin sans lire les conversations", async () => {
+  const a = thread("0611111111", "Bonjour A", "2026-10-28T08:00:00.000Z");
+  const supabase = fakeDb({
+    settings: {
+      seya: {
+        brief: "Consignes",
+        treatmentBriefs: [{ name: "Hydrafacial", brief: "Visage" }],
+      },
+    },
+    rows: [row(a)],
+  });
+
+  const result = await mutateCenterSettings(
+    supabase,
+    CENTER,
+    (settings) => ({
+      ...settings,
+      seya: {
+        ...settings.seya,
+        treatmentBriefs: [
+          ...settings.seya.treatmentBriefs,
+          { name: "Nouveau soin", brief: "Prix seulement si on te le demande." },
+        ],
+      },
+    }),
+    { settingsOnly: true },
+  );
+
+  assert.equal(result.changed, true);
+  assert.equal(supabase.db.conversationReads, 0);
+  assert.equal(supabase.db.rowWrites, 0);
+  assert.equal(supabase.db.settingsWrites, 1);
   assert.equal(supabase.db.settings.seya.treatmentBriefs[1].name, "Nouveau soin");
   assert.equal(supabase.db.settings.seya.conversations, undefined);
 });

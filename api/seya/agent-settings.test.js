@@ -27,6 +27,7 @@ function fakeDb({ settings, admin = true } = {}) {
   const db = {
     center: { id: CENTER, name: "Institut Gaillard", public_slug: "gaillard", settings },
     settingsWrites: 0,
+    conversationReads: 0,
   };
 
   function table(name) {
@@ -59,7 +60,11 @@ function fakeDb({ settings, admin = true } = {}) {
           return { data: null, error: null };
         }
         if (name === "seya_conversation_backfills") {
-          return { data: { read_source: "settings" }, error: null };
+          return { data: { read_source: "table" }, error: null };
+        }
+        if (name === "seya_conversations") {
+          db.conversationReads += 1;
+          throw new Error("les conversations ne doivent pas être lues pour un soin");
         }
         if (name === "centers" && mode === "update") {
           if (
@@ -206,4 +211,5 @@ test("un admin Bookea enregistre un soin via le rôle service", async () => {
   assert.equal(supabase.db.center.settings.seya.treatmentBriefs.length, 2);
   assert.equal(supabase.db.center.settings.seya.treatmentBriefs[1].name, "Nouveau soin");
   assert.equal(supabase.db.center.settings.seya.brief, "Consignes");
+  assert.equal(supabase.db.conversationReads, 0);
 });

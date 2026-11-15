@@ -104,14 +104,19 @@ function createAgentSettingsHandler({ createSupabase = createServiceClient } = {
         return res.status(404).json({ ok: false, error: "Centre introuvable." });
       }
 
-      const result = await mutateCenterSettings(supabase, centerId, (currentSettings) =>
-        applyAgentSettings(currentSettings, payload, {
-          id: center.id,
-          name: center.name,
-          slug: center.public_slug,
-        }),
+      const result = await mutateCenterSettings(
+        supabase,
+        centerId,
+        (currentSettings) =>
+          applyAgentSettings(currentSettings, payload, {
+            id: center.id,
+            name: center.name,
+            slug: center.public_slug,
+          }),
+        { settingsOnly: true },
       );
       const seya = asRecord(result.settings.seya);
+      delete seya.conversations;
       return res.status(200).json({
         ok: true,
         centerId: center.id,
