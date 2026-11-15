@@ -3684,7 +3684,12 @@ function gaillardLeadReply(conversation, text, seya, slots, extras = {}) {
         [...(base.messages || [])].reverse().find((item) => item.author === "seya")?.text || "";
       const question = gaillard.varyQuestion(nextQuestion.text, previousSeya);
       const ack =
-        family === "visage" && nextQuestion.step === "tried" ? gaillard.visageNeedAck(text) : "";
+        family === "visage" && nextQuestion.step === "tried"
+          ? gaillard.visageNeedAck(text)
+          : family === "minceur" &&
+              (nextQuestion.step === "tried" || nextQuestion.step === "kilos")
+            ? gaillard.minceurNeedAck(text)
+            : "";
       return ask([ack, question].filter(Boolean).join(" "));
     }
 

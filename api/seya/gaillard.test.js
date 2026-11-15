@@ -108,7 +108,9 @@ test("Gaillard minceur : besoin → déjà testé → fiche/bilan → rappel seu
     GAILLARD,
     settings,
   );
+  assert.match(lastSeya(conversation), /ventre|cuisses/i);
   assert.match(lastSeya(conversation), /déjà testé/i);
+  assert.doesNotMatch(lastSeya(conversation), /quelles zones|quel est votre objectif/i);
   conversation = await say(conversation, "J'ai déjà fait des régimes", GAILLARD, settings);
   assert.match(lastSeya(conversation), /rééquilibrage|application|bilan/i);
   assert.match(lastSeya(conversation), /Souhaitez-vous/i);
@@ -331,6 +333,49 @@ test("Gaillard minceur : perte de poids, zones puis kilos", async () => {
   assert.equal(conversation.status, "À recontacter");
   assert.match(conversation.teamNotes.need, /kilos : Une dizaine/);
   assert.equal(conversation.messages.filter((item) => /combien de kilos/i.test(item.text)).length, 1);
+});
+
+test("Gaillard minceur : ventre et kilos déjà dits, elle reprend le besoin", async () => {
+  let conversation = open("Soin minceur");
+  conversation = await say(
+    conversation,
+    "Je voudrais perdre du ventre, j’ai environ 8 kilos à perdre",
+  );
+  assert.match(lastSeya(conversation), /ventre/i);
+  assert.match(lastSeya(conversation), /8 kilos/i);
+  assert.match(lastSeya(conversation), /déjà testé/i);
+  assert.doesNotMatch(lastSeya(conversation), /quelles zones|combien de kilos/i);
+});
+
+test("Gaillard minceur : technologies du ventre, sans redemander l’objectif", async () => {
+  const settings = {
+    ...seya,
+    treatmentBriefs: [
+      {
+        name: "Soin minceur",
+        brief:
+          "Le centre dispose des équipements suivants : cryo, électrostimulation avec la Mag, pressothérapie, tunnel minceur et Scan 360. Le bilan complet et la séance découverte sont offerts.",
+        pricing: { bilan: "offert", discovery: "offert" },
+      },
+    ],
+  };
+  let conversation = open("Soin minceur", GAILLARD, settings);
+  conversation = await say(
+    conversation,
+    "Je voudrais perdre du ventre. J’aimerais connaître les soins et technologies que vous proposez.",
+    GAILLARD,
+    settings,
+  );
+  assert.doesNotMatch(lastSeya(conversation), /je n['’]ai pas cette information|ne faisons pas/i);
+  assert.match(lastSeya(conversation), /cryo|électrostimulation/i);
+  assert.doesNotMatch(lastSeya(conversation), /quelles zones|quel est votre objectif/i);
+});
+
+test("Gaillard minceur : « vous proposez quoi comme soins » ne part pas à l’équipe", async () => {
+  let conversation = open("Soin minceur");
+  conversation = await say(conversation, "Vous proposez quoi comme soins minceur ?");
+  assert.doesNotMatch(lastSeya(conversation), /je n['’]ai pas cette information/i);
+  assert.match(lastSeya(conversation), /soins minceur|bilan|analyse corporelle/i);
 });
 
 test("Gaillard minceur : kilos déjà précisés, zones encore demandées", async () => {
@@ -799,7 +844,7 @@ const structured = {
     /minceur/i.test(item.name) ? { ...item, brief: STRUCTURED_MINCEUR } : item,
   ),
 };
-const LEAK = /BILAN ET TECHNOLOGIES|répond déjà|«|»|C’est noté/;
+const LEAK = /BILAN ET TECHNOLOGIES|répond déjà|[«»]|C’est noté pour l’équipe/;
 
 async function sayAll(turns, settings = structured) {
   let conversation = open("Soin minceur", GAILLARD, settings);

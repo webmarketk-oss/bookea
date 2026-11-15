@@ -692,6 +692,47 @@ function visageDiscoveryBit(pricing, title) {
   return "";
 }
 
+const MINCEUR_ZONE_LABELS = [
+  [/culotte de cheval/, "la culotte de cheval"],
+  [/poignees? d[' ]amour/, "les poignées d’amour"],
+  [/\bventre\b/, "le ventre"],
+  [/cuisses?/, "les cuisses"],
+  [/hanches?/, "les hanches"],
+  [/fesses?/, "les fesses"],
+  [/\bbras\b/, "les bras"],
+  [/\bdos\b/, "le dos"],
+  [/jambes?/, "les jambes"],
+];
+
+function minceurNeedAck(text) {
+  const value = normalize(text);
+  const zones = [];
+  for (const [pattern, label] of MINCEUR_ZONE_LABELS) {
+    if (pattern.test(value) && !zones.includes(label)) {
+      zones.push(label);
+    }
+    if (zones.length >= 3) {
+      break;
+    }
+  }
+  const kilos = value.match(/(\d+)\s*(kg|kilos?)\b/);
+  const kilosBit = kilos ? `, environ ${kilos[1]} kilos` : "";
+  if (!zones.length) {
+    return "";
+  }
+  return `C’est noté pour ${joinFrench(zones)}${kilosBit} 😊`;
+}
+
+function minceurDiscoveryBit(pricing, title) {
+  if (
+    /offert/i.test(String(pricing?.bilan || pricing?.discovery || "")) ||
+    /bilan[^.]*offert|decouverte offerts/i.test(normalize(title))
+  ) {
+    return " Le bilan et la séance découverte sont offerts.";
+  }
+  return "";
+}
+
 function processReply(family, sources = []) {
   const found = findFacts(sources, /deroule|consiste|bilan|analyse|decouverte|protocole|etape/, 2);
   if (found.length) {
@@ -739,6 +780,20 @@ function technologyReply(text, sources = [], { family, zone, pricing, title } = 
       return `${ack} ${body}${offer}`;
     }
     return `Oui, nous proposons des soins visage. ${body}${offer}`;
+  }
+  if (family === "minceur") {
+    if (/appareils?|machines?|equipements?|materiel/.test(normalize(text))) {
+      return knowledge.TEAM_QUESTION_REPLY;
+    }
+    const ack = minceurNeedAck(text);
+    const body = processReply("minceur", sources);
+    const offer = /bilan|decouverte/.test(normalize(`${body} ${ack}`))
+      ? ""
+      : minceurDiscoveryBit(pricing, title);
+    if (ack) {
+      return `${ack} ${body}${offer}`;
+    }
+    return `Oui, nous proposons des soins minceur. ${body}${offer}`;
   }
   return knowledge.TEAM_QUESTION_REPLY;
 }
@@ -1291,6 +1346,7 @@ module.exports = {
   trialWhenReply,
   triedObjectifAckReply,
   triedQuestion,
+  minceurNeedAck,
   visageNeedAck,
   validatedModality,
   varyQuestion,
