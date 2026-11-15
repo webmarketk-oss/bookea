@@ -933,7 +933,10 @@ function isCatalogAsk(text) {
     /connaitre (les |vos )?(soins|technologies|prestations|appareils)/.test(value) ||
     /quelles? (sont )?(les )?(soins|technologies|prestations)/.test(value) ||
     /soins et technologies/.test(value) ||
-    /technologies que vous (proposez|faites|offrez|avez)/.test(value)
+    /technologies que vous (proposez|faites|offrez|avez)/.test(value) ||
+    /proposez quoi comme (soins|technologies|prestations)/.test(value) ||
+    /quoi comme (soins|technologies|prestations)/.test(value) ||
+    /vous (faites|proposez|offrez) (quoi|comme soins)/.test(value)
   );
 }
 

@@ -31,6 +31,22 @@ function expertLabel(family) {
     : "un expert ou une experte du centre";
 }
 
+function openingForFamily(family, mission) {
+  if (mission === "welcome_relance") {
+    return "Bonjour {prenom}, c’est Seya du {centre}. On vient de recevoir votre demande pour {offre}. Je suis là si vous avez une question.";
+  }
+  if (family === "minceur") {
+    return "Bonjour {prenom}, c’est Seya du {centre}. On vient de recevoir votre demande pour {offre}. Sur quelle zone souhaitez-vous que l’on regarde ?";
+  }
+  if (family === "visage") {
+    return "Bonjour {prenom}, c’est Seya du {centre}. On vient de recevoir votre demande pour {offre}. Qu’est-ce qui vous préoccupe au niveau de votre peau ?";
+  }
+  if (family === "epilation") {
+    return "Bonjour {prenom}, c’est Seya du {centre}. On vient de recevoir votre demande pour {offre}. Quelles zones souhaitez-vous traiter ?";
+  }
+  return "Bonjour {prenom}, c’est Seya du {centre}. On vient de recevoir votre demande. Dites-moi ce que je peux faire pour vous.";
+}
+
 function closingReply(family) {
   const specialty = specialtyLabel(family);
   const who = specialty
@@ -651,7 +667,15 @@ function technologyReply(text, sources = [], { family, zone } = {}) {
       ? `Non, le centre n’utilise pas la lumière pulsée : l’épilation se fait avec ${lasers}.`
       : knowledge.TEAM_QUESTION_REPLY;
   }
-  return knowledge.technologyReply({ text, family, zone, sources }) || knowledge.TEAM_QUESTION_REPLY;
+  const fromFiche = knowledge.technologyReply({ text, family, zone, sources });
+  if (fromFiche) {
+    return fromFiche;
+  }
+  // Sans appareil en fiche : on parle du diagnostic, on n’invente rien et on ne dit pas « je n’ai pas ».
+  if (family === "visage") {
+    return `Oui, nous proposons des soins visage. ${processReply("visage", sources)}`;
+  }
+  return knowledge.TEAM_QUESTION_REPLY;
 }
 
 function childCompanionReply(sources = []) {
@@ -1066,7 +1090,12 @@ function relanceText(round, firstName, care, custom, conversation) {
   ) {
     return `${hello}, je reviens vers vous au sujet de ${about}. C’est bien noté : un expert ou une experte du centre vous rappellera 😊`;
   }
-  if (custom) {
+  const usableCustom =
+    custom &&
+    !/quel jour|quelle heure|disponib|op[ée]ratrice|creneau/.test(
+      normalize(custom),
+    );
+  if (usableCustom) {
     return custom;
   }
   if (threadAlreadyHasNeed(conversation) && Number(round) === 1) {
@@ -1175,6 +1204,7 @@ module.exports = {
   modalityReply,
   modalityTopic,
   needQuestion,
+  openingForFamily,
   noteAfterHandoffReply,
   noteTriedMethodsReply,
   otherClinicCompareReply,

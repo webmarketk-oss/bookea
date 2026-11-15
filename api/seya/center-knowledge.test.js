@@ -211,3 +211,15 @@ test("question transmise : mail centre, et texte retiré si le mail n’est pas 
 test("sélection pure : sans appareil dans la fiche, rien n’est inventé", () => {
   assert.equal(technologyReply({ text: "Quels appareils pour le ventre ?", family: "minceur", sources: ["Bilan minceur offert."] }), "");
 });
+
+test("fermeté ovale : radiofréquence visage, pas LED ni peeling", () => {
+  const reply = technologyReply({
+    text: "Je veux raffermir l’ovale, les bajoues et la jawline. Quelles technologies proposez-vous ?",
+    family: "visage",
+    sources: [
+      "Technologies : peeling aux ultrasons, radiofréquence, ultrasons séquentiels, masque LED.",
+    ],
+  });
+  assert.match(reply, /radiofréquence/i);
+  assert.doesNotMatch(reply, /\bLED\b|peeling/i);
+});

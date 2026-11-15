@@ -45,10 +45,11 @@ const TECHNOLOGIES = [
   {
     key: "radiofrequence",
     family: "minceur",
+    families: ["minceur", "visage"],
     pattern: /radio ?frequence/,
     name: "la radiofréquence",
     role: "qui agit par la chaleur pour raffermir la peau",
-    zones: /fermete|relachement|ferme|cellulite|peau|ventre|cuisse|bras|fesse/,
+    zones: /fermete|relachement|ferme|ovale|bajoue|jawline|jaw[- ]?line|cellulite|peau|ventre|cuisse|bras|fesse|visage/,
   },
   {
     key: "pressotherapie",
@@ -131,6 +132,14 @@ const TECHNOLOGIES = [
     zones: /cicatrice|ride|texture|pore|eclat|fermete|visage|tache/,
   },
   {
+    key: "ultrasons-visage",
+    family: "visage",
+    pattern: /ultra ?sons?/,
+    name: "les ultrasons",
+    role: "qui aident à raffermir et à redessiner les contours",
+    zones: /fermete|relachement|ovale|bajoue|jawline|jaw[- ]?line|ferme|visage|peau/,
+  },
+  {
     key: "led",
     family: "visage",
     pattern: /\bled\b|luminotherapie/,
@@ -167,6 +176,12 @@ const ZONE_WORDS = [
   [/rides?/, "les rides"],
   [/pores?/, "les pores"],
   [/acne/, "l’acné"],
+  [/\bovale\b/, "l’ovale"],
+  [/bajoues?/, "les bajoues"],
+  [/jawline|jaw[- ]?line/, "la jawline"],
+  [/fermete|rafferm/, "la fermeté"],
+  [/plis du sourire/, "les plis du sourire"],
+  [/\beclat\b/, "l’éclat"],
 ];
 
 // Une description de la fiche n’est reprise que si elle reste sobre : sinon, rôle neutre du catalogue.
@@ -232,7 +247,8 @@ function centerTechnologies(sources, family) {
   const facts = knowledgeLines(sources);
   const found = [];
   for (const tech of TECHNOLOGIES) {
-    if (family && tech.family !== family) {
+    const families = Array.isArray(tech.families) ? tech.families : [tech.family];
+    if (family && !families.includes(family)) {
       continue;
     }
     const related = facts.filter((fact) => tech.pattern.test(normalize(fact)));

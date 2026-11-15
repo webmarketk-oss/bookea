@@ -151,6 +151,34 @@ test("aisselles, c’est du laser, pas de la minceur", () => {
   );
 });
 
+test("l’offre visage Lift4 n’est pas classée minceur", () => {
+  const { inferCareFamily, findOfferMap, humanizeOfferTitle } = require("./care-family");
+  assert.equal(
+    inferCareFamily("Bilan ultra-personnalisé + Soin découverte OFFERTS"),
+    "visage",
+  );
+  assert.equal(
+    humanizeOfferTitle("Bilan ultra-personnalisé + Soin découverte OFFERTS"),
+    "un soin visage",
+  );
+  const mapped = findOfferMap(
+    {
+      offerMaps: [
+        {
+          match: "Visage",
+          label: "Bilan ultra-personnalisé + Soin découverte OFFERTS",
+        },
+        {
+          match: "Soin minceur",
+          label: "Bilan minceur complet + séance découverte d’environ 20 minutes offerts",
+        },
+      ],
+    },
+    "Bilan ultra-personnalisé + Soin découverte OFFERTS",
+  );
+  assert.equal(mapped.match, "Visage");
+});
+
 test("l’offre se dit naturellement, jamais « le minceur »", () => {
   const { humanizeOfferTitle, naturalOfferPhrase } = require("./care-family");
   assert.equal(naturalOfferPhrase("minceur", ""), "un soin minceur");

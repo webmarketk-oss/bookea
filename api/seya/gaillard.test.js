@@ -131,7 +131,6 @@ test("Gaillard minceur : besoin → déjà testé → fiche/bilan → rappel seu
 
 test("Gaillard épilation : zones, déjà testé, rappel d’un expert en épilation", async () => {
   let conversation = open("Épilation définitive");
-  conversation = await say(conversation, "Oui je suis intéressée");
   assert.match(lastSeya(conversation), /quelles zones/i);
   conversation = await say(conversation, "Les jambes et le maillot");
   assert.match(lastSeya(conversation), /déjà testé/i);
@@ -188,10 +187,79 @@ test("Gaillard visage : message détaillé + technologies, elle ne dit pas « on
   const reply = lastSeya(conversation);
   assert.doesNotMatch(reply, /ne faisons pas/i);
   assert.doesNotMatch(reply, /qu['’]est-ce qui vous pr[ée]occupe/i);
-  assert.match(reply, /radiofr|i-Diag|i-Probe|visage|peeling|LED/i);
+  assert.doesNotMatch(reply, /je n['’]ai pas cette information/i);
+  assert.match(reply, /radiofr/i);
+  assert.doesNotMatch(reply, /\bLED\b/i);
   const relance = relanceCopy(conversation, 1, GAILLARD, settings);
   assert.doesNotMatch(relance, /ce que vous recherchez/i);
   assert.match(relance, /rappeler|rappellera/i);
+});
+
+test("Gaillard visage live : offre Bouchra, fiche sans appareils, relance CRM ignorée", async () => {
+  const settings = {
+    ...seya,
+    relances: [
+      {
+        message:
+          "Bonjour {prenom} 😊 C'est Seya AI de {centre}. Je reviens vers vous au sujet de notre offre : {offre} ✨ Quel jour et à quelle heure êtes-vous disponible ? Une opératrice vous rappellera à ce moment-là 📞",
+        afterDays: 1,
+      },
+    ],
+    offerMaps: [
+      {
+        label: "Bilan ultra-personnalisé + Soin découverte OFFERTS",
+        match: "Visage",
+        template: "seya_visage_jerome",
+      },
+    ],
+    treatmentBriefs: [
+      {
+        name: "Visage",
+        title: "Bilan ultra-personnalisé + Soin découverte OFFERTS",
+        opening:
+          "Bonjour 😊 Moi c’est Seya AI, l’assistante virtuelle du centre [centre] ! J’ai bien reçu votre demande concernant notre offre Bilan ultra-personnalisé + Soin découverte OFFERTS. Pour mieux vous orienter, qu’aimeriez-vous améliorer au niveau de votre peau et sur quelle zone en particulier ?",
+        brief:
+          "Ta mission est uniquement de qualifier le prospect pour l’offre visage Lift4 de JFG Clinic Gaillard, puis de transmettre les informations à l’équipe pour un rappel.",
+      },
+      { name: "Laser", brief: "Laser Triwave." },
+      { name: "Soin minceur", brief: "Cryo, Mag, pressothérapie." },
+    ],
+  };
+  const opening = open(
+    "Bilan ultra-personnalisé + Soin découverte OFFERTS",
+    GAILLARD,
+    settings,
+  );
+  assert.doesNotMatch(lastSeya(opening), /minceur|créneau|opératrice/i);
+  assert.match(lastSeya(opening), /peau|visage|offre/i);
+
+  let conversation = opening;
+  conversation = await say(
+    conversation,
+    "Je souhaiterais améliorer la fermeté de mon visage, notamment l’ovale, les bajoues et la jawline. J’aimerais connaître les soins et technologies que vous proposez pour répondre à ces besoins.",
+    GAILLARD,
+    settings,
+  );
+  assert.doesNotMatch(lastSeya(conversation), /ne faisons pas|je n['’]ai pas cette information|minceur/i);
+  assert.match(lastSeya(conversation), /soins visage|diagnostic/i);
+  assert.match(lastSeya(conversation), /déjà testé/i);
+
+  conversation = await say(conversation, "Plus d'éclat et fermeté", GAILLARD, settings);
+  assert.doesNotMatch(lastSeya(conversation), /rappellera/i);
+  assert.doesNotMatch(lastSeya(conversation), /je n['’]ai pas cette information/i);
+  assert.match(lastSeya(conversation), /déjà testé|note/i);
+
+  const relance = relanceCopy(conversation, 1, GAILLARD, settings);
+  assert.doesNotMatch(relance, NO_PLANNING);
+  assert.doesNotMatch(relance, /ce que vous recherchez/i);
+  assert.match(relance, /rappeler|rappellera/i);
+});
+
+test("Gaillard visage : « vous proposez quoi comme soins » ne part pas à l’équipe", async () => {
+  let conversation = open("Visage");
+  conversation = await say(conversation, "Vous proposez quoi comme soins pour le visage ?");
+  assert.doesNotMatch(lastSeya(conversation), /je n['’]ai pas cette information/i);
+  assert.match(lastSeya(conversation), /soins visage|diagnostic/i);
 });
 
 test("Gaillard visage : préoccupations et attentes, un simple bonjour ne compte pas comme réponse", async () => {
@@ -562,8 +630,8 @@ test("Gaillard : le texte saisi part à son J+, tel quel", () => {
   };
   const first = relanceCopy(conversation, 1, GAILLARD, custom);
   assert.match(first, /Bonjour Léa/);
-  assert.match(first, /Gaillard/);
-  assert.match(first, /opératrice vous rappellera/);
+  assert.doesNotMatch(first, NO_PLANNING);
+  assert.match(first, /expert ou une experte du centre/);
   const second = relanceCopy(conversation, 2, GAILLARD, custom);
   assert.match(second, /toujours enregistrée chez JFG Clinic Gaillard/);
   assert.match(second, /offre :/);

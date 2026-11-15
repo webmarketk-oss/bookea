@@ -67,6 +67,7 @@ const {
   isWillComeBack,
   isThreadComplaint,
   isServiceAsk,
+  isCatalogAsk,
   askedServiceName,
   asksOpenQuestion,
   isWaitUntilLater,
@@ -1106,12 +1107,15 @@ function buildOpeningMessage(context, centerName, seya) {
     );
   const stored = String(brief?.opening || "").trim();
   const mission = resolveSeyaMission(seya);
+  const fallbackOpening = gaillard.isGaillardCenter(centerName)
+    ? gaillard.openingForFamily(family, mission)
+    : defaultOpeningForFamily(family, mission);
   const template =
     mission === "welcome_relance"
-      ? defaultOpeningForFamily(family, mission)
+      ? fallbackOpening
       : looksRoboticOpening(stored)
-        ? defaultOpeningForFamily(family, mission)
-        : stored || defaultOpeningForFamily(family, mission);
+        ? fallbackOpening
+        : stored || fallbackOpening;
   return fillOpening(template, {
     prenom: greetingName(context.firstName),
     centre: String(centerName || "").trim() || "le centre",
@@ -2891,7 +2895,7 @@ const GAILLARD_MINCEUR_OBJECTIF =
 const GAILLARD_MINCEUR_ZONE =
   /ventre|cuisse|hanche|fesse|bras|culotte de cheval|poignee d'amour|dos|jambes?/;
 const GAILLARD_VISAGE_CONCERN =
-  /ride|ridule|acne|bouton|tache|eclat|relach|teint|cerne|pore|fermete|hydrat|rajeun|terne|peau (seche|grasse|sensible)|rougeur|cicatrice|double menton|rafferm|\bferme|ovale|bajoue|jawline|plis du sourire|jaw[- ]?line/;
+  /ride|ridule|acne|bouton|tache|eclat|relach|teint|cerne|pore|fermete|hydrat|rajeun|terne|peau (seche|grasse|sensible)|rougeur|cicatrice|double menton|rafferm|\bferme|bajoue|jawline|plis du sourire|jaw[- ]?line/;
 const GAILLARD_EPILATION_ZONE =
   /jambe|maillot|intime|parties? intimes?|aisselle|bras|levre|menton|visage|dos|fesse|ventre|cuisse|torse|barbe|sourcil|nuque|epaule|pied|main|sillon|integral|bresilien|corps entier|joue|favori/;
 const GAILLARD_TRIED =
@@ -2930,6 +2934,9 @@ function looksLikeObjectifOnly(text) {
     /aimerais|voudrais|souhaite|kilos?|\bkg\b/.test(value)
   ) {
     return false;
+  }
+  if (GAILLARD_VISAGE_CONCERN.test(value)) {
+    return true;
   }
   if (/^(perdre|perde|perd|affiner|raffermir|maigrir|mincir|tonifier)(\s+\w+){0,3}$/.test(value)) {
     return true;
@@ -3142,6 +3149,7 @@ function gaillardLeadReply(conversation, text, seya, slots, extras = {}) {
     !acceptsOfferNow &&
     (isServiceAsk(text) ||
       asksOpenQuestion(text) ||
+      isCatalogAsk(text) ||
       gaillard.asksTechnology(text) ||
       gaillard.asksProcess(text));
   const thread = understandThread(base, asking ? "" : text);
@@ -3475,11 +3483,16 @@ function gaillardLeadReply(conversation, text, seya, slots, extras = {}) {
     return informed(gaillard.processReply(topicFamily, sourceBag));
   }
 
-  if (gaillard.asksTechnology(text)) {
+  if (gaillard.asksTechnology(text) || isCatalogAsk(text)) {
     if (gaillard.asksFatRemoval(text) && (topicFamily === "minceur" || family === "minceur")) {
       return answer(gaillard.fatRemovalReply());
     }
-    return informed(gaillard.technologyReply(text, sourceBag, { family: topicFamily, zone: merged.zone }));
+    return informed(
+      gaillard.technologyReply(text, sourceBag, {
+        family: topicFamily || family,
+        zone: merged.zone,
+      }),
+    );
   }
 
   if (gaillard.isCourtesyWish(text)) {

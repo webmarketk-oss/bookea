@@ -65,7 +65,7 @@ function inferCareFamily(text) {
     if (/laser|epil|pilaire|depil/.test(needle)) {
       return "epilation";
     }
-    if (/visage|peau|hydra/.test(needle)) {
+    if (/visage|peau|hydra|lift ?4|ultra[- ]personnal/.test(needle)) {
       return "visage";
     }
     return "minceur";
@@ -201,7 +201,7 @@ function humanizeOfferTitle(value) {
   if (/^(le )?minceur$/.test(needle)) {
     return "un soin minceur";
   }
-  if (/^(notre |le )?soin visage$/.test(needle)) {
+  if (/^(notre |le )?soin visage$/.test(needle) || /ultra[- ]personnal|lift ?4/.test(needle)) {
     return "un soin visage";
   }
   if (/^l['’]?epilation( definitive)?$/.test(needle)) {
@@ -390,6 +390,8 @@ function findOfferMap(seya, ...parts) {
     }
     const nMatch = normalizeCare(match);
     const cMatch = compactOfferKey(match);
+    const nLabel = normalizeCare(label);
+    const cLabel = compactOfferKey(label);
     if (nMatch.length < 2) {
       continue;
     }
@@ -397,8 +399,14 @@ function findOfferMap(seya, ...parts) {
       campaignNeedle &&
         (campaignNeedle === nMatch || compactCampaign === cMatch),
     );
+    const labelHit = Boolean(
+      nLabel.length > 8 &&
+        (needle === nLabel ||
+          compactHay === cLabel ||
+          (nLabel.length > 12 && (needle.includes(nLabel) || nLabel.includes(needle)))),
+    );
     const itemFamily = inferCareFamily(`${match} ${label}`);
-    if (!campaignHit && family && itemFamily && itemFamily !== family) {
+    if (!campaignHit && !labelHit && family && itemFamily && itemFamily !== family) {
       continue;
     }
     let score = 0;
@@ -407,6 +415,8 @@ function findOfferMap(seya, ...parts) {
       (campaignNeedle === nMatch || compactCampaign === cMatch)
     ) {
       score = 5000 + nMatch.length;
+    } else if (labelHit) {
+      score = 4500 + nLabel.length;
     } else if (needle === nMatch || compactHay === cMatch) {
       score = 4000 + nMatch.length;
     } else if (needle.includes(nMatch) || nMatch.includes(needle)) {
