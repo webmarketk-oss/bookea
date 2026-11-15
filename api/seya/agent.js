@@ -3491,6 +3491,8 @@ function gaillardLeadReply(conversation, text, seya, slots, extras = {}) {
       gaillard.technologyReply(text, sourceBag, {
         family: topicFamily || family,
         zone: merged.zone,
+        pricing: brief?.pricing,
+        title: brief?.title,
       }),
     );
   }
@@ -3680,7 +3682,10 @@ function gaillardLeadReply(conversation, text, seya, slots, extras = {}) {
     if (nextQuestion) {
       const previousSeya =
         [...(base.messages || [])].reverse().find((item) => item.author === "seya")?.text || "";
-      return ask(gaillard.varyQuestion(nextQuestion.text, previousSeya));
+      const question = gaillard.varyQuestion(nextQuestion.text, previousSeya);
+      const ack =
+        family === "visage" && nextQuestion.step === "tried" ? gaillard.visageNeedAck(text) : "";
+      return ask([ack, question].filter(Boolean).join(" "));
     }
 
     // Transmission seulement si le prospect accepte le bilan (minceur) ou au bout du parcours hors minceur.
@@ -3787,7 +3792,15 @@ function gaillardLeadReply(conversation, text, seya, slots, extras = {}) {
   }
   // Dernière chance : question matériel / déroulement documentée dans la fiche.
   if (gaillard.asksTechnology(text) || /appareil|equipement|technologie|machine|cryo|radiofrequ/.test(normalize(text))) {
-    return informed(gaillard.technologyReply(text, sourceBag, { family: topicFamily, zone: merged.zone }), next);
+    return informed(
+      gaillard.technologyReply(text, sourceBag, {
+        family: topicFamily,
+        zone: merged.zone,
+        pricing: brief?.pricing,
+        title: brief?.title,
+      }),
+      next,
+    );
   }
   if (gaillard.asksProcess(text)) {
     return informed(gaillard.processReply(topicFamily, sourceBag), next);

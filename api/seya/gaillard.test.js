@@ -220,6 +220,7 @@ test("Gaillard visage live : offre Bouchra, fiche sans appareils, relance CRM ig
           "Bonjour 😊 Moi c’est Seya AI, l’assistante virtuelle du centre [centre] ! J’ai bien reçu votre demande concernant notre offre Bilan ultra-personnalisé + Soin découverte OFFERTS. Pour mieux vous orienter, qu’aimeriez-vous améliorer au niveau de votre peau et sur quelle zone en particulier ?",
         brief:
           "Ta mission est uniquement de qualifier le prospect pour l’offre visage Lift4 de JFG Clinic Gaillard, puis de transmettre les informations à l’équipe pour un rappel.",
+        pricing: { bilan: "offert", discovery: "offert" },
       },
       { name: "Laser", brief: "Laser Triwave." },
       { name: "Soin minceur", brief: "Cryo, Mag, pressothérapie." },
@@ -241,7 +242,8 @@ test("Gaillard visage live : offre Bouchra, fiche sans appareils, relance CRM ig
     settings,
   );
   assert.doesNotMatch(lastSeya(conversation), /ne faisons pas|je n['’]ai pas cette information|minceur/i);
-  assert.match(lastSeya(conversation), /soins visage|diagnostic/i);
+  assert.match(lastSeya(conversation), /ovale|bajoues|jawline/i);
+  assert.match(lastSeya(conversation), /diagnostic/i);
   assert.match(lastSeya(conversation), /déjà testé/i);
 
   conversation = await say(conversation, "Plus d'éclat et fermeté", GAILLARD, settings);
@@ -253,6 +255,14 @@ test("Gaillard visage live : offre Bouchra, fiche sans appareils, relance CRM ig
   assert.doesNotMatch(relance, NO_PLANNING);
   assert.doesNotMatch(relance, /ce que vous recherchez/i);
   assert.match(relance, /rappeler|rappellera/i);
+});
+
+test("Gaillard visage : un besoin seul est repris, sans redemander la préoccupation", async () => {
+  let conversation = open("Soin visage");
+  conversation = await say(conversation, "Bonjour, j’aimerais raffermir l’ovale de mon visage");
+  assert.match(lastSeya(conversation), /ovale|raffermir/i);
+  assert.match(lastSeya(conversation), /déjà testé/i);
+  assert.doesNotMatch(lastSeya(conversation), /qu['’]est-ce qui vous pr[ée]occupe/i);
 });
 
 test("Gaillard visage : « vous proposez quoi comme soins » ne part pas à l’équipe", async () => {

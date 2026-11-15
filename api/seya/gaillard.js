@@ -634,6 +634,64 @@ function asksChildCompanion(text) {
   return /enfant|bebe|nourrisson|avec mon fils|avec ma fille/.test(value);
 }
 
+function joinFrench(items) {
+  if (items.length <= 1) {
+    return items[0] || "";
+  }
+  return `${items.slice(0, -1).join(", ")} et ${items.at(-1)}`;
+}
+
+function visageConcernsOf(text) {
+  const value = normalize(text);
+  const hits = [];
+  if (/ovale/.test(value)) {
+    hits.push("l’ovale");
+  }
+  if (/bajoue/.test(value)) {
+    hits.push("les bajoues");
+  }
+  if (/jawline|jaw[- ]?line/.test(value)) {
+    hits.push("la jawline");
+  }
+  if (/plis du sourire/.test(value) && hits.length < 3) {
+    hits.push("les plis du sourire");
+  }
+  if (/\beclat\b/.test(value) && hits.length < 3) {
+    hits.push("l’éclat");
+  }
+  return hits;
+}
+
+function visageNeedAck(text) {
+  const value = normalize(text);
+  const hits = visageConcernsOf(text);
+  if (!hits.length) {
+    if (/fermete|rafferm/.test(value)) {
+      return "C’est noté, vous souhaitez raffermir la peau 😊";
+    }
+    if (/ride|terne|tache|acne|pore/.test(value)) {
+      return "C’est noté 😊";
+    }
+    return "";
+  }
+  if (/fermete|rafferm/.test(value) && hits.some((item) => item !== "l’éclat")) {
+    const firm = hits.filter((item) => item !== "l’éclat");
+    const glow = hits.includes("l’éclat") ? ", et retrouver plus d’éclat" : "";
+    return `C’est noté pour raffermir ${joinFrench(firm)}${glow} 😊`;
+  }
+  return `C’est noté pour ${joinFrench(hits)} 😊`;
+}
+
+function visageDiscoveryBit(pricing, title) {
+  if (
+    /offert/i.test(String(pricing?.discovery || "")) ||
+    /decouverte offerts/i.test(normalize(title))
+  ) {
+    return " Le soin découverte est offert.";
+  }
+  return "";
+}
+
 function processReply(family, sources = []) {
   const found = findFacts(sources, /deroule|consiste|bilan|analyse|decouverte|protocole|etape/, 2);
   if (found.length) {
@@ -651,7 +709,7 @@ function processReply(family, sources = []) {
   return knowledge.TEAM_QUESTION_REPLY;
 }
 
-function technologyReply(text, sources = [], { family, zone } = {}) {
+function technologyReply(text, sources = [], { family, zone, pricing, title } = {}) {
   if (family === "minceur" && asksFatRemoval(text)) {
     return fatRemovalReply();
   }
@@ -671,9 +729,16 @@ function technologyReply(text, sources = [], { family, zone } = {}) {
   if (fromFiche) {
     return fromFiche;
   }
-  // Sans appareil en fiche : on parle du diagnostic, on n’invente rien et on ne dit pas « je n’ai pas ».
   if (family === "visage") {
-    return `Oui, nous proposons des soins visage. ${processReply("visage", sources)}`;
+    const ack = visageNeedAck(text);
+    const body = processReply("visage", sources);
+    const offer = /decouverte/.test(normalize(`${body} ${ack}`))
+      ? ""
+      : visageDiscoveryBit(pricing, title);
+    if (ack) {
+      return `${ack} ${body}${offer}`;
+    }
+    return `Oui, nous proposons des soins visage. ${body}${offer}`;
   }
   return knowledge.TEAM_QUESTION_REPLY;
 }
@@ -1226,6 +1291,7 @@ module.exports = {
   trialWhenReply,
   triedObjectifAckReply,
   triedQuestion,
+  visageNeedAck,
   validatedModality,
   varyQuestion,
   whiteHairLaserReply,
