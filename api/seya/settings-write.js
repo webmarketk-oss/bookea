@@ -182,6 +182,9 @@ async function mutateSettingsOnly(supabase, id, mutate, attempts) {
     }
 
     const stored = asRecord(data.settings);
+    if (stored.seya && typeof stored.seya === "object" && !Array.isArray(stored.seya)) {
+      delete stored.seya.conversations;
+    }
     const isolated = withoutConversations(stored);
     const next = withoutConversations(
       asRecord(mutate(cloneJson(isolated), cloneJson(isolated))),
@@ -196,7 +199,8 @@ async function mutateSettingsOnly(supabase, id, mutate, attempts) {
       };
     }
 
-    const wrote = await writeSettingsCas(supabase, id, next, stored);
+    // Pas de filtre JSON sur tout le blob : trop gros, l’écriture échoue ou tourne à vide.
+    const wrote = await writeSettingsById(supabase, id, next);
     if (wrote.error) {
       lastError = wrote.error;
       if (!wrote.retryable) {
@@ -290,6 +294,66 @@ async function mutateCenterSettings(supabase, centerId, mutate, options = {}) {
   }
 
   throw new Error(lastError?.message || "settings_write_conflict");
+}
+
+async function writeSettingsById(supabase, id, nextSettings) {
+  const afterId = supabase
+    .from("centers")
+    .update({ settings: nextSettings })
+    .eq("id", id);
+
+  if (
+    afterId &&
+    typeof afterId.then === "function" &&
+    typeof afterId.eq !== "function" &&
+    typeof afterId.select !== "function"
+  ) {
+    const { error } = await afterId;
+    if (error) {
+      return { ok: false, error, retryable: false, cas: false };
+    }
+    return { ok: true, cas: false };
+  }
+
+  if (typeof afterId?.select === "function") {
+    let query = afterId.select("id");
+    const result =
+      typeof query.maybeSingle === "function"
+        ? await query.maybeSingle()
+        : await query;
+    if (result?.error) {
+      return { ok: false, error: result.error, retryable: false, cas: false };
+    }
+    if (result?.data?.id) {
+      return { ok: true, cas: false };
+    }
+    if (result && result.data === null && !result.error) {
+      return {
+        ok: false,
+        error: new Error("settings_write_forbidden"),
+        retryable: false,
+        cas: false,
+      };
+    }
+    if (result && !result.error) {
+      return { ok: true, cas: false };
+    }
+  }
+
+  if (typeof afterId?.then === "function") {
+    const { error } = await afterId;
+    if (error) {
+      return { ok: false, error, retryable: false, cas: false };
+    }
+    return { ok: true, cas: false };
+  }
+
+  return {
+    ok: false,
+    error: new Error("settings_write_unsupported_client"),
+    retryable: false,
+    cas: false,
+  };
 }
 
 async function writeSettingsCas(supabase, id, nextSettings, currentSettings) {

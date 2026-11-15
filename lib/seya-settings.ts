@@ -1347,7 +1347,7 @@ export async function saveSeyaAgentSettings(
     throw new Error(
       typeof payload.error === "string" && payload.error
         ? payload.error
-        : "Impossible d’enregistrer les réglages.",
+        : `Impossible d’enregistrer les réglages (${response.status}).`,
     );
   }
 

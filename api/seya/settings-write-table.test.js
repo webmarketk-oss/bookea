@@ -33,22 +33,32 @@ function fakeDb({ settings, rows = [], readSource = "table", conversationsError 
       select: () => ({
         eq: () => ({ maybeSingle: async () => ({ data: { settings: db.settings }, error: null }) }),
       }),
-      update: (patch) => ({
-        eq: () => ({
+      update: (patch) => {
+        const write = async (expected) => {
+          if (
+            expected !== undefined &&
+            JSON.stringify(expected) !== JSON.stringify(db.settings)
+          ) {
+            return { data: null, error: null };
+          }
+          db.settings = patch.settings;
+          db.settingsWrites += 1;
+          return { data: { id: CENTER }, error: null };
+        };
+        const afterId = {
           eq: (_column, expected) => ({
+            eq: (_nextColumn, nextExpected) => ({
+              select: () => ({
+                maybeSingle: async () => write(nextExpected),
+              }),
+            }),
             select: () => ({
-              maybeSingle: async () => {
-                if (JSON.stringify(expected) !== JSON.stringify(db.settings)) {
-                  return { data: null, error: null };
-                }
-                db.settings = patch.settings;
-                db.settingsWrites += 1;
-                return { data: { id: CENTER }, error: null };
-              },
+              maybeSingle: async () => write(undefined),
             }),
           }),
-        }),
-      }),
+        };
+        return afterId;
+      },
     };
   }
 

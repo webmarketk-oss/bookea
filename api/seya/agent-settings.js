@@ -138,9 +138,18 @@ function createAgentSettingsHandler({ createSupabase = createServiceClient } = {
           error: "Les conversations de ce centre sont illisibles : réglages non enregistrés.",
         });
       }
+      if (message === "settings_write_forbidden") {
+        return res.status(403).json({
+          ok: false,
+          error: "Ce compte n’a pas le droit d’enregistrer les réglages de ce centre.",
+        });
+      }
       return res.status(500).json({
         ok: false,
-        error: "Impossible d’enregistrer les réglages pour le moment.",
+        error:
+          message && message.length < 180
+            ? message
+            : "Impossible d’enregistrer les réglages pour le moment.",
       });
     }
   };
