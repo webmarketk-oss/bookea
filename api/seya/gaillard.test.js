@@ -168,6 +168,32 @@ test("Gaillard et Sallanches visage : le soin découverte est un essai sur la mo
   assert.doesNotMatch(lastSeya(bruz), /i-Probe|moitié du visage/i);
 });
 
+test("Gaillard visage : message détaillé + technologies, elle ne dit pas « on ne fait pas les soins » et ne redemande pas le besoin", async () => {
+  const settings = {
+    ...seya,
+    treatmentBriefs: [
+      {
+        name: "Visage",
+        brief:
+          "Diagnostic i-Diag et i-Probe. Technologies : peeling aux ultrasons, radiofréquence, ultrasons séquentiels, masque LED. Soin découverte offert.",
+      },
+      { name: "Laser", brief: "Épilation laser." },
+      { name: "Soin minceur", brief: "Cryo et radiofréquence." },
+    ],
+  };
+  const message =
+    "Je souhaiterais améliorer la fermeté de mon visage, notamment l’ovale, les bajoues et la jawline. Je souhaite également raffermir la peau, atténuer les plis du sourire et retrouver un visage plus tonique et mieux redessiné, tout en gardant un résultat naturel.\nJ’aimerais connaître les soins et technologies que vous proposez pour répondre à ces besoins. Merci beaucoup !";
+  let conversation = open("Soin visage", GAILLARD, settings);
+  conversation = await say(conversation, message, GAILLARD, settings);
+  const reply = lastSeya(conversation);
+  assert.doesNotMatch(reply, /ne faisons pas/i);
+  assert.doesNotMatch(reply, /qu['’]est-ce qui vous pr[ée]occupe/i);
+  assert.match(reply, /radiofr|i-Diag|i-Probe|visage|peeling|LED/i);
+  const relance = relanceCopy(conversation, 1, GAILLARD, settings);
+  assert.doesNotMatch(relance, /ce que vous recherchez/i);
+  assert.match(relance, /rappeler|rappellera/i);
+});
+
 test("Gaillard visage : préoccupations et attentes, un simple bonjour ne compte pas comme réponse", async () => {
   let conversation = open("Soin visage");
   conversation = await say(conversation, "Bonjour");

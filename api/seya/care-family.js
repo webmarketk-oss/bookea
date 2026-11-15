@@ -575,11 +575,19 @@ function phraseAskedService(asked) {
 }
 
 function serviceOfferReply(text, seya, conversation) {
-  const { askedServiceName, isServiceAsk } = require("./conversation");
+  const { askedServiceName, isServiceAsk, isGenericAskedService } = require("./conversation");
   if (!isServiceAsk(text)) {
     return "";
   }
   const asked = askedServiceName(text) || "cette prestation";
+  if (isGenericAskedService(asked) && offeredTreatmentNames(seya).length) {
+    const familyFromText = inferCareFamily(text);
+    const familyBriefs = familyFromText ? briefsForFamily(seya, familyFromText) : [];
+    if (familyFromText && familyBriefs.length) {
+      return familyServiceReply(text, familyFromText, familyBriefs, []);
+    }
+    return `Oui, nous proposons ${offeredTreatmentNames(seya).slice(0, 3).join(", ")}.`;
+  }
   const family = inferCareFamily(text);
   const familyBriefs = family ? briefsForFamily(seya, family) : [];
   if (family && familyBriefs.length && inferCareFamily(familyBriefs[0]?.name) === family) {

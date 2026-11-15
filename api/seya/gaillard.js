@@ -526,7 +526,7 @@ function asksTechnology(text) {
     /technologie|technique|machines?|appareils?|equipements?|materiel|cryolipolyse|cryo|radiofrequ|ultrasons?|lumiere pulsee|c[' ]est (du |de la )?laser/.test(
       value,
     ) &&
-    (/\?|quoi|quelles|avez|utilisez|utilises|presentes|faisiez|faites|pour (la |le )?minceur|pour (l[' ]|la )?epilation|graisse/.test(
+    (/\?|quoi|quelles|avez|utilisez|utilises|presentes|faisiez|faites|proposez|offrez|connaitre|pour (la |le )?minceur|pour (l[' ]|la )?epilation|graisse/.test(
       value,
     ) ||
       /lumiere pulsee|cryolipolyse|radiofrequ/.test(value))
@@ -1034,6 +1034,28 @@ function safeGaillardText(text, family) {
     .trim();
 }
 
+function threadAlreadyHasNeed(conversation) {
+  const qualification = conversation?.qualification || {};
+  if (
+    String(
+      qualification.need ||
+        qualification.detail ||
+        qualification.objectif ||
+        qualification.zone ||
+        "",
+    ).trim()
+  ) {
+    return true;
+  }
+  const blob = (conversation?.messages || [])
+    .filter((item) => item.author === "lead")
+    .map((item) => normalize(item.text))
+    .join(" ");
+  return /fermete|rafferm|ovale|bajoue|jawline|ride|minceur|ventre|graisse|epil|laser|visage|peau|plis du sourire/.test(
+    blob,
+  );
+}
+
 function relanceText(round, firstName, care, custom, conversation) {
   const about = care ? `votre demande pour ${care}` : "votre demande";
   const hello = firstName ? `Bonjour ${firstName}` : "Bonjour";
@@ -1046,6 +1068,9 @@ function relanceText(round, firstName, care, custom, conversation) {
   }
   if (custom) {
     return custom;
+  }
+  if (threadAlreadyHasNeed(conversation) && Number(round) === 1) {
+    return `${hello}, je reviens vers vous au sujet de ${about}. Si vous le souhaitez, un expert ou une experte du centre peut vous rappeler pour en parler 😊`;
   }
   if (conversation?.qualification?.pathOffered && Number(round) === 1) {
     return `${hello}, je reviens vers vous au sujet de ${about}. ${pathQuestion()}`;

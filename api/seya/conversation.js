@@ -927,13 +927,30 @@ function isAgendaAvailabilityAsk(text) {
   );
 }
 
+function isCatalogAsk(text) {
+  const value = normalize(text);
+  return (
+    /connaitre (les |vos )?(soins|technologies|prestations|appareils)/.test(value) ||
+    /quelles? (sont )?(les )?(soins|technologies|prestations)/.test(value) ||
+    /soins et technologies/.test(value) ||
+    /technologies que vous (proposez|faites|offrez|avez)/.test(value)
+  );
+}
+
+function isGenericAskedService(asked) {
+  const needle = normalize(asked).replace(/^(le |la |l'|les |des |un |une |de |du )/, "");
+  return /^(soins?( et technologies)?|technologies?|prestations?|traitements?)(\s+que\b.*)?$/.test(
+    needle,
+  );
+}
+
 function askedServiceName(text) {
   const value = normalize(text)
     .replace(/[?!.…]+$/g, "")
     .replace(/\s+/g, " ")
     .trim();
   // Agenda / dispo : jamais une demande de soin (« Vous avez des disponibilités quand ? »).
-  if (isAgendaAvailabilityAsk(text)) {
+  if (isAgendaAvailabilityAsk(text) || isCatalogAsk(text)) {
     return "";
   }
   // Autre ville / autre centre (« centre sur Cournon ») ≠ prestation.
@@ -947,13 +964,14 @@ function askedServiceName(text) {
   );
   if (match?.[1]) {
     const asked = String(match[1]).replace(/\s+/g, " ").trim();
-    return isSchedulingVocabulary(asked) ? "" : asked;
+    return isSchedulingVocabulary(asked) || isGenericAskedService(asked) ? "" : asked;
   }
   const inverted = value.match(
     /(?:le |la |l'|les |un |une |de l[' ]|de la |du |des )?(soins?(?: visage| minceur)?|epilation(?: laser| definitive)?|laser|minceur|visage|lumiere pulsee).{0,30}vous (?:faites|faisiez|proposez|avez|offrez)/,
   );
   if (inverted?.[1]) {
-    return String(inverted[1]).replace(/\s+/g, " ").trim();
+    const asked = String(inverted[1]).replace(/\s+/g, " ").trim();
+    return isGenericAskedService(asked) ? "" : asked;
   }
   const seen = value.match(
     /j[' ]ai vu que vous (?:faisiez|faites|proposiez|proposez|aviez|avez)(?: aussi)?(?: le | la | l'| les | de | du | des | un | une )?(.+)$/,
@@ -961,12 +979,15 @@ function askedServiceName(text) {
   const fromSeen = String(seen?.[1] || "")
     .replace(/\s+/g, " ")
     .trim();
-  return isSchedulingVocabulary(fromSeen) ? "" : fromSeen;
+  if (isSchedulingVocabulary(fromSeen) || isGenericAskedService(fromSeen)) {
+    return "";
+  }
+  return fromSeen;
 }
 
 function isServiceAsk(text) {
   const value = normalize(text);
-  if (isAgendaAvailabilityAsk(text)) {
+  if (isAgendaAvailabilityAsk(text) || isCatalogAsk(text)) {
     return false;
   }
   if (
@@ -2071,6 +2092,8 @@ module.exports = {
   isAskToWriteBack,
   isWaitUntilLater,
   isServiceAsk,
+  isCatalogAsk,
+  isGenericAskedService,
   wantsNoon,
   isRescheduleAsk,
   announcesVisitAbsence,

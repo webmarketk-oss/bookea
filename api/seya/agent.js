@@ -2891,7 +2891,7 @@ const GAILLARD_MINCEUR_OBJECTIF =
 const GAILLARD_MINCEUR_ZONE =
   /ventre|cuisse|hanche|fesse|bras|culotte de cheval|poignee d'amour|dos|jambes?/;
 const GAILLARD_VISAGE_CONCERN =
-  /ride|ridule|acne|bouton|tache|eclat|relach|teint|cerne|pore|fermete|hydrat|rajeun|terne|peau (seche|grasse|sensible)|rougeur|cicatrice|double menton|rafferm|\bferme/;
+  /ride|ridule|acne|bouton|tache|eclat|relach|teint|cerne|pore|fermete|hydrat|rajeun|terne|peau (seche|grasse|sensible)|rougeur|cicatrice|double menton|rafferm|\bferme|ovale|bajoue|jawline|plis du sourire|jaw[- ]?line/;
 const GAILLARD_EPILATION_ZONE =
   /jambe|maillot|intime|parties? intimes?|aisselle|bras|levre|menton|visage|dos|fesse|ventre|cuisse|torse|barbe|sourcil|nuque|epaule|pied|main|sillon|integral|bresilien|corps entier|joue|favori/;
 const GAILLARD_TRIED =
@@ -3134,8 +3134,9 @@ function gaillardLeadReply(conversation, text, seya, slots, extras = {}) {
       Boolean(base.qualification?.pathOffered) ||
       gaillard.acceptedCallbackInThread(base));
   const statesHerNeed =
-    GAILLARD_MINCEUR_ZONE.test(normalize(text)) &&
-    (GAILLARD_MINCEUR_OBJECTIF.test(normalize(text)) || /\d/.test(normalize(text)));
+    (GAILLARD_MINCEUR_ZONE.test(normalize(text)) &&
+      (GAILLARD_MINCEUR_OBJECTIF.test(normalize(text)) || /\d/.test(normalize(text)))) ||
+    GAILLARD_VISAGE_CONCERN.test(normalize(text));
   const asking =
     !statesHerNeed &&
     !acceptsOfferNow &&
