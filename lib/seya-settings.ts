@@ -998,7 +998,7 @@ function assertExpectedCenter(expectedCenterId: string | undefined, actualCenter
 export async function loadSeyaAgentSettings(options?: {
   includeConversations?: boolean;
 }) {
-  const includeConversations = options?.includeConversations !== false;
+  const includeConversations = options?.includeConversations === true;
   const context = await getActiveCenterContext();
   const localSettings = readLocalSeyaSettings(context.centerId);
   const localConversations = readLocalSeyaConversations(context.centerId);
@@ -1070,11 +1070,6 @@ export async function loadSeyaAgentSettings(options?: {
   );
   if (repaired.changed) {
     settings = repaired.settings as SeyaAgentSettings;
-    void saveSeyaAgentSettings(settings, context.centerId, ["treatmentBriefs"]).catch(
-      (saveError) => {
-        console.error("[seya] gaillard laser repair save skipped", saveError);
-      },
-    );
   }
 
   writeLocalSeyaSettings(context.centerId, settings);

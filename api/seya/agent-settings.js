@@ -315,10 +315,9 @@ function createAgentSettingsHandler({
         if (!center?.id) {
           return res.status(404).json({ ok: false, error: "Centre introuvable." });
         }
-        await ensureSchema();
         const seya =
-          (await loadSeyaFiche(supabase, center.id)) ||
-          (await loadSeyaFicheColumns(supabase, center.id));
+          (await loadSeyaFicheColumns(supabase, center.id)) ||
+          (await loadSeyaFiche(supabase, center.id));
         return res.status(200).json({
           ok: true,
           centerId: center.id,

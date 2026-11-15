@@ -465,6 +465,7 @@ export default function SeyaCrmPage() {
   const [notifyTesting, setNotifyTesting] = useState(false);
   const [notifyFeedback, setNotifyFeedback] = useState("");
   const [view, setView] = useState<"inbox" | "settings">(readSeyaView);
+  const [settingsReady, setSettingsReady] = useState(false);
 
   function setSeyaView(next: "inbox" | "settings") {
     setView(next);
@@ -552,7 +553,7 @@ export default function SeyaCrmPage() {
           }).catch(() => null);
         }
         const seya = await loadSeyaAgentSettings({
-          includeConversations: readSeyaView() !== "settings",
+          includeConversations: false,
         });
         const activeId = readActiveCenterId();
         if (
@@ -577,6 +578,7 @@ export default function SeyaCrmPage() {
         setCenterName(seya.centerName);
         savedAgentSettingsRef.current = seya.settings;
         setAgentSettings(seya.settings);
+        setSettingsReady(true);
         setConversations(storedConversations);
         // Lien « Voir dans Seya CRM » depuis la fiche prospect : ?lead=… ou ?phone=…
         const params = new URLSearchParams(window.location.search);
@@ -598,6 +600,7 @@ export default function SeyaCrmPage() {
         loaded = true;
       } catch {
         if (!cancelled && loadSeq === loadSeqRef.current) {
+          setSettingsReady(true);
           setSummary("Impossible de charger les conversations Seya de ce centre.");
         }
       }
@@ -1819,6 +1822,16 @@ export default function SeyaCrmPage() {
             Ce texte, Seya ne le dit que si on lui demande le prix. Elle ne le
             sort jamais toute seule.
           </p>
+          {!settingsReady ? (
+            <p className="mt-3 rounded-2xl border border-violet-100 bg-violet-50 px-4 py-3 text-sm font-medium text-violet-800">
+              Chargement de la fiche {centerName}…
+            </p>
+          ) : agentSettings.treatmentBriefs.length === 0 ? (
+            <p className="mt-3 rounded-2xl border border-amber-100 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-900">
+              Aucun soin enregistré pour {centerName}. La messagerie WhatsApp
+              de ce centre n’est pas touchée. Tu peux ajouter un soin ci-dessous.
+            </p>
+          ) : null}
           <div className="mt-3 grid gap-3">
             {agentSettings.treatmentBriefs.map((item, index) => (
               <div
