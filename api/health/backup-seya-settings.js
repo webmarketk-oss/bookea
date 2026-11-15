@@ -32,7 +32,10 @@ module.exports = async function handler(req, res) {
 
   const includeConversations = firstQuery(req.query?.conversations) === "1";
   const slug = firstQuery(req.query?.slug).trim();
-  const light = firstQuery(req.query?.light) === "1" || Boolean(slug);
+  const light =
+    firstQuery(req.query?.full) === "1"
+      ? false
+      : firstQuery(req.query?.light) === "1" || Boolean(slug);
 
   try {
     const supabase = createClient(url, key, {
@@ -70,10 +73,11 @@ module.exports = async function handler(req, res) {
         centers: results,
       });
     }
-    const { data: centers, error } = await supabase
-      .from("centers")
-      .select("id,name,slug,settings")
-      .order("name", { ascending: true });
+    let query = supabase.from("centers").select("id,name,slug,settings");
+    if (slug) {
+      query = query.eq("slug", slug);
+    }
+    const { data: centers, error } = await query.order("name", { ascending: true });
     if (error) {
       throw new Error(error.message);
     }

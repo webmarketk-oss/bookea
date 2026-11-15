@@ -88,12 +88,48 @@ function mergeTreatmentBriefLists(remote, incoming, removedNames) {
   return merged;
 }
 
-function applySettingsPatch(base, settings, changedKeys, removedNames) {
-  if (!Array.isArray(changedKeys) || changedKeys.length === 0) {
-    return { ...settings };
+function profileFilled(value) {
+  const profile = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  return Object.values(profile).some((item) => String(item || "").trim());
+}
+
+function keepFilledSeya(current, incoming) {
+  const currentSeya =
+    current && typeof current === "object" && !Array.isArray(current) ? { ...current } : {};
+  const next =
+    incoming && typeof incoming === "object" && !Array.isArray(incoming)
+      ? { ...incoming }
+      : {};
+  if (
+    Array.isArray(currentSeya.treatmentBriefs) &&
+    currentSeya.treatmentBriefs.length > 0 &&
+    (!Array.isArray(next.treatmentBriefs) || next.treatmentBriefs.length === 0)
+  ) {
+    next.treatmentBriefs = currentSeya.treatmentBriefs;
   }
+  if (
+    Array.isArray(currentSeya.offerMaps) &&
+    currentSeya.offerMaps.length > 0 &&
+    (!Array.isArray(next.offerMaps) || next.offerMaps.length === 0)
+  ) {
+    next.offerMaps = currentSeya.offerMaps;
+  }
+  if (profileFilled(currentSeya.centerProfile) && !profileFilled(next.centerProfile)) {
+    next.centerProfile = currentSeya.centerProfile;
+  }
+  if (String(currentSeya.brief || "").trim() && !String(next.brief || "").trim()) {
+    next.brief = currentSeya.brief;
+  }
+  return next;
+}
+
+function applySettingsPatch(base, settings, changedKeys, removedNames) {
+  const keys =
+    Array.isArray(changedKeys) && changedKeys.length > 0
+      ? changedKeys
+      : Object.keys(settings || {});
   const next = { ...base };
-  for (const key of changedKeys) {
+  for (const key of keys) {
     if (key === "treatmentBriefs") {
       next.treatmentBriefs = mergeTreatmentBriefLists(
         base.treatmentBriefs,
@@ -102,17 +138,39 @@ function applySettingsPatch(base, settings, changedKeys, removedNames) {
       );
       continue;
     }
+    if (key === "offerMaps") {
+      const incoming = Array.isArray(settings.offerMaps) ? settings.offerMaps : [];
+      const remote = Array.isArray(base.offerMaps) ? base.offerMaps : [];
+      next.offerMaps = incoming.length > 0 ? incoming : remote;
+      continue;
+    }
     if (!(key in settings) || settings[key] === undefined) {
+      continue;
+    }
+    if (
+      key === "centerProfile" &&
+      !profileFilled(settings.centerProfile) &&
+      profileFilled(base.centerProfile)
+    ) {
+      continue;
+    }
+    if (
+      key === "brief" &&
+      !String(settings.brief || "").trim() &&
+      String(base.brief || "").trim()
+    ) {
       continue;
     }
     next[key] = settings[key];
   }
-  return next;
+  return keepFilledSeya(base, next);
 }
 
 module.exports = {
   applySettingsPatch,
+  keepFilledSeya,
   mergePricing,
   mergeTreatmentBriefLists,
   normalizeTreatmentName,
+  profileFilled,
 };

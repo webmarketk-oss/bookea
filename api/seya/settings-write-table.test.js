@@ -257,6 +257,43 @@ test("table illisible : un soin s’enregistre quand même, sans toucher aux con
   assert.equal(supabase.db.settings.seya.conversations, undefined);
 });
 
+test("settingsOnly : un formulaire vide ne supprime pas les soins ni WhatsApp", async () => {
+  const conversations = [
+    { id: "c1", phone: "0611111111", messages: [], updatedAt: "2026-10-28T08:00:00.000Z" },
+  ];
+  const supabase = fakeDb({
+    settings: {
+      seya: {
+        brief: "Consignes",
+        treatmentBriefs: [{ name: "Hydrafacial", brief: "Visage" }],
+        conversations,
+      },
+    },
+  });
+
+  const result = await mutateCenterSettings(
+    supabase,
+    CENTER,
+    (settings) => ({
+      ...settings,
+      seya: {
+        ...settings.seya,
+        brief: "",
+        treatmentBriefs: [],
+        conversations: undefined,
+      },
+    }),
+    { settingsOnly: true },
+  );
+
+  assert.equal(result.changed, false);
+  assert.equal(result.settings.seya.treatmentBriefs[0].name, "Hydrafacial");
+  assert.equal(result.settings.seya.brief, "Consignes");
+  assert.equal(result.settings.seya.conversations.length, 1);
+  assert.equal(supabase.db.settingsWrites, 0);
+  assert.equal(supabase.db.settings.seya.conversations.length, 1);
+});
+
 test("table : settingsOnly enregistre un soin sans lire les conversations", async () => {
   const a = thread("0611111111", "Bonjour A", "2026-10-28T08:00:00.000Z");
   const supabase = fakeDb({

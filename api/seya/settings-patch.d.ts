@@ -9,3 +9,7 @@ export function applySettingsPatch<T extends Record<string, unknown>>(
   settings: T,
   changedKeys?: string[],
 ): T;
+export function keepFilledSeya<T extends Record<string, unknown>>(
+  current?: T | null,
+  incoming?: T | null,
+): T;

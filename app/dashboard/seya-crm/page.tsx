@@ -879,6 +879,17 @@ export default function SeyaCrmPage() {
       setAgentFeedback("Réglages en cours de chargement : réessayez dans un instant.");
       return;
     }
+    if (
+      Array.isArray(saved.treatmentBriefs) &&
+      saved.treatmentBriefs.length > 0 &&
+      Array.isArray(nextSettings.treatmentBriefs) &&
+      nextSettings.treatmentBriefs.length === 0
+    ) {
+      setAgentSettings(saved);
+      agentSettingsRef.current = saved;
+      setAgentFeedback("Les soins de ce centre ne peuvent pas être effacés.");
+      return;
+    }
     const seq = ++persistSeqRef.current;
     const job = persistTailRef.current
       .catch(() => undefined)

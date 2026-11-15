@@ -5,6 +5,7 @@ const {
 } = require("./conversation-mirror");
 const { mergeSeyaConversationLists } = require("./conversation-key");
 const { loadTableConversationRows, readsFromTable } = require("./conversation-source");
+const { keepFilledSeya } = require("./settings-patch");
 
 function asRecord(value) {
   return value && typeof value === "object" && !Array.isArray(value) ? value : {};
@@ -182,17 +183,25 @@ async function mutateSettingsOnly(supabase, id, mutate, attempts) {
     }
 
     const stored = asRecord(data.settings);
-    if (stored.seya && typeof stored.seya === "object" && !Array.isArray(stored.seya)) {
-      delete stored.seya.conversations;
-    }
+    const conversations = asRecord(stored.seya).conversations;
     const isolated = withoutConversations(stored);
-    const next = withoutConversations(
+    const mutated = withoutConversations(
       asRecord(mutate(cloneJson(isolated), cloneJson(isolated))),
     );
+    const nextSeya = keepFilledSeya(isolated.seya, mutated.seya);
+    const next = {
+      ...mutated,
+      seya: Array.isArray(conversations)
+        ? { ...nextSeya, conversations }
+        : nextSeya,
+    };
+    const comparable = withoutConversations(next);
 
-    if (stableStringify(next) === stableStringify(isolated)) {
+    if (stableStringify(comparable) === stableStringify(isolated)) {
       return {
-        settings: isolated,
+        settings: Array.isArray(conversations)
+          ? { ...isolated, seya: { ...asRecord(isolated.seya), conversations } }
+          : isolated,
         changed: false,
         attempts: attempt + 1,
         cas: true,

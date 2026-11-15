@@ -33,6 +33,9 @@
     "api/health/repair-seya.js": {
       "maxDuration": 60
     },
+    "api/health/restore-seya-fiche.js": {
+      "maxDuration": 30
+    },
     "api/seya/whatsapp.js": {
       "maxDuration": 30
     },

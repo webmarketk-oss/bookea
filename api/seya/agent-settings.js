@@ -4,7 +4,7 @@
  */
 const { createClient } = require("@supabase/supabase-js");
 const { repairGaillardLaserSettings } = require("./gaillard-laser-pricing");
-const { applySettingsPatch } = require("./settings-patch");
+const { applySettingsPatch, keepFilledSeya } = require("./settings-patch");
 const { mutateCenterSettings } = require("./settings-write");
 const { staffCanUseCenter } = require("./_staff-auth");
 const { loadSeyaFicheColumns } = require("./fiche-select");
@@ -145,40 +145,11 @@ function applyAgentSettings(currentSettings, payload, center) {
   if (repaired.changed) {
     merged = repaired.settings;
   }
-  const { conversations: _omit, ...seya } = {
+  const { conversations: _omit, ...seya } = keepFilledSeya(currentSeya, {
     ...currentSeya,
     ...merged,
-  };
+  });
   void _omit;
-  // Un formulaire vide (chargement raté) ne doit jamais effacer une fiche déjà en base.
-  if (
-    Array.isArray(currentSeya.treatmentBriefs) &&
-    currentSeya.treatmentBriefs.length > 0 &&
-    (!Array.isArray(seya.treatmentBriefs) || seya.treatmentBriefs.length === 0)
-  ) {
-    seya.treatmentBriefs = currentSeya.treatmentBriefs;
-  }
-  if (
-    Array.isArray(currentSeya.offerMaps) &&
-    currentSeya.offerMaps.length > 0 &&
-    (!Array.isArray(seya.offerMaps) || seya.offerMaps.length === 0)
-  ) {
-    seya.offerMaps = currentSeya.offerMaps;
-  }
-  const currentProfile = asRecord(currentSeya.centerProfile);
-  const nextProfile = asRecord(seya.centerProfile);
-  const currentProfileFilled = Object.values(currentProfile).some((value) =>
-    String(value || "").trim(),
-  );
-  const nextProfileFilled = Object.values(nextProfile).some((value) =>
-    String(value || "").trim(),
-  );
-  if (currentProfileFilled && !nextProfileFilled) {
-    seya.centerProfile = currentProfile;
-  }
-  if (String(currentSeya.brief || "").trim() && !String(seya.brief || "").trim()) {
-    seya.brief = currentSeya.brief;
-  }
   return { ...currentSettings, seya };
 }
 
