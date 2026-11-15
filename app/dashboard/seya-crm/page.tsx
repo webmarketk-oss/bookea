@@ -391,6 +391,35 @@ function OfferMapCheck({
   );
 }
 
+const SEYA_VIEW_KEY = "bookea-seya-view";
+
+function readSeyaView(): "inbox" | "settings" {
+  if (typeof window === "undefined") {
+    return "inbox";
+  }
+  try {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("reglages") === "1" || params.get("view") === "settings") {
+      return "settings";
+    }
+    const stored = window.sessionStorage.getItem(SEYA_VIEW_KEY);
+    if (stored === "settings" || stored === "inbox") {
+      return stored;
+    }
+  } catch {
+    return "inbox";
+  }
+  return "inbox";
+}
+
+function writeSeyaView(next: "inbox" | "settings") {
+  try {
+    window.sessionStorage.setItem(SEYA_VIEW_KEY, next);
+  } catch {
+    return;
+  }
+}
+
 export default function SeyaCrmPage() {
   const [tasks, setTasks] = useState<SeyaTask[]>([]);
   const [prompt, setPrompt] = useState(
@@ -434,7 +463,12 @@ export default function SeyaCrmPage() {
   const [replying, setReplying] = useState(false);
   const [notifyTesting, setNotifyTesting] = useState(false);
   const [notifyFeedback, setNotifyFeedback] = useState("");
-  const [view, setView] = useState<"inbox" | "settings">("inbox");
+  const [view, setView] = useState<"inbox" | "settings">(readSeyaView);
+
+  function setSeyaView(next: "inbox" | "settings") {
+    setView(next);
+    writeSeyaView(next);
+  }
 
   const stats = useMemo(
     () => ({
@@ -504,11 +538,18 @@ export default function SeyaCrmPage() {
 
     async function loadInbox() {
       try {
-        await fetch("/api/seya/rehome", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: "{}",
-        }).catch(() => null);
+        // Rangement des fils entre centres : lourd (toute la plateforme), jamais bloquant,
+        // au plus une fois par heure depuis ce navigateur.
+        const REHOME_KEY = "bookea-seya-rehome-at";
+        const lastRehome = Number(window.localStorage.getItem(REHOME_KEY) || 0);
+        if (Date.now() - lastRehome > 60 * 60 * 1000) {
+          window.localStorage.setItem(REHOME_KEY, String(Date.now()));
+          void fetch("/api/seya/rehome", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: "{}",
+          }).catch(() => null);
+        }
         const seya = await loadSeyaAgentSettings();
         const activeId = readActiveCenterId();
         if (
@@ -1315,7 +1356,7 @@ export default function SeyaCrmPage() {
         <div className="flex rounded-2xl bg-white p-1 shadow-sm ring-1 ring-slate-200">
           <button
             type="button"
-            onClick={() => setView("inbox")}
+            onClick={() => setSeyaView("inbox")}
             className={`rounded-xl px-4 py-2 text-sm font-semibold ${
               view === "inbox" ? "bg-slate-950 text-white" : "text-slate-600"
             }`}
@@ -1324,7 +1365,7 @@ export default function SeyaCrmPage() {
           </button>
           <button
             type="button"
-            onClick={() => setView("settings")}
+            onClick={() => setSeyaView("settings")}
             className={`rounded-xl px-4 py-2 text-sm font-semibold ${
               view === "settings" ? "bg-slate-950 text-white" : "text-slate-600"
             }`}
