@@ -1110,7 +1110,32 @@ export async function loadSeyaAgentSettings(options?: {
     settings = repaired.settings as SeyaAgentSettings;
   }
 
-  writeLocalSeyaSettings(context.centerId, settings);
+  const localHasBriefs =
+    Array.isArray(localSettings?.treatmentBriefs) &&
+    localSettings.treatmentBriefs.length > 0;
+  const remoteHasBriefs = settings.treatmentBriefs.length > 0;
+  if (!remoteHasBriefs && localHasBriefs) {
+    settings = {
+      ...settings,
+      treatmentBriefs: localSettings.treatmentBriefs as SeyaTreatmentBrief[],
+      offerMaps:
+        settings.offerMaps.length > 0
+          ? settings.offerMaps
+          : Array.isArray(localSettings.offerMaps)
+            ? localSettings.offerMaps
+            : settings.offerMaps,
+      centerProfile:
+        Object.values(settings.centerProfile || {}).some((value) =>
+          String(value || "").trim(),
+        )
+          ? settings.centerProfile
+          : localSettings.centerProfile || settings.centerProfile,
+    };
+  }
+
+  if (remoteHasBriefs || !localHasBriefs) {
+    writeLocalSeyaSettings(context.centerId, settings);
+  }
 
   if (!includeConversations) {
     return {

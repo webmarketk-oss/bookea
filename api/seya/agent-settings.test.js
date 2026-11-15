@@ -179,6 +179,35 @@ test("sans jeton, l’enregistrement est refusé", async () => {
   assert.equal(supabase.db.settingsWrites, 0);
 });
 
+test("un formulaire vide ne remplace pas une fiche Gaillard déjà en base", () => {
+  const next = applyAgentSettings(
+    {
+      seya: {
+        brief: "Consignes Gaillard",
+        centerProfile: { activity: "Minceur, laser, visage" },
+        treatmentBriefs: [
+          { name: "Soin minceur", brief: "Cryo et radiofréquence." },
+          { name: "Épilation définitive", brief: "Laser." },
+        ],
+        offerMaps: [{ match: "laser", label: "Épilation laser" }],
+      },
+    },
+    {
+      settings: {
+        brief: "",
+        centerProfile: {},
+        treatmentBriefs: [],
+        offerMaps: [],
+      },
+    },
+    { id: CENTER, name: "JFG Clinic Gaillard" },
+  );
+  assert.equal(next.seya.treatmentBriefs.length, 2);
+  assert.equal(next.seya.offerMaps.length, 1);
+  assert.equal(next.seya.brief, "Consignes Gaillard");
+  assert.equal(next.seya.centerProfile.activity, "Minceur, laser, visage");
+});
+
 test("un patch de soins vide ne remplace pas les fiches déjà en base", () => {
   const next = applyAgentSettings(
     {
