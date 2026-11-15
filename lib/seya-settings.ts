@@ -969,13 +969,20 @@ export function bindSeyaSettingsToCenter(
   local?: Partial<SeyaAgentSettings> | null,
 ): SeyaAgentSettings {
   if (remote != null) {
+    const remoteBriefs = Array.isArray(remote.treatmentBriefs)
+      ? remote.treatmentBriefs
+      : [];
+    const localBriefs = Array.isArray(local?.treatmentBriefs)
+      ? local.treatmentBriefs
+      : [];
+    const remoteMaps = Array.isArray(remote.offerMaps) ? remote.offerMaps : [];
+    const localMaps = Array.isArray(local?.offerMaps) ? local.offerMaps : [];
     return normalizeSeyaAgentSettings({
+      ...local,
       ...remote,
-      centerProfile: remote.centerProfile,
-      treatmentBriefs: Array.isArray(remote.treatmentBriefs)
-        ? remote.treatmentBriefs
-        : [],
-      offerMaps: Array.isArray(remote.offerMaps) ? remote.offerMaps : [],
+      centerProfile: remote.centerProfile || local?.centerProfile,
+      treatmentBriefs: remoteBriefs.length > 0 ? remoteBriefs : localBriefs,
+      offerMaps: remoteMaps.length > 0 ? remoteMaps : localMaps,
     });
   }
   return normalizeSeyaAgentSettings(local ?? {});
@@ -987,7 +994,10 @@ function assertExpectedCenter(expectedCenterId: string | undefined, actualCenter
   }
 }
 
-export async function loadSeyaAgentSettings() {
+export async function loadSeyaAgentSettings(options?: {
+  includeConversations?: boolean;
+}) {
+  const includeConversations = options?.includeConversations !== false;
   const context = await getActiveCenterContext();
   const localSettings = readLocalSeyaSettings(context.centerId);
   const localConversations = readLocalSeyaConversations(context.centerId);
@@ -1008,10 +1018,8 @@ export async function loadSeyaAgentSettings() {
   }
 
   const remote = asRecord(asRecord(data?.settings).seya);
+  delete remote.conversations;
   const hasRemote = Boolean(asRecord(data?.settings).seya);
-  const ownedPhones = await loadOwnedPhones(supabase, context.centerId).catch(
-    () => new Set<string>(),
-  );
   let settings = bindSeyaSettingsToCenter(
     hasRemote ? (remote as Partial<SeyaAgentSettings>) : null,
     localSettings,
@@ -1023,16 +1031,27 @@ export async function loadSeyaAgentSettings() {
   );
   if (repaired.changed) {
     settings = repaired.settings as SeyaAgentSettings;
-    // Persistance ciblée Gaillard laser uniquement, sans toucher aux autres centres.
-    try {
-      await saveSeyaAgentSettings(settings, context.centerId, ["treatmentBriefs"]);
-    } catch (error) {
-      console.error("[seya] gaillard laser repair save skipped", error);
-    }
+    void saveSeyaAgentSettings(settings, context.centerId, ["treatmentBriefs"]).catch(
+      (saveError) => {
+        console.error("[seya] gaillard laser repair save skipped", saveError);
+      },
+    );
   }
 
   writeLocalSeyaSettings(context.centerId, settings);
 
+  if (!includeConversations) {
+    return {
+      centerId: context.centerId,
+      centerName: context.centerName,
+      settings,
+      conversations: localConversations,
+    };
+  }
+
+  const ownedPhones = await loadOwnedPhones(supabase, context.centerId).catch(
+    () => new Set<string>(),
+  );
   const sourced = asRecord(
     await withConversationSource(supabase, context.centerId, remote),
   );

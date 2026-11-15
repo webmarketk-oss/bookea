@@ -551,7 +551,9 @@ export default function SeyaCrmPage() {
             body: "{}",
           }).catch(() => null);
         }
-        const seya = await loadSeyaAgentSettings();
+        const seya = await loadSeyaAgentSettings({
+          includeConversations: readSeyaView() !== "settings",
+        });
         const activeId = readActiveCenterId();
         if (
           cancelled ||
@@ -727,6 +729,24 @@ export default function SeyaCrmPage() {
       document.removeEventListener("visibilitychange", refreshIfVisible);
     };
   }, []);
+
+  useEffect(() => {
+    if (view !== "inbox" || !centerId) {
+      return;
+    }
+    let cancelled = false;
+    void refreshSeyaConversations()
+      .then((seya) => {
+        if (cancelled || seya.centerId !== settingsCenterIdRef.current) {
+          return;
+        }
+        setConversations(seya.conversations || []);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [view, centerId]);
 
   const selectedDepositLink =
     depositLinks.find((link) => String(link.id) === selectedDepositLinkId) ??
