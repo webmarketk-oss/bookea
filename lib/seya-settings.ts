@@ -1274,29 +1274,43 @@ export function mergeSeyaSettingsPatch(
   });
 }
 
+function seyaAgentSettingsUrl() {
+  if (typeof window === "undefined") {
+    return "/api/seya/agent-settings";
+  }
+  const url = new URL("/api/seya/agent-settings", window.location.origin);
+  if (url.hostname === "bookeai.fr") {
+    url.hostname = "www.bookeai.fr";
+  }
+  return url.toString();
+}
+
 export function seyaSettingsSaveErrorMessage(error: unknown) {
   const raw = error instanceof Error ? error.message : String(error || "");
   const code = raw.toLowerCase();
+  if (code.includes("failed to fetch") || code.includes("network") || code.includes("joindre")) {
+    return "Seya n’a pas pu joindre le serveur. Recharge la page (Cmd+Shift+R) puis réessaie.";
+  }
   if (
     code.includes("connexion requise") ||
     code.includes("401") ||
     code.includes("session")
   ) {
-    return "Reconnectez-vous pour enregistrer les réglages. Vos modifications restent dans le formulaire.";
+    return "Reconnectez-vous pour enregistrer les réglages. Tes modifications restent dans le formulaire.";
   }
   if (code.includes("forbidden") || code.includes("n’a pas le droit") || code.includes("403")) {
-    return "Ce compte n’a pas le droit d’enregistrer les réglages de ce centre. Vos modifications restent dans le formulaire.";
+    return "Ce compte n’a pas le droit d’enregistrer les réglages de ce centre. Tes modifications restent dans le formulaire.";
   }
   if (code.includes("conflict") || code.includes("en même temps")) {
-    return "Un autre enregistrement a eu lieu en même temps. Réessayez. Vos modifications restent dans le formulaire.";
+    return "Un autre enregistrement a eu lieu en même temps. Réessaie. Tes modifications restent dans le formulaire.";
   }
   if (code.includes("trop de temps")) {
     return "L’enregistrement a pris trop de temps. Recharge la page puis réessaie. Tes modifications restent dans le formulaire.";
   }
-  if (raw && raw.length < 180 && !code.includes("failed to fetch") && !code.includes("network")) {
-    return `${raw.replace(/\.*$/, "")}. Vos modifications restent dans le formulaire.`;
+  if (raw && raw.trim()) {
+    return `Seya : ${raw.replace(/\.*$/, "").slice(0, 160)}. Tes modifications restent dans le formulaire.`;
   }
-  return "Impossible d’enregistrer les réglages. Vos modifications restent dans le formulaire.";
+  return "Seya n’a pas enregistré (erreur vide). Recharge la page puis réessaie.";
 }
 
 export async function saveSeyaAgentSettings(
@@ -1315,8 +1329,9 @@ export async function saveSeyaAgentSettings(
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 15000);
   let response: Response;
+  const endpoint = seyaAgentSettingsUrl();
   try {
-    response = await fetch("/api/seya/agent-settings", {
+    response = await fetch(endpoint, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",

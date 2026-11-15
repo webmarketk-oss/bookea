@@ -89,6 +89,10 @@ function fakeDb({ settings, admin = true } = {}) {
   return {
     db,
     from: table,
+    rpc: async (fn) => ({
+      data: null,
+      error: { message: `Could not find the function public.${fn}` },
+    }),
     auth: {
       getUser: async (token) =>
         token === "good-token"
