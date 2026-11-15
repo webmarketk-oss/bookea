@@ -52,6 +52,7 @@ import {
   isSameSeyaConversation,
   readLocalSeyaConversations,
   saveSeyaAgentSettings,
+  seyaSettingsSaveErrorMessage,
   saveSeyaConversations,
   markSeyaHealthReviewed,
   sortSeyaInbox,
@@ -852,13 +853,11 @@ export default function SeyaCrmPage() {
           setAgentFeedback(
             `Enregistré pour ${result.centerName || centerName} uniquement.`,
           );
-        } catch {
+        } catch (error) {
           if (seq !== persistSeqRef.current) {
             return;
           }
-          setAgentFeedback(
-            "Impossible d’enregistrer les réglages. Vos modifications restent dans le formulaire.",
-          );
+          setAgentFeedback(seyaSettingsSaveErrorMessage(error));
         } finally {
           if (seq === persistSeqRef.current) {
             setSavingAgent(false);

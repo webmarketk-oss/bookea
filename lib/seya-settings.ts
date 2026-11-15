@@ -1274,6 +1274,28 @@ export function mergeSeyaSettingsPatch(
   });
 }
 
+export function seyaSettingsSaveErrorMessage(error: unknown) {
+  const raw = error instanceof Error ? error.message : String(error || "");
+  const code = raw.toLowerCase();
+  if (
+    code.includes("connexion requise") ||
+    code.includes("401") ||
+    code.includes("session")
+  ) {
+    return "Reconnectez-vous pour enregistrer les réglages. Vos modifications restent dans le formulaire.";
+  }
+  if (code.includes("forbidden") || code.includes("n’a pas le droit") || code.includes("403")) {
+    return "Ce compte n’a pas le droit d’enregistrer les réglages de ce centre. Vos modifications restent dans le formulaire.";
+  }
+  if (code.includes("conflict") || code.includes("en même temps")) {
+    return "Un autre enregistrement a eu lieu en même temps. Réessayez. Vos modifications restent dans le formulaire.";
+  }
+  if (raw && raw.length < 180 && !code.includes("failed to fetch") && !code.includes("network")) {
+    return `${raw.replace(/\.*$/, "")}. Vos modifications restent dans le formulaire.`;
+  }
+  return "Impossible d’enregistrer les réglages. Vos modifications restent dans le formulaire.";
+}
+
 export async function saveSeyaAgentSettings(
   settings: SeyaAgentSettings,
   expectedCenterId?: string,
@@ -1281,46 +1303,42 @@ export async function saveSeyaAgentSettings(
   options?: { removedTreatmentNames?: string[] },
 ) {
   const context = await getActiveCenterContext();
+  const centerId = expectedCenterId || context.centerId;
   assertExpectedCenter(expectedCenterId, context.centerId);
 
-  const supabase = createClient();
-  let nextSettings: SeyaAgentSettings | null = null;
-  await mutateCenterSettings(supabase, context.centerId, (currentSettings) => {
-    const currentSeya = asRecord(currentSettings.seya);
-    let merged = mergeSeyaSettingsPatch(
-      currentSettings.seya ? (currentSeya as Partial<SeyaAgentSettings>) : null,
+  const {
+    data: { session },
+  } = await createClient().auth.getSession();
+  const response = await fetch("/api/seya/agent-settings", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}),
+    },
+    body: JSON.stringify({
+      centerId,
       settings,
       changedKeys,
-      options?.removedTreatmentNames,
-    );
-    const repaired = repairGaillardLaserSettings(
-      merged,
-      context.centerName,
-      context.centerId,
-    );
-    if (repaired.changed) {
-      merged = repaired.settings as SeyaAgentSettings;
-    }
-    nextSettings = merged;
-    return {
-      ...currentSettings,
-      seya: {
-        ...currentSeya,
-        ...nextSettings,
-        // Toujours garder les conversations lues à cet instant (pas une copie périmée).
-        conversations: currentSeya.conversations,
-      },
-    };
+      removedTreatmentNames: options?.removedTreatmentNames,
+    }),
   });
-
-  if (!nextSettings) {
-    throw new Error("Réglages non enregistrés.");
+  const payload = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+  if (!response.ok || payload.ok !== true) {
+    throw new Error(
+      typeof payload.error === "string" && payload.error
+        ? payload.error
+        : "Impossible d’enregistrer les réglages.",
+    );
   }
-  writeLocalSeyaSettings(context.centerId, nextSettings);
+
+  const nextSettings = normalizeSeyaAgentSettings(
+    (payload.settings || {}) as Partial<SeyaAgentSettings>,
+  );
+  writeLocalSeyaSettings(centerId, nextSettings);
 
   return {
-    centerId: context.centerId,
-    centerName: context.centerName,
+    centerId: String(payload.centerId || centerId),
+    centerName: String(payload.centerName || context.centerName),
     settings: nextSettings,
   };
 }

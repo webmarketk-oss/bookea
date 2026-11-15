@@ -42,7 +42,43 @@ async function mutateTableModeSettings(supabase, id, mutate, attempts) {
     const stored = asRecord(data.settings);
     const rows = await loadTableConversationRows(supabase, id);
     if (!rows) {
-      throw new Error("seya_conversations_unreadable");
+      const isolated = {
+        ...stored,
+        seya: { ...asRecord(stored.seya), conversations: [] },
+      };
+      const next = asRecord(mutate(cloneJson(isolated), cloneJson(isolated)));
+      const nextList = asRecord(next.seya).conversations;
+      const conversationsTouched =
+        Array.isArray(nextList) && stableStringify(nextList) !== "[]";
+      if (conversationsTouched) {
+        throw new Error("seya_conversations_unreadable");
+      }
+      const nextStored = withoutConversations(next);
+      if (stableStringify(nextStored) === stableStringify(stored)) {
+        return {
+          settings: isolated,
+          changed: false,
+          attempts: attempt + 1,
+          cas: true,
+        };
+      }
+      const wrote = await writeSettingsCas(supabase, id, nextStored, stored);
+      if (wrote.error) {
+        lastError = wrote.error;
+        if (!wrote.retryable) {
+          throw new Error(wrote.error.message || String(wrote.error));
+        }
+        continue;
+      }
+      if (!wrote.ok) {
+        continue;
+      }
+      return {
+        settings: next,
+        changed: true,
+        attempts: attempt + 1,
+        cas: wrote.cas,
+      };
     }
     const tableList = rows.map((row) => row.data);
     const versions = new Map(rows.map((row) => [row.key, row.updatedAt]));

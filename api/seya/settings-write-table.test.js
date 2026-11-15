@@ -17,7 +17,7 @@ function thread(phone, text, at) {
 }
 
 /** Base minimale : réglages du centre, interrupteur table, lignes seya_conversations versionnées. */
-function fakeDb({ settings, rows = [], readSource = "table" }) {
+function fakeDb({ settings, rows = [], readSource = "table", conversationsError = null }) {
   let clock = 0;
   const db = {
     settings,
@@ -56,14 +56,17 @@ function fakeDb({ settings, rows = [], readSource = "table" }) {
       select: () => ({
         eq: () => ({
           order: () => ({
-            limit: async () => ({
-              data: db.rows.map((row) => ({
-                conversation_key: row.conversation_key,
-                updated_at: row.updated_at,
-                data: row.data,
-              })),
-              error: null,
-            }),
+            limit: async () =>
+              conversationsError
+                ? { data: null, error: { message: conversationsError } }
+                : {
+                    data: db.rows.map((row) => ({
+                      conversation_key: row.conversation_key,
+                      updated_at: row.updated_at,
+                      data: row.data,
+                    })),
+                    error: null,
+                  },
           }),
         }),
       }),
@@ -209,4 +212,54 @@ test("table : un autre réglage change sans toucher aux conversations", async ()
   assert.equal(supabase.db.settingsWrites, 1);
   assert.equal(supabase.db.settings.seya.relanceEnabled, true);
   assert.equal(supabase.db.settings.seya.conversations, undefined);
+});
+
+test("table illisible : un soin s’enregistre quand même, sans toucher aux conversations", async () => {
+  const supabase = fakeDb({
+    settings: {
+      seya: {
+        brief: "Consignes",
+        treatmentBriefs: [{ name: "Hydrafacial", brief: "Visage" }],
+      },
+    },
+    conversationsError: "permission denied",
+  });
+
+  const result = await mutateCenterSettings(supabase, CENTER, (settings) => ({
+    ...settings,
+    seya: {
+      ...settings.seya,
+      conversations: settings.seya.conversations,
+      treatmentBriefs: [
+        ...settings.seya.treatmentBriefs,
+        { name: "Nouveau soin", brief: "Prix seulement si on te le demande." },
+      ],
+    },
+  }));
+
+  assert.equal(result.changed, true);
+  assert.equal(supabase.db.settingsWrites, 1);
+  assert.equal(supabase.db.settings.seya.treatmentBriefs.length, 2);
+  assert.equal(supabase.db.settings.seya.treatmentBriefs[1].name, "Nouveau soin");
+  assert.equal(supabase.db.settings.seya.conversations, undefined);
+});
+
+test("table illisible : une écriture de conversation reste bloquée", async () => {
+  const supabase = fakeDb({
+    settings: { seya: { brief: "Consignes" } },
+    conversationsError: "permission denied",
+  });
+
+  await assert.rejects(
+    () =>
+      mutateCenterSettings(supabase, CENTER, (settings) => ({
+        ...settings,
+        seya: {
+          ...settings.seya,
+          conversations: [{ id: "c1", phone: "0611111111" }],
+        },
+      })),
+    /seya_conversations_unreadable/,
+  );
+  assert.equal(supabase.db.settingsWrites, 0);
 });

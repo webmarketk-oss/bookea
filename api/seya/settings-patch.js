@@ -88,7 +88,7 @@ function mergeTreatmentBriefLists(remote, incoming, removedNames) {
   return merged;
 }
 
-function applySettingsPatch(base, settings, changedKeys) {
+function applySettingsPatch(base, settings, changedKeys, removedNames) {
   if (!Array.isArray(changedKeys) || changedKeys.length === 0) {
     return { ...settings };
   }
@@ -98,6 +98,7 @@ function applySettingsPatch(base, settings, changedKeys) {
       next.treatmentBriefs = mergeTreatmentBriefLists(
         base.treatmentBriefs,
         settings.treatmentBriefs,
+        removedNames,
       );
       continue;
     }
