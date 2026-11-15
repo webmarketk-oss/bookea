@@ -97,28 +97,40 @@ async function runSql(sql, params = []) {
   }
 }
 
+function cityLabel(center) {
+  const city = String(center.city || "").trim();
+  if (city && !/\d/.test(city) && !city.includes(",") && city.length <= 40) {
+    return city;
+  }
+  const parts = String(center.name || "")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+  return parts[parts.length - 1] || city;
+}
+
 function centerAddress(center) {
-  return [center.address_line1, center.postal_code, center.city]
+  const city = cityLabel(center);
+  return [center.address_line1, center.postal_code, city]
     .map((item) => String(item || "").trim())
     .filter(Boolean)
     .join(", ");
 }
 
 function retargetSeyaFiche(seya, source, dest) {
+  const sourceCity = cityLabel(source);
+  const destCity = cityLabel(dest);
   const replacements = [
     [source.address_line1, dest.address_line1],
     [centerAddress(source), centerAddress(dest)],
     [
-      [source.postal_code, source.city].filter(Boolean).join(" "),
-      [dest.postal_code, dest.city].filter(Boolean).join(" "),
+      [source.postal_code, sourceCity].filter(Boolean).join(" "),
+      [dest.postal_code, destCity].filter(Boolean).join(" "),
     ],
     [source.email, dest.email],
     [source.phone, dest.phone],
     [source.name, dest.name],
-    [source.city, dest.city],
-    ["Sallanches", dest.city || "Gaillard"],
-    ["sallanches", String(dest.city || "gaillard").toLowerCase()],
-    ["SALLANCHES", String(dest.city || "GAILLARD").toUpperCase()],
+    [sourceCity, destCity],
   ].filter(([from, to]) => from && to && String(from) !== String(to));
 
   function replaceValue(value) {
@@ -142,6 +154,18 @@ function retargetSeyaFiche(seya, source, dest) {
 
   const next = replaceValue(asRecord(seya));
   delete next.conversations;
+  const profile = asRecord(next.centerProfile);
+  const destAddress = centerAddress(dest);
+  if (destAddress) {
+    profile.extras = destAddress;
+  }
+  if (dest.email) {
+    profile.supportEmail = dest.email;
+  }
+  if (dest.phone) {
+    profile.supportPhone = dest.phone;
+  }
+  next.centerProfile = profile;
   return next;
 }
 

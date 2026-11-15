@@ -42,7 +42,7 @@ test("la copie Sallanches → Gaillard change le nom et l’adresse, pas les soi
   assert.equal(next.treatmentBriefs.length, 2);
   assert.match(next.brief, /JFG Clinic Gaillard/);
   assert.doesNotMatch(next.brief, /Sallanches/);
-  assert.match(next.centerProfile.extras, /58 rue de la Libération/);
+  assert.equal(next.centerProfile.extras, "58 rue de la Libération, 74240, Gaillard");
   assert.equal(next.centerProfile.supportEmail, "gaillard@jfg-clinic.com");
   assert.equal(next.centerProfile.supportPhone, "0450000000");
   assert.match(next.treatmentBriefs[0].brief, /Gaillard/);
