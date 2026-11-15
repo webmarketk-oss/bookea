@@ -15,6 +15,7 @@ import {
   Search,
   ShieldCheck,
   Smartphone,
+  SlidersHorizontal,
   Trash2,
   UserRoundPlus,
 } from "lucide-react";
@@ -1250,6 +1251,17 @@ function CenterCard({
               className="inline-flex h-10 items-center justify-center rounded-xl bg-slate-950 px-4 text-sm font-semibold text-white transition hover:bg-blue-700"
             >
               Ouvrir ce centre
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                saveActiveCenterId(center.id);
+                window.location.href = `/dashboard/seya-crm?reglages=1&center=${encodeURIComponent(center.id)}`;
+              }}
+              className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-violet-200 bg-violet-50 px-4 text-sm font-semibold text-violet-800 transition hover:bg-violet-100"
+            >
+              <SlidersHorizontal className="h-4 w-4" />
+              Réglages Seya
             </button>
             <button
               type="button"

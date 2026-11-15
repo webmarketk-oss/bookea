@@ -25,7 +25,12 @@ import { mutateCenterSettings } from "@/api/seya/settings-write";
 import { withConversationSource } from "@/api/seya/conversation-source";
 import { ficheFromRow, SEYA_FICHE_SELECT } from "@/api/seya/fiche-select";
 import { repairGaillardLaserSettings } from "@/api/seya/gaillard-laser-pricing";
-import { getActiveCenterContext } from "@/lib/center-access";
+import {
+  getActiveCenterContext,
+  loadAccessibleCenters,
+  readActiveCenterId,
+  readStoredAccessibleCenters,
+} from "@/lib/center-access";
 import { sanitizePersonName } from "@/lib/seya-person-name";
 import { createClient } from "@/lib/supabase";
 
@@ -995,11 +1000,44 @@ function assertExpectedCenter(expectedCenterId: string | undefined, actualCenter
   }
 }
 
+async function resolveSeyaCenterContext(centerId?: string) {
+  const requested = String(centerId || readActiveCenterId() || "").trim();
+  if (!requested) {
+    return getActiveCenterContext();
+  }
+  const stored = readStoredAccessibleCenters().find(
+    (center) => center.id === requested,
+  );
+  if (stored) {
+    return {
+      centerId: stored.id,
+      centerName: stored.name,
+      centerSlug: stored.slug,
+    };
+  }
+  try {
+    const found = (await loadAccessibleCenters()).find(
+      (center) => center.id === requested,
+    );
+    if (found) {
+      return {
+        centerId: found.id,
+        centerName: found.name,
+        centerSlug: found.slug,
+      };
+    }
+  } catch {
+    // Le centre demandé reste prioritaire : on n’ouvre pas un autre établissement.
+  }
+  return { centerId: requested, centerName: "le centre", centerSlug: "" };
+}
+
 export async function loadSeyaAgentSettings(options?: {
   includeConversations?: boolean;
+  centerId?: string;
 }) {
   const includeConversations = options?.includeConversations === true;
-  const context = await getActiveCenterContext();
+  const context = await resolveSeyaCenterContext(options?.centerId);
   const localSettings = readLocalSeyaSettings(context.centerId);
   const localConversations = readLocalSeyaConversations(context.centerId);
   const supabase = createClient();

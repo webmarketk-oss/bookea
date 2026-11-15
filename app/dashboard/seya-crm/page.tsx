@@ -1,6 +1,6 @@
 "use client";
 
-import { Bot } from "lucide-react";
+import { Bot, ChevronsUpDown } from "lucide-react";
 import { NotificationsBell } from "@/components/layout/notifications-bell";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { cabins, practitioners } from "@/lib/agenda-data";
@@ -16,7 +16,13 @@ import {
   type CenterDepositLinkSetting,
 } from "@/lib/center-settings";
 import { defaultCenterDayHours, loadCenterHours } from "@/lib/center-hours";
-import { readActiveCenterId } from "@/lib/center-access";
+import {
+  loadAccessibleCenters,
+  loadIsBookeaAdmin,
+  readActiveCenterId,
+  saveActiveCenterId,
+  type AccessibleCenter,
+} from "@/lib/center-access";
 import { todayIso } from "@/lib/crm-stats";
 import {
   addCrmLeadActivity,
@@ -466,6 +472,8 @@ export default function SeyaCrmPage() {
   const [notifyFeedback, setNotifyFeedback] = useState("");
   const [view, setView] = useState<"inbox" | "settings">(readSeyaView);
   const [settingsReady, setSettingsReady] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [adminCenters, setAdminCenters] = useState<AccessibleCenter[]>([]);
 
   function setSeyaView(next: "inbox" | "settings") {
     setView(next);
@@ -527,40 +535,69 @@ export default function SeyaCrmPage() {
     let refreshInFlight = false;
     const loadSeq = ++loadSeqRef.current;
 
-    const savedCenterId = readActiveCenterId();
+    const params = new URLSearchParams(window.location.search);
+    const requestedCenterId = String(
+      params.get("center") || params.get("centerId") || "",
+    ).trim();
+    if (requestedCenterId) {
+      saveActiveCenterId(requestedCenterId);
+      const nextUrl = new URL(window.location.href);
+      nextUrl.searchParams.delete("center");
+      nextUrl.searchParams.delete("centerId");
+      window.history.replaceState(
+        {},
+        "",
+        `${nextUrl.pathname}${nextUrl.search}${nextUrl.hash}`,
+      );
+    }
+    const savedCenterId = requestedCenterId || readActiveCenterId() || "";
     if (savedCenterId) {
       const localConversations = readLocalSeyaConversations(savedCenterId);
+      setCenterId(savedCenterId);
+      settingsCenterIdRef.current = savedCenterId;
       if (localConversations.length > 0) {
-        setCenterId(savedCenterId);
-        settingsCenterIdRef.current = savedCenterId;
         setConversations(localConversations);
         setSelectedConversationId(localConversations[0]?.id ?? null);
       }
     }
+    const openSettings = readSeyaView() === "settings";
+    void loadIsBookeaAdmin()
+      .then(async (allowed) => {
+        if (cancelled) {
+          return;
+        }
+        setIsAdmin(allowed);
+        if (!allowed) {
+          return;
+        }
+        const centers = await loadAccessibleCenters();
+        if (!cancelled) {
+          setAdminCenters(centers);
+        }
+      })
+      .catch(() => undefined);
 
     async function loadInbox() {
       try {
-        // Rangement des fils entre centres : lourd (toute la plateforme), jamais bloquant,
-        // au plus une fois par heure depuis ce navigateur.
-        const REHOME_KEY = "bookea-seya-rehome-at";
-        const lastRehome = Number(window.localStorage.getItem(REHOME_KEY) || 0);
-        if (Date.now() - lastRehome > 60 * 60 * 1000) {
-          window.localStorage.setItem(REHOME_KEY, String(Date.now()));
-          void fetch("/api/seya/rehome", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: "{}",
-          }).catch(() => null);
+        if (!openSettings) {
+          // Rangement des fils entre centres : lourd (toute la plateforme), jamais bloquant,
+          // au plus une fois par heure depuis ce navigateur.
+          const REHOME_KEY = "bookea-seya-rehome-at";
+          const lastRehome = Number(window.localStorage.getItem(REHOME_KEY) || 0);
+          if (Date.now() - lastRehome > 60 * 60 * 1000) {
+            window.localStorage.setItem(REHOME_KEY, String(Date.now()));
+            void fetch("/api/seya/rehome", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: "{}",
+            }).catch(() => null);
+          }
         }
         const seya = await loadSeyaAgentSettings({
           includeConversations: false,
+          centerId: savedCenterId || undefined,
         });
-        const activeId = readActiveCenterId();
-        if (
-          cancelled ||
-          loadSeq !== loadSeqRef.current ||
-          (seya.centerId && activeId && seya.centerId !== activeId)
-        ) {
+        if (cancelled || loadSeq !== loadSeqRef.current) {
           return;
         }
         const storedConversations = seya.conversations?.length
@@ -601,7 +638,11 @@ export default function SeyaCrmPage() {
       } catch {
         if (!cancelled && loadSeq === loadSeqRef.current) {
           setSettingsReady(true);
-          setSummary("Impossible de charger les conversations Seya de ce centre.");
+          setSummary(
+            openSettings
+              ? "Impossible de charger les réglages Seya de ce centre."
+              : "Impossible de charger les conversations Seya de ce centre.",
+          );
         }
       }
     }
@@ -668,12 +709,16 @@ export default function SeyaCrmPage() {
     }
 
     void loadInbox();
-    void loadTasks();
-    const poll = window.setInterval(() => {
-      if (document.visibilityState === "visible") {
-        void refreshConversations();
-      }
-    }, 30000);
+    if (!openSettings) {
+      void loadTasks();
+    }
+    const poll = openSettings
+      ? 0
+      : window.setInterval(() => {
+          if (document.visibilityState === "visible") {
+            void refreshConversations();
+          }
+        }, 30000);
     const refreshIfVisible = () => {
       if (document.visibilityState === "visible") {
         void refreshConversations();
@@ -692,8 +737,10 @@ export default function SeyaCrmPage() {
     };
     window.addEventListener("bookea-center-will-switch", cancelPersistOnSwitch);
     window.addEventListener("bookea-active-center-changed", reloadOnCenterChange);
-    window.addEventListener("focus", refreshConversations);
-    document.addEventListener("visibilitychange", refreshIfVisible);
+    if (!openSettings) {
+      window.addEventListener("focus", refreshConversations);
+      document.addEventListener("visibilitychange", refreshIfVisible);
+    }
     void fetch("/api/seya/whatsapp")
       .then((response) => response.json())
       .then((payload) => {
@@ -719,7 +766,9 @@ export default function SeyaCrmPage() {
 
     return () => {
       cancelled = true;
-      window.clearInterval(poll);
+      if (poll) {
+        window.clearInterval(poll);
+      }
       window.removeEventListener(
         "bookea-center-will-switch",
         cancelPersistOnSwitch,
@@ -1440,9 +1489,51 @@ export default function SeyaCrmPage() {
           </div>
           <div>
             <h2 className="text-base font-semibold">Agent WhatsApp Seya</h2>
-            <p className="mt-1 text-sm font-semibold text-violet-800">
-              Centre : {centerName || "—"}
-            </p>
+            {isAdmin && adminCenters.length > 0 ? (
+              <label className="mt-2 block max-w-xl">
+                <span className="text-xs font-semibold uppercase tracking-wide text-violet-600">
+                  Ouvrir les réglages d’un centre
+                </span>
+                <span className="relative mt-1 block">
+                  <select
+                    value={centerId}
+                    onChange={(event) => {
+                      const nextCenterId = event.target.value;
+                      if (!nextCenterId || nextCenterId === centerId) {
+                        return;
+                      }
+                      window.location.assign(
+                        `/dashboard/seya-crm?reglages=1&center=${encodeURIComponent(nextCenterId)}`,
+                      );
+                    }}
+                    className="h-11 w-full appearance-none rounded-2xl border border-violet-200 bg-white px-3 pr-10 text-sm font-semibold text-slate-950 outline-none focus:border-violet-500"
+                  >
+                    {(centerId &&
+                    !adminCenters.some((center) => center.id === centerId)
+                      ? [
+                          {
+                            id: centerId,
+                            name: centerName || "le centre",
+                            slug: "",
+                            city: "",
+                          },
+                          ...adminCenters,
+                        ]
+                      : adminCenters
+                    ).map((center) => (
+                      <option key={center.id} value={center.id}>
+                        {center.name}
+                      </option>
+                    ))}
+                  </select>
+                  <ChevronsUpDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-violet-400" />
+                </span>
+              </label>
+            ) : (
+              <p className="mt-1 text-sm font-semibold text-violet-800">
+                Centre : {centerName || "—"}
+              </p>
+            )}
             <p className="mt-1 max-w-3xl text-sm font-medium text-slate-500">
               Ces réglages valent uniquement pour ce centre. Off, 99 € ou
               offert ici ne s’appliquent jamais à un autre établissement.
