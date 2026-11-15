@@ -23,6 +23,7 @@ import {
 import { mergeTreatmentBriefLists as mergeTreatmentBriefListsFromPatch } from "@/api/seya/settings-patch";
 import { mutateCenterSettings } from "@/api/seya/settings-write";
 import { withConversationSource } from "@/api/seya/conversation-source";
+import { ficheFromRow, SEYA_FICHE_SELECT } from "@/api/seya/fiche-select";
 import { repairGaillardLaserSettings } from "@/api/seya/gaillard-laser-pricing";
 import { getActiveCenterContext } from "@/lib/center-access";
 import { sanitizePersonName } from "@/lib/seya-person-name";
@@ -1002,13 +1003,54 @@ export async function loadSeyaAgentSettings(options?: {
   const localSettings = readLocalSeyaSettings(context.centerId);
   const localConversations = readLocalSeyaConversations(context.centerId);
   const supabase = createClient();
-  const { data, error } = await supabase
-    .from("centers")
-    .select("settings")
-    .eq("id", context.centerId)
-    .maybeSingle();
 
-  if (error) {
+  let remote: Record<string, unknown> | null = null;
+  try {
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+    const url = new URL(
+      seyaAgentSettingsUrl(),
+      typeof window === "undefined"
+        ? "https://www.bookeai.fr"
+        : window.location.origin,
+    );
+    url.searchParams.set("centerId", context.centerId);
+    const response = await fetch(url.toString(), {
+      credentials: "include",
+      headers: session?.access_token
+        ? { Authorization: `Bearer ${session.access_token}` }
+        : {},
+    });
+    const payload = (await response.json().catch(() => ({}))) as Record<
+      string,
+      unknown
+    >;
+    if (
+      response.ok &&
+      payload.ok === true &&
+      payload.empty !== true &&
+      payload.settings &&
+      Object.keys(asRecord(payload.settings)).length > 0
+    ) {
+      remote = asRecord(payload.settings);
+    }
+  } catch {
+    remote = null;
+  }
+
+  if (!remote) {
+    const { data, error } = await supabase
+      .from("centers")
+      .select(SEYA_FICHE_SELECT)
+      .eq("id", context.centerId)
+      .maybeSingle();
+    if (!error) {
+      remote = ficheFromRow(data);
+    }
+  }
+
+  if (!remote) {
     return {
       centerId: context.centerId,
       centerName: context.centerName,
@@ -1017,11 +1059,8 @@ export async function loadSeyaAgentSettings(options?: {
     };
   }
 
-  const remote = asRecord(asRecord(data?.settings).seya);
-  delete remote.conversations;
-  const hasRemote = Boolean(asRecord(data?.settings).seya);
   let settings = bindSeyaSettingsToCenter(
-    hasRemote ? (remote as Partial<SeyaAgentSettings>) : null,
+    remote as Partial<SeyaAgentSettings>,
     localSettings,
   );
   const repaired = repairGaillardLaserSettings(

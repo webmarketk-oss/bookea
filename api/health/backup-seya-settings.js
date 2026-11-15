@@ -1,5 +1,6 @@
 const { createClient } = require("@supabase/supabase-js");
 const { withConversationSource } = require("../seya/conversation-source");
+const { loadSeyaFicheColumns } = require("../seya/fiche-select");
 
 module.exports.config = { maxDuration: 60 };
 
@@ -30,11 +31,45 @@ module.exports = async function handler(req, res) {
   }
 
   const includeConversations = firstQuery(req.query?.conversations) === "1";
+  const slug = firstQuery(req.query?.slug).trim();
+  const light = firstQuery(req.query?.light) === "1" || Boolean(slug);
 
   try {
     const supabase = createClient(url, key, {
       auth: { persistSession: false, autoRefreshToken: false },
     });
+    if (light) {
+      let query = supabase.from("centers").select("id,name,slug");
+      if (slug) {
+        query = query.eq("slug", slug);
+      }
+      const { data: centers, error } = await query.order("name", { ascending: true });
+      if (error) {
+        throw new Error(error.message);
+      }
+      const results = [];
+      for (const center of centers || []) {
+        const seya = (await loadSeyaFicheColumns(supabase, center.id)) || {};
+        const briefs = Array.isArray(seya.treatmentBriefs)
+          ? seya.treatmentBriefs.map((brief) => String(brief?.name || "").trim()).filter(Boolean)
+          : [];
+        results.push({
+          id: center.id,
+          name: center.name,
+          slug: center.slug,
+          offerMaps: Array.isArray(seya.offerMaps) ? seya.offerMaps.length : 0,
+          briefLen: String(seya.brief || "").length,
+          profile: seya.centerProfile || {},
+          briefs,
+        });
+      }
+      return res.status(200).json({
+        ok: true,
+        light: true,
+        centerCount: results.length,
+        centers: results,
+      });
+    }
     const { data: centers, error } = await supabase
       .from("centers")
       .select("id,name,slug,settings")

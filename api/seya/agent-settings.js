@@ -7,6 +7,7 @@ const { repairGaillardLaserSettings } = require("./gaillard-laser-pricing");
 const { applySettingsPatch } = require("./settings-patch");
 const { mutateCenterSettings } = require("./settings-write");
 const { staffCanUseCenter } = require("./_staff-auth");
+const { loadSeyaFicheColumns } = require("./fiche-select");
 
 const ALLOWED_ORIGINS = new Set([
   "https://www.bookeai.fr",
@@ -210,12 +211,23 @@ async function loadSeyaFiche(supabase, centerId) {
   if (rows && rows[0]) {
     return asRecord(rows[0].seya);
   }
-  return null;
+  try {
+    return await loadSeyaFicheColumns(supabase, centerId);
+  } catch (error) {
+    console.error("[seya/agent-settings] fiche columns", error instanceof Error ? error.message : error);
+    return null;
+  }
 }
 
 async function saveSeyaFiche(supabase, centerId, seya) {
   const clean = asRecord(seya);
   delete clean.conversations;
+  if (Array.isArray(clean.treatmentBriefs) && clean.treatmentBriefs.length === 0) {
+    delete clean.treatmentBriefs;
+  }
+  if (Array.isArray(clean.offerMaps) && clean.offerMaps.length === 0) {
+    delete clean.offerMaps;
+  }
   const rpc = await supabase.rpc("save_center_seya_settings", {
     p_center_id: centerId,
     p_seya: clean,
@@ -276,8 +288,54 @@ function createAgentSettingsHandler({
     if (req.method === "OPTIONS") {
       return res.status(204).end();
     }
+    if (req.method === "GET") {
+      const centerId = String(
+        (Array.isArray(req.query?.centerId) ? req.query.centerId[0] : req.query?.centerId) ||
+          "",
+      ).trim();
+      if (!centerId) {
+        return res.status(400).json({ ok: false, error: "Centre manquant." });
+      }
+      try {
+        const supabase = createSupabase();
+        if (!(await staffCanUseCenter(supabase, req, centerId))) {
+          return res.status(401).json({
+            ok: false,
+            error: "Connexion requise pour lire les réglages de ce centre.",
+          });
+        }
+        const { data: center, error: centerError } = await supabase
+          .from("centers")
+          .select("id,name,public_slug")
+          .eq("id", centerId)
+          .maybeSingle();
+        if (centerError) {
+          throw new Error(centerError.message);
+        }
+        if (!center?.id) {
+          return res.status(404).json({ ok: false, error: "Centre introuvable." });
+        }
+        await ensureSchema();
+        const seya =
+          (await loadSeyaFiche(supabase, center.id)) ||
+          (await loadSeyaFicheColumns(supabase, center.id));
+        return res.status(200).json({
+          ok: true,
+          centerId: center.id,
+          centerName: center.name || "",
+          settings: seya || {},
+          empty: !seya,
+        });
+      } catch (error) {
+        console.error("[seya/agent-settings] get", error instanceof Error ? error.message : error);
+        return res.status(500).json({
+          ok: false,
+          error: "Impossible de lire les réglages pour le moment.",
+        });
+      }
+    }
     if (req.method !== "POST") {
-      res.setHeader("Allow", "POST, OPTIONS");
+      res.setHeader("Allow", "GET, POST, OPTIONS");
       return res.status(405).json({ ok: false, error: "method_not_allowed" });
     }
 

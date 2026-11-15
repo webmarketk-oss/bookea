@@ -179,6 +179,24 @@ test("sans jeton, l’enregistrement est refusé", async () => {
   assert.equal(supabase.db.settingsWrites, 0);
 });
 
+test("un patch de soins vide ne remplace pas les fiches déjà en base", () => {
+  const next = applyAgentSettings(
+    {
+      seya: {
+        brief: "Consignes",
+        treatmentBriefs: [{ name: "Hydrafacial", brief: "Visage" }],
+      },
+    },
+    {
+      settings: { treatmentBriefs: [] },
+      changedKeys: ["treatmentBriefs"],
+    },
+    { id: CENTER, name: "Laxou" },
+  );
+  assert.equal(next.seya.treatmentBriefs.length, 1);
+  assert.equal(next.seya.treatmentBriefs[0].name, "Hydrafacial");
+});
+
 test("un admin Bookea enregistre un soin via le rôle service", async () => {
   const supabase = fakeDb({
     settings: {
