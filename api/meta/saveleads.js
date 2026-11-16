@@ -226,6 +226,22 @@ module.exports = async function handler(req, res) {
   }
 };
 
+function parseJsonLenient(text) {
+  try {
+    return JSON.parse(text);
+  } catch {
+    const repaired = String(text || "").replace(
+      /:\s*(OUI\/NON|oui\/non|OUI|NON|oui|non)\s*([,}])/g,
+      ':"$1"$2',
+    );
+    try {
+      return JSON.parse(repaired);
+    } catch {
+      return null;
+    }
+  }
+}
+
 function parsePayload(body) {
   if (!body) {
     return {};
@@ -243,7 +259,15 @@ function parsePayload(body) {
     }
 
     if (text.startsWith("{") || text.startsWith("[")) {
-      return JSON.parse(text);
+      const parsed = parseJsonLenient(text);
+      if (parsed) {
+        return parsed;
+      }
+      const loose = extractLooseContact(text);
+      if (loose.phone || loose.email) {
+        return loose;
+      }
+      return {};
     }
 
     const loose = extractLooseContact(text);
@@ -614,26 +638,7 @@ function mapIncomingLead(payload, query) {
       "number",
       "numero_de_telephone",
     ]),
-    postalCode:
-      pickUseful(fields, [
-        "postal_code",
-        "post_code",
-        "postcode",
-        "code_postal",
-        "zip",
-        "zipcode",
-        "cp",
-      ]) ||
-      peelPostalCode(
-        pickUseful(fields, [
-          "commentaire",
-          "comment",
-          "note",
-          "notes",
-          "message",
-          "infos",
-        ]),
-      ).postalCode,
+    postalCode: pickPostalCode(fields),
     comment: pickLeadComment(fields),
     treatment,
     campaign:
@@ -1614,7 +1619,9 @@ function pick(fields, names) {
 }
 
 function pickLeadValue(fields, names) {
-  const keys = Object.keys(fields || {}).filter((key) => !isAffiliateField(key));
+  const keys = Object.keys(fields || {}).filter(
+    (key) => !isAffiliateField(key) && !isPhysicalAddressKey(key),
+  );
   const preferred = keys.filter((key) => /(?:^|_)(member|contact)(?:_|$)/.test(key));
   const blockedNames = affiliateNamesFrom(fields);
 
@@ -1695,6 +1702,42 @@ function pickUseful(fields, names) {
   }
 
   return "";
+}
+
+function isPhysicalAddressKey(key) {
+  const name = String(key || "");
+  if (/(email|mail|e_mail)/.test(name)) {
+    return false;
+  }
+  return /(^|_)(adresse|address|street|rue|zipcode|postcode|country)(_|$)/.test(name);
+}
+
+function pickPostalCode(fields) {
+  const code =
+    pickUseful(fields, [
+      "postal_code",
+      "post_code",
+      "postcode",
+      "code_postal",
+      "zip",
+      "zipcode",
+      "cp",
+    ]) ||
+    peelPostalCode(
+      pickUseful(fields, [
+        "commentaire",
+        "comment",
+        "note",
+        "notes",
+        "message",
+        "infos",
+      ]),
+    ).postalCode;
+  const text = String(code || "").trim();
+  if (!text || looksLikeConsentValue(text)) {
+    return "";
+  }
+  return text;
 }
 
 function peelPostalCode(value) {
@@ -1790,7 +1833,10 @@ function pickLeadComment(fields) {
   const peeled = peelPostalCode(direct);
   const zoneSource = zone || peeled.text;
   const zoneText = looksLikeConsentValue(zoneSource) ? "" : humanizeLeadText(zoneSource);
-  const code = postalCode || peeled.postalCode;
+  const code =
+    looksLikeConsentValue(postalCode || peeled.postalCode)
+      ? ""
+      : postalCode || peeled.postalCode;
   const consent = pickConsentComment(fields);
   const parts = [];
   if (zoneText) {

@@ -1,7 +1,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 
-const { mapIncomingLead } = require("./saveleads");
+const { mapIncomingLead, payloadFromBody } = require("./saveleads");
 
 test("la campagne prend le champ offre plutôt que Meta Lead Ads", () => {
   const mapped = mapIncomingLead({
@@ -432,4 +432,23 @@ test("Systeme.io Bruz : le champ Adresse OUI/NON remonte en consentement, pas en
     adresse: "12 rue de Rennes, 35170 Bruz",
   });
   assert.doesNotMatch(realAddress.comment, /Consentement/i);
+
+  const zipNoise = mapIncomingLead({
+    first_name: "Léa",
+    phone: "0611111111",
+    email: "lea@test.fr",
+    adresse: { address: "OUI", zip: "OUI/NON", country: "France" },
+  });
+  assert.equal(zipNoise.postalCode || "", "");
+  assert.match(zipNoise.comment, /Consentement téléphone : oui/i);
+  assert.doesNotMatch(zipNoise.comment, /Code postal/i);
+
+  const broken = mapIncomingLead(
+    payloadFromBody(
+      '{"first_name":"Léa","phone":"0611111111","email":"lea@test.fr","adresse": OUI/NON}',
+    ),
+  );
+  assert.equal(broken.firstName, "Léa");
+  assert.match(broken.phone.replace(/\D/g, ""), /611111111/);
+  assert.match(broken.comment, /Consentement/i);
 });
