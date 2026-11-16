@@ -2891,7 +2891,7 @@ function leadReplyCore(conversation, text, seya, slots, extras = {}) {
 }
 
 const GAILLARD_MINCEUR_OBJECTIF =
-  /perdre|perde|perd\b|perte|maigrir|mincir|kilos?|\bkg\b|\bcm\b|centimetre|tour de taille|cellulite|peau d'orange|graisse|gras\b|bourrelet|capiton|affiner|tonifier|raffermir|fermete|silhouette|gonfl|ballonn|degonfl|ventre plat|\bplat\b/;
+  /perdre|perde|perd\b|perte|maigrir|mincir|kilos?|\bkg\b|\bcm\b|centimetre|tour de taille|cellulite|peau d'orange|graisse|gras\b|bourrelet|capiton|affiner|tonifier|raffermir|fermete|silhouette|gonfl|ballonn|degonfl|ventre plat|\bplat\b|corrig|aggrav|plus difficile a traiter|probleme au niveau/;
 const GAILLARD_MINCEUR_ZONE =
   /ventre|cuisse|hanche|fesse|bras|culotte de cheval|poignee d'amour|dos|jambes?/;
 const GAILLARD_VISAGE_CONCERN =
@@ -3140,10 +3140,15 @@ function gaillardLeadReply(conversation, text, seya, slots, extras = {}) {
     (gaillard.lastSeyaOfferedCallback(base) ||
       Boolean(base.qualification?.pathOffered) ||
       gaillard.acceptedCallbackInThread(base));
+  const spoken = normalize(text);
+  const minceurZoneWithoutFace =
+    GAILLARD_MINCEUR_ZONE.test(spoken) &&
+    !GAILLARD_VISAGE_CONCERN.test(spoken) &&
+    !/epil|laser|\bpoil|aisselle|maillot/.test(spoken);
   const statesHerNeed =
-    (GAILLARD_MINCEUR_ZONE.test(normalize(text)) &&
-      (GAILLARD_MINCEUR_OBJECTIF.test(normalize(text)) || /\d/.test(normalize(text)))) ||
-    GAILLARD_VISAGE_CONCERN.test(normalize(text));
+    (GAILLARD_MINCEUR_ZONE.test(spoken) &&
+      (GAILLARD_MINCEUR_OBJECTIF.test(spoken) || minceurZoneWithoutFace)) ||
+    GAILLARD_VISAGE_CONCERN.test(spoken);
   const asking =
     !statesHerNeed &&
     !acceptsOfferNow &&
@@ -3153,7 +3158,7 @@ function gaillardLeadReply(conversation, text, seya, slots, extras = {}) {
       gaillard.asksTechnology(text) ||
       gaillard.asksProcess(text));
   const thread = understandThread(base, asking ? "" : text);
-  const merged = asking
+  let merged = asking
     ? { ...(base.qualification || {}) }
     : {
         ...(base.qualification || {}),
@@ -3167,12 +3172,19 @@ function gaillardLeadReply(conversation, text, seya, slots, extras = {}) {
         distance: base.qualification?.distance || "",
       };
   const familyText = asking ? "" : text;
-  const family =
+  let family =
     resolveActiveFamily(seya, { ...base, qualification: merged }, familyText) ||
     inferCareFamily(`${merged.need || ""} ${base.treatment || ""} ${familyText}`) ||
     base.teamNotes?.family ||
     (asking ? inferCareFamily(text) : "") ||
     "";
+  // Offre visage + besoin cuisses/ventre : on suit ce qu’elle vient de dire, pas l’axe d’origine.
+  if (!asking && minceurZoneWithoutFace && family !== "epilation") {
+    family = "minceur";
+    if (inferCareFamily(merged.need) !== "minceur") {
+      merged = { ...merged, need: "Soin minceur" };
+    }
+  }
   const topicFamily = (asking && inferCareFamily(text)) || family;
   const bookingState = base.bookingState || emptyBookingState(extras.centerId || base.centerId);
   const handedOff = Boolean(base.teamNotes?.handedOffAt);
@@ -3551,6 +3563,16 @@ function gaillardLeadReply(conversation, text, seya, slots, extras = {}) {
       } else {
         qualification.detail = said;
       }
+    }
+    if (
+      family === "minceur" &&
+      !qualification.detail &&
+      !mentionsAvailability &&
+      gaillard.isAnswerLike(text) &&
+      (gaillardMinceurZonesKnown(qualification, [normalize(text)]) ||
+        gaillardMinceurObjectifKnown(qualification, [normalize(text)]))
+    ) {
+      qualification.detail = said;
     }
     // Réponse à « quel est votre objectif » : on la garde telle quelle, sans redemander.
     // Exception : curiosité (« découvrir / voir le résultat ») → on repose avec des choix concrets.

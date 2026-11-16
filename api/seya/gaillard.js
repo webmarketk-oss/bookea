@@ -1195,7 +1195,7 @@ function threadAlreadyHasNeed(conversation) {
     .filter((item) => item.author === "lead")
     .map((item) => normalize(item.text))
     .join(" ");
-  return /fermete|rafferm|ovale|bajoue|jawline|ride|minceur|ventre|graisse|epil|laser|visage|peau|plis du sourire/.test(
+  return /fermete|rafferm|ovale|bajoue|jawline|ride|minceur|ventre|graisse|cuisse|hanche|fesse|epil|laser|visage|peau|plis du sourire/.test(
     blob,
   );
 }

@@ -259,6 +259,55 @@ test("Gaillard visage live : offre Bouchra, fiche sans appareils, relance CRM ig
   assert.match(relance, /rappeler|rappellera/i);
 });
 
+test("Gaillard : cuisses après une offre visage, elle reprend le besoin et ne redemande pas l’objectif", async () => {
+  const settings = {
+    ...seya,
+    offerMaps: [
+      {
+        label: "Bilan ultra-personnalisé + Soin découverte OFFERTS",
+        match: "Visage",
+      },
+    ],
+    treatmentBriefs: [
+      {
+        name: "Visage",
+        title: "Bilan ultra-personnalisé + Soin découverte OFFERTS",
+        brief:
+          "Ta mission est uniquement de qualifier le prospect pour l’offre visage Lift4, puis de transmettre à l’équipe.",
+      },
+      { name: "Soin minceur", brief: "Cryo, Mag, pressothérapie." },
+    ],
+  };
+  let conversation = open(
+    "Bilan ultra-personnalisé + Soin découverte OFFERTS",
+    GAILLARD,
+    settings,
+  );
+  conversation = {
+    ...conversation,
+    campaign: "Soin minceur",
+    messages: [
+      ...conversation.messages,
+      {
+        author: "seya",
+        text: "Bonjour Elena 😊 C’est Seya AI de JFG Clinic Gaillard. Je reviens vers vous au sujet de notre offre : bilan ultra-personnalisé + Soin découverte OFFERTS ✨ Quel jour et à quelle heure êtes-vous disponible ? Une opératrice vous rappellera à ce moment-là 📞",
+      },
+    ],
+  };
+  conversation = await say(
+    conversation,
+    "J'ai 24 ans et je me sens bien dans mon corps. Je souhaiterais simplement commencer à corriger ce problème au niveau des cuisses avant qu'il ne s'aggrave et qu'il ne devienne plus difficile à traiter.",
+    GAILLARD,
+    settings,
+  );
+  const reply = lastSeya(conversation);
+  assert.match(reply, /cuisses/i);
+  assert.match(reply, /déjà testé/i);
+  assert.doesNotMatch(reply, /préoccupe|peau|quel est votre objectif/i);
+  assert.doesNotMatch(reply, NO_PLANNING);
+  assert.equal(conversation.qualification?.need, "Soin minceur");
+});
+
 test("Gaillard visage : un besoin seul est repris, sans redemander la préoccupation", async () => {
   let conversation = open("Soin visage");
   conversation = await say(conversation, "Bonjour, j’aimerais raffermir l’ovale de mon visage");
