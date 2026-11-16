@@ -1706,6 +1706,55 @@ function peelPostalCode(value) {
   return { text: String(match[1]).trim(), postalCode: match[2] };
 }
 
+function consentNeedle(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ");
+}
+
+/** OUI / NON / OUI/NON : le champ Adresse Systeme.io sert au consentement, pas à une rue. */
+function looksLikeConsentValue(value) {
+  const needle = consentNeedle(value);
+  if (!needle || needle.length > 40) {
+    return false;
+  }
+  return /^(oui|non|yes|no|ok)([ /_.-]*(oui|non|yes|no))?$/.test(needle);
+}
+
+function consentAnswerLabel(value) {
+  const needle = consentNeedle(value);
+  if (/^oui\s*\/\s*non$/.test(needle) || /^oui[ /_.-]+non$/.test(needle)) {
+    return "OUI/NON";
+  }
+  if (/^(oui|yes|ok)$/.test(needle)) {
+    return "oui";
+  }
+  if (/^(non|no)$/.test(needle)) {
+    return "non";
+  }
+  return String(value || "").trim();
+}
+
+function pickConsentComment(fields) {
+  for (const [key, value] of Object.entries(fields || {})) {
+    if (!looksLikeConsentValue(value)) {
+      continue;
+    }
+    if (
+      !/(^|_)(adresse|address|street|rue|consent|opt_?in|recontact|accepte)(_|$)/.test(
+        String(key || ""),
+      )
+    ) {
+      continue;
+    }
+    return `Consentement téléphone : ${consentAnswerLabel(value)}`;
+  }
+  return "";
+}
+
 function humanizeLeadText(value) {
   return String(value || "")
     .replace(/_/g, " ")
@@ -1739,14 +1788,19 @@ function pickLeadComment(fields) {
     "cp",
   ]);
   const peeled = peelPostalCode(direct);
-  const zoneText = humanizeLeadText(zone || peeled.text);
+  const zoneSource = zone || peeled.text;
+  const zoneText = looksLikeConsentValue(zoneSource) ? "" : humanizeLeadText(zoneSource);
   const code = postalCode || peeled.postalCode;
+  const consent = pickConsentComment(fields);
   const parts = [];
   if (zoneText) {
     parts.push(/^zone\s*:/i.test(zoneText) ? zoneText : `Zone : ${zoneText}`);
   }
   if (code && !parts.join(" ").includes(code)) {
     parts.push(`Code postal : ${code}`);
+  }
+  if (consent) {
+    parts.push(consent);
   }
   return parts.join("\n").trim();
 }

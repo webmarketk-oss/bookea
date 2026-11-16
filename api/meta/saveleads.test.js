@@ -389,3 +389,47 @@ test("SaveMyLeads : code postal et zone remplissent le commentaire", () => {
   assert.match(mapped.comment, /64320/);
   assert.equal(mapped.postalCode, "64320");
 });
+
+test("Systeme.io Bruz : le champ Adresse OUI/NON remonte en consentement, pas en adresse", () => {
+  const oui = mapIncomingLead({
+    contact: {
+      email: "lea.martin@example.fr",
+      sourceURL: "https://jfg-bruz.systeme.io/optin",
+      fields: [
+        { slug: "first_name", value: "Léa" },
+        { slug: "surname", value: "Martin" },
+        { slug: "phone_number", value: "0611111111" },
+        { slug: "adresse", value: "OUI" },
+      ],
+    },
+  });
+  assert.match(oui.comment, /Consentement téléphone : oui/i);
+  assert.doesNotMatch(oui.comment, /Zone :/i);
+  assert.equal(oui.postalCode || "", "");
+
+  const nested = mapIncomingLead({
+    contact: {
+      email: "lea.martin@example.fr",
+      fields: [
+        { slug: "first_name", value: "Léa" },
+        { slug: "phone_number", value: "0611111111" },
+        { slug: "adresse", value: { address: "NON", city: "", zip: "" } },
+      ],
+    },
+  });
+  assert.match(nested.comment, /Consentement téléphone : non/i);
+
+  const placeholder = mapIncomingLead({
+    first_name: "Léa",
+    phone: "0611111111",
+    adresse: "OUI/NON",
+  });
+  assert.match(placeholder.comment, /Consentement téléphone : OUI\/NON/);
+
+  const realAddress = mapIncomingLead({
+    first_name: "Léa",
+    phone: "0611111111",
+    adresse: "12 rue de Rennes, 35170 Bruz",
+  });
+  assert.doesNotMatch(realAddress.comment, /Consentement/i);
+});
