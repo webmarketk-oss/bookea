@@ -1,20 +1,26 @@
-import { normalizeLeadStatus } from "./lead-statuses.ts";
-
 /**
  * Statuts encore dans le tunnel RDV / acompte.
  * Tout ce qui vient après « Acompte reçu » (devis, vendu, no-show, annulation…)
  * est hors calcul du % acompte validé.
  */
 const DEPOSIT_FUNNEL_STATUSES = new Set([
-  "RDV pris",
-  "RDV confirmé",
-  "RDV programmé",
-  "RDV fixé",
-  "Acompte envoyé",
-  "Acompte en attente",
-  "Acompte reçu",
-  "Acompte validé",
+  "rdv pris",
+  "rdv confirme",
+  "rdv programme",
+  "rdv fixe",
+  "acompte envoye",
+  "acompte en attente",
+  "acompte recu",
+  "acompte valide",
 ]);
+
+function foldStatus(value?: string | null) {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
+}
 
 function ratio(value: number, total: number) {
   if (total === 0) {
@@ -24,26 +30,12 @@ function ratio(value: number, total: number) {
 }
 
 export function isDepositFunnelStatus(status?: string | null) {
-  const raw = String(status || "").trim();
-  if (DEPOSIT_FUNNEL_STATUSES.has(raw)) {
-    return true;
-  }
-  const normalized = normalizeLeadStatus(raw);
-  return (
-    normalized === "RDV pris" ||
-    normalized === "RDV confirmé" ||
-    normalized === "Acompte envoyé" ||
-    normalized === "Acompte en attente" ||
-    normalized === "Acompte reçu"
-  );
+  return DEPOSIT_FUNNEL_STATUSES.has(foldStatus(status));
 }
 
 export function isValidatedDepositStatus(status?: string | null) {
-  const raw = String(status || "").trim();
-  if (raw === "Acompte reçu" || raw === "Acompte validé") {
-    return true;
-  }
-  return normalizeLeadStatus(raw) === "Acompte reçu";
+  const folded = foldStatus(status);
+  return folded === "acompte recu" || folded === "acompte valide";
 }
 
 /** Acomptes reçus / RDV encore ouverts, jusqu’à acompte reçu uniquement. */
