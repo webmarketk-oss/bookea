@@ -10,6 +10,7 @@ import {
   getLeadRdvTakenDates,
   isRdvBookedStatus,
 } from "@/lib/crm-stats";
+import { validatedDepositRate } from "@/lib/kpi-deposit-rate";
 import {
   countByInscriptionOutcome,
   inscriptionVisitRates,
@@ -93,12 +94,8 @@ export default function KPIDashboard({ leads }: KPIDashboardProps) {
   const isInPeriod = (date: string) =>
     isDateInKpiPeriod(parseDate(date), period, customStartDate, customEndDate);
   const totalProspects = periodLeads.length;
-  const rdvCount = leads.filter((lead) => {
-    if (getLeadRdvTakenDates(lead).some(isInPeriod)) {
-      return true;
-    }
-    return isEverBookedLead(lead) && periodLeads.includes(lead);
-  }).length;
+  const rdvLeads = leadsWithRdvInPeriod(leads, periodLeads, isInPeriod);
+  const rdvCount = rdvLeads.length;
   const arrivedOutcomes = periodLeads.map((lead) => ({
     outcomes: getLeadOutcomes(lead).map((item) => item.outcome),
   }));
@@ -364,13 +361,15 @@ export default function KPIDashboard({ leads }: KPIDashboardProps) {
               Taux & performances
             </h3>
             <p className="mb-5 mt-1 text-sm font-medium text-slate-500">
-              Transformation et présentiel suivent la date d’inscription du prospect.
+              Transformation et présentiel suivent la date d’inscription. L’acompte
+              validé = acomptes reçus / RDV encore ouverts, jusqu’à acompte reçu.
+              Devis, vendu, no-show, annulation : hors calcul.
             </p>
             <div className="grid divide-y divide-slate-100 sm:grid-cols-2 sm:divide-x sm:divide-y-0 xl:grid-cols-3">
               <Rate label="Taux de transformation" value={conversionRate} color="text-emerald-600" />
               <Rate label="Taux de présentiel" value={attendanceRate} color="text-cyan-600" />
               <Rate label="Taux de prise RDV" value={rdvRate} color="text-blue-600" />
-              <Rate label="% prise d'acompte" value={depositRate} color="text-green-600" />
+              <Rate label="% acompte validé" value={depositRate} color="text-green-600" />
               <Rate label="% leads rouge" value={redRate} color="text-red-600" />
               <Rate label="Taux hors zone" value={outOfZoneRate} color="text-rose-600" />
               <Rate label="% reste à traiter" value={remainingRate} color="text-violet-600" />
@@ -529,7 +528,9 @@ export default function KPIDashboard({ leads }: KPIDashboardProps) {
               Taux par axe
             </h3>
             <p className="mt-1 text-sm font-medium text-slate-500">
-              Les mêmes taux que le bloc du haut. Transformation et présentiel suivent la date d’inscription. La ligne Global est le centre entier, les autres lignes un seul axe.
+              Les mêmes taux que le bloc du haut. Transformation et présentiel
+              suivent la date d’inscription. L’acompte s’arrête à acompte reçu. La
+              ligne Global est le centre entier, les autres lignes un seul axe.
             </p>
           </div>
           <div className="mt-5 overflow-x-auto rounded-xl border border-slate-100">
@@ -1203,38 +1204,40 @@ type PerformanceRates = {
   remaining: number;
 };
 
+function leadsWithRdvInPeriod(
+  allRows: Lead[],
+  periodRows: Lead[],
+  isInPeriod: (date: string) => boolean,
+) {
+  return allRows.filter((lead) => {
+    if (getLeadRdvTakenDates(lead).some(isInPeriod)) {
+      return true;
+    }
+    return isEverBookedLead(lead) && periodRows.includes(lead);
+  });
+}
+
 function performanceRates(
   periodRows: Lead[],
   allRows: Lead[],
   isInPeriod: (date: string) => boolean,
 ): PerformanceRates {
   const totalProspects = periodRows.length;
-  const rdvCount = allRows.filter((lead) => {
-    if (getLeadRdvTakenDates(lead).some(isInPeriod)) {
-      return true;
-    }
-    return isEverBookedLead(lead) && periodRows.includes(lead);
-  }).length;
-  const soldOnArrival = countByInscriptionOutcome(
-    periodRows.map((lead) => ({
-      outcomes: getLeadOutcomes(lead).map((item) => item.outcome),
-    })),
-    "Vendu",
-  );
+  const rdvLeads = leadsWithRdvInPeriod(allRows, periodRows, isInPeriod);
+  const rdvCount = rdvLeads.length;
   const visit = inscriptionVisitRates(
     periodRows.map((lead) => ({
       outcomes: getLeadOutcomes(lead).map((item) => item.outcome),
       dealAmount: Number(lead.dealAmount) || 0,
     })),
   );
-  const depositCount = countByStatus(periodRows, ["Acompte reçu", "Acompte validé"]);
 
   return {
     prospects: totalProspects,
     conversion: visit.conversion,
     attendance: visit.attendance,
     rdv: Math.min(100, ratio(rdvCount, totalProspects)),
-    deposit: ratio(depositCount, Math.max(soldOnArrival + rdvCount, 1)),
+    deposit: validatedDepositRate(rdvLeads),
     red: ratio(countByStatus(periodRows, lostStatuses), totalProspects),
     outOfZone: ratio(countByStatus(periodRows, ["Hors zone"]), totalProspects),
     remaining: ratio(countByStatus(periodRows, openToTreatStatuses), totalProspects),
