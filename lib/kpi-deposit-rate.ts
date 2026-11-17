@@ -1,13 +1,9 @@
 /**
- * Statuts encore dans le tunnel RDV / acompte.
- * Tout ce qui vient après « Acompte reçu » (devis, vendu, no-show, annulation…)
- * est hors calcul du % acompte validé.
+ * % acompte = reçus / (reçus + en attente + envoyés).
+ * Un RDV sans acompte, un devis, une vente, un no-show ou une annulation
+ * ne rentrent pas dans le calcul.
  */
-const DEPOSIT_FUNNEL_STATUSES = new Set([
-  "rdv pris",
-  "rdv confirme",
-  "rdv programme",
-  "rdv fixe",
+const DEPOSIT_RATE_STATUSES = new Set([
   "acompte envoye",
   "acompte en attente",
   "acompte recu",
@@ -30,7 +26,7 @@ function ratio(value: number, total: number) {
 }
 
 export function isDepositFunnelStatus(status?: string | null) {
-  return DEPOSIT_FUNNEL_STATUSES.has(foldStatus(status));
+  return DEPOSIT_RATE_STATUSES.has(foldStatus(status));
 }
 
 export function isValidatedDepositStatus(status?: string | null) {
@@ -38,11 +34,11 @@ export function isValidatedDepositStatus(status?: string | null) {
   return folded === "acompte recu" || folded === "acompte valide";
 }
 
-/** Acomptes reçus / RDV encore ouverts, jusqu’à acompte reçu uniquement. */
+/** Acomptes reçus / (reçus + en attente + envoyés). */
 export function validatedDepositRate(leads: Array<{ status: string }>) {
-  const funnel = leads.filter((lead) => isDepositFunnelStatus(lead.status));
-  const validated = funnel.filter((lead) =>
+  const counted = leads.filter((lead) => isDepositFunnelStatus(lead.status));
+  const received = counted.filter((lead) =>
     isValidatedDepositStatus(lead.status),
   );
-  return ratio(validated.length, funnel.length);
+  return ratio(received.length, counted.length);
 }

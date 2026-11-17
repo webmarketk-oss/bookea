@@ -362,8 +362,8 @@ export default function KPIDashboard({ leads }: KPIDashboardProps) {
             </h3>
             <p className="mb-5 mt-1 text-sm font-medium text-slate-500">
               Transformation et présentiel suivent la date d’inscription. L’acompte
-              validé = acomptes reçus / RDV encore ouverts, jusqu’à acompte reçu.
-              Devis, vendu, no-show, annulation : hors calcul.
+              validé = reçus / (reçus + en attente + envoyés). Un RDV sans acompte
+              ne compte pas.
             </p>
             <div className="grid divide-y divide-slate-100 sm:grid-cols-2 sm:divide-x sm:divide-y-0 xl:grid-cols-3">
               <Rate label="Taux de transformation" value={conversionRate} color="text-emerald-600" />
@@ -528,9 +528,9 @@ export default function KPIDashboard({ leads }: KPIDashboardProps) {
               Taux par axe
             </h3>
             <p className="mt-1 text-sm font-medium text-slate-500">
-              Les mêmes taux que le bloc du haut. Transformation et présentiel
-              suivent la date d’inscription. L’acompte s’arrête à acompte reçu. La
-              ligne Global est le centre entier, les autres lignes un seul axe.
+              Les mêmes taux que le bloc du haut, calculés sur les prospects de
+              chaque axe. L’acompte = reçus / (reçus + en attente + envoyés) de
+              cet axe. La ligne Global est le centre entier.
             </p>
           </div>
           <div className="mt-5 overflow-x-auto rounded-xl border border-slate-100">

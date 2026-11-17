@@ -38,9 +38,24 @@ describe("% acompte validé", () => {
   it("traite Acompte validé comme Acompte reçu", () => {
     const leads = [
       { status: "Acompte validé" },
-      { status: "RDV confirmé" },
+      { status: "Acompte envoyé" },
     ];
 
     assert.equal(validatedDepositRate(leads), 50);
+  });
+
+  it("reçu / (reçu + en attente + envoyé), sans les RDV ni les devis", () => {
+    const leads = [
+      { status: "Acompte reçu" },
+      { status: "Acompte en attente" },
+      { status: "Acompte envoyé" },
+      { status: "Acompte envoyé" },
+      { status: "RDV pris" },
+      { status: "Devis" },
+    ];
+
+    assert.equal(validatedDepositRate(leads), 25);
+    assert.equal(isDepositFunnelStatus("RDV pris"), false);
+    assert.equal(isDepositFunnelStatus("Acompte envoyé"), true);
   });
 });
