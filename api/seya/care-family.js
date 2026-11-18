@@ -365,6 +365,43 @@ function compactOfferKey(value) {
     .replace(/[^a-z0-9]+/g, "");
 }
 
+function familyDefaultKeys(family) {
+  if (family === "minceur") {
+    return ["soin minceur", "minceur"];
+  }
+  if (family === "visage") {
+    return ["soin visage", "visage"];
+  }
+  if (family === "epilation") {
+    return ["epilation definitive", "epilation laser", "epilation", "laser"];
+  }
+  return [];
+}
+
+function offerMapRow(item) {
+  return {
+    match: String(item?.match || "").trim(),
+    label: String(item?.label || "").trim(),
+    template: String(item?.template || "").trim(),
+  };
+}
+
+function familyDefaultOffer(maps, family) {
+  const keys = familyDefaultKeys(family);
+  let best = null;
+  let bestRank = keys.length;
+  for (const item of maps) {
+    const row = offerMapRow(item);
+    const rank = keys.indexOf(normalizeCare(row.match));
+    if (rank === -1 || rank >= bestRank) {
+      continue;
+    }
+    best = row;
+    bestRank = rank;
+  }
+  return best;
+}
+
 function findOfferMap(seya, ...parts) {
   const maps = Array.isArray(seya?.offerMaps) ? seya.offerMaps : [];
   const campaign = parts[0];
@@ -429,10 +466,10 @@ function findOfferMap(seya, ...parts) {
     }
     if (score > bestScore) {
       bestScore = score;
-      best = { match, label, template: String(item?.template || "").trim() };
+      best = offerMapRow(item);
     }
   }
-  return best;
+  return best || familyDefaultOffer(maps, family);
 }
 
 function offeredFamilies(seya) {

@@ -44,6 +44,34 @@ test("choix automatique avec les vrais modèles Meta : jamais un modèle de rela
   assert.equal(pickApprovedTemplate(meta, "minceur", "seya_scan").name, "seya_scan");
 });
 
+test("Gaillard : un soin minceur sans le mot dans le texte prend le modèle de la ligne minceur, pas l’ancien", () => {
+  const { findOfferMap } = require("./care-family");
+  const seya = {
+    offerMaps: [
+      {
+        match: "Scan",
+        label: "Bilan Scan 360° + séance test haute technologie minceur de 20 minutes offerts",
+        template: "seya_scan_jerome",
+      },
+      {
+        match: "Soin minceur",
+        label: "Bilan minceur complet + séance découverte d’environ 20 minutes offerts",
+        template: "seya_minceur_jerome",
+      },
+      {
+        match: "minceur",
+        label: "Bilan minceur complet + séance découverte d’environ 20 minutes offerts",
+        template: "seya_minceur_jerome",
+      },
+    ],
+  };
+  const cryo = findOfferMap(seya, "Cryolipolyse ventre");
+  assert.equal(cryo.template, "seya_minceur_jerome");
+  assert.match(cryo.label, /Bilan minceur complet/);
+  assert.equal(findOfferMap(seya, "Scan 360").template, "seya_scan_jerome");
+  assert.equal(findOfferMap(seya, "Laser aisselles"), null);
+});
+
 test("premier message collé depuis l’aperçu : [prénom] et [centre] sont remplacés", () => {
   const { startConversation } = require("./agent");
   const seya = {
