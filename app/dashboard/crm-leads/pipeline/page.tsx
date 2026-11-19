@@ -65,6 +65,7 @@ const stages: PipelineStage[] = [
       "Acompte en attente",
       "Vendu",
       "Client converti",
+      "Création de compte",
     ],
   },
   {

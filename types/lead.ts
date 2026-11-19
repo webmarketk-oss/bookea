@@ -23,6 +23,7 @@ export type LeadStatus =
   | "No show"
   | "Annulation"
   | "Client converti"
+  | "Création de compte"
   | "Acompte envoyé"
   | "Acompte reçu"
   | "Acompte en attente"

@@ -106,6 +106,7 @@ const CRM_LEAD_STATUSES = [
   "No show",
   "Annulation",
   "Client converti",
+  "Création de compte",
   "Acompte envoyé",
   "Acompte reçu",
   "Acompte en attente",
