@@ -80,9 +80,10 @@ export function AdaptiveSelect({
     const needed = options.length * OPTION_HEIGHT + LIST_PADDING;
     const below = window.innerHeight - rect.bottom - VIEWPORT_GAP;
     const above = rect.top - VIEWPORT_GAP;
-    // Vers le bas, avec défilement dans le menu. Vers le haut seulement collé au bord bas.
-    const openUp = below < OPTION_HEIGHT * 3 && above > below;
-    const maxHeight = Math.min(needed, Math.max(OPTION_HEIGHT * 3, openUp ? above : below));
+    // Vers le haut dès que la liste ne tient pas en dessous : elle reste visible.
+    const openUp = needed > below && above > below;
+    const room = Math.max(OPTION_HEIGHT, openUp ? above : below);
+    const maxHeight = Math.min(needed, room);
     const vertical = openUp
       ? { bottom: window.innerHeight - rect.top + 4 }
       : { top: rect.bottom + 4 };
