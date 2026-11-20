@@ -1462,10 +1462,28 @@ export default function CRMLeadsPage() {
 
   function handleCommercialChange(leadId: string, commercial: string) {
     const lead = leadList.find((item) => item.id === leadId);
+    const nextName = practitionerLabel(commercial);
     setLeadList((currentLeads) =>
       currentLeads.map((item) =>
         item.id === leadId
-          ? { ...item, commercial, updatedDate: todayIso() }
+          ? {
+              ...item,
+              commercial,
+              updatedDate: todayIso(),
+              activityLog: practitionerNamesMatch(nextName, item.commercial)
+                ? item.activityLog
+                : [
+                    {
+                      id: crypto.randomUUID(),
+                      author: nextName,
+                      date: formatActivityDate(),
+                      text: `Praticienne : ${nextName}`,
+                      type: "system" as const,
+                      occurredAt: new Date().toISOString(),
+                    },
+                    ...item.activityLog,
+                  ],
+            }
           : item
       )
     );

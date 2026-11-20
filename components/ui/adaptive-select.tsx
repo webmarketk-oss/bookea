@@ -24,6 +24,8 @@ export type AdaptiveSelectHistoryItem = {
   at: string;
   label: string;
   className?: string;
+  /** Prénom de la praticienne, gardé à côté du statut. */
+  who?: string;
   /** Écriture libre, pas un statut. */
   note?: boolean;
 };
@@ -286,16 +288,23 @@ export function AdaptiveSelect({
                       </span>
                       {item.note ? (
                         <span className="min-w-0 whitespace-normal text-xs font-medium leading-4 text-slate-700">
-                          {item.label}
+                          {item.who ? `${item.who} · ${item.label}` : item.label}
                         </span>
                       ) : (
-                        <span
-                          className={cn(
-                            "max-w-full truncate rounded-full border bg-white px-2 py-0.5 text-xs font-semibold",
-                            item.className,
-                          )}
-                        >
-                          {item.label}
+                        <span className="min-w-0">
+                          {item.who ? (
+                            <span className="mb-0.5 block text-xs font-semibold text-slate-800">
+                              {item.who}
+                            </span>
+                          ) : null}
+                          <span
+                            className={cn(
+                              "inline-block max-w-full truncate rounded-full border bg-white px-2 py-0.5 text-xs font-semibold",
+                              item.className,
+                            )}
+                          >
+                            {item.label}
+                          </span>
                         </span>
                       )}
                     </li>

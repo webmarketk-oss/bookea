@@ -20,6 +20,7 @@ import { isOpenReminderDue, todayIso, toDateOnlyIso } from "@/lib/crm-stats";
 import { loadCrmLeadHistory } from "@/lib/crm-supabase";
 import { displayVisitDate } from "@/lib/crm-rdv";
 import { leadOfferLabel } from "@/lib/lead-offer";
+import { historyPractitionerName } from "@/lib/lead-practitioner";
 import {
   formatWhatsAppDate,
   type LeadWhatsAppSummary,
@@ -580,6 +581,7 @@ function statusHistory(activities: LeadActivity[]) {
   const items = [];
   for (const activity of activities) {
     const at = formatHistoryStamp(activity.occurredAt || activity.date);
+    const who = historyPractitionerName(activity.author);
     if (activity.type === "status") {
       const label = (
         activity.text.match(/→\s*(.+?)\.?\s*$/)?.[1] ||
@@ -593,8 +595,17 @@ function statusHistory(activities: LeadActivity[]) {
       items.push({
         at,
         label,
+        who,
         className: leadStatusMenuClassName(label),
       });
+      continue;
+    }
+    if (/^Praticienne\s*:/i.test(activity.text)) {
+      const name = who || historyPractitionerName(activity.text.replace(/^Praticienne\s*:\s*/i, ""));
+      if (!name) {
+        continue;
+      }
+      items.push({ at, label: name, note: true });
       continue;
     }
     if (activity.type === "comment") {
@@ -605,7 +616,19 @@ function statusHistory(activities: LeadActivity[]) {
       items.push({ at, label, note: true });
     }
   }
-  return items;
+  return items.filter((item, index) => {
+    const name = historyPractitionerName(item.label);
+    if (!item.note || item.label !== name) {
+      return true;
+    }
+    return !items.some(
+      (other, otherIndex) =>
+        otherIndex !== index &&
+        !other.note &&
+        other.who === name &&
+        other.at === item.at,
+    );
+  });
 }
 
 function formatHistoryStamp(value: string) {

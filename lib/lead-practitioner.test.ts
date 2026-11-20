@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   authorFromStatusNote,
   COMMERCIAL_EVENT,
+  historyPractitionerName,
   latestAssignedPractitioner,
   practitionerNamesMatch,
   statusChangeNote,
@@ -25,6 +26,13 @@ test("le changement de statut garde le nom de la praticienne", () => {
   assert.equal(authorFromStatusNote(sandra), "Sandra");
   assert.equal(visibleStatusChangeText(julie), "Statut changé : Nouveau → Apl en abs.");
   assert.notEqual(authorFromStatusNote(julie), authorFromStatusNote(sandra));
+});
+
+test("l’historique garde le prénom, pas Équipe ni Système", () => {
+  assert.equal(historyPractitionerName("Fanny"), "Fanny");
+  assert.equal(historyPractitionerName("Morgane Martin"), "Morgane");
+  assert.equal(historyPractitionerName("Équipe"), "");
+  assert.equal(historyPractitionerName("Système"), "");
 });
 
 test("la dernière praticienne choisie reste celle affichée", () => {

@@ -2561,16 +2561,22 @@ function toLead(row: LeadRow): Lead {
       .filter(
         (event) =>
           !isAcompteDepositEvent(event.event_type) &&
-          event.event_type !== RDV_DATE_EVENT &&
-          event.event_type !== COMMERCIAL_EVENT,
+          event.event_type !== RDV_DATE_EVENT,
       )
     .map((event) => {
-      const rawText = (event.note || event.to_value || "Activité CRM").trim();
+      const isCommercial = event.event_type === COMMERCIAL_EVENT;
+      const commercialName = isCommercial
+        ? practitionerLabel(event.to_value || event.note)
+        : "";
+      const rawText = isCommercial
+        ? `Praticienne : ${commercialName}`
+        : (event.note || event.to_value || "Activité CRM").trim();
       const type = normalizeEventType(event.event_type);
       const isComment =
         type === "comment" ||
         (type === "system" &&
           event.event_type !== IMPORT_ORIGIN_EVENT &&
+          !isCommercial &&
           isUserFacingComment(event.note) &&
           !event.from_value);
       const statusAuthor =
@@ -2578,7 +2584,9 @@ function toLead(row: LeadRow): Lead {
 
       return {
         id: event.id,
-        author: statusAuthor || authorFromEvent(event.event_type),
+        author: isCommercial
+          ? commercialName
+          : statusAuthor || authorFromEvent(event.event_type),
         date: formatLeadDateTime(event.created_at),
         text: type === "status" ? visibleStatusChangeText(rawText) : visibleReceptionNote(rawText),
         type: isComment ? ("comment" as const) : type,

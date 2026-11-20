@@ -36,6 +36,15 @@ export function statusChangeNote(author: string, fromStatus: string, toStatus: s
   return `${practitionerLabel(author)} · Statut changé : ${fromStatus} → ${toStatus}.`;
 }
 
+/** Prénom affiché dans l’historique. « Équipe » et « Système » n’en sont pas. */
+export function historyPractitionerName(author?: string | null) {
+  const name = String(author || "").trim();
+  if (!name || /^(syst[eè]me|[eé]quipe)$/i.test(name)) {
+    return "";
+  }
+  return name.split(/\s+/)[0] || "";
+}
+
 export function authorFromStatusNote(note?: string | null) {
   const text = String(note || "").trim();
   const match = text.match(/^(.+?) · Statut changé :/);
