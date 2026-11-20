@@ -75,6 +75,8 @@ export interface Lead {
   reminderTime?: string;
   /** Date du rendez-vous saisie dans le CRM (YYYY-MM-DD). Vide = effacée. Absent = non saisie. */
   visitDate?: string;
+  /** Heure du rendez-vous saisie dans le CRM (HH:mm). */
+  visitTime?: string;
   centerId?: string;
   centerName?: string;
   /** Suivi acomptes : date/heure ISO des 4 relances (même fiche CRM). */
@@ -104,6 +106,9 @@ export interface LeadAppointment {
   id: string;
   bookedOn: string;
   date: string;
+  /** Heure de début agenda, HH:mm. */
+  start?: string;
+  duration?: number;
   outcome?: LeadAppointmentOutcome;
 }
 

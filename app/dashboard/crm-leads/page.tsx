@@ -56,6 +56,7 @@ import {
 import {
   compareBookedLeads,
   displayVisitDate,
+  displayVisitTime,
   isEverBookedLead,
   leadWithVisitDate,
 } from "@/lib/crm-rdv";
@@ -1311,10 +1312,10 @@ export default function CRMLeadsPage() {
     void refreshBookedLeads();
   }, [activeTab, bookedLeads, bookedCenterId, leadsCenterId]);
 
-  function patchVisitDate(leadId: string, date: string) {
+  function patchVisitDate(leadId: string, date: string, time?: string) {
     setLeadList((currentLeads) =>
       currentLeads.map((lead) =>
-        lead.id === leadId ? leadWithVisitDate(lead, date) : lead,
+        lead.id === leadId ? leadWithVisitDate(lead, date, time) : lead,
       ),
     );
     setBookedLeads((currentLeads) => {
@@ -1327,11 +1328,11 @@ export default function CRMLeadsPage() {
       const next = known
         ? currentLeads.some((lead) => lead.id === leadId)
           ? currentLeads.map((lead) =>
-              lead.id === leadId ? leadWithVisitDate(lead, date) : lead,
+              lead.id === leadId ? leadWithVisitDate(lead, date, time) : lead,
             )
-          : [...currentLeads, leadWithVisitDate(known, date)]
+          : [...currentLeads, leadWithVisitDate(known, date, time)]
         : currentLeads.map((lead) =>
-            lead.id === leadId ? leadWithVisitDate(lead, date) : lead,
+            lead.id === leadId ? leadWithVisitDate(lead, date, time) : lead,
           );
       return next.filter(isEverBookedLead).sort(compareBookedLeads);
     });
@@ -1341,7 +1342,8 @@ export default function CRMLeadsPage() {
     const current =
       leadList.find((lead) => lead.id === leadId) ||
       bookedLeads?.find((lead) => lead.id === leadId);
-    patchVisitDate(leadId, date);
+    const time = current ? displayVisitTime(current) : "";
+    patchVisitDate(leadId, date, time);
     try {
       await trackSave(() =>
         updateCrmLeadVisitDate(
@@ -1349,6 +1351,7 @@ export default function CRMLeadsPage() {
           date,
           current ? displayVisitDate(current) : "",
           current?.appointments,
+          time,
         ),
       );
       setCrmNotice("Date du rendez-vous enregistrée.");
@@ -1357,6 +1360,40 @@ export default function CRMLeadsPage() {
         error instanceof Error
           ? error.message
           : "La date du rendez-vous n'a pas pu être enregistrée.",
+      );
+      await refreshCrmLeads();
+      if (bookedLeads) {
+        await refreshBookedLeads();
+      }
+    }
+  }
+
+  async function handleVisitTimeChange(leadId: string, time: string) {
+    const current =
+      leadList.find((lead) => lead.id === leadId) ||
+      bookedLeads?.find((lead) => lead.id === leadId);
+    const date = current ? displayVisitDate(current) : "";
+    if (!date) {
+      setCrmError("Choisis d’abord la date du rendez-vous.");
+      return;
+    }
+    patchVisitDate(leadId, date, time);
+    try {
+      await trackSave(() =>
+        updateCrmLeadVisitDate(
+          leadId,
+          date,
+          date,
+          current?.appointments,
+          time,
+        ),
+      );
+      setCrmNotice("Heure du rendez-vous enregistrée.");
+    } catch (error) {
+      setCrmError(
+        error instanceof Error
+          ? error.message
+          : "L'heure du rendez-vous n'a pas pu être enregistrée.",
       );
       await refreshCrmLeads();
       if (bookedLeads) {
@@ -2119,6 +2156,7 @@ export default function CRMLeadsPage() {
                   onDepositReminderChange={handleDepositReminderChange}
                   showVisitDate={activeTab === "prospects"}
                   onVisitDateChange={handleVisitDateChange}
+                  onVisitTimeChange={handleVisitTimeChange}
                   whatsApp={
                     isRecontactCategory
                       ? { state: whatsAppState, byLead: whatsAppByLead }

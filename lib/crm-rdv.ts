@@ -28,7 +28,7 @@ type RdvDateEvent = {
   created_at: string;
 };
 
-export function parseVisitDate(events: RdvDateEvent[]): string | undefined {
+function latestVisitValue(events: RdvDateEvent[]): string | undefined {
   let latest: { at: number; value: string } | null = null;
   for (const event of events) {
     if (event.event_type !== RDV_DATE_EVENT) {
@@ -39,12 +39,37 @@ export function parseVisitDate(events: RdvDateEvent[]): string | undefined {
     if (latest && latest.at >= stamp) {
       continue;
     }
-    latest = { at: stamp, value: String(event.to_value || "").trim().slice(0, 10) };
+    latest = { at: stamp, value: String(event.to_value || "").trim() };
   }
-  if (!latest) {
+  return latest ? latest.value : undefined;
+}
+
+export function parseVisitDate(events: RdvDateEvent[]): string | undefined {
+  const value = latestVisitValue(events);
+  if (value === undefined) {
     return undefined;
   }
-  return /^\d{4}-\d{2}-\d{2}$/.test(latest.value) ? latest.value : "";
+  const day = value.slice(0, 10);
+  return /^\d{4}-\d{2}-\d{2}$/.test(day) ? day : "";
+}
+
+/** Heure saisie avec la date (`AAAA-MM-JJTHH:mm`). Vide si la date n’a pas d’heure. */
+export function parseVisitTime(events: RdvDateEvent[]): string | undefined {
+  const value = latestVisitValue(events);
+  if (value === undefined) {
+    return undefined;
+  }
+  const match = value.match(/T(\d{2}:\d{2})/);
+  return match ? match[1] : "";
+}
+
+export function visitEventValue(date: string, time: string) {
+  const day = date.trim().slice(0, 10);
+  const clock = time.trim().slice(0, 5);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) {
+    return "";
+  }
+  return /^\d{2}:\d{2}$/.test(clock) ? `${day}T${clock}` : day;
 }
 
 function todayIso() {
@@ -91,6 +116,21 @@ export function displayVisitDate(lead: Lead): string {
   return appointmentVisitDate(lead);
 }
 
+/** Heure affichée : saisie CRM, sinon l’heure du rendez-vous d’agenda à cette date. */
+export function displayVisitTime(lead: Lead): string {
+  if (lead.visitTime) {
+    return lead.visitTime.slice(0, 5);
+  }
+  const date = displayVisitDate(lead);
+  if (!date) {
+    return "";
+  }
+  const match = (lead.appointments ?? []).find(
+    (item) => item.date.slice(0, 10) === date && item.start,
+  );
+  return match?.start?.slice(0, 5) || "";
+}
+
 export function isEverBookedLead(lead: Lead): boolean {
   if (lead.visitDate) {
     return true;
@@ -128,18 +168,22 @@ export function appointmentIdForVisitDate(
   return (upcoming || dated[dated.length - 1] || list[0]).id;
 }
 
-export function leadWithVisitDate(lead: Lead, date: string): Lead {
+export function leadWithVisitDate(lead: Lead, date: string, time?: string): Lead {
   const previous = displayVisitDate(lead);
+  const nextTime = time !== undefined ? time.slice(0, 5) : displayVisitTime(lead);
   const appointmentId = date
     ? appointmentIdForVisitDate(lead.appointments, previous)
     : undefined;
   return {
     ...lead,
     visitDate: date,
+    visitTime: date ? nextTime : "",
     appointments:
       appointmentId && date
         ? (lead.appointments ?? []).map((item) =>
-            item.id === appointmentId ? { ...item, date } : item,
+            item.id === appointmentId
+              ? { ...item, date, ...(nextTime ? { start: nextTime } : {}) }
+              : item,
           )
         : lead.appointments,
   };

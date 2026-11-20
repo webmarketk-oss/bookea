@@ -16,6 +16,7 @@ import {
   PaymentStatusBadge,
   PaymentStatusMark,
 } from "@/components/crm/payment-status-mark";
+import { WhatsAppConversationLink } from "@/components/crm/whatsapp-conversation-link";
 import { Button } from "@/components/ui/button";
 import { askAlert, askConfirm } from "@/components/ui/app-dialog";
 import { Card, CardContent } from "@/components/ui/card";
@@ -3938,6 +3939,17 @@ function WeekSchedule({
                                     appointment.notes,
                                   )
                                 : appointment.personName}
+                              {isAgendaBlockKind(
+                                appointment.kind,
+                                appointment.treatment,
+                                appointment.personName,
+                              ) ? null : (
+                                <WhatsAppConversationLink
+                                  leadId={appointment.leadId}
+                                  phone={appointment.phone}
+                                  name={appointment.personName}
+                                />
+                              )}
                               {tone ? (
                                 <PaymentStatusMark tone={tone} />
                               ) : null}
@@ -5405,6 +5417,17 @@ function AppointmentCard({
                   )
                 : appointment.personName}
             </span>
+            {isAgendaBlockKind(
+              appointment.kind,
+              appointment.treatment,
+              appointment.personName,
+            ) ? null : (
+              <WhatsAppConversationLink
+                leadId={appointment.leadId}
+                phone={appointment.phone}
+                name={appointment.personName}
+              />
+            )}
             {paymentTone ? (
               <PaymentStatusMark tone={paymentTone} />
             ) : null}

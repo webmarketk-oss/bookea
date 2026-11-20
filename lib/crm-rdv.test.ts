@@ -4,9 +4,12 @@ import { describe, it } from "node:test";
 import {
   compareBookedLeads,
   displayVisitDate,
+  displayVisitTime,
   isEverBookedLead,
   parseVisitDate,
+  parseVisitTime,
   RDV_DATE_EVENT,
+  visitEventValue,
 } from "./crm-rdv.ts";
 import type { Lead } from "../types/lead.ts";
 
@@ -51,6 +54,28 @@ describe("crm-rdv", () => {
       },
     ]);
     assert.equal(date, "2026-05-12");
+    assert.equal(
+      parseVisitDate([
+        {
+          event_type: RDV_DATE_EVENT,
+          to_value: "2026-05-12T14:30",
+          created_at: "2026-03-02T10:00:00.000Z",
+        },
+      ]),
+      "2026-05-12",
+    );
+    assert.equal(
+      parseVisitTime([
+        {
+          event_type: RDV_DATE_EVENT,
+          to_value: "2026-05-12T14:30",
+          created_at: "2026-03-02T10:00:00.000Z",
+        },
+      ]),
+      "14:30",
+    );
+    assert.equal(visitEventValue("2026-05-12", "14:30"), "2026-05-12T14:30");
+    assert.equal(visitEventValue("2026-05-12", ""), "2026-05-12");
   });
 
   it("affiche la date saisie avant celle de l’agenda", () => {
@@ -59,6 +84,28 @@ describe("crm-rdv", () => {
       appointments: [{ id: "a", bookedOn: "2026-05-01", date: "2026-05-20" }],
     });
     assert.equal(displayVisitDate(booked), "2026-06-02");
+    assert.equal(
+      displayVisitTime(
+        lead({
+          visitDate: "2026-06-02",
+          visitTime: "09:15",
+          appointments: [
+            { id: "a", bookedOn: "2026-05-01", date: "2026-06-02", start: "16:00" },
+          ],
+        }),
+      ),
+      "09:15",
+    );
+    assert.equal(
+      displayVisitTime(
+        lead({
+          appointments: [
+            { id: "a", bookedOn: "2026-05-01", date: "2099-03-01", start: "11:00" },
+          ],
+        }),
+      ),
+      "11:00",
+    );
     assert.equal(
       displayVisitDate(
         lead({

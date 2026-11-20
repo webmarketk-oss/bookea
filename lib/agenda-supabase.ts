@@ -1049,6 +1049,7 @@ function toAppointment(row: AppointmentRow): Appointment {
   return {
     id: row.id,
     clientId: row.client_id || undefined,
+    leadId: row.lead_id || undefined,
     personName: appointmentPersonName(client, service?.name, row.notes),
     phone: client?.phone ?? "",
     email: client?.email ?? undefined,

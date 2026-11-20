@@ -17,8 +17,9 @@ import {
   toDatetimeLocalValue,
 } from "@/lib/crm-deposit";
 import { isOpenReminderDue, todayIso, toDateOnlyIso } from "@/lib/crm-stats";
+import { WhatsAppConversationLink } from "@/components/crm/whatsapp-conversation-link";
 import { loadCrmLeadHistory } from "@/lib/crm-supabase";
-import { displayVisitDate } from "@/lib/crm-rdv";
+import { displayVisitDate, displayVisitTime } from "@/lib/crm-rdv";
 import { leadOfferLabel } from "@/lib/lead-offer";
 import { historyPractitionerName } from "@/lib/lead-practitioner";
 import {
@@ -68,6 +69,7 @@ interface ProspectsTableProps {
   ) => void;
   showVisitDate?: boolean;
   onVisitDateChange?: (leadId: string, date: string) => void;
+  onVisitTimeChange?: (leadId: string, time: string) => void;
   /** Change quand la recherche, les filtres ou l'onglet changent : on revient alors à la page 1. */
   resetKey?: string;
 }
@@ -108,6 +110,7 @@ export default function ProspectsTable({
   onDepositReminderChange,
   showVisitDate = false,
   onVisitDateChange,
+  onVisitTimeChange,
   resetKey = "",
 }: ProspectsTableProps) {
   const [commentsOpen, setCommentsOpen] = useState(true);
@@ -245,7 +248,9 @@ export default function ProspectsTable({
               </button>
             </TableHead>
             <TableHead className="w-[9.25rem] min-w-[9.25rem]">Statut</TableHead>
-            <TableHead>Rappel</TableHead>
+            <TableHead className="w-[8.5rem] min-w-[8.5rem] max-w-[8.5rem]">
+              Rappel
+            </TableHead>
             {showDepositReminders
               ? DEPOSIT_REMINDER_INDEXES.map((index) => (
                   <TableHead
@@ -343,8 +348,15 @@ export default function ProspectsTable({
               <TableCell>
                 <div className="flex items-start gap-2">
                   <div className="min-w-0">
-                    <p className="font-semibold">
-                      {lead.firstName} {lead.lastName}
+                    <p className="flex items-center gap-1 font-semibold">
+                      <span className="min-w-0">
+                        {lead.firstName} {lead.lastName}
+                      </span>
+                      <WhatsAppConversationLink
+                        leadId={lead.id}
+                        phone={lead.phone}
+                        name={`${lead.firstName} ${lead.lastName}`.trim()}
+                      />
                     </p>
                     <p className="text-sm text-slate-500">{lead.phone}</p>
                     {lead.email ? (
@@ -416,14 +428,14 @@ export default function ProspectsTable({
                 />
               </TableCell>
 
-              <TableCell>
-                <div className="flex items-center gap-1">
+              <TableCell className="w-[8.5rem] max-w-[8.5rem]">
+                <div className="flex w-[8.5rem] max-w-[8.5rem] flex-col gap-1">
                   <AdaptiveDateInput
                     ariaLabel="Rappel"
                     value={toDateOnlyIso(lead.reminderDate) ?? ""}
                     onChange={(date) => onReminderDateChange(lead.id, date)}
                     className={cn(
-                      "h-8 w-[8.5rem] shrink-0 rounded-lg border border-slate-200 bg-white px-2 text-xs font-semibold outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100",
+                      "h-8 w-full min-w-0 rounded-lg border border-slate-200 bg-white px-2 text-xs font-semibold outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100",
                       isOpenReminderDue(lead) &&
                         "border-amber-200 bg-amber-100 text-amber-800"
                     )}
@@ -436,7 +448,7 @@ export default function ProspectsTable({
                       onReminderTimeChange(lead.id, event.target.value)
                     }
                     className={cn(
-                      "h-8 w-[5.75rem] shrink-0 rounded-lg border border-slate-200 bg-white px-2 text-xs font-semibold outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100",
+                      "h-8 w-full min-w-0 rounded-lg border border-slate-200 bg-white px-2 text-xs font-semibold outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100",
                       isOpenReminderDue(lead) &&
                         "border-amber-200 bg-amber-100 text-amber-800"
                     )}
@@ -467,13 +479,24 @@ export default function ProspectsTable({
                 : null}
 
               {showVisitDate ? (
-                <TableCell>
-                  <AdaptiveDateInput
-                    ariaLabel="Date du RDV"
-                    value={displayVisitDate(lead)}
-                    onChange={(date) => onVisitDateChange?.(lead.id, date)}
-                    className="h-8 w-[8.5rem] shrink-0 rounded-lg border border-slate-200 bg-white px-2 text-xs font-semibold outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
-                  />
+                <TableCell className="w-[9.5rem] max-w-[9.5rem]">
+                  <div className="flex w-[8.5rem] max-w-[8.5rem] flex-col gap-1">
+                    <AdaptiveDateInput
+                      ariaLabel="Date du RDV"
+                      value={displayVisitDate(lead)}
+                      onChange={(date) => onVisitDateChange?.(lead.id, date)}
+                      className="h-8 w-full min-w-0 rounded-lg border border-slate-200 bg-white px-2 text-xs font-semibold outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                    />
+                    <input
+                      type="time"
+                      aria-label="Heure du RDV"
+                      value={displayVisitTime(lead)}
+                      onChange={(event) =>
+                        onVisitTimeChange?.(lead.id, event.target.value)
+                      }
+                      className="h-8 w-full min-w-0 rounded-lg border border-slate-200 bg-white px-2 text-xs font-semibold outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                    />
+                  </div>
                 </TableCell>
               ) : null}
 

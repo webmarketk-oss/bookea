@@ -45,7 +45,9 @@ import {
   bookedHistoryStatuses,
   isEverBookedLead,
   parseVisitDate,
+  parseVisitTime,
   RDV_DATE_EVENT,
+  visitEventValue,
 } from "@/lib/crm-rdv";
 import {
   authorFromStatusNote,
@@ -57,7 +59,7 @@ import {
   statusChangeNote,
   visibleStatusChangeText,
 } from "@/lib/lead-practitioner";
-import type { WhatsAppThread } from "@/lib/lead-whatsapp";
+import { threadWhatsAppMessages, type WhatsAppThread } from "@/lib/lead-whatsapp";
 import {
   loadTableConversations,
   readsFromTable,
@@ -620,7 +622,7 @@ export async function loadBookedCrmLeads(): Promise<{
     fetchAllRows<CenterAppointmentRow>((start, end) =>
       supabase
         .from("appointments")
-        .select("id,lead_id,client_id,created_at,appointment_date,status,notes")
+        .select("id,lead_id,client_id,created_at,appointment_date,starts_at,duration_minutes,status,notes")
         .eq("center_id", centerId)
         .order("appointment_date", { ascending: false })
         .range(start, end) as PromiseLike<{
@@ -737,6 +739,40 @@ export async function loadCrmWhatsAppThreads(): Promise<{
   };
 }
 
+/** Une seule conversation, lue au clic. Ne charge pas la boîte Seya. */
+export async function loadLeadWhatsAppMessages(leadId: string, phone = "") {
+  const supabase = createClient();
+  const centerId = readActiveCenterId();
+  if (!centerId) {
+    throw new Error("Centre introuvable.");
+  }
+  const safeLead = String(leadId || "").replace(/[^a-zA-Z0-9-]/g, "");
+  const digits = String(phone || "").replace(/\D/g, "").slice(-9);
+  const filters = [
+    safeLead ? `lead_id.eq.${safeLead}` : "",
+    digits.length === 9 ? `phone_last9.eq.${digits}` : "",
+  ].filter(Boolean);
+  if (!filters.length) {
+    return [];
+  }
+  const { data, error } = await supabase
+    .from("seya_conversations")
+    .select("data")
+    .eq("center_id", centerId)
+    .or(filters.join(","))
+    .order("last_activity_at", { ascending: false })
+    .limit(8);
+  if (error) {
+    throw new Error(error.message);
+  }
+  const threads = (data || [])
+    .map((row) => (row as { data?: WhatsAppThread }).data)
+    .filter((item): item is WhatsAppThread => Boolean(item));
+  return threads
+    .flatMap(threadWhatsAppMessages)
+    .sort((left, right) => (Date.parse(left.at) || 0) - (Date.parse(right.at) || 0));
+}
+
 const appointmentOutcomeByStatus: Record<string, LeadAppointmentOutcome> = {
   quote: "Devis",
   sold: "Vendu",
@@ -750,6 +786,8 @@ type CenterAppointmentRow = {
   client_id: string | null;
   created_at: string;
   appointment_date: string | null;
+  starts_at?: string | null;
+  duration_minutes?: number | null;
   status: string | null;
   notes: string | null;
 };
@@ -762,7 +800,7 @@ async function loadCenterAppointments(
     return await fetchAllRows<CenterAppointmentRow>((start, end) =>
       supabase
         .from("appointments")
-        .select("id,lead_id,client_id,created_at,appointment_date,status,notes")
+        .select("id,lead_id,client_id,created_at,appointment_date,starts_at,duration_minutes,status,notes")
         .eq("center_id", centerId)
         .order("appointment_date", { ascending: false })
         .order("id", { ascending: true })
@@ -801,10 +839,15 @@ function groupLeadAppointments(
     if (ownerIds.length !== 1) {
       continue;
     }
+    const start = String(row.starts_at || "").slice(0, 5);
     const appointment: LeadAppointment = {
       id: String(row.id),
       bookedOn: toLocalIsoDate(String(row.created_at)),
       date: String(row.appointment_date || "").slice(0, 10),
+      ...(/^\d{2}:\d{2}$/.test(start) ? { start } : {}),
+      ...(Number(row.duration_minutes) > 0
+        ? { duration: Number(row.duration_minutes) }
+        : {}),
       outcome: appointmentOutcomeByStatus[String(row.status || "")],
     };
     byLead.set(ownerIds[0], [...(byLead.get(ownerIds[0]) ?? []), appointment]);
@@ -1471,22 +1514,32 @@ export async function updateCrmLeadAmount(leadId: string, amount: number) {
   });
 }
 
+function clockPlusMinutes(time: string, minutes: number) {
+  const [hours, mins] = time.split(":").map(Number);
+  const total = (hours * 60 + mins + minutes) % (24 * 60);
+  const wrapped = total < 0 ? total + 24 * 60 : total;
+  return `${String(Math.floor(wrapped / 60)).padStart(2, "0")}:${String(wrapped % 60).padStart(2, "0")}:00`;
+}
+
 export function updateCrmLeadVisitDate(
   leadId: string,
   date: string,
   previousDate = "",
   appointments?: LeadAppointment[],
+  time = "",
 ) {
   const value = date.trim() ? toDateOnlyIso(date) || "" : "";
   if (date.trim() && !value) {
     return Promise.reject(new Error("Date de rendez-vous invalide."));
   }
+  const stored = visitEventValue(value, time);
+  const clock = stored.includes("T") ? stored.slice(11, 16) : "";
   return queueLeadWrite(leadId, async () => {
     const supabase = createClient();
     const centerId = await getLeadCenterId(supabase, leadId);
     await insertLeadEvent(supabase, centerId, leadId, {
       event_type: RDV_DATE_EVENT,
-      to_value: value || null,
+      to_value: stored || null,
     });
     await updateLeadFields(supabase, leadId, {
       updated_at: new Date().toISOString(),
@@ -1498,12 +1551,23 @@ export function updateCrmLeadVisitDate(
     if (!appointmentId) {
       return;
     }
+    const appointment = appointments?.find((item) => item.id === appointmentId);
+    const patch: {
+      appointment_date: string;
+      updated_at: string;
+      starts_at?: string;
+      ends_at?: string;
+    } = {
+      appointment_date: value,
+      updated_at: new Date().toISOString(),
+    };
+    if (clock) {
+      patch.starts_at = `${clock}:00`;
+      patch.ends_at = clockPlusMinutes(clock, appointment?.duration || 30);
+    }
     const { error } = await supabase
       .from("appointments")
-      .update({
-        appointment_date: value,
-        updated_at: new Date().toISOString(),
-      })
+      .update(patch)
       .eq("id", appointmentId)
       .eq("center_id", centerId);
     if (error) {
@@ -2552,6 +2616,7 @@ function toLead(row: LeadRow): Lead {
   const depositReminderNotes = parseDepositReminderNotes(events);
   const depositTracked = parseDepositTracked(events);
   const visitDate = parseVisitDate(events);
+  const visitTime = parseVisitTime(events);
   const assignedName = latestAssignedPractitioner(events);
   const recordedOffers = offersFromEvents(events);
 
@@ -2659,6 +2724,7 @@ function toLead(row: LeadRow): Lead {
     reminderDate: toDateOnlyIso(row.recall_date) ?? undefined,
     reminderTime: toReminderTime(row.recall_time) ?? undefined,
     ...(visitDate !== undefined ? { visitDate } : {}),
+    ...(visitTime !== undefined ? { visitTime } : {}),
     centerId: row.center_id,
     centerName: relationObject(row.centers)?.name?.trim() || undefined,
     depositReminders,

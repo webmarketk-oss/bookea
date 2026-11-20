@@ -621,19 +621,25 @@ export default function SeyaCrmPage() {
         const params = new URLSearchParams(window.location.search);
         const linkedLead = String(params.get("lead") || "").trim();
         const linkedPhone = String(params.get("phone") || "").replace(/\D/g, "").slice(-9);
+        const wantsLinked = Boolean(linkedLead || linkedPhone.length === 9);
         const linked = storedConversations.find(
           (item) =>
             (linkedLead && item.leadId === linkedLead) ||
             (linkedPhone.length === 9 &&
               String(item.phone || "").replace(/\D/g, "").slice(-9) === linkedPhone),
         );
-        setSelectedConversationId((current) =>
-          linked
-            ? linked.id
-            : current && storedConversations.some((item) => item.id === current)
-              ? current
-              : (storedConversations[0]?.id ?? null),
-        );
+        if (wantsLinked && !linked) {
+          setSelectedConversationId(null);
+          setSummary("Aucune conversation WhatsApp pour ce prospect.");
+        } else {
+          setSelectedConversationId((current) =>
+            linked
+              ? linked.id
+              : current && storedConversations.some((item) => item.id === current)
+                ? current
+                : (storedConversations[0]?.id ?? null),
+          );
+        }
         loaded = true;
       } catch {
         if (!cancelled && loadSeq === loadSeqRef.current) {
