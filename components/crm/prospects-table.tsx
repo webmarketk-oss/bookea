@@ -10,7 +10,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { AdaptiveDateInput } from "@/components/ui/adaptive-date-input";
-import { AdaptiveSelect } from "@/components/ui/adaptive-select";
+import { AdaptiveSelect, type AdaptiveSelectHistoryItem } from "@/components/ui/adaptive-select";
 import {
   DEPOSIT_REMINDER_INDEXES,
   DEPOSIT_REMINDER_LABELS,
@@ -601,7 +601,7 @@ export default function ProspectsTable({
 }
 
 function statusHistory(activities: LeadActivity[]) {
-  const items = [];
+  const items: AdaptiveSelectHistoryItem[] = [];
   for (const activity of activities) {
     const at = formatHistoryStamp(activity.occurredAt || activity.date);
     const who = historyPractitionerName(activity.author);
