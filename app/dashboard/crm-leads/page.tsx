@@ -16,6 +16,7 @@ import { Input } from "@/components/ui/input";
 
 import { readActiveCenterId, saveActiveCenterId } from "@/lib/center-access";
 import { importPelissanneOctoberLeads } from "@/lib/pelissanne-october-import";
+import { importSaintGillesLeads } from "@/lib/saint-gilles-import";
 import { followUpLeadStatuses, gaillardOnlyLeadStatuses, inactiveLeadStatuses, leadStatuses, leadStatusesForCenter, sallanchesOnlyLeadStatuses } from "@/lib/lead-statuses";
 import { matchesPersonSearch, matchesPhoneSearch } from "@/lib/person-search";
 import {
@@ -628,6 +629,32 @@ export default function CRMLeadsPage() {
         .then((result) => {
           setCrmNotice(
             `Import Pélissanne : ${result.created} créés, ${result.skipped} déjà là${
+              result.errors.length ? `, ${result.errors.length} erreur(s)` : ""
+            }.`,
+          );
+          if (result.created > 0) {
+            void loadCrmLeads().then(({ leads, center: { centerId, centerName } }) => {
+              centerIdRef.current = centerId;
+              centerNameRef.current = centerName;
+              setLeadsCenterName(centerName);
+              setLeadsCenterId(centerId);
+              setLeadList(leads);
+              saveCrmLeadsSnapshot({ leads, centerId, centerName });
+            });
+          }
+        })
+        .catch((error) => {
+          setCrmError(error instanceof Error ? error.message : "Import impossible.");
+        });
+    }
+
+    if (searchParams.get("importListe") === "saint-gilles" && !listImportRan.current) {
+      listImportRan.current = true;
+      setCrmNotice("Import Saint-Gilles en cours…");
+      void importSaintGillesLeads()
+        .then((result) => {
+          setCrmNotice(
+            `Import Saint-Gilles : ${result.created} créés, ${result.skipped} déjà là${
               result.errors.length ? `, ${result.errors.length} erreur(s)` : ""
             }.`,
           );
