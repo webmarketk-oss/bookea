@@ -20,7 +20,11 @@ import { isOpenReminderDue, todayIso, toDateOnlyIso } from "@/lib/crm-stats";
 import { WhatsAppConversationLink } from "@/components/crm/whatsapp-conversation-link";
 import { loadCrmLeadHistory } from "@/lib/crm-supabase";
 import { displayVisitDate, displayVisitTime } from "@/lib/crm-rdv";
-import { leadOfferLabel } from "@/lib/lead-offer";
+import {
+  commentsWithoutRepeatedOffer,
+  leadOfferLabel,
+  staffCommentText,
+} from "@/lib/lead-offer";
 import { historyPractitionerName } from "@/lib/lead-practitioner";
 import {
   formatWhatsAppDate,
@@ -315,6 +319,7 @@ export default function ProspectsTable({
           {visibleLeads.map((lead) => {
             const isInactive = isInactiveLeadStatus(lead.status);
             const latestComment = getLatestLeadComment(lead);
+            const savedComment = staffCommentText(latestComment?.text ?? "");
             const offer = leadOfferLabel(lead);
 
             return (
@@ -562,13 +567,13 @@ export default function ProspectsTable({
                 {commentsOpen ? (
                   <QuickComment
                     key={`${lead.id}-comment`}
-                    saved={latestComment?.text ?? ""}
+                    saved={savedComment}
                     onSave={async (value) => {
-                      if (!value && latestComment) {
+                      if (!value && latestComment && savedComment) {
                         return (await onCommentDelete(lead.id, latestComment.id)) !== false;
                       }
 
-                      if (value && value !== latestComment?.text) {
+                      if (value && value !== savedComment) {
                         return (await onCommentAdd(lead.id, value)) !== false;
                       }
 
@@ -601,6 +606,13 @@ export default function ProspectsTable({
 }
 
 function statusHistory(activities: LeadActivity[]) {
+  const commentActivities = activities.filter((activity) => activity.type === "comment");
+  const shownComments = commentsWithoutRepeatedOffer(
+    commentActivities.map((activity) => ({ text: activity.text })),
+  );
+  const commentText = new Map(
+    commentActivities.map((activity, index) => [activity.id, shownComments[index]]),
+  );
   const items: AdaptiveSelectHistoryItem[] = [];
   for (const activity of activities) {
     const at = formatHistoryStamp(activity.occurredAt || activity.date);
@@ -632,7 +644,7 @@ function statusHistory(activities: LeadActivity[]) {
       continue;
     }
     if (activity.type === "comment") {
-      const label = activity.text.trim();
+      const label = (commentText.get(activity.id) || "").trim();
       if (!label) {
         continue;
       }
@@ -640,6 +652,19 @@ function statusHistory(activities: LeadActivity[]) {
     }
   }
   return items.filter((item, index) => {
+    if (
+      item.note &&
+      items.some(
+        (other, otherIndex) =>
+          otherIndex !== index &&
+          other.note &&
+          other.at === item.at &&
+          (other.label === item.label ||
+            (other.label.startsWith(`${item.label} |`) && item.label.length < other.label.length)),
+      )
+    ) {
+      return false;
+    }
     const name = historyPractitionerName(item.label);
     if (!item.note || item.label !== name) {
       return true;

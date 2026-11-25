@@ -46,6 +46,11 @@ import {
   type StoredCenterSettings,
 } from "@/lib/center-settings";
 import { coverPositionCss, servicePhotoByName } from "@/lib/center-media";
+import { offerDeadline, offerIsLive, offerShelf } from "@/lib/public-offers";
+import {
+  ClientMarketplace,
+  type MarketplaceOffer,
+} from "@/components/public/client-marketplace";
 
 type Center = {
   name: string;
@@ -752,6 +757,29 @@ export function PublicBooking() {
 
     return [...centerOffers, ...endingSoonOffers];
   }, [configuredCenter, storedSettings]);
+  const showcaseOffers = useMemo(() => {
+    const published = (configuredCenter?.offers ?? []).filter((offer) => offer.visible);
+    const source = published.length > 0 ? published : defaultCenterOffers;
+    const centerName = configuredCenter?.name ?? centers[0].name;
+    const city = configuredCenter?.city ?? centers[0].city;
+    const searchCategory = configuredCenter?.categories[0] ?? "Institut beauté";
+    return source
+      .filter((offer) => offerIsLive(offer))
+      .map((offer): MarketplaceOffer => ({
+        id: String(offer.id),
+        title: offer.title,
+        center: centerName,
+        city,
+        price: offer.price,
+        oldPrice: offer.oldPrice,
+        shelf: offerShelf(offer),
+        photo: servicePhotoByName(storedSettings?.services, offer.serviceName),
+        deadline: offerDeadline(offer),
+        spots: offer.limitedSpots,
+        service: offer.serviceName,
+        searchCategory,
+      }));
+  }, [configuredCenter, storedSettings]);
 
   const focusSeyaSearch = () => {
     document.getElementById("recherche")?.scrollIntoView({ behavior: "smooth" });
@@ -1018,653 +1046,34 @@ export function PublicBooking() {
         </div>
       </header>
 
-      <section id="recherche" className="mx-auto w-full max-w-6xl px-3 py-4 sm:px-6 lg:px-8 lg:py-10">
-        <div className="grid min-w-0 gap-4 lg:grid-cols-[1.05fr_0.95fr] lg:items-stretch">
-          <div className="min-w-0 rounded-[22px] border border-blue-100 bg-white p-4 shadow-sm sm:rounded-[28px] sm:p-7 lg:p-9">
-            <div className="inline-flex max-w-full items-center gap-2 rounded-full border border-violet-200 bg-violet-50 px-3 py-2 text-xs font-bold text-violet-700 sm:text-sm">
-              <Sparkles className="h-4 w-4 shrink-0" />
-              <span className="truncate">Bookea Client avec Seya</span>
-            </div>
-            <h1 className="mt-5 max-w-3xl text-[2rem] font-black leading-[1.08] text-slate-950 sm:text-5xl lg:text-7xl">
-              Trouvez un soin, réservez, brillez.
-            </h1>
-            <p className="mt-4 max-w-2xl text-base font-medium leading-7 text-slate-600 sm:text-lg">
-              Cherchez une prestation, comparez les prix et bloquez votre
-              rendez-vous en quelques secondes.
-            </p>
-
-            <div className="mt-6 rounded-2xl border border-slate-200 bg-white p-2 shadow-lg shadow-slate-200/70 sm:rounded-3xl sm:p-3 lg:bg-slate-50 lg:shadow-inner">
-              <div className="grid gap-3 lg:grid-cols-[1fr_0.8fr_auto]">
-                <label className="flex min-w-0 items-center gap-3 rounded-2xl border border-slate-200 bg-white px-3 py-3 sm:px-4 sm:py-3.5">
-                  <Search className="h-5 w-5 shrink-0 text-slate-400" />
-                  <input
-                    ref={searchInputRef}
-                    className="min-w-0 w-full bg-transparent text-base font-semibold outline-none placeholder:text-slate-400"
-                    value={serviceQuery}
-                    onChange={(event) => setServiceQuery(event.target.value)}
-                    aria-label="Prestation recherchee"
-                    placeholder="Soin, exemple Hydrafacial"
-                  />
-                </label>
-                <label className="flex min-w-0 items-center gap-3 rounded-2xl border border-slate-200 bg-white px-3 py-3 sm:px-4 sm:py-3.5">
-                  <MapPin className="h-5 w-5 shrink-0 text-slate-400" />
-                  <input
-                    className="w-full bg-transparent text-base font-semibold outline-none placeholder:text-slate-400"
-                    value={locationQuery}
-                    onChange={(event) => setLocationQuery(event.target.value)}
-                    aria-label="Localisation"
-                    placeholder="Ville"
-                  />
-                </label>
-                <button
-                  type="button"
-                  onClick={launchPublicSearch}
-                  className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-blue-600 px-5 py-3.5 text-base font-black text-white shadow-sm transition hover:bg-blue-700 lg:w-auto"
-                >
-                  Rechercher
-                  <ArrowRight className="h-5 w-5" />
-                </button>
-              </div>
-            </div>
-
-            <div className="-mx-1 mt-4 flex max-w-full snap-x gap-2 overflow-x-auto px-1 pb-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-              {["Tous", ...publicCenterCategories].map((item) => (
-                <button
-                  key={item}
-                  onClick={() => selectCategory(item)}
-                  className={`shrink-0 rounded-full border px-4 py-2 text-sm font-bold ${
-                    activeCategory === item
-                      ? "border-blue-600 bg-blue-600 text-white"
-                      : "border-slate-200 bg-white text-slate-600"
-                  }`}
-                >
-                  {item}
-                </button>
-              ))}
-            </div>
-
-            <div className="-mx-1 mt-3 flex max-w-full snap-x gap-2 overflow-x-auto px-1 pb-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-              {["Remplissage gel demain", "Laser jambes", "Cryolipolyse proche"].map(
-                (item) => (
-                  <button
-                    key={item}
-                    onClick={() => launchOfferSearch(item, "Tous")}
-                    className="shrink-0 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-bold text-slate-600"
-                  >
-                    {item}
-                  </button>
-                ),
-              )}
-            </div>
-          </div>
-
-          <button
-            type="button"
-            onClick={focusSeyaSearch}
-            className="min-w-0 rounded-[22px] border border-violet-100 bg-violet-50 p-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-violet-200 hover:shadow-md sm:rounded-[28px] sm:p-7 lg:p-8"
-            aria-label="Demander à Seya de chercher un créneau"
-          >
-            <div className="flex items-center gap-3">
-              <div className="grid h-11 w-11 place-items-center rounded-2xl bg-violet-600 text-white">
-                <Bot className="h-6 w-6" />
-              </div>
-              <div>
-                <p className="text-xs font-black uppercase tracking-wide text-violet-700">
-                  Seya comprend
-                </p>
-                <h2 className="text-xl font-black text-slate-950 sm:text-2xl">
-                  votre demande naturelle
-                </h2>
-              </div>
-            </div>
-
-            <div className="mt-5 space-y-3">
-              <div className="rounded-2xl bg-white p-4 text-base font-bold leading-7 text-slate-800 shadow-sm sm:rounded-3xl">
-                &quot;Je cherche un institut pres de chez moi pour un Hydrafacial
-                samedi apres-midi.&quot;
-              </div>
-              <div className="grid gap-3 sm:grid-cols-2">
-                {[
-                  ["Prestation", serviceQuery || "A preciser"],
-                  ["Ville", locationQuery || "Autour de moi"],
-                  ["Moment", "Samedi apres-midi"],
-                  ["Resultat", `${visibleCenters.length} centres`],
-                ].map(([label, value]) => (
-                  <div key={label} className="min-w-0 rounded-2xl bg-white/80 p-4">
-                    <p className="text-[11px] font-black uppercase text-slate-400">
-                      {label}
-                    </p>
-                    <p className="mt-1 truncate text-sm font-black text-slate-950 sm:text-base">
-                      {value}
-                    </p>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </button>
-        </div>
-      </section>
-
-      <section className="mx-auto w-full max-w-6xl px-3 pb-8 sm:px-6 lg:px-8">
-        <div className="grid min-w-0 gap-4 lg:grid-cols-[1.15fr_0.85fr]">
-          <div className="min-w-0 rounded-[22px] border border-slate-200 bg-white p-4 shadow-sm sm:rounded-[28px] sm:p-6">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <p className="text-xs font-black uppercase text-blue-600">
-                  Par catégorie
-                </p>
-                <h2 className="text-2xl font-black text-slate-950">
-                  Les plus réservés
-                </h2>
-              </div>
-              <Flame className="h-7 w-7 text-orange-500" />
-            </div>
-
-            <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-              {mostBookedByCategory.map((item) => (
-                <button
-                  key={`${item.category}-${item.service}`}
-                  type="button"
-                  onClick={() => launchOfferSearch(item.service, item.category)}
-                  className="min-w-0 rounded-2xl border border-slate-200 bg-slate-50 p-4 text-left transition hover:-translate-y-0.5 hover:border-blue-200 hover:bg-blue-50 sm:rounded-3xl"
-                >
-                  <span className="rounded-full bg-white px-3 py-1 text-xs font-black text-blue-700">
-                    {item.category}
-                  </span>
-                  <h3 className="mt-3 text-lg font-black text-slate-950">
-                    {item.service}
-                  </h3>
-                  <div className="mt-3 flex flex-wrap items-end justify-between gap-3">
-                    <p className="text-2xl font-black text-blue-600">
-                      dès {item.price}
-                    </p>
-                    <p className="rounded-full bg-amber-100 px-2 py-1 text-[11px] font-black text-amber-700">
-                      {item.badge}
-                    </p>
-                  </div>
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="grid min-w-0 gap-4">
-            <div className="rounded-[22px] border border-violet-100 bg-violet-50 p-4 shadow-sm sm:rounded-[28px] sm:p-5">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <p className="text-xs font-black uppercase text-violet-700">
-                    Offres
-                  </p>
-                  <h2 className="text-2xl font-black text-slate-950">
-                    À ne pas rater
-                  </h2>
-                </div>
-                <Gift className="h-7 w-7 text-violet-600" />
-              </div>
-              <div className="mt-4 space-y-3">
-                {publicCurrentOffers.map((offer) => (
-                  <button
-                    key={offer.title}
-                    type="button"
-                    onClick={() => launchOfferSearch(offer.title, offer.category)}
-                    className="flex w-full min-w-0 items-center justify-between gap-3 rounded-2xl bg-white p-4 text-left shadow-sm transition hover:-translate-y-0.5 sm:rounded-3xl"
-                  >
-                    <div className="flex min-w-0 items-center gap-3">
-                      {offer.photo ? (
-                        <img
-                          src={offer.photo}
-                          alt=""
-                          className="h-12 w-12 shrink-0 rounded-2xl object-cover"
-                        />
-                      ) : null}
-                      <div className="min-w-0">
-                        <p className="font-black text-slate-950">{offer.title}</p>
-                        <p className="mt-1 text-sm font-semibold text-slate-500">
-                          {offer.center}
-                        </p>
-                      </div>
-                    </div>
-                    <div className="shrink-0 text-right">
-                      <p className="text-xl font-black text-violet-700">
-                        {offer.price}
-                      </p>
-                      <p className="text-sm font-bold text-slate-400 line-through">
-                        {offer.oldPrice}
-                      </p>
-                    </div>
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div className="rounded-[22px] border border-orange-100 bg-orange-50 p-4 shadow-sm sm:rounded-[28px] sm:p-5">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <p className="text-xs font-black uppercase text-orange-700">
-                    Urgence douce
-                  </p>
-                  <h2 className="text-2xl font-black text-slate-950">
-                    Bientôt terminées
-                  </h2>
-                </div>
-                <Timer className="h-7 w-7 text-orange-600" />
-              </div>
-              <div className="mt-4 grid gap-2">
-                {publicEndingSoonOffers.map((offer) => (
-                  <button
-                    key={offer.title}
-                    type="button"
-                    onClick={() => launchOfferSearch(offer.title, offer.category)}
-                    className="flex w-full min-w-0 flex-col items-start justify-between gap-2 rounded-2xl bg-white px-4 py-3 text-left font-black shadow-sm transition hover:bg-orange-100 sm:flex-row sm:items-center"
-                  >
-                    <span className="flex min-w-0 items-center gap-3">
-                      {offer.photo ? (
-                        <img
-                          src={offer.photo}
-                          alt=""
-                          className="h-10 w-10 shrink-0 rounded-xl object-cover"
-                        />
-                      ) : null}
-                      <span className="text-slate-950">{offer.title}</span>
-                    </span>
-                    <span className="rounded-full bg-orange-100 px-3 py-1 text-xs text-orange-700">
-                      {offer.discount} · {offer.until}
-                    </span>
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <section className="mx-auto w-full max-w-6xl space-y-4 px-3 pb-8 sm:px-6 lg:px-8">
-        <div className="min-w-0 rounded-[22px] border border-orange-100 bg-gradient-to-br from-orange-50 via-white to-violet-50 p-4 shadow-sm sm:rounded-[30px] sm:p-6">
-          <div className="flex items-end justify-between gap-4">
-            <div className="min-w-0">
-              <p className="text-xs font-black uppercase text-orange-600">
-                Offres à ne pas manquer
-              </p>
-              <h2 className="text-2xl font-black text-slate-950 sm:text-3xl">
-                Les bons plans du moment
-              </h2>
-            </div>
-            <Flame className="hidden h-8 w-8 text-orange-500 sm:block" />
-          </div>
-
-          <div className="-mx-1 mt-5 flex max-w-full snap-x gap-3 overflow-x-auto px-1 pb-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-            {publicCurrentOffers.slice(0, 4).map((offer, index) => (
-              <button
-                key={`${offer.title}-${offer.center}`}
-                type="button"
-                onClick={() => launchOfferSearch(offer.title, offer.category)}
-                className={`relative min-w-[245px] max-w-[calc(100vw-3rem)] snap-start overflow-hidden rounded-[22px] p-4 text-left text-white shadow-sm transition hover:-translate-y-0.5 sm:min-w-[320px] sm:rounded-[26px] sm:p-5 ${
-                  index % 2 === 0
-                    ? "bg-gradient-to-br from-orange-500 to-pink-500"
-                    : "bg-gradient-to-br from-blue-600 to-violet-600"
-                }`}
-              >
-                {offer.photo ? (
-                  <img
-                    src={offer.photo}
-                    alt=""
-                    className="absolute inset-0 h-full w-full object-cover opacity-35"
-                  />
-                ) : null}
-                <div className="relative">
-                <span className="rounded-full bg-white/20 px-3 py-1 text-xs font-black">
-                  Offre limitée
-                </span>
-                <h3 className="mt-5 text-xl font-black sm:text-2xl">{offer.title}</h3>
-                <p className="mt-2 text-sm font-bold text-white/80">
-                  {offer.center}
-                </p>
-                <div className="mt-6 flex flex-wrap items-end justify-between gap-4">
-                  <div>
-                    <p className="text-3xl font-black">{offer.price}</p>
-                    <p className="text-sm font-bold text-white/70 line-through">
-                      {offer.oldPrice}
-                    </p>
-                  </div>
-                  <span className="rounded-full bg-white px-4 py-2 text-sm font-black text-slate-950">
-                    Voir l&apos;offre
-                  </span>
-                </div>
-                </div>
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div className="grid gap-4 lg:grid-cols-[0.95fr_1.05fr]">
-          <div className="min-w-0 rounded-[22px] border border-orange-100 bg-white p-4 shadow-sm sm:rounded-[28px] sm:p-5">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-xs font-black uppercase text-orange-600">
-                  Expire bientôt
-                </p>
-                <h2 className="text-2xl font-black text-slate-950">
-                  Derniers créneaux
-                </h2>
-              </div>
-              <Timer className="h-7 w-7 text-orange-500" />
-            </div>
-            <div className="mt-4 space-y-3">
-              {publicEndingSoonOffers.slice(0, 3).map((offer) => (
-                <button
-                  key={`soon-${offer.title}`}
-                  type="button"
-                  onClick={() => launchOfferSearch(offer.title, offer.category)}
-                  className="flex w-full min-w-0 items-center justify-between gap-3 rounded-2xl border border-orange-100 bg-orange-50 px-4 py-3 text-left transition hover:border-orange-200 sm:rounded-3xl"
-                >
-                  <div className="flex min-w-0 items-center gap-3">
-                    {offer.photo ? (
-                      <img
-                        src={offer.photo}
-                        alt=""
-                        className="h-11 w-11 shrink-0 rounded-xl object-cover"
-                      />
-                    ) : null}
-                    <div className="min-w-0">
-                      <p className="font-black text-slate-950">{offer.title}</p>
-                      <p className="mt-1 text-sm font-bold text-orange-700">
-                        {offer.until}
-                      </p>
-                    </div>
-                  </div>
-                  <span className="shrink-0 rounded-full bg-white px-3 py-1 text-sm font-black text-orange-700">
-                    {offer.discount}
-                  </span>
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <button
-            id="seya-assistant"
-            type="button"
-            onClick={focusSeyaSearch}
-            className="min-w-0 rounded-[22px] border border-violet-200 bg-violet-600 p-4 text-left text-white shadow-sm transition hover:-translate-y-0.5 sm:rounded-[28px] sm:p-5"
-          >
-            <div className="flex items-start gap-4">
-              <div className="grid h-12 w-12 place-items-center rounded-2xl bg-white/15">
-                <Bot className="h-7 w-7" />
-              </div>
-              <div className="min-w-0">
-                <p className="text-xs font-black uppercase text-violet-100">
-                  Demandez à Seya
-                </p>
-                <h2 className="mt-1 text-2xl font-black sm:text-3xl">
-                  Bonjour, je peux vous aider.
-                </h2>
-              </div>
-            </div>
-            <div className="mt-5 rounded-2xl bg-white p-4 text-slate-950 shadow-sm sm:rounded-3xl">
-              <p className="text-sm font-black uppercase text-slate-400">
-                Que recherchez-vous ?
-              </p>
-              <p className="mt-2 text-lg font-black">
-                Je voudrais refaire mon remplissage gel demain.
-              </p>
-            </div>
-          </button>
-        </div>
-
-        <div className="grid min-w-0 gap-4 lg:grid-cols-3">
-          <div className="min-w-0 rounded-[22px] border border-slate-200 bg-white p-4 shadow-sm sm:rounded-[28px] sm:p-5">
-            <p className="text-xs font-black uppercase text-blue-600">
-              Très réservés
-            </p>
-            <h2 className="mt-1 text-2xl font-black text-slate-950">
-              Centres de la semaine
-            </h2>
-            <div className="mt-4 space-y-3">
-              {popularCenters.map((center, index) => (
-                <button
-                  key={center.name}
-                  type="button"
-                  onClick={() => openPopularCenter(center)}
-                  className="flex w-full min-w-0 items-center justify-between gap-3 rounded-2xl bg-slate-50 p-4 text-left transition hover:bg-blue-50 sm:rounded-3xl"
-                >
-                  <div className="min-w-0">
-                    <p className="font-black text-slate-950">
-                      {index + 1}. {center.name}
-                    </p>
-                    <p className="mt-1 text-sm font-bold text-slate-500">
-                      {center.city} · {center.rating}/5
-                    </p>
-                  </div>
-                  <span className="shrink-0 rounded-full bg-blue-600 px-3 py-1 text-xs font-black text-white">
-                    {center.bookings} fois
-                  </span>
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="min-w-0 rounded-[22px] border border-slate-200 bg-white p-4 shadow-sm sm:rounded-[28px] sm:p-5">
-            <p className="text-xs font-black uppercase text-violet-600">
-              Tendances du moment
-            </p>
-            <h2 className="mt-1 text-2xl font-black text-slate-950">
-              Ce qui monte
-            </h2>
-            <div className="mt-4 grid gap-3">
-              {trendItems.map(([title, detail, badge, category]) => (
-                <button
-                  key={title}
-                  type="button"
-                  onClick={() => launchOfferSearch(title, category)}
-                  className="rounded-3xl border border-slate-200 p-4 text-left transition hover:border-violet-200 hover:bg-violet-50"
-                >
-                  <div className="flex flex-wrap items-center justify-between gap-3">
-                    <p className="min-w-0 font-black text-slate-950">{title}</p>
-                    <span className="shrink-0 rounded-full bg-violet-50 px-3 py-1 text-xs font-black text-violet-700">
-                      {badge}
-                    </span>
-                  </div>
-                  <p className="mt-2 text-sm font-bold text-slate-500">
-                    {detail}
-                  </p>
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="min-w-0 rounded-[22px] border border-slate-200 bg-white p-4 shadow-sm sm:rounded-[28px] sm:p-5">
-            <p className="text-xs font-black uppercase text-emerald-600">
-              Près de vous
-            </p>
-            <h2 className="mt-1 text-2xl font-black text-slate-950">
-              Bons plans locaux
-            </h2>
-            <div className="mt-4 space-y-3">
-              {nearbyDeals.map(([city, service, deal, distance]) => (
-                <button
-                  key={`${city}-${service}`}
-                  type="button"
-                  onClick={() => {
-                    setLocationQuery(city);
-                    setServiceQuery(service);
-                    document
-                      .getElementById("centres")
-                      ?.scrollIntoView({ behavior: "smooth" });
-                  }}
-                  className="flex w-full min-w-0 items-center justify-between gap-3 rounded-2xl bg-emerald-50 p-4 text-left sm:rounded-3xl"
-                >
-                  <div className="min-w-0">
-                    <p className="font-black text-slate-950">{service}</p>
-                    <p className="mt-1 text-sm font-bold text-slate-500">
-                      {city} · {distance}
-                    </p>
-                  </div>
-                  <span className="shrink-0 text-2xl font-black text-emerald-600">
-                    {deal}
-                  </span>
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-
-        <div className="grid min-w-0 gap-4 lg:grid-cols-[1.05fr_0.95fr]">
-          <div className="min-w-0 rounded-[22px] border border-slate-200 bg-white p-4 shadow-sm sm:rounded-[28px] sm:p-5">
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div className="rounded-3xl bg-blue-50 p-5">
-                <Heart className="h-7 w-7 text-blue-600" />
-                <p className="mt-4 text-xs font-black uppercase text-blue-700">
-                  Vos instituts favoris
-                </p>
-                <h3 className="mt-1 text-xl font-black text-slate-950">
-                  Retrouvez vite vos adresses préférées.
-                </h3>
-                <button
-                  type="button"
-                  onClick={() => document.getElementById("centres")?.scrollIntoView({ behavior: "smooth" })}
-                  className="mt-5 rounded-2xl bg-blue-600 px-4 py-3 text-sm font-black text-white"
-                >
-                  Voir les centres
-                </button>
-              </div>
-
-              <div className="rounded-3xl bg-pink-50 p-5">
-                <Gift className="h-7 w-7 text-pink-600" />
-                <p className="mt-4 text-xs font-black uppercase text-pink-700">
-                  Offre personnalisée
-                </p>
-                <h3 className="mt-1 text-xl font-black text-slate-950">
-                  20% sur votre prochain soin le mois de votre anniversaire.
-                </h3>
-                <p className="mt-3 text-sm font-bold text-slate-500">
-                  Activée dans votre espace client.
-                </p>
-              </div>
-            </div>
-
-            <div className="mt-4 rounded-2xl bg-slate-950 p-4 text-white sm:rounded-3xl sm:p-5">
-              <div className="flex items-center justify-between gap-4">
-                <div>
-                  <p className="text-xs font-black uppercase text-cyan-200">
-                    Carte
-                  </p>
-                  <h3 className="mt-1 text-2xl font-black">
-                    Centres autour de moi
-                  </h3>
-                </div>
-                <MapPin className="h-8 w-8 text-cyan-200" />
-              </div>
-              <div className="mt-5 grid grid-cols-3 gap-2">
-                {["Aubière", "Clermont", "Romagnat"].map((city) => (
-                  <button
-                    key={city}
-                    type="button"
-                    onClick={() => {
-                      setLocationQuery(city);
-                      scrollToCenters();
-                    }}
-                    className="min-w-0 rounded-2xl bg-white/10 px-2 py-3 text-xs font-black sm:px-3 sm:text-sm"
-                  >
-                    {city}
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
-
-          <div className="grid min-w-0 gap-4">
-            <div className="min-w-0 rounded-[22px] border border-slate-200 bg-white p-4 shadow-sm sm:rounded-[28px] sm:p-5">
-              <p className="text-xs font-black uppercase text-blue-600">
-                Disponibilités aujourd&apos;hui
-              </p>
-              <div className="mt-4 space-y-3">
-                {todayAvailabilities.map(([time, service, center]) => (
-                  <button
-                    key={`${time}-${service}`}
-                    type="button"
-                    onClick={() => openAvailability(time, service, center)}
-                    className="grid w-full min-w-0 grid-cols-[64px_minmax(0,1fr)] items-center gap-3 rounded-2xl border border-slate-200 p-3 text-left sm:grid-cols-[72px_1fr_auto] sm:rounded-3xl sm:p-4"
-                  >
-                    <span className="text-xl font-black text-blue-600">
-                      {time}
-                    </span>
-                    <span className="min-w-0">
-                      <span className="block font-black text-slate-950">
-                        {service}
-                      </span>
-                      <span className="block text-sm font-bold text-slate-500">
-                        {center}
-                      </span>
-                    </span>
-                    <span className="col-span-2 w-fit rounded-full bg-blue-50 px-3 py-1 text-xs font-black text-blue-700 sm:col-span-1">
-                      Réserver
-                    </span>
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm">
-              <p className="text-xs font-black uppercase text-slate-500">
-                Derniers avis
-              </p>
-              <div className="mt-4 space-y-3">
-                {latestReviews.map(([name, review]) => (
-                  <div key={name} className="rounded-3xl bg-slate-50 p-4">
-                    <p className="text-sm font-black text-amber-500">★★★★★</p>
-                    <p className="mt-2 font-bold text-slate-700">{review}</p>
-                    <p className="mt-2 text-sm font-black text-slate-950">
-                      {name}
-                    </p>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div className="rounded-[28px] border border-cyan-100 bg-white p-5 shadow-sm">
-          <div className="flex items-center justify-between gap-4">
-            <div>
-              <p className="text-xs font-black uppercase text-cyan-600">
-                Nouveaux centres
-              </p>
-              <h2 className="text-2xl font-black text-slate-950">
-                Ouvertures cette semaine
-              </h2>
-            </div>
-            <Sparkles className="h-7 w-7 text-cyan-500" />
-          </div>
-          <div className="mt-4 grid gap-3 md:grid-cols-3">
-            {["Glow Studio", "Maison du Regard", "Spa Volcan"].map((name) => (
-              <button
-                key={name}
-                type="button"
-                onClick={() => {
-                  const matchingCenter =
-                    allCenters.find((center) => center.name === name) ??
-                    allCenters.find((center) =>
-                      center.categories.some((category) =>
-                        name.toLowerCase().includes(category.toLowerCase().split(" ")[0]),
-                      ),
-                    );
-                  if (matchingCenter) {
-                    setSelectedCenterName(matchingCenter.name);
-                  }
-                  scrollToCenters();
-                }}
-                className="rounded-3xl border border-cyan-100 bg-cyan-50 p-4 text-left"
-              >
-                <span className="rounded-full bg-white px-3 py-1 text-xs font-black text-cyan-700">
-                  Nouveau
-                </span>
-                <p className="mt-4 text-xl font-black text-slate-950">{name}</p>
-                <p className="mt-1 text-sm font-bold text-slate-500">
-                  Disponible sur Bookea
-                </p>
-              </button>
-            ))}
-          </div>
-        </div>
-      </section>
+      <ClientMarketplace
+        serviceQuery={serviceQuery}
+        locationQuery={locationQuery}
+        categories={publicCenterCategories}
+        activeCategory={activeCategory}
+        offers={showcaseOffers}
+        centers={visibleCenters.map((center) => ({
+          name: center.name,
+          city: center.city,
+          distance: center.distance,
+          rating: center.rating,
+          reviews: center.reviews,
+          service: center.service,
+          slots: center.slots,
+        }))}
+        onServiceQuery={setServiceQuery}
+        onLocationQuery={setLocationQuery}
+        onSearch={launchPublicSearch}
+        onCategory={selectCategory}
+        onOffer={(offer) => launchOfferSearch(offer.service || offer.title, offer.searchCategory)}
+        onCenter={(center) => {
+          setLocationQuery(center.city);
+          setSelectedCenterName(center.name);
+          setSelectedSlot(center.slots[0] ?? "");
+          scrollToCenters();
+        }}
+        onSlot={openAvailability}
+      />
 
       <section id="centres" className="mx-auto w-full max-w-6xl px-3 pb-8 sm:px-6 lg:px-8">
         <div className="mb-4 flex items-end justify-between gap-4">

@@ -28,6 +28,7 @@ import {
 } from "@/lib/sms-settings";
 import { sendBookeaSms } from "@/lib/send-sms";
 import { sendLeadWhatsApp } from "@/lib/send-whatsapp";
+import { commentsWithoutRepeatedOffer } from "@/lib/lead-offer";
 import { reminderDateAfterStatusChange } from "@/lib/crm-stats";
 import {
   formatWhatsAppDate,
@@ -130,6 +131,11 @@ export default function LeadDetails({
   whatsAppMessages,
 }: LeadDetailsProps) {
   const fullName = `${lead.firstName} ${lead.lastName}`;
+  const commentDisplay = useMemo(() => {
+    const comments = lead.activityLog.filter((item) => item.type === "comment");
+    const shown = commentsWithoutRepeatedOffer(comments.map((item) => ({ text: item.text })));
+    return new Map(comments.map((item, index) => [item.id, shown[index]]));
+  }, [lead.activityLog]);
   const [commentDraft, setCommentDraft] = useState("");
   const [commentSaving, setCommentSaving] = useState(false);
   const [infoForm, setInfoForm] = useState<LeadInfoForm>(() => leadToInfoForm(lead));
@@ -722,12 +728,20 @@ export default function LeadDetails({
               </div>
             </div>
 
-            {lead.activityLog.map((comment) => (
+            {lead.activityLog.map((comment) => {
+              const text =
+                comment.type === "comment"
+                  ? commentDisplay.get(comment.id) || ""
+                  : comment.text;
+              if (!text.trim()) {
+                return null;
+              }
+              return (
               <CommentCard
                 key={comment.id}
                 author={comment.author}
                 date={comment.date}
-                text={comment.text}
+                text={text}
                 highlight={comment.type === "system" || comment.type === "status"}
                 onDelete={
                   comment.type === "comment"
@@ -735,7 +749,8 @@ export default function LeadDetails({
                     : undefined
                 }
               />
-            ))}
+              );
+            })}
 
             <CommentCard
               author="Seya"

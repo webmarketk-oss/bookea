@@ -154,7 +154,12 @@ export type CenterPublicOffer = {
   oldPrice: number;
   price: number;
   tag: string;
+  /** Rayon de la vitrine client. */
+  shelf?: "bon-plan" | "offre-limitee" | "derniers-creneaux" | "pres-de-chez-vous";
   endsAt: string;
+  /** Heure de fin HH:mm, utilisée seulement si le minuteur est actif. */
+  endsAtTime?: string;
+  timerEnabled?: boolean;
   limitedSpots: number;
   visible: boolean;
 };
@@ -383,9 +388,12 @@ export const defaultCenterOffers: CenterPublicOffer[] = [
     title: "Hydrafacial découverte",
     serviceName: "Hydrafacial",
     oldPrice: 99,
-    price: 79,
-    tag: "Offre du moment",
-    endsAt: "2026-08-15",
+    price: 49,
+    tag: "Bon plan du moment",
+    shelf: "bon-plan",
+    endsAt: "2026-12-15",
+    endsAtTime: "23:59",
+    timerEnabled: true,
     limitedSpots: 8,
     visible: true,
   },
@@ -394,10 +402,40 @@ export const defaultCenterOffers: CenterPublicOffer[] = [
     title: "Laser jambes",
     serviceName: "Épilation Laser",
     oldPrice: 150,
-    price: 120,
-    tag: "Bientôt épuisée",
-    endsAt: "2026-08-02",
+    price: 99,
+    tag: "Offre limitée",
+    shelf: "offre-limitee",
+    endsAt: "2026-12-08",
+    endsAtTime: "20:00",
+    timerEnabled: true,
+    limitedSpots: 6,
+    visible: true,
+  },
+  {
+    id: 3,
+    title: "Bilan minceur",
+    serviceName: "Cryolipolyse",
+    oldPrice: 0,
+    price: 39,
+    tag: "Derniers créneaux disponibles",
+    shelf: "derniers-creneaux",
+    endsAt: "2026-12-02",
+    endsAtTime: "18:30",
+    timerEnabled: true,
     limitedSpots: 3,
+    visible: true,
+  },
+  {
+    id: 4,
+    title: "Soin visage près de chez vous",
+    serviceName: "Hydrafacial",
+    oldPrice: 89,
+    price: 69,
+    tag: "Près de chez vous",
+    shelf: "pres-de-chez-vous",
+    endsAt: "",
+    timerEnabled: false,
+    limitedSpots: 0,
     visible: true,
   },
 ];

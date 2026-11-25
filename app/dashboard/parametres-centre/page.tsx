@@ -50,6 +50,12 @@ import {
   type CenterReviewAutomation,
 } from "@/lib/center-settings";
 import { cabins as agendaCabins, practitioners as agendaPractitioners } from "@/lib/agenda-data";
+import {
+  PUBLIC_OFFER_SHELVES,
+  offerShelf,
+  publicOfferShelfLabel,
+  type PublicOfferShelf,
+} from "@/lib/public-offers";
 import { loadCenterAssignmentOptions, loadCenterCabins } from "@/lib/agenda-supabase";
 import { resolveAssignedCabinNames } from "@/lib/assigned-cabins";
 import {
@@ -1334,8 +1340,11 @@ export default function CenterSettingsPage() {
         serviceName: firstService?.name ?? "Prestation",
         oldPrice: firstService?.price ?? 0,
         price: firstService ? Math.max(0, firstService.price - 10) : 0,
-        tag: "Offre du moment",
+        tag: "Bon plan du moment",
+        shelf: "bon-plan",
         endsAt: new Date().toISOString().slice(0, 10),
+        endsAtTime: "23:59",
+        timerEnabled: false,
         limitedSpots: 5,
         visible: true,
       },
@@ -2009,10 +2018,10 @@ export default function CenterSettingsPage() {
                       Offres publiques
                     </p>
                     <h3 className="mt-1 text-base font-semibold text-slate-950">
-                      Offres du moment et offres bientôt épuisées
+                      Offre limitée, créneaux, près de chez vous, bon plan
                     </h3>
                     <p className="mt-1 text-sm font-normal text-slate-500">
-                      L'ordre ci-dessous est l'ordre affiché sur la fiche publique.
+                      Chaque offre est publiée dans une catégorie de la vitrine client. Le minuteur la retire toute seule à l&apos;heure choisie.
                     </p>
                   </div>
                   <button
@@ -2078,19 +2087,31 @@ export default function CenterSettingsPage() {
                             />
                             <label className="space-y-2">
                               <span className="text-xs font-medium text-slate-500">
-                                Badge
+                                Catégorie vitrine
                               </span>
                               <select
                                 className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-medium text-slate-800 outline-none focus:border-blue-500"
-                                value={offer.tag}
-                                onChange={(event) =>
-                                  updateOffer(offer.id, "tag", event.target.value)
-                                }
+                                value={offerShelf(offer)}
+                                onChange={(event) => {
+                                  const shelf = event.target.value as PublicOfferShelf;
+                                  setOffers((current) =>
+                                    current.map((item) =>
+                                      item.id === offer.id
+                                        ? {
+                                            ...item,
+                                            shelf,
+                                            tag: publicOfferShelfLabel(shelf),
+                                          }
+                                        : item,
+                                    ),
+                                  );
+                                }}
                               >
-                                <option>Offre du moment</option>
-                                <option>Bientôt épuisée</option>
-                                <option>Derniers créneaux</option>
-                                <option>À ne pas rater</option>
+                                {PUBLIC_OFFER_SHELVES.map((shelf) => (
+                                  <option key={shelf.id} value={shelf.id}>
+                                    {shelf.label}
+                                  </option>
+                                ))}
                               </select>
                             </label>
                             <NumberField
@@ -2103,19 +2124,45 @@ export default function CenterSettingsPage() {
                             />
                           </div>
                           <div className="flex flex-wrap items-center gap-3">
-                            <label className="space-y-2">
-                              <span className="text-xs font-medium text-slate-500">
-                                Fin de l'offre
-                              </span>
-                              <input
-                                type="date"
-                                value={offer.endsAt}
-                                onChange={(event) =>
-                                  updateOffer(offer.id, "endsAt", event.target.value)
+                            <div className="flex flex-wrap items-end gap-3">
+                              <Toggle
+                                checked={Boolean(offer.timerEnabled)}
+                                label={offer.timerEnabled ? "Minuteur actif" : "Sans minuteur"}
+                                onClick={() =>
+                                  updateOffer(offer.id, "timerEnabled", !offer.timerEnabled)
                                 }
-                                className="h-11 rounded-xl border border-slate-200 px-3 font-semibold outline-none focus:border-blue-500"
                               />
-                            </label>
+                              {offer.timerEnabled ? (
+                                <>
+                                  <label className="space-y-2">
+                                    <span className="text-xs font-medium text-slate-500">
+                                      Fin de l&apos;offre
+                                    </span>
+                                    <input
+                                      type="date"
+                                      value={offer.endsAt}
+                                      onChange={(event) =>
+                                        updateOffer(offer.id, "endsAt", event.target.value)
+                                      }
+                                      className="h-11 rounded-xl border border-slate-200 px-3 font-semibold outline-none focus:border-blue-500"
+                                    />
+                                  </label>
+                                  <label className="space-y-2">
+                                    <span className="text-xs font-medium text-slate-500">
+                                      Heure
+                                    </span>
+                                    <input
+                                      type="time"
+                                      value={offer.endsAtTime || "23:59"}
+                                      onChange={(event) =>
+                                        updateOffer(offer.id, "endsAtTime", event.target.value)
+                                      }
+                                      className="h-11 rounded-xl border border-slate-200 px-3 font-semibold outline-none focus:border-blue-500"
+                                    />
+                                  </label>
+                                </>
+                              ) : null}
+                            </div>
                             <div className="flex flex-wrap items-center gap-2 pt-5">
                               <Toggle
                                 checked={offer.visible}
@@ -4094,7 +4141,10 @@ function PublicPreview({
                         <div>
                           <p className="font-semibold text-slate-950">{offer.title}</p>
                           <p className="mt-1 text-sm font-normal text-slate-500">
-                            {offer.serviceName} · fin {offer.endsAt}
+                            {offer.serviceName} · {publicOfferShelfLabel(offerShelf(offer))}
+                            {offer.timerEnabled && offer.endsAt
+                              ? ` · jusqu'au ${offer.endsAt}${offer.endsAtTime ? ` ${offer.endsAtTime}` : ""}`
+                              : ""}
                           </p>
                         </div>
                         <span className="rounded-full bg-violet-100 px-3 py-1 text-xs font-semibold text-violet-700">

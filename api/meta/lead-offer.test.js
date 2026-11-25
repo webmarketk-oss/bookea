@@ -17,8 +17,10 @@ const {
   incomingHasNewOffer,
   joinOfferLabels,
   leadImportToolFromEvents,
+  commentsWithoutRepeatedOffer,
   leadOfferLabel,
   leadSourceFromStored,
+  staffCommentText,
   offersFromEvents,
   systemeIoCareLabel,
 } = require("../../lib/lead-offer.ts");
@@ -364,6 +366,31 @@ test("Systeme.io Bruz sans le mot minceur : le soin est Soin minceur, l’offre 
     withSystemeIoAxis({ treatment: "", campaign: "Meta Lead Ads" }, "Facebook").treatment,
     "",
   );
+});
+
+test("le commentaire ne répète pas l’offre déjà affichée dans sa colonne", () => {
+  const landing =
+    "Zone : Black November — jusqu'à -50 % sur nos forfaits + bilan et séance test offerts — zones : Aisselles, Maillot, Jambes complètes, Dos / torse | Contact message : oui";
+  const noted = `auré 24/11 dit tarifs avec BF mais veut reflechir ${landing}`;
+  assert.equal(
+    staffCommentText(noted),
+    "auré 24/11 dit tarifs avec BF mais veut reflechir",
+  );
+  assert.equal(staffCommentText("rappel demain"), "rappel demain");
+  assert.equal(staffCommentText("Zone : Ameins"), "Zone : Ameins");
+
+  const shown = commentsWithoutRepeatedOffer([
+    { text: noted },
+    { text: noted },
+    { text: "auré 24/11 dit tarifs mais veut reflechir" },
+  ]);
+  assert.equal(shown[0], "auré 24/11 dit tarifs avec BF mais veut reflechir");
+  assert.equal(
+    shown[1],
+    "auré 24/11 dit tarifs avec BF mais veut reflechir | Zones : Aisselles, Maillot, Jambes complètes, Dos / torse | Contact message : oui",
+  );
+  assert.equal(shown[2], "auré 24/11 dit tarifs mais veut reflechir");
+  assert.doesNotMatch(shown.join("\n"), /Black November/);
 });
 
 test("fiche Systeme.io déjà enregistrée en Soin à préciser : le CRM affiche Soin minceur", () => {

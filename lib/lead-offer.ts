@@ -100,6 +100,62 @@ export function systemeIoCareLabel(source?: string | null, treatment?: string | 
   return parts.length ? parts.join(" · ") : "Soin minceur";
 }
 
+/** Sépare la note saisie du bloc landing (offre, zones, contact) recopié dans le commentaire. */
+export function splitLeadComment(text: string) {
+  const raw = String(text || "").trim();
+  const zonesAt = raw.search(/\s+zones\s*:/i);
+  if (zonesAt < 0) {
+    return { note: raw, offer: "", zones: "", contact: "" };
+  }
+  const head = raw.slice(0, zonesAt).trim();
+  const tail = raw.slice(zonesAt).replace(/^\s+zones\s*:/i, "").trim();
+  const contactMatch = tail.match(/^(.*?)(?:\s*\|\s*Contact(?:\s+\S+)?\s*:\s*(.+))\s*$/i);
+  const zones = (contactMatch ? contactMatch[1] : tail).replace(/[—-]\s*$/g, "").trim();
+  const contact = String(contactMatch?.[2] || "").trim();
+  const marked = head.match(/^(.*?)(?:\s+Zone\s*:\s*)([\s\S]*)$/i);
+  if (marked) {
+    return { note: marked[1].trim(), offer: marked[2].trim(), zones, contact };
+  }
+  const prefixed = head.match(/^Zone\s*:\s*([\s\S]*)$/i);
+  if (prefixed) {
+    return { note: "", offer: prefixed[1].replace(/[—-]\s*$/g, "").trim(), zones, contact };
+  }
+  return { note: head.replace(/[—-]\s*$/g, "").trim(), offer: "", zones, contact };
+}
+
+/** Le champ commentaire affiche la note, pas l’offre déjà visible à côté. */
+export function staffCommentText(text: string) {
+  return splitLeadComment(text).note;
+}
+
+/**
+ * L’offre reste dans sa colonne. Les zones et le contact ne sont gardés
+ * que sur le commentaire le plus ancien qui les contient.
+ * L’entrée est dans l’ordre d’affichage, du plus récent au plus ancien.
+ */
+export function commentsWithoutRepeatedOffer(comments: Array<{ text: string }>) {
+  const parsed = comments.map((item) => splitLeadComment(item.text));
+  let detailsAt = -1;
+  for (let index = parsed.length - 1; index >= 0; index -= 1) {
+    if (parsed[index].zones || parsed[index].contact) {
+      detailsAt = index;
+      break;
+    }
+  }
+  return parsed.map((item, index) => {
+    const parts = [item.note];
+    if (index === detailsAt) {
+      if (item.zones) {
+        parts.push(`Zones : ${item.zones}`);
+      }
+      if (item.contact) {
+        parts.push(`Contact message : ${item.contact}`);
+      }
+    }
+    return parts.filter(Boolean).join(" | ").trim();
+  });
+}
+
 export function leadOfferLabel(lead: Pick<Lead, "campaign" | "treatment">) {
   const offer = String(lead.campaign || "").trim();
   const needle = normalized(offer);
