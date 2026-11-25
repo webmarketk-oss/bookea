@@ -1171,7 +1171,7 @@ export async function mergeCrmDuplicateLeads(
   const { data: primary, error: primaryError } = await supabase
     .from("leads")
     .select(
-      "id,center_id,client_id,latest_comment,amount_cure_ttc,next_action,recall_date,created_at,campaign_id,service_id,campaigns(name),services(name)",
+      "id,center_id,client_id,status,latest_comment,amount_cure_ttc,next_action,recall_date,created_at,campaign_id,service_id,campaigns(name),services(name)",
     )
     .eq("id", primaryLeadId)
     .single();
@@ -1183,7 +1183,7 @@ export async function mergeCrmDuplicateLeads(
   const { data: duplicates, error: duplicatesError } = await supabase
     .from("leads")
     .select(
-      "id,client_id,latest_comment,amount_cure_ttc,next_action,recall_date,created_at,campaign_id,service_id,campaigns(name),services(name)",
+      "id,client_id,status,latest_comment,amount_cure_ttc,next_action,recall_date,created_at,campaign_id,service_id,campaigns(name),services(name)",
     )
     .in("id", uniqueDuplicateIds);
 
@@ -1196,7 +1196,6 @@ export async function mergeCrmDuplicateLeads(
   const comments = [String(primary.latest_comment || "").trim()].filter(Boolean);
   let nextAction = String(primary.next_action || "");
   let recallDate = (primary.recall_date as string | null) ?? null;
-  let earliestCreated = String(primary.created_at || "");
   let newestOffer = {
     at: String(primary.created_at || ""),
     campaignId: primary.campaign_id as string | null,
@@ -1214,9 +1213,7 @@ export async function mergeCrmDuplicateLeads(
       comments.push(extraComment);
     }
     const createdAt = String(duplicate.created_at || "");
-    if (createdAt && (!earliestCreated || createdAt < earliestCreated)) {
-      earliestCreated = createdAt;
-    }
+    const previousStatus = String(duplicate.status || "").trim();
     if (createdAt && createdAt > newestOffer.at) {
       newestOffer = {
         at: createdAt,
@@ -1240,6 +1237,15 @@ export async function mergeCrmDuplicateLeads(
 
     if (eventsError) {
       throw new Error(eventsError.message);
+    }
+
+    if (previousStatus) {
+      await insertLeadEvent(supabase, primary.center_id as string, primaryLeadId, {
+        event_type: "status",
+        to_value: previousStatus,
+        note: `Ancienne fiche · Statut changé : fiche reliée → ${previousStatus}.`,
+        createdAt,
+      });
     }
 
     const appointmentPatch: Record<string, string> = { lead_id: primaryLeadId };
@@ -1300,7 +1306,6 @@ export async function mergeCrmDuplicateLeads(
     recall_date: recallDate,
     ...(newestOffer.campaignId ? { campaign_id: newestOffer.campaignId } : {}),
     ...(newestOffer.serviceId ? { service_id: newestOffer.serviceId } : {}),
-    ...(earliestCreated ? { created_at: earliestCreated } : {}),
     updated_at: new Date().toISOString(),
     last_activity_at: new Date().toISOString(),
   });
@@ -1321,7 +1326,7 @@ export async function mergeCrmDuplicateLeads(
 
   await insertLeadEvent(supabase, primary.center_id as string, primaryLeadId, {
     event_type: "system",
-    note: `Fiches fusionnées : ${uniqueDuplicateIds.length} doublon(s) regroupé(s) sur cette fiche.`,
+    note: `Ancienne fiche reliée ici. Le statut de cette fiche est conservé, les anciens statuts restent dans l'historique.`,
   });
 }
 

@@ -67,6 +67,7 @@ import {
   type DepositPhaseFilter,
   type DepositReminderIndex,
 } from "@/lib/crm-deposit";
+import { duplicateMergeTarget } from "@/lib/duplicate-merge";
 import { syncBirthdaySms } from "@/lib/send-sms";
 import {
   APPOINTMENT_STATUS_UPDATED_EVENT,
@@ -1680,8 +1681,7 @@ export default function CRMLeadsPage() {
   }
 
   async function handleMergeDuplicate(group: Lead[]) {
-    const primaryLead = group[0];
-    const duplicateLeads = group.slice(1);
+    const { kept: primaryLead, linked: duplicateLeads } = duplicateMergeTarget(group);
 
     if (!primaryLead || duplicateLeads.length === 0 || isMergingDuplicates) {
       return;
@@ -2075,8 +2075,8 @@ export default function CRMLeadsPage() {
                       Doublons confirmés
                     </p>
                     <p className="mt-1 text-sm font-semibold text-slate-600">
-                      Même téléphone ou même email, même si les prestations
-                      diffèrent. La fusion garde les infos des deux fiches.
+                      La fiche la plus récente reste en haut, avec son statut.
+                      L’ancienne s’y relie : ses statuts restent dans l’historique.
                     </p>
                   </div>
 
@@ -2103,7 +2103,7 @@ export default function CRMLeadsPage() {
                     >
                       {isMergingDuplicates
                         ? "Fusion en cours..."
-                        : "Fusionner vers la fiche 1"}
+                        : "Relier la fiche 1 à la plus récente"}
                     </Button>
                     <Button
                       type="button"
