@@ -327,6 +327,52 @@ function statusChangeSource(text: string) {
   return sourceMatch ? normalizeLeadStatus(sourceMatch[1].trim()) : undefined;
 }
 
+function activityInstant(activity: LeadActivity) {
+  const time = Date.parse(activity.occurredAt || "");
+  return Number.isNaN(time) ? 0 : time;
+}
+
+/**
+ * Statut à réafficher après suppression d’une ligne d’historique.
+ * null : la colonne ne change pas (ancien passage, ou un statut plus récent existe).
+ * Le retour ne doit pas créer une nouvelle ligne, sinon les KPI recompteraient.
+ */
+export function statusAfterDeletedStatus(
+  currentStatus: string | null | undefined,
+  activities: LeadActivity[],
+  removedId: string,
+): LeadStatus | null {
+  const current = normalizeLeadStatus(currentStatus);
+  const removed = activities.find((activity) => activity.id === removedId);
+  if (!removed || removed.type !== "status") {
+    return null;
+  }
+  const removedTarget = statusChangeTarget(removed.text);
+  if (!removedTarget || removedTarget !== current) {
+    return null;
+  }
+  const removedAt = activityInstant(removed);
+  const newer = activities.some(
+    (activity) =>
+      activity.id !== removedId &&
+      activity.type === "status" &&
+      activityInstant(activity) > removedAt,
+  );
+  if (newer) {
+    return null;
+  }
+  const previous = activities
+    .filter((activity) => activity.id !== removedId && activity.type === "status")
+    .sort((left, right) => activityInstant(right) - activityInstant(left))[0];
+  if (previous) {
+    const target = statusChangeTarget(previous.text);
+    if (target) {
+      return target;
+    }
+  }
+  return statusChangeSource(removed.text) || "Nouveau";
+}
+
 function isAcompteReceivedActivity(activity: LeadActivity) {
   if (activity.type === "comment") {
     return false;

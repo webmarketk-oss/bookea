@@ -15,12 +15,14 @@ registerHooks({
 });
 
 const {
+  getLeadOutcomes,
   getLeadRdvTakenDates,
   isLeadAcompteReceivedOn,
   isLeadRdvTakenBetween,
   isLeadRdvTakenOn,
   isOpenReminderDue,
   monthEndIso,
+  statusAfterDeletedStatus,
 } = await import("./crm-stats.ts");
 
 function lead(partial: Partial<Lead>): Lead {
@@ -117,6 +119,37 @@ describe("crm-stats acompte / RDV KPI", () => {
       ],
     });
     assert.equal(isLeadRdvTakenOn(direct, day), true);
+  });
+
+  it("retire un statut posé par erreur des KPI, et revient au statut précédent", () => {
+    const bookedOn = "2026-03-01";
+    const mistakeOn = "2026-03-02";
+    const activities = [
+      activity("Statut changé : Nouveau → RDV pris.", `${bookedOn}T10:00:00.000Z`, {
+        id: "rdv",
+      }),
+      activity("Statut changé : RDV pris → Vendu.", `${mistakeOn}T11:00:00.000Z`, {
+        id: "mistake",
+      }),
+    ];
+    const mistaken = lead({ status: "Vendu", activityLog: activities });
+
+    assert.equal(statusAfterDeletedStatus("Vendu", activities, "mistake"), "RDV pris");
+    assert.equal(statusAfterDeletedStatus("Vendu", activities, "rdv"), null);
+
+    const corrected = lead({
+      status: "RDV pris",
+      activityLog: activities.filter((item) => item.id !== "mistake"),
+    });
+    assert.equal(
+      getLeadOutcomes(mistaken).some((item) => item.outcome === "Vendu"),
+      true,
+    );
+    assert.equal(
+      getLeadOutcomes(corrected).some((item) => item.outcome === "Vendu"),
+      false,
+    );
+    assert.deepEqual(getLeadRdvTakenDates(corrected), [bookedOn]);
   });
 });
 

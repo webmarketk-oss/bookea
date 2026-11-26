@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, ChevronDown } from "lucide-react";
+import { Check, ChevronDown, X } from "lucide-react";
 import {
   useCallback,
   useEffect,
@@ -28,6 +28,8 @@ export type AdaptiveSelectHistoryItem = {
   who?: string;
   /** Écriture libre, pas un statut. */
   note?: boolean;
+  /** Identifiant de la ligne de statut, pour la retirer. */
+  id?: string;
 };
 
 type AdaptiveSelectProps = {
@@ -41,6 +43,8 @@ type AdaptiveSelectProps = {
   /** Panneau affiché à gauche du menu ouvert. */
   history?: readonly AdaptiveSelectHistoryItem[];
   onOpenChange?: (open: boolean) => void;
+  /** Retire une ligne de statut posée par erreur. */
+  onDeleteHistory?: (id: string) => void;
 };
 
 export function AdaptiveSelect({
@@ -52,6 +56,7 @@ export function AdaptiveSelect({
   optionClassName,
   history,
   onOpenChange,
+  onDeleteHistory,
 }: AdaptiveSelectProps) {
   const listId = useId();
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -291,20 +296,43 @@ export function AdaptiveSelect({
                           {item.who ? `${item.who} · ${item.label}` : item.label}
                         </span>
                       ) : (
-                        <span className="min-w-0">
-                          {item.who ? (
-                            <span className="mb-0.5 block text-xs font-semibold text-slate-800">
-                              {item.who}
+                        <span className="flex min-w-0 items-start gap-1">
+                          <span className="min-w-0">
+                            {item.who ? (
+                              <span className="mb-0.5 block text-xs font-semibold text-slate-800">
+                                {item.who}
+                              </span>
+                            ) : null}
+                            <span
+                              className={cn(
+                                "inline-block max-w-full truncate rounded-full border bg-white px-2 py-0.5 text-xs font-semibold",
+                                item.className,
+                              )}
+                            >
+                              {item.label}
                             </span>
-                          ) : null}
-                          <span
-                            className={cn(
-                              "inline-block max-w-full truncate rounded-full border bg-white px-2 py-0.5 text-xs font-semibold",
-                              item.className,
-                            )}
-                          >
-                            {item.label}
                           </span>
+                          {item.id && onDeleteHistory ? (
+                            <button
+                              type="button"
+                              aria-label={`Retirer le statut ${item.label}`}
+                              title="Retirer ce statut"
+                              className="mt-0.5 shrink-0 rounded p-0.5 text-slate-400 hover:bg-rose-50 hover:text-rose-600"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                event.preventDefault();
+                                if (
+                                  window.confirm(
+                                    `Retirer le statut « ${item.label} » ? Il ne comptera plus dans les KPI.`,
+                                  )
+                                ) {
+                                  onDeleteHistory(item.id as string);
+                                }
+                              }}
+                            >
+                              <X className="h-3.5 w-3.5" />
+                            </button>
+                          ) : null}
                         </span>
                       )}
                     </li>

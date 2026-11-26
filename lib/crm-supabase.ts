@@ -4,6 +4,7 @@ import {
   isReminderDueOn,
   isRdvBookedStatus,
   reminderDateAfterStatusChange,
+  statusAfterDeletedStatus,
   toDateOnlyIso,
   toLocalIsoDate,
 } from "@/lib/crm-stats";
@@ -1153,6 +1154,78 @@ export async function deleteCrmLeadActivity(activityId: string) {
   if (error) {
     throw new Error(error.message);
   }
+}
+
+export function deleteCrmLeadStatus(leadId: string, activityId: string) {
+  return queueLeadWrite(leadId, () => writeDeleteCrmLeadStatus(leadId, activityId));
+}
+
+async function writeDeleteCrmLeadStatus(leadId: string, activityId: string) {
+  const supabase = createClient();
+  const { data: event, error } = await supabase
+    .from("lead_events")
+    .select("id,event_type,from_value,to_value,note,created_at")
+    .eq("id", activityId)
+    .eq("lead_id", leadId)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+  if (!event || event.event_type !== "status") {
+    throw new Error("Ce statut n'est plus dans l'historique.");
+  }
+
+  const { error: deleteError } = await supabase
+    .from("lead_events")
+    .delete()
+    .eq("id", activityId)
+    .eq("lead_id", leadId)
+    .eq("event_type", "status");
+
+  if (deleteError) {
+    throw new Error(deleteError.message);
+  }
+
+  const { data: lead, error: leadError } = await supabase
+    .from("leads")
+    .select("status")
+    .eq("id", leadId)
+    .single();
+
+  if (leadError) {
+    throw new Error(leadError.message);
+  }
+
+  const { data: remaining, error: remainingError } = await supabase
+    .from("lead_events")
+    .select("id,from_value,to_value,note,created_at")
+    .eq("lead_id", leadId)
+    .eq("event_type", "status");
+
+  if (remainingError) {
+    throw new Error(remainingError.message);
+  }
+
+  const activities: LeadActivity[] = [event, ...(remaining ?? [])].map((row) => ({
+    id: row.id,
+    author: "",
+    date: "",
+    text:
+      row.note && /→/.test(row.note)
+        ? row.note
+        : `Statut changé : ${row.from_value || "Nouveau"} → ${row.to_value || ""}.`,
+    type: "status",
+    occurredAt: row.created_at,
+  }));
+  const nextStatus = statusAfterDeletedStatus(lead.status, activities, activityId);
+  const status = nextStatus || normalizeLeadStatus(lead.status);
+
+  if (nextStatus && nextStatus !== normalizeLeadStatus(lead.status)) {
+    await updateLeadFields(supabase, leadId, { status: nextStatus }, { requireRow: true });
+  }
+
+  return { status };
 }
 
 export async function mergeCrmDuplicateLeads(

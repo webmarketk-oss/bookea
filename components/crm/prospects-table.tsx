@@ -54,6 +54,7 @@ interface ProspectsTableProps {
   isLeadDetailsOpen?: boolean;
   onSelectLead: (lead: Lead) => void;
   onStatusChange: (leadId: string, status: LeadStatus) => void;
+  onStatusDelete: (leadId: string, activityId: string) => void | Promise<boolean>;
   onCommentAdd: (leadId: string, text: string) => void | Promise<boolean>;
   onCommentDelete: (leadId: string, activityId: string) => void | Promise<boolean>;
   onDealAmountChange: (leadId: string, amount: number) => void;
@@ -101,6 +102,7 @@ export default function ProspectsTable({
   isLeadDetailsOpen = false,
   onSelectLead,
   onStatusChange,
+  onStatusDelete,
   onCommentAdd,
   onCommentDelete,
   onDealAmountChange,
@@ -123,6 +125,7 @@ export default function ProspectsTable({
   const pressStartedOnControlRef = useRef(false);
   const [fullHistory, setFullHistory] = useState<Record<string, LeadActivity[]>>({});
   const historyRequestedRef = useRef(new Set<string>());
+  const hiddenStatusIdsRef = useRef(new Set<string>());
 
   function requestHistory(leadId: string) {
     if (historyRequestedRef.current.has(leadId)) {
@@ -131,11 +134,32 @@ export default function ProspectsTable({
     historyRequestedRef.current.add(leadId);
     void loadCrmLeadHistory(leadId)
       .then((log) => {
-        setFullHistory((current) => ({ ...current, [leadId]: log }));
+        setFullHistory((current) => ({
+          ...current,
+          [leadId]: log.filter((activity) => !hiddenStatusIdsRef.current.has(activity.id)),
+        }));
       })
       .catch(() => {
         historyRequestedRef.current.delete(leadId);
+      })
+      .finally(() => {
+        historyRequestedRef.current.delete(leadId);
       });
+  }
+
+  function removeStatus(leadId: string, activityId: string) {
+    const previous = fullHistory[leadId];
+    hiddenStatusIdsRef.current.add(activityId);
+    setFullHistory((current) => ({
+      ...current,
+      [leadId]: (current[leadId] || []).filter((activity) => activity.id !== activityId),
+    }));
+    void Promise.resolve(onStatusDelete(leadId, activityId)).then((saved) => {
+      if (saved === false) {
+        hiddenStatusIdsRef.current.delete(activityId);
+        setFullHistory((current) => ({ ...current, [leadId]: previous || [] }));
+      }
+    });
   }
 
   useEffect(() => {
@@ -418,7 +442,13 @@ export default function ProspectsTable({
                     fullHistory[lead.id]?.length
                       ? fullHistory[lead.id]
                       : lead.activityLog,
+                    Boolean(fullHistory[lead.id]?.length),
                   )}
+                  onDeleteHistory={
+                    fullHistory[lead.id]?.length
+                      ? (activityId) => removeStatus(lead.id, activityId)
+                      : undefined
+                  }
                   onOpenChange={(isOpen) => {
                     if (isOpen) {
                       requestHistory(lead.id);
@@ -605,7 +635,7 @@ export default function ProspectsTable({
   );
 }
 
-function statusHistory(activities: LeadActivity[]) {
+function statusHistory(activities: LeadActivity[], canDelete = false) {
   const commentActivities = activities.filter((activity) => activity.type === "comment");
   const shownComments = commentsWithoutRepeatedOffer(
     commentActivities.map((activity) => ({ text: activity.text })),
@@ -631,6 +661,7 @@ function statusHistory(activities: LeadActivity[]) {
         at,
         label,
         who,
+        id: canDelete ? activity.id : undefined,
         className: leadStatusMenuClassName(label),
       });
       continue;

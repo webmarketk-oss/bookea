@@ -25,6 +25,7 @@ import {
   matchesCrmQuickFilter,
   rdvBookedStatusList,
   reminderDateAfterStatusChange,
+  statusAfterDeletedStatus,
   threeMonthStartIso,
   todayIso,
   type CrmQuickFilter,
@@ -33,6 +34,7 @@ import {
   addCrmLeadActivity,
   createCrmLead,
   deleteCrmLeadComment,
+  deleteCrmLeadStatus,
   loadBookedCrmLeads,
   loadCrmLeadHistory,
   loadCrmLeads,
@@ -1241,6 +1243,59 @@ export default function CRMLeadsPage() {
     return handleAddActivity(leadId, comment);
   }
 
+  async function handleDeleteStatus(leadId: string, activityId: string) {
+    const leadBefore = leadList.find((lead) => lead.id === leadId);
+    const storedHistory = fullHistoryRef.current.get(leadId);
+    const history = storedHistory?.length
+      ? storedHistory
+      : leadBefore?.activityLog ?? [];
+    const nextStatus = leadBefore
+      ? statusAfterDeletedStatus(leadBefore.status, history, activityId)
+      : null;
+
+    if (storedHistory) {
+      fullHistoryRef.current.set(
+        leadId,
+        storedHistory.filter((activity) => activity.id !== activityId),
+      );
+    }
+
+    setLeadList((currentLeads) =>
+      currentLeads.map((lead) => {
+        if (lead.id !== leadId) {
+          return lead;
+        }
+        return {
+          ...lead,
+          status: nextStatus || lead.status,
+          activityLog: lead.activityLog.filter((activity) => activity.id !== activityId),
+        };
+      }),
+    );
+
+    try {
+      const saved = await trackSave(() => deleteCrmLeadStatus(leadId, activityId));
+      if (saved.status !== (nextStatus || leadBefore?.status)) {
+        setLeadList((currentLeads) =>
+          currentLeads.map((lead) =>
+            lead.id === leadId ? { ...lead, status: saved.status } : lead,
+          ),
+        );
+      }
+      setCrmNotice("Statut retiré. Il ne compte plus dans les KPI.");
+      setStatusSaveError(null);
+      return true;
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Le statut n'a pas pu être retiré.";
+      setCrmNotice(null);
+      await refreshCrmLeads();
+      setCrmError(message);
+      setStatusSaveError(`Statut non retiré : ${message}`);
+      return false;
+    }
+  }
+
   async function handleDeleteActivity(leadId: string, activityId: string) {
     setLeadList((currentLeads) =>
       currentLeads.map((lead) => {
@@ -2171,6 +2226,7 @@ export default function CRMLeadsPage() {
                     setIsLeadDetailsOpen(true);
                   }}
                   onStatusChange={handleStatusChange}
+                  onStatusDelete={handleDeleteStatus}
                   onCommentAdd={handleQuickComment}
                   onCommentDelete={handleDeleteActivity}
                   onDealAmountChange={handleDealAmountChange}
