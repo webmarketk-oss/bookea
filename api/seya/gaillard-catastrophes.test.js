@@ -630,3 +630,54 @@ test("Gaillard Erblina : prix + séances + à vie, sans « je n’ai pas cette i
   assert.equal(conversation.status, "À recontacter");
   assert.match(lastSeya(conversation), /rappellera/i);
 });
+
+test("Gianna : samedi n’est pas un tarif, paquets n’est pas un soin, dégonfler n’est pas le ventre", async () => {
+  let conversation = open("Soin minceur", "Gianna");
+  conversation = await say(
+    conversation,
+    "Bonjour, je souhaite faire un bilan gratuit pour la cryolipolise et des massages lymphatiques. Avez vous des disponibilités pour samedi après midi?",
+    "samedi",
+  );
+  assert.doesNotMatch(lastSeya(conversation), /tarif|prix|fourchette|euro/i);
+  assert.match(lastSeya(conversation), /préférence|objectif|zones/i);
+  assert.equal(Boolean(conversation.teamNotes?.handedOffAt), false);
+
+  conversation = await say(conversation, "Merci. Avez-vous des paquets intéressants?", "paquets");
+  assert.doesNotMatch(lastSeya(conversation), /ne faisons pas|tarif|prix|fourchette|euro|500/i);
+  assert.match(lastSeya(conversation), /bilan|protocole|zones/i);
+
+  conversation = await say(
+    conversation,
+    "La culotte de cheval et banana roll pour la cryolipolise et massage lymphatique cuisses et fesses car j’ai de la rétention d’eau",
+    "zones",
+  );
+  assert.match(lastSeya(conversation), /cuisse|fesse|culotte/i);
+  assert.doesNotMatch(lastSeya(conversation), /ventre gonflé/i);
+
+  conversation = await say(
+    conversation,
+    "Perdre des centimètres et dégonfler la zone",
+    "dégonfler",
+  );
+  assert.doesNotMatch(lastSeya(conversation), /un ventre gonflé/i);
+  assert.match(lastSeya(conversation), /cuisse|fesse|culotte|gonflement/i);
+  assert.match(lastSeya(conversation), /pas le ventre/i);
+
+  conversation = await say(conversation, "Je fais du sport et jlai du muscle", "sport");
+  assert.doesNotMatch(lastSeya(conversation), /un ventre gonflé/i);
+
+  conversation = await say(conversation, "Pas le ventre", "correction");
+  assert.match(lastSeya(conversation), /partie basse|pas le ventre/i);
+  assert.doesNotMatch(lastSeya(conversation), /Souhaitez-vous que je fasse remonter/i);
+
+  conversation = await say(conversation, "La partie basse du corps", "bas du corps");
+  assert.match(lastSeya(conversation), /partie basse/i);
+  assert.doesNotMatch(lastSeya(conversation), /Souhaitez-vous que je fasse remonter/i);
+
+  conversation = await say(
+    conversation,
+    "Oui si possible pour un rendez-vous samedi après midi",
+    "oui samedi",
+  );
+  assert.match(lastSeya(conversation), /rappellera|préférence/i);
+});

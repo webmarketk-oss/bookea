@@ -941,6 +941,13 @@ function isCatalogAsk(text) {
   );
 }
 
+function isCommercialBundle(label) {
+  const value = normalize(label).replace(/^(un |une |des |le |la |les )/, "");
+  return /^(paquets?|packs?|forfaits?|formules?)( interessants?| avantageux| promo| en promo)?$/.test(
+    value,
+  );
+}
+
 function isGenericAskedService(asked) {
   const needle = normalize(asked).replace(/^(le |la |l'|les |des |un |une |de |du )/, "");
   return /^(soins?( et technologies)?|technologies?|prestations?|traitements?)(\s+que\b.*)?$/.test(
@@ -968,7 +975,9 @@ function askedServiceName(text) {
   );
   if (match?.[1]) {
     const asked = String(match[1]).replace(/\s+/g, " ").trim();
-    return isSchedulingVocabulary(asked) || isGenericAskedService(asked) ? "" : asked;
+    return isSchedulingVocabulary(asked) || isGenericAskedService(asked) || isCommercialBundle(asked)
+      ? ""
+      : asked;
   }
   const inverted = value.match(
     /(?:le |la |l'|les |un |une |de l[' ]|de la |du |des )?(soins?(?: visage| minceur)?|epilation(?: laser| definitive)?|laser|minceur|visage|lumiere pulsee).{0,30}vous (?:faites|faisiez|proposez|avez|offrez)/,

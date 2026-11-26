@@ -89,13 +89,31 @@ function classifyPriceQuestion(text) {
   ) {
     return "";
   }
+  // « samedi après-midi » n’est pas « après le bilan ».
+  const clock = value.replace(/apres[- ]?midi/g, " ");
+  // Un bilan déjà annoncé gratuit + un créneau n’est pas une demande de tarif.
+  if (
+    /disponibilit|\bdispo\b|rendez|creneau/.test(clock) &&
+    /gratuit|offert|bilan|seance|decouverte/.test(value) &&
+    !/prix|tarif|coute|cout|combien/.test(value)
+  ) {
+    return "";
+  }
+  // Un forfait sans mot de prix (« des paquets intéressants ») n’est pas une demande de tarif.
+  if (
+    /\b(paquets?|packs?|forfaits?|formules?)\b/.test(value) &&
+    /prix|tarif|coute|cout|combien/.test(value)
+  ) {
+    return "package";
+  }
   const asks =
     /prix|tarif|coute|cout|combien|gratuit|offert/.test(value);
   if (/forfait|cure|pack/.test(value) && asks) {
     return "package";
   }
   if (
-    (/continuer|ensuite|apres|suivant|poursuiv/.test(value) ||
+    (/continuer|ensuite|suivant|poursuiv/.test(clock) ||
+      /\bapres\b/.test(clock) ||
       /les seances|seances suivantes|autre seance/.test(value) ||
       /\d+\s*seances?/.test(value) ||
       /prix avant|tarif avant|avant toute/.test(value)) &&

@@ -465,8 +465,47 @@ function describesBloating(text) {
   return /gonfl|ballonn/.test(normalize(text));
 }
 
-function bloatingNotedReply() {
-  return "Vous décrivez surtout un ventre gonflé. Les soins minceur ne permettent pas de déterminer la cause de ce gonflement ; il faudra le signaler lors du bilan.";
+function bloatingNotedReply(text = "", zoneLabel = "") {
+  const spoken = normalize(text);
+  const where = normalize(zoneLabel);
+  const deniesBelly = /pas (?:le |du |de |au |sur le )?ventre/.test(`${spoken} ${where}`);
+  const belly = !deniesBelly && /\bventre\b/.test(spoken);
+  const lower = /cuisse|fesse|culotte|hanche|jambe|bas du corps|partie basse|banana|banane/.test(
+    `${spoken} ${where}`,
+  );
+  const caution =
+    "Les soins minceur ne permettent pas de déterminer la cause de ce gonflement ; il faudra le signaler lors du bilan.";
+  if (belly && !lower) {
+    return `Vous décrivez surtout un ventre gonflé. ${caution}`;
+  }
+  if (where && !/ventre/.test(where)) {
+    return `Vous parlez d’un gonflement sur ${zoneLabel}. Ce n’est pas le ventre. ${caution}`;
+  }
+  if (lower) {
+    return `Vous parlez d’un gonflement sur le bas du corps. Ce n’est pas le ventre. ${caution}`;
+  }
+  return `Vous décrivez une zone qui gonfle. ${caution}`;
+}
+
+function asksCarePackage(text) {
+  const value = normalize(text);
+  if (/prix|tarif|coute|cout|combien|€|euros?/.test(value)) {
+    return false;
+  }
+  return /\b(paquets?|packs?|forfaits?|formules?)\b/.test(value);
+}
+
+function carePackageReply() {
+  return "Les associations de soins se choisissent au bilan, selon les zones et l’objectif. On ne fige pas un protocole avant.";
+}
+
+function correctsBodyZone(text) {
+  const value = normalize(text);
+  return /pas (?:le |du |de |au |sur le )?ventre|partie basse|bas du corps/.test(value);
+}
+
+function zoneCorrectionReply() {
+  return "C’est noté : la partie basse du corps, pas le ventre. Je le précise pour l’équipe.";
 }
 
 function asksDeviceCompare(text) {
@@ -1262,6 +1301,7 @@ module.exports = {
   alreadyHasAppointment,
   appointmentMailReply,
   asksBookingNow,
+  asksCarePackage,
   asksChildCompanion,
   asksCountry,
   asksDeviceCompare,
@@ -1278,7 +1318,9 @@ module.exports = {
   availabilityContext,
   availabilityMention,
   bloatingNotedReply,
+  correctsBodyZone,
   bookingCapabilityReply,
+  carePackageReply,
   breaksGaillardRules,
   changesStep,
   childCompanionReply,
@@ -1352,5 +1394,6 @@ module.exports = {
   varyQuestion,
   whiteHairLaserReply,
   withMailNote,
+  zoneCorrectionReply,
   withPreference,
 };

@@ -2893,7 +2893,7 @@ function leadReplyCore(conversation, text, seya, slots, extras = {}) {
 const GAILLARD_MINCEUR_OBJECTIF =
   /perdre|perde|perd\b|perte|maigrir|mincir|kilos?|\bkg\b|\bcm\b|centimetre|tour de taille|cellulite|peau d'orange|graisse|gras\b|bourrelet|capiton|affiner|tonifier|raffermir|fermete|silhouette|gonfl|ballonn|degonfl|ventre plat|\bplat\b|corrig|aggrav|plus difficile a traiter|probleme au niveau/;
 const GAILLARD_MINCEUR_ZONE =
-  /ventre|cuisse|hanche|fesse|bras|culotte de cheval|poignee d'amour|dos|jambes?/;
+  /ventre|cuisse|hanche|fesse|bras|culotte de cheval|poignee d'amour|dos|jambes?|bas du corps|partie basse|banana|banane/;
 const GAILLARD_VISAGE_CONCERN =
   /ride|ridule|acne|bouton|tache|eclat|relach|teint|cerne|pore|fermete|hydrat|rajeun|terne|peau (seche|grasse|sensible)|rougeur|cicatrice|double menton|rafferm|\bferme|bajoue|jawline|plis du sourire|jaw[- ]?line/;
 const GAILLARD_EPILATION_ZONE =
@@ -2957,29 +2957,42 @@ function gaillardLeadTexts(conversation, text) {
   ].map(normalize);
 }
 
+function gaillardZoneText(value) {
+  return normalize(value).replace(/pas (?:le |du |de |au |sur le )?ventre/g, " ");
+}
+
 function gaillardMinceurZonesKnown(qualification, leadTexts) {
-  if (qualification.zone && GAILLARD_MINCEUR_ZONE.test(normalize(qualification.zone))) {
+  if (qualification.zone && GAILLARD_MINCEUR_ZONE.test(gaillardZoneText(qualification.zone))) {
     return true;
   }
-  return leadTexts.some((value) => GAILLARD_MINCEUR_ZONE.test(value));
+  return leadTexts.some((value) => GAILLARD_MINCEUR_ZONE.test(gaillardZoneText(value)));
 }
 
 const GAILLARD_ZONE_WORDS = [
+  ["partie basse", "la partie basse du corps"],
+  ["bas du corps", "la partie basse du corps"],
+  ["banana", "le banana roll"],
+  ["banane", "la banane"],
+  ["culotte de cheval", "la culotte de cheval"],
+  ["poignee d'amour", "les poignées d’amour"],
   ["ventre", "le ventre"],
   ["cuisse", "les cuisses"],
   ["hanche", "les hanches"],
   ["fesse", "les fesses"],
   ["bras", "les bras"],
-  ["culotte de cheval", "la culotte de cheval"],
-  ["poignee d'amour", "les poignées d’amour"],
   ["dos", "le dos"],
   ["jambe", "les jambes"],
 ];
 
 /** « le ventre », « le ventre et les cuisses »… pour reprendre la zone dans la question objectif. */
 function gaillardMinceurZoneLabel(qualification, leadTexts) {
-  const hay = [normalize(qualification.zone || ""), ...leadTexts].join(" ");
-  const zones = GAILLARD_ZONE_WORDS.filter(([word]) => hay.includes(word)).map(([, label]) => label);
+  const hay = gaillardZoneText([qualification.zone || "", ...leadTexts].join(" "));
+  const zones = [];
+  for (const [word, label] of GAILLARD_ZONE_WORDS) {
+    if (hay.includes(word) && !zones.includes(label)) {
+      zones.push(label);
+    }
+  }
   if (!zones.length) {
     return "";
   }
@@ -3149,9 +3162,14 @@ function gaillardLeadReply(conversation, text, seya, slots, extras = {}) {
     (GAILLARD_MINCEUR_ZONE.test(spoken) &&
       (GAILLARD_MINCEUR_OBJECTIF.test(spoken) || minceurZoneWithoutFace)) ||
     GAILLARD_VISAGE_CONCERN.test(spoken);
+  // « Bilan cryo, dispo samedi après-midi ? » décrit un besoin, ce n’est pas une question tarif.
+  const slotAndNeed =
+    gaillard.availabilityMention(text) &&
+    /bilan|cryo|massage|minceur|lymph|seance|decouverte/.test(spoken);
   const asking =
     !statesHerNeed &&
     !acceptsOfferNow &&
+    !slotAndNeed &&
     (isServiceAsk(text) ||
       asksOpenQuestion(text) ||
       isCatalogAsk(text) ||
@@ -3338,7 +3356,12 @@ function gaillardLeadReply(conversation, text, seya, slots, extras = {}) {
     !gaillard.declinesOffer(text) &&
     gaillard.acceptsContinue(text) &&
     (gaillard.lastSeyaOfferedCallback(base) || Boolean(merged.pathOffered));
-  if (!softPathAccept && !acceptsCallbackNow && (gaillard.asksTrialWhen(text) || gaillard.asksDiscoveryFree(text))) {
+  if (
+    !slotAndNeed &&
+    !softPathAccept &&
+    !acceptsCallbackNow &&
+    (gaillard.asksTrialWhen(text) || gaillard.asksDiscoveryFree(text))
+  ) {
     const offer = `${base.offerLabel || ""} ${brief?.pricing?.bilan || ""} ${brief?.pricing?.discovery || ""}`;
     const known = gaillard.asksTrialWhen(text)
       ? gaillard.trialWhenReply(brief?.pricing || {}, offer)
@@ -3346,8 +3369,13 @@ function gaillardLeadReply(conversation, text, seya, slots, extras = {}) {
         "Oui, le bilan et la séance découverte d’environ 20 minutes sont offerts.";
     return answer(known.includes("?") ? known : `${known} ${gaillard.pathQuestion()}`);
   }
+  // « Des paquets intéressants » : un protocole de soins, pas un tarif.
+  if (gaillard.asksCarePackage(text)) {
+    return answer(gaillard.carePackageReply());
+  }
   // Prix cryo demandé sans tarif séance cryo en fiche → ne pas présenter le forfait 500 € comme prix cryo.
   if (
+    !slotAndNeed &&
     !softPathAccept &&
     !acceptsCallbackNow &&
     /cryo|cryolipolyse/.test(normalize(text)) &&
@@ -3357,6 +3385,7 @@ function gaillardLeadReply(conversation, text, seya, slots, extras = {}) {
     return answer(gaillard.cryoPriceUnknownReply());
   }
   if (
+    !slotAndNeed &&
     !softPathAccept &&
     !acceptsCallbackNow &&
     (asksPrice(text) ||
@@ -3495,7 +3524,7 @@ function gaillardLeadReply(conversation, text, seya, slots, extras = {}) {
     return informed(gaillard.processReply(topicFamily, sourceBag));
   }
 
-  if (gaillard.asksTechnology(text) || isCatalogAsk(text)) {
+  if (!slotAndNeed && (gaillard.asksTechnology(text) || isCatalogAsk(text))) {
     if (gaillard.asksFatRemoval(text) && (topicFamily === "minceur" || family === "minceur")) {
       return answer(gaillard.fatRemovalReply());
     }
@@ -3641,7 +3670,16 @@ function gaillardLeadReply(conversation, text, seya, slots, extras = {}) {
       return ask(gaillard.triedObjectifAckReply(family));
     }
 
+    if (family === "minceur" && gaillard.correctsBodyZone(text)) {
+      qualification.zone = "partie basse du corps";
+      qualification.detail = qualification.detail || said;
+      if (gaillard.lastSeyaAskedPath(base) || qualification.pathOffered) {
+        return ask(gaillard.zoneCorrectionReply());
+      }
+    }
+
     // Ballonnement : noter sans transformer en objectif kilos, puis poursuivre.
+    // « Dégonfler les cuisses » n’est pas un ventre gonflé.
     if (
       gaillard.describesBloating(text) &&
       !extras.bloatingNoted &&
@@ -3653,7 +3691,9 @@ function gaillardLeadReply(conversation, text, seya, slots, extras = {}) {
         afterBloat?.step === "path"
           ? gaillard.minceurPathReply(sourceBag, brief?.pricing || {})
           : afterBloat?.text || gaillard.triedQuestion(family);
-      return ask(`${gaillard.bloatingNotedReply()} ${follow}`.trim());
+      return ask(
+        `${gaillard.bloatingNotedReply(text, gaillardMinceurZoneLabel(qualification, leadTexts))} ${follow}`.trim(),
+      );
     }
 
     // Intérêt soft (« ça peut faire du bien ») : reprendre la proposition de bilan, sans clôturer.
@@ -3818,7 +3858,11 @@ function gaillardLeadReply(conversation, text, seya, slots, extras = {}) {
     return fixed(next, status, gaillard.preferenceReply());
   }
   // Dernière chance : question matériel / déroulement documentée dans la fiche.
-  if (gaillard.asksTechnology(text) || /appareil|equipement|technologie|machine|cryo|radiofrequ/.test(normalize(text))) {
+  if (
+    !slotAndNeed &&
+    (gaillard.asksTechnology(text) ||
+      /appareil|equipement|technologie|machine|cryo|radiofrequ/.test(normalize(text)))
+  ) {
     return informed(
       gaillard.technologyReply(text, sourceBag, {
         family: topicFamily,
