@@ -101,7 +101,7 @@ function OfferTimer({ deadline }: { deadline: number }) {
   }, []);
 
   if (now == null) {
-    return <div className="h-12 rounded-xl bg-stone-950" aria-hidden="true" />;
+    return <div className="h-12 rounded-xl bg-[#1c1917]" aria-hidden="true" />;
   }
 
   const parts = countdownParts(deadline, now);
@@ -114,18 +114,18 @@ function OfferTimer({ deadline }: { deadline: number }) {
 
   return (
     <div
-      className="rounded-xl bg-stone-950 px-2.5 py-1.5 text-white"
+      className="rounded-xl bg-[#1c1917] px-2.5 py-1.5 text-white"
       aria-label="Temps restant"
     >
-      <p className="flex items-baseline justify-between gap-2 text-sm font-semibold tabular-nums">
+      <p className="flex items-baseline justify-between gap-2 font-heading text-sm font-medium tabular-nums tracking-tight">
         {cells.map(([value, label]) => (
-          <span key={label} className={label === "s" ? "text-rose-400" : undefined}>
+          <span key={label}>
             {String(value).padStart(2, "0")}
-            <span className="ml-0.5 text-[10px] font-medium uppercase text-white/60">{label}</span>
+            <span className="ml-0.5 text-[10px] font-medium uppercase tracking-wide text-white/55">{label}</span>
           </span>
         ))}
       </p>
-      <p className="mt-0.5 text-[11px] font-medium text-rose-200">
+      <p className="mt-0.5 font-heading text-[11px] font-medium tracking-wide text-white/70">
         Fin le {endDateLabel(deadline)}
       </p>
     </div>
@@ -147,16 +147,16 @@ function SectionHeading({
     <div className="flex items-end justify-between gap-3">
       <div>
         <p
-          className={`text-[11px] font-semibold uppercase tracking-[0.16em] ${
-            urgent ? "text-rose-700" : "text-stone-400"
+          className={`font-heading text-[11px] font-medium uppercase tracking-[0.18em] ${
+            urgent ? "text-violet-700" : "text-stone-400"
           }`}
         >
           {kicker}
         </p>
-        <h2 className="mt-1 flex items-center gap-2 font-serif text-2xl text-stone-950 sm:text-[1.7rem]">
+        <h2 className="mt-1 flex items-center gap-2 font-heading text-2xl font-medium tracking-tight text-stone-950 sm:text-[1.7rem]">
           {title}
           {urgent ? (
-            <Flame className="h-5 w-5 shrink-0 text-rose-600" aria-hidden />
+            <Flame className="h-4 w-4 shrink-0 text-violet-700" aria-hidden />
           ) : null}
         </h2>
       </div>
@@ -323,33 +323,33 @@ export function ClientMarketplace({
                   key={offer.id}
                   type="button"
                   onClick={() => onOffer(offer)}
-                  className="w-[260px] shrink-0 rounded-3xl border border-stone-200 bg-white p-3 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-stone-400"
+                  className="w-[260px] shrink-0 rounded-3xl border border-stone-200 bg-stone-50 p-3 text-left transition hover:-translate-y-0.5 hover:border-violet-200"
                 >
-                  <div className="relative flex h-28 items-end overflow-hidden rounded-2xl bg-stone-100 p-3">
+                  <div className="relative flex h-28 items-end overflow-hidden rounded-2xl bg-gradient-to-br from-stone-200 to-violet-100 p-3">
                     {offer.photo ? (
                       <img src={offer.photo} alt="" className="absolute inset-0 h-full w-full object-cover" />
                     ) : null}
-                    <span className="relative rounded-full bg-rose-600 px-2.5 py-1 text-[11px] font-semibold text-white">
+                    <span className="relative rounded-full bg-white/90 px-2.5 py-1 font-heading text-[11px] font-medium text-violet-800">
                       {publicOfferShelfLabel(offer.shelf)}
                     </span>
                   </div>
-                  <p className="mt-3 text-sm font-semibold text-stone-950">{offer.title}</p>
+                  <p className="mt-3 font-heading text-sm font-medium tracking-tight text-stone-950">{offer.title}</p>
                   <p className="mt-1 text-xs text-stone-500">
                     {offer.center}
                     {offer.city ? ` · ${offer.city}` : ""}
                   </p>
                   {spotsLabel(offer.spots) ? (
-                    <p className="mt-2 text-xs font-semibold text-rose-700">{spotsLabel(offer.spots)}</p>
+                    <p className="mt-2 font-heading text-xs font-medium tracking-wide text-violet-700">{spotsLabel(offer.spots)}</p>
                   ) : null}
                   <div className="mt-3 flex flex-wrap items-baseline gap-2">
-                    <p className="text-xl font-semibold text-stone-950">{money(offer.price)}</p>
+                    <p className="font-heading text-xl font-medium tracking-tight text-stone-950">{money(offer.price)}</p>
                     {offer.oldPrice > offer.price ? (
-                      <p className="text-base font-medium text-stone-400 line-through decoration-rose-400">
+                      <p className="font-heading text-base font-medium text-stone-400 line-through">
                         {money(offer.oldPrice)}
                       </p>
                     ) : null}
                     {discountPercent(offer.price, offer.oldPrice) > 0 ? (
-                      <span className="rounded-full bg-rose-600 px-2 py-0.5 text-[11px] font-semibold text-white">
+                      <span className="rounded-full bg-violet-50 px-2 py-0.5 font-heading text-[11px] font-medium text-violet-800">
                         −{discountPercent(offer.price, offer.oldPrice)} %
                       </span>
                     ) : null}
@@ -369,15 +369,15 @@ export function ClientMarketplace({
           <button
             type="button"
             onClick={() => onOffer(featured)}
-            className="rounded-[28px] border border-stone-200 bg-white p-5 text-left shadow-sm transition hover:-translate-y-0.5"
+            className="rounded-[28px] border border-violet-100 bg-gradient-to-br from-white to-violet-50 p-5 text-left shadow-sm transition hover:-translate-y-0.5"
           >
             <div className="flex items-center justify-between gap-3">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-rose-700">
+              <p className="font-heading text-[11px] font-medium uppercase tracking-[0.18em] text-violet-700">
                 Bon plan du moment
               </p>
-              <Timer className="h-5 w-5 text-rose-600" />
+              <Timer className="h-5 w-5 text-violet-700" />
             </div>
-            <h2 className="mt-4 font-serif text-3xl text-stone-950">{featured.title}</h2>
+            <h2 className="mt-4 font-heading text-3xl font-medium tracking-tight text-stone-950">{featured.title}</h2>
             <p className="mt-2 text-sm text-stone-500">
               {featured.center}
               {spotsLabel(featured.spots)
@@ -387,14 +387,14 @@ export function ClientMarketplace({
                   : ""}
             </p>
             <div className="mt-5 flex flex-wrap items-baseline gap-3">
-              <p className="text-4xl font-semibold text-stone-950">{money(featured.price)}</p>
+              <p className="font-heading text-4xl font-medium tracking-tight text-stone-950">{money(featured.price)}</p>
               {featured.oldPrice > featured.price ? (
-                <p className="text-2xl font-medium text-stone-400 line-through decoration-rose-400">
+                <p className="font-heading text-2xl font-medium text-stone-400 line-through">
                   {money(featured.oldPrice)}
                 </p>
               ) : null}
               {discountPercent(featured.price, featured.oldPrice) > 0 ? (
-                <span className="rounded-full bg-rose-600 px-2.5 py-1 text-xs font-semibold text-white">
+                <span className="rounded-full bg-white px-2.5 py-1 font-heading text-xs font-medium text-violet-800">
                   −{discountPercent(featured.price, featured.oldPrice)} %
                 </span>
               ) : null}
@@ -406,7 +406,7 @@ export function ClientMarketplace({
             ) : (
               <p className="mt-5 text-sm text-stone-500">Offre en cours dans ce centre.</p>
             )}
-            <span className="mt-6 inline-flex items-center gap-2 text-sm font-semibold text-stone-950">
+            <span className="mt-6 inline-flex items-center gap-2 font-heading text-sm font-medium text-violet-800">
               Voir l&apos;offre
               <ArrowRight className="h-4 w-4" />
             </span>
@@ -430,18 +430,18 @@ export function ClientMarketplace({
               key={offer.id}
               type="button"
               onClick={() => onOffer(offer)}
-              className="rounded-3xl border border-stone-200 bg-white p-4 text-left transition hover:border-stone-400"
+              className="rounded-3xl border border-stone-200 bg-stone-50 p-4 text-left transition hover:border-violet-200"
             >
-              <p className="text-[11px] font-semibold uppercase tracking-wide text-rose-700">
+              <p className="font-heading text-[11px] font-medium uppercase tracking-[0.14em] text-violet-700">
                 {spotsLabel(offer.spots) || "Places limitées"}
               </p>
-              <p className="mt-2 font-semibold text-stone-950">{offer.title}</p>
+              <p className="mt-2 font-heading text-base font-medium tracking-tight text-stone-950">{offer.title}</p>
               <p className="mt-1 text-sm text-stone-500">{offer.center}</p>
               <div className="mt-4 flex items-center justify-between gap-2">
                 <p className="flex items-baseline gap-2">
-                  <span className="text-lg font-semibold text-stone-950">{money(offer.price)}</span>
+                  <span className="font-heading text-lg font-medium tracking-tight text-stone-950">{money(offer.price)}</span>
                   {offer.oldPrice > offer.price ? (
-                    <span className="text-base font-medium text-stone-400 line-through decoration-rose-400">
+                    <span className="font-heading text-base font-medium text-stone-400 line-through">
                       {money(offer.oldPrice)}
                     </span>
                   ) : null}
@@ -462,17 +462,17 @@ export function ClientMarketplace({
               key={`${item.center.name}-${item.slot}`}
               type="button"
               onClick={() => onSlot(item.slot, item.service, item.center.name)}
-              className="rounded-3xl border border-stone-200 bg-white p-4 text-left transition hover:border-stone-400"
+              className="rounded-3xl border border-stone-200 p-4 text-left transition hover:border-stone-400"
             >
-              <div className="inline-flex items-center gap-2 rounded-full bg-stone-950 px-3 py-1.5 text-sm font-semibold text-white">
+              <div className="inline-flex items-center gap-2 font-heading text-xs font-medium tracking-wide text-stone-500">
                 <Clock3 className="h-3.5 w-3.5" />
                 {item.slot}
               </div>
-              <p className="mt-3 font-semibold text-stone-950">{item.service}</p>
+              <p className="mt-3 font-heading text-base font-medium tracking-tight text-stone-950">{item.service}</p>
               <p className="mt-1 text-sm text-stone-500">
                 {item.center.name} · {item.center.city}
               </p>
-              <span className="mt-4 inline-flex rounded-full bg-stone-950 px-3 py-1.5 text-xs font-semibold text-white">
+              <span className="mt-4 inline-flex rounded-full bg-white px-3 py-1.5 font-heading text-xs font-medium text-stone-950 ring-1 ring-stone-200">
                 Réserver
               </span>
             </button>
