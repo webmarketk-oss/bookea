@@ -102,7 +102,44 @@ export async function loadCrmAppointments() {
 
   void persistPastAppointmentPresence(appointments, markedAppointments);
 
-  return markedAppointments;
+  return attachLoyaltyRewards(supabase, centerId, markedAppointments);
+}
+
+async function attachLoyaltyRewards(
+  supabase: SupabaseClient,
+  centerId: string,
+  appointments: Appointment[],
+) {
+  const ids = appointments.map((appointment) => appointment.id).filter(Boolean);
+  if (!ids.length) {
+    return appointments;
+  }
+  const { data, error } = await supabase
+    .from("loyalty_reward_requests")
+    .select("id,appointment_id,discount_eur,points,status")
+    .eq("center_id", centerId)
+    .in("appointment_id", ids)
+    .in("status", ["requested", "used"]);
+  if (error || !data) {
+    return appointments;
+  }
+  const rewards = new Map(
+    data.map((row) => [
+      String(row.appointment_id),
+      {
+        requestId: String(row.id),
+        status: row.status === "used" ? ("used" as const) : ("requested" as const),
+        discountEur: Number(row.discount_eur) || 0,
+        points: Number(row.points) || 0,
+        centerId,
+      },
+    ]),
+  );
+  return appointments.map((appointment) => ({
+    ...appointment,
+    centerId: appointment.centerId || centerId,
+    loyaltyReward: rewards.get(appointment.id),
+  }));
 }
 
 async function persistPastAppointmentPresence(
@@ -1048,6 +1085,7 @@ function toAppointment(row: AppointmentRow): Appointment {
 
   return {
     id: row.id,
+    centerId: row.center_id || undefined,
     clientId: row.client_id || undefined,
     leadId: row.lead_id || undefined,
     personName: appointmentPersonName(client, service?.name, row.notes),

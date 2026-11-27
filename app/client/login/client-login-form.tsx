@@ -7,6 +7,17 @@ import { FormEvent, useState } from "react";
 
 const CLIENT_HOME = "/client/compte";
 
+function clientDestination() {
+  if (typeof window === "undefined") {
+    return CLIENT_HOME;
+  }
+  const next = new URLSearchParams(window.location.search).get("next") || "";
+  if (next.startsWith("/") && !next.startsWith("//")) {
+    return next;
+  }
+  return CLIENT_HOME;
+}
+
 export function ClientLoginForm() {
   const router = useRouter();
   const supabase = createClient();
@@ -37,7 +48,7 @@ export function ClientLoginForm() {
         setLoading(false);
         return;
       }
-      router.push(CLIENT_HOME);
+      router.push(clientDestination());
       router.refresh();
       return;
     }
@@ -50,7 +61,7 @@ export function ClientLoginForm() {
           full_name: fullName.trim(),
           account_type: "client",
         },
-        emailRedirectTo: `${window.location.origin}/auth/callback?next=${CLIENT_HOME}`,
+        emailRedirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(clientDestination())}`,
       },
     });
 
@@ -61,7 +72,7 @@ export function ClientLoginForm() {
     }
 
     if (data.session) {
-      router.push(CLIENT_HOME);
+      router.push(clientDestination());
       router.refresh();
       return;
     }

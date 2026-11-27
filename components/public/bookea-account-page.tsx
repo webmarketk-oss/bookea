@@ -5,6 +5,7 @@ import {
   CalendarCheck,
   CalendarDays,
   Gift,
+  Heart,
   History,
   MessageCircle,
   Send,
@@ -19,16 +20,22 @@ import {
   emptyClientAccount,
   loadClientAccount,
   loadClientAppointmentSlots,
+  loadClientFavorites,
+  markClientOfferNoticesRead,
   rescheduleClientAppointment,
+  saveClientFavorite,
   saveClientSettings,
   sendClientMessage,
   type ClientAccount,
+  type ClientFavorite,
+  type ClientOfferNotice,
   type ClientAppointmentCard,
   type ClientRescheduleDay,
 } from "@/lib/client-account";
+import { ClientLoyaltyPanel } from "@/components/public/client-loyalty-panel";
 import { createClient } from "@/lib/supabase";
 
-type AccountTab = "upcoming" | "loyalty" | "past" | "messages" | "settings";
+type AccountTab = "upcoming" | "favorites" | "loyalty" | "past" | "messages" | "settings";
 
 const tabs: Array<{
   id: AccountTab;
@@ -41,6 +48,12 @@ const tabs: Array<{
     label: "RDV à venir",
     description: "Vos prochains rendez-vous Bookea.",
     icon: CalendarDays,
+  },
+  {
+    id: "favorites",
+    label: "Centres favoris",
+    description: "Les instituts que vous suivez, et leurs nouvelles offres.",
+    icon: Heart,
   },
   {
     id: "loyalty",
@@ -110,6 +123,9 @@ export function BookeaAccountPage() {
   const [rescheduleTime, setRescheduleTime] = useState("");
   const [savingProfile, setSavingProfile] = useState(false);
   const [profileFeedback, setProfileFeedback] = useState("");
+  const [favorites, setFavorites] = useState<ClientFavorite[]>([]);
+  const [offerNotices, setOfferNotices] = useState<ClientOfferNotice[]>([]);
+  const [favoriteBusy, setFavoriteBusy] = useState(false);
   const [profileForm, setProfileForm] = useState({
     firstName: "",
     lastName: "",
@@ -142,6 +158,17 @@ export function BookeaAccountPage() {
         }
         setAccount(next);
         setActiveCenterId((current) => current || next.centers[0]?.id || "");
+        try {
+          const favoriteSnapshot = await loadClientFavorites();
+          if (!cancelled && favoriteSnapshot) {
+            setFavorites(favoriteSnapshot.favorites);
+            setOfferNotices(favoriteSnapshot.notices);
+          }
+        } catch {
+          if (!cancelled) {
+            setError("Les favoris n’ont pas pu être chargés.");
+          }
+        }
         setProfileForm((current) => ({
           ...current,
           firstName: next.firstName,
@@ -323,6 +350,34 @@ export function BookeaAccountPage() {
     router.replace("/client/login");
   }
 
+  async function removeFavorite(favorite: ClientFavorite) {
+    setFavoriteBusy(true);
+    setError("");
+    try {
+      const next = await saveClientFavorite("remove", favorite);
+      setFavorites(next.favorites);
+      setOfferNotices(next.notices);
+    } catch {
+      setError("Impossible de retirer ce centre des favoris.");
+    } finally {
+      setFavoriteBusy(false);
+    }
+  }
+
+  async function markOffersRead() {
+    setFavoriteBusy(true);
+    setError("");
+    try {
+      const next = await markClientOfferNoticesRead();
+      setFavorites(next.favorites);
+      setOfferNotices(next.notices);
+    } catch {
+      setError("Impossible de marquer les offres comme vues.");
+    } finally {
+      setFavoriteBusy(false);
+    }
+  }
+
   return (
     <main className="min-h-screen bg-[#eef3f9] text-slate-950">
       <header className="border-b border-slate-200 bg-white">
@@ -384,6 +439,15 @@ export function BookeaAccountPage() {
                 >
                   <Icon className="h-4 w-4" />
                   <span>{tab.label}</span>
+                  {tab.id === "favorites" && offerNotices.length > 0 ? (
+                    <span
+                      className={`ml-auto rounded-full px-2 py-0.5 text-[11px] ${
+                        selected ? "bg-white text-slate-950" : "bg-rose-100 text-rose-800"
+                      }`}
+                    >
+                      {offerNotices.length}
+                    </span>
+                  ) : null}
                 </button>
               );
             })}
@@ -571,47 +635,104 @@ export function BookeaAccountPage() {
             </section>
           ) : null}
 
-          {!loading && activeTab === "loyalty" ? (
-            <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-              <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
-                Carte fidélité
-              </p>
-              <h3 className="mt-1 text-2xl font-semibold">
-                {account.loyalty.points} point
-                {account.loyalty.points === 1 ? "" : "s"}
-              </h3>
-              {account.loyalty.points === 0 ? (
-                <p className="mt-3 text-sm font-medium text-slate-500">
-                  Aucun point pour le moment. Ils s’ajouteront après vos
-                  passages en institut.
-                </p>
-              ) : (
-                <p className="mt-2 text-sm font-medium text-slate-500">
-                  Cumul réel de vos instituts Bookea.
-                </p>
-              )}
-              <div className="mt-5">
-                <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
-                  Notes partagées
-                </p>
-                {account.loyalty.notes.length === 0 ? (
-                  <p className="mt-2 text-sm font-medium text-slate-500">
-                    Aucune note partagée par un institut.
+          {!loading && activeTab === "favorites" ? (
+            <section className="space-y-4">
+              <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <h3 className="text-base font-semibold">Nouvelles offres</h3>
+                  {offerNotices.length > 0 ? (
+                    <button
+                      type="button"
+                      disabled={favoriteBusy}
+                      onClick={() => void markOffersRead()}
+                      className="rounded-xl bg-slate-950 px-3 py-2 text-sm font-semibold text-white"
+                    >
+                      Marquer comme vu
+                    </button>
+                  ) : null}
+                </div>
+                {offerNotices.length === 0 ? (
+                  <p className="mt-4 text-sm font-medium text-slate-500">
+                    Aucune nouvelle offre. Quand un centre favori en publie une,
+                    elle apparaît ici.
                   </p>
                 ) : (
+                  <div className="mt-4 space-y-2">
+                    {offerNotices.map((notice) => (
+                      <a
+                        key={notice.id}
+                        href="/"
+                        className="block rounded-2xl bg-rose-50 px-4 py-3"
+                      >
+                        <p className="text-sm font-semibold text-rose-950">
+                          {notice.title}
+                          {notice.price > 0 ? ` · ${notice.price} €` : ""}
+                        </p>
+                        <p className="mt-1 text-sm text-rose-800">{notice.centerName}</p>
+                      </a>
+                    ))}
+                  </div>
+                )}
+              </section>
+              <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+                <h3 className="text-base font-semibold">Mes centres</h3>
+                {favorites.length === 0 ? (
+                  <p className="mt-4 text-sm font-medium text-slate-500">
+                    Aucun favori. Sur la page d’accueil, le cœur d’une fiche
+                    centre l’ajoute ici.
+                  </p>
+                ) : (
+                  <div className="mt-4 space-y-2">
+                    {favorites.map((favorite) => (
+                      <div
+                        key={favorite.id}
+                        className="flex items-center justify-between gap-3 rounded-2xl bg-slate-50 px-4 py-3"
+                      >
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-semibold text-slate-950">
+                            {favorite.name}
+                          </p>
+                          {favorite.city ? (
+                            <p className="text-sm text-slate-500">{favorite.city}</p>
+                          ) : null}
+                        </div>
+                        <button
+                          type="button"
+                          disabled={favoriteBusy}
+                          onClick={() => void removeFavorite(favorite)}
+                          className="shrink-0 text-sm font-semibold text-slate-500"
+                        >
+                          Retirer
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </section>
+            </section>
+          ) : null}
+
+          {!loading && activeTab === "loyalty" ? (
+            <div className="space-y-4">
+              <ClientLoyaltyPanel />
+              {account.loyalty.notes.length > 0 ? (
+                <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-stone-400">
+                    Notes partagées
+                  </p>
                   <div className="mt-2 space-y-2">
                     {account.loyalty.notes.map((note) => (
                       <p
                         key={note}
-                        className="rounded-2xl bg-slate-50 px-4 py-3 text-sm font-medium text-slate-700"
+                        className="rounded-2xl bg-slate-50 px-4 py-3 text-sm text-slate-700"
                       >
                         {note}
                       </p>
                     ))}
                   </div>
-                )}
-              </div>
-            </section>
+                </section>
+              ) : null}
+            </div>
           ) : null}
 
           {!loading && activeTab === "past" ? (

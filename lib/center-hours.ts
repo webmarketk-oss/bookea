@@ -70,6 +70,45 @@ export function normalizeCenterDayHours(value: unknown): CenterDayHours[] {
   });
 }
 
+export function explicitCenterHours(settings: unknown): CenterDayHours[] | null {
+  const record = asRecord(settings);
+  const agenda = asRecord(record.agenda);
+  const raw = agenda.hours ?? record.hours ?? record.agendaHours;
+  if (!Array.isArray(raw) || raw.length === 0) {
+    return null;
+  }
+  return normalizeCenterDayHours(raw);
+}
+
+export function nextPublicSlots(
+  hours: CenterDayHours[],
+  now = new Date(),
+  count = 3,
+) {
+  const labels = ["Dim", "Lun", "Mar", "Mer", "Jeu", "Ven", "Sam"];
+  const slots: string[] = [];
+  for (let offset = 0; offset < 14 && slots.length < count; offset += 1) {
+    const date = new Date(now);
+    date.setDate(date.getDate() + offset);
+    const day = hours.find(
+      (item) => item.weekday === date.getDay() && !item.closed && item.startTime,
+    );
+    if (!day) {
+      continue;
+    }
+    const [hour = 0, minute = 0] = day.startTime.split(":").map(Number);
+    if (
+      offset === 0 &&
+      now.getHours() * 60 + now.getMinutes() >= hour * 60 + minute
+    ) {
+      continue;
+    }
+    const prefix = offset === 0 ? "Auj" : offset === 1 ? "Dem" : labels[date.getDay()];
+    slots.push(`${prefix} ${day.startTime}`);
+  }
+  return slots;
+}
+
 export function readCenterHoursFromSettings(settings: unknown) {
   const record = asRecord(settings);
   const agenda = asRecord(record.agenda);

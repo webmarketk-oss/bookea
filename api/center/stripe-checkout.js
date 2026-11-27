@@ -1,6 +1,4 @@
 const {
-  amountToCents,
-  appBaseUrl,
   createServiceClient,
   isStripeConfigured,
   parsePayload,
@@ -39,19 +37,10 @@ module.exports = async function handler(req, res) {
     .trim()
     .toLowerCase()
     .slice(0, 80);
-  const cents = amountToCents(payload.amount);
   const serviceName = String(payload.serviceName || "Acompte").trim().slice(0, 120);
   const customerEmail = String(payload.customerEmail || "").trim().slice(0, 180);
   const customerName = String(payload.customerName || "").trim().slice(0, 120);
   const bookingId = String(payload.bookingId || "").trim().slice(0, 80);
-
-  if (cents < 50) {
-    return res.status(400).json({
-      ok: false,
-      error: "invalid_amount",
-      message: "Le montant d’acompte est trop bas pour Stripe.",
-    });
-  }
 
   try {
     const supabase = createServiceClient();
@@ -93,6 +82,10 @@ module.exports = async function handler(req, res) {
     const account = await stripeRequest("GET", `accounts/${stored.accountId}`);
     stored = stripeStatusFromAccount(account);
     await persistCenterStripe(supabase, center.id, stored);
+    center = {
+      ...center,
+      settings: { ...(center.settings || {}), stripe: stored },
+    };
 
     if (!stored.chargesEnabled) {
       return res.status(409).json({
@@ -102,52 +95,34 @@ module.exports = async function handler(req, res) {
       });
     }
 
-    const origin = appBaseUrl(req);
-    const publicPath = `/centres/${center.slug || slug}`;
-    const successUrl =
-      String(payload.successUrl || "").trim() ||
-      `${origin}${publicPath}?paid=1`;
-    const cancelUrl =
-      String(payload.cancelUrl || "").trim() ||
-      `${origin}${publicPath}?paid=0`;
-
-    const session = await stripeRequest("POST", "checkout/sessions", {
-      mode: "payment",
-      currency: "eur",
-      customer_email: customerEmail || undefined,
-      success_url: successUrl,
-      cancel_url: cancelUrl,
-      line_items: [
-        {
-          quantity: 1,
-          price_data: {
-            currency: "eur",
-            unit_amount: cents,
-            product_data: {
-              name: `Acompte · ${serviceName}`,
-            },
-          },
-        },
-      ],
-      payment_intent_data: {
-        transfer_data: {
-          destination: stored.accountId,
-        },
-        metadata: {
-          center_id: center.id,
-          booking_id: bookingId,
-          service_name: serviceName,
-          customer_name: customerName,
-        },
+    const { startOnlineDeposit } = require("./online-deposit");
+    const online = await startOnlineDeposit(
+      supabase,
+      center,
+      {
+        bookingId,
+        treatment: serviceName,
+        date: String(payload.date || "").slice(0, 10),
+        start: String(payload.start || payload.time || "").slice(0, 5),
+        duration: Number(payload.duration) > 0 ? Number(payload.duration) : 60,
+        firstName: customerName,
+        lastName: "",
+        email: customerEmail,
+        phone: String(payload.phone || ""),
       },
-      metadata: {
-        center_id: center.id,
-        booking_id: bookingId,
-        service_name: serviceName,
-      },
+      req,
+    );
+    if (!online) {
+      return res.status(409).json({
+        ok: false,
+        error: "no_deposit",
+        message: "Cette prestation ne demande pas d’acompte en ligne.",
+      });
+    }
+    return res.status(online.status).json({
+      ...online.body,
+      url: online.body.checkoutUrl,
     });
-
-    return res.status(200).json({ ok: true, url: session.url, id: session.id });
   } catch (error) {
     const status = Number(error.status) || 500;
     return res.status(status).json({

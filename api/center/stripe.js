@@ -11,6 +11,7 @@ const {
   stripeRequest,
   stripeStatusFromAccount,
 } = require("./_stripe-lib");
+const { canManageCenterBilling } = require("../billing/_center-auth");
 
 module.exports = async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
@@ -53,6 +54,10 @@ module.exports = async function handler(req, res) {
     }
     if (!center?.id) {
       return res.status(404).json({ ok: false, error: "center_not_found" });
+    }
+    const allowed = await canManageCenterBilling(supabase, req, center.id);
+    if (!allowed) {
+      return res.status(401).json({ ok: false, error: "unauthorized" });
     }
 
     if (!isStripeConfigured()) {

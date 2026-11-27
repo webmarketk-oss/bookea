@@ -16,8 +16,6 @@ import {
   MapPin,
   MessageCircle,
   Music2,
-  Navigation,
-  Phone,
   Quote,
   Search,
   SlidersHorizontal,
@@ -30,12 +28,11 @@ import { BookeaLogo } from "@/components/bookea-logo";
 import { PublicLegalFooter } from "@/components/legal/legal-page";
 import {
   createPublicBookingId,
+  readPublicBookings,
   savePublicBooking,
 } from "@/lib/public-bookings";
 import {
-  defaultCenterServices,
   defaultCenterOffers,
-  defaultExternalReviews,
   formatCenterServicePrice,
   loadPublishedCenterProfile,
   mergeServiceCategories,
@@ -47,6 +44,15 @@ import {
 } from "@/lib/center-settings";
 import { coverPositionCss, servicePhotoByName } from "@/lib/center-media";
 import { offerDeadline, offerIsLive, offerShelf } from "@/lib/public-offers";
+import {
+  clientFavoriteId,
+  loadClientFavorites,
+  saveClientFavorite,
+  type ClientFavorite,
+  type ClientOfferNotice,
+} from "@/lib/client-account";
+import { nextPublicSlots } from "@/lib/center-hours";
+import { createClient } from "@/lib/supabase";
 import {
   ClientMarketplace,
   type MarketplaceOffer,
@@ -83,6 +89,7 @@ type Center = {
   }>;
   services?: Array<{
     name: string;
+    category?: string;
     price: number;
     onQuote?: boolean;
     duration: string;
@@ -99,6 +106,7 @@ type Center = {
     tiktok?: string;
     facebook?: string;
   };
+  centerId?: string;
 };
 
 type ClientAppointment = {
@@ -544,23 +552,52 @@ export function PublicBooking() {
     }
     const paid = new URLSearchParams(window.location.search).get("paid");
     if (paid === "1") {
-      return "Reservation confirmee. Acompte payé.";
+      return "Vérification du paiement en cours. Le rendez-vous sera confirmé dès que Stripe aura validé l’acompte.";
     }
     if (paid === "0") {
-      return "Reservation confirmee. Paiement annulé : le centre peut renvoyer un lien d'acompte.";
+      return "Paiement abandonné. Le créneau a été libéré.";
     }
     return "Creneau pret a reserver";
   });
   const [activeCategory, setActiveCategory] = useState("Tous");
   const [filtersExpanded, setFiltersExpanded] = useState(false);
   const [storedSettings, setStoredSettings] = useState<StoredCenterSettings | null>(null);
+  const [clientName, setClientName] = useState("");
+  const [clientFavorites, setClientFavorites] = useState<ClientFavorite[]>([]);
+  const [offerNotices, setOfferNotices] = useState<ClientOfferNotice[]>([]);
+  const [favoriteBusy, setFavoriteBusy] = useState("");
   const appliedConfiguredRef = useRef(false);
   const [customerForm, setCustomerForm] = useState({
-    firstName: "Julie",
-    lastName: "Martin",
-    phone: "06 22 33 44 55",
-    email: "julie@email.com",
+    firstName: "",
+    lastName: "",
+    phone: "",
+    email: "",
   });
+  const [selectedServiceName, setSelectedServiceName] = useState("");
+  const [catalogView, setCatalogView] = useState<Record<string, "soins" | "tarifs" | "">>({});
+  const [catalogCategory, setCatalogCategory] = useState<Record<string, string>>({});
+  const [visitDate, setVisitDate] = useState("");
+  const [visitTime, setVisitTime] = useState("");
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    const paid = new URLSearchParams(window.location.search).get("paid");
+    if (paid !== "0") {
+      return;
+    }
+    const last = readPublicBookings()[0];
+    const slug = readPublicCenterSlug();
+    if (!last || !slug) {
+      return;
+    }
+    void fetch("/api/public/booking", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "release", slug, bookingId: last.id }),
+    });
+  }, []);
 
   useEffect(() => {
     const refreshSettings = () => setStoredSettings(readCenterSettings());
@@ -583,6 +620,73 @@ export function PublicBooking() {
     };
   }, []);
 
+  useEffect(() => {
+    const supabase = createClient();
+    let cancelled = false;
+    async function readSession() {
+      const { data } = await supabase.auth.getSession();
+      if (cancelled) {
+        return;
+      }
+      const user = data.session?.user;
+      if (!user) {
+        setClientName("");
+        setClientFavorites([]);
+        setOfferNotices([]);
+        return;
+      }
+      const meta = user.user_metadata || {};
+      const full = String(meta.full_name || meta.first_name || user.email || "Mon compte");
+      setClientName(full.split(" ")[0] || "Mon compte");
+      try {
+        const snapshot = await loadClientFavorites();
+        if (cancelled || !snapshot) {
+          return;
+        }
+        setClientFavorites(snapshot.favorites);
+        setOfferNotices(snapshot.notices);
+      } catch {
+        setClientFavorites([]);
+        setOfferNotices([]);
+      }
+    }
+    void readSession();
+    const { data } = supabase.auth.onAuthStateChange(() => {
+      void readSession();
+    });
+    return () => {
+      cancelled = true;
+      data.subscription.unsubscribe();
+    };
+  }, []);
+
+  const toggleFavorite = async (center: Center) => {
+    const id = clientFavoriteId(center);
+    if (!id || favoriteBusy) {
+      return;
+    }
+    const supabase = createClient();
+    const { data } = await supabase.auth.getSession();
+    if (!data.session) {
+      const next = `${window.location.pathname}${window.location.search}` || "/";
+      window.location.href = `/client/login?next=${encodeURIComponent(next)}`;
+      return;
+    }
+    const saved = clientFavorites.some((item) => item.id === id);
+    setFavoriteBusy(id);
+    try {
+      const snapshot = await saveClientFavorite(saved ? "remove" : "add", {
+        id,
+        name: center.name,
+        city: center.city,
+      });
+      setClientFavorites(snapshot.favorites);
+      setOfferNotices(snapshot.notices);
+    } finally {
+      setFavoriteBusy("");
+    }
+  };
+
   const configuredCenter = useMemo<Center | null>(() => {
     const profile = storedSettings?.center;
 
@@ -591,9 +695,7 @@ export function PublicBooking() {
     }
 
     const visibleServices = sortServicesByCategory(
-      (storedSettings?.services ?? defaultCenterServices).filter(
-        (service) => service.visible,
-      ),
+      (storedSettings?.services ?? []).filter(isPublicCare),
       mergeServiceCategories(
         storedSettings?.serviceCategories,
         storedSettings?.services,
@@ -601,8 +703,7 @@ export function PublicBooking() {
     );
     const topService =
       visibleServices.find((service) => service.topListed) ?? visibleServices[0];
-    const externalReviews =
-      storedSettings?.externalReviews ?? defaultExternalReviews;
+    const externalReviews = storedSettings?.externalReviews ?? [];
     const averageRating =
       externalReviews.length > 0
         ? (
@@ -611,7 +712,7 @@ export function PublicBooking() {
           )
             .toFixed(1)
             .replace(".", ",")
-        : "4,9";
+        : "";
 
     if (!topService) {
       return null;
@@ -624,13 +725,13 @@ export function PublicBooking() {
       rating: averageRating,
       reviews: externalReviews.length,
       price: topService.price,
-      deposit: topService.depositEnabled ? topService.depositAmount : 0,
+      deposit: publicDepositEuros(topService),
       service: topService.name,
       duration: `${topService.duration} min`,
-      nextSlot: "Aujourd'hui 14:30",
+      nextSlot: nextPublicSlots(storedSettings?.hours ?? [])[0] || "Selon les horaires du centre",
       phone: profile.phone,
       email: profile.email,
-      slots: ["Auj 14:30", "Dem 10:00", "Sam 16:00"],
+      slots: nextPublicSlots(storedSettings?.hours ?? []),
       tags: [
         "Réservation en ligne",
         "Agenda à jour",
@@ -654,21 +755,21 @@ export function PublicBooking() {
         source: review.source,
         comment: review.comment,
       })),
-      services: visibleServices.slice(0, 4).map((service) => ({
+      services: visibleServices.map((service) => ({
         name: service.name,
+        category: service.category || "Autres",
         price: service.price,
         onQuote: service.onQuote === true,
         duration: `${service.duration} min`,
         color: service.color,
-        deposit: service.depositEnabled ? service.depositAmount : 0,
+        deposit: publicDepositEuros(service),
         photo: service.photo,
       })),
       color: "from-violet-600 via-blue-500 to-cyan-400",
       profileColor: profile.profileColor,
       socialLinks: profile.socialLinks,
-      offers: (storedSettings?.offers ?? defaultCenterOffers).filter(
-        (offer) => offer.visible,
-      ),
+      centerId: profile.id,
+      offers: (storedSettings?.offers ?? []).filter((offer) => offer.visible),
     };
   }, [storedSettings]);
 
@@ -689,10 +790,7 @@ export function PublicBooking() {
       return centers;
     }
 
-    return [
-      configuredCenter,
-      ...centers.filter((center) => center.name !== configuredCenter.name),
-    ];
+    return [configuredCenter];
   }, [configuredCenter]);
 
   const filteredCenters = useMemo(() => {
@@ -725,6 +823,17 @@ export function PublicBooking() {
   const visibleCenters = filteredCenters.length > 0 ? filteredCenters : allCenters;
   const selectedCenter =
     allCenters.find((center) => center.name === selectedCenterName) ?? allCenters[0];
+  const bookedService =
+    selectedCenter.services?.find((service) => service.name === selectedServiceName) ?? null;
+  const bookedPrice = {
+    price: bookedService?.price ?? selectedCenter.price,
+    deposit: bookedService?.deposit ?? selectedCenter.deposit,
+    remaining: Math.max(
+      0,
+      (bookedService?.price ?? selectedCenter.price) -
+        (bookedService?.deposit ?? selectedCenter.deposit),
+    ),
+  };
   const publicCurrentOffers = useMemo(() => {
     const centerOffers =
       configuredCenter?.offers
@@ -738,7 +847,7 @@ export function PublicBooking() {
           photo: servicePhotoByName(storedSettings?.services, offer.serviceName),
         })) ?? [];
 
-    return [...centerOffers, ...currentOffers];
+    return configuredCenter ? centerOffers : [...centerOffers, ...currentOffers];
   }, [configuredCenter, storedSettings]);
   const publicEndingSoonOffers = useMemo(() => {
     const centerOffers =
@@ -755,11 +864,15 @@ export function PublicBooking() {
           photo: servicePhotoByName(storedSettings?.services, offer.serviceName),
         })) ?? [];
 
-    return [...centerOffers, ...endingSoonOffers];
+    return configuredCenter ? centerOffers : [...centerOffers, ...endingSoonOffers];
   }, [configuredCenter, storedSettings]);
   const showcaseOffers = useMemo(() => {
     const published = (configuredCenter?.offers ?? []).filter((offer) => offer.visible);
-    const source = published.length > 0 ? published : defaultCenterOffers;
+    const source = configuredCenter
+      ? published
+      : published.length > 0
+        ? published
+        : defaultCenterOffers;
     const centerName = configuredCenter?.name ?? centers[0].name;
     const city = configuredCenter?.city ?? centers[0].city;
     const searchCategory = configuredCenter?.categories[0] ?? "Institut beauté";
@@ -851,7 +964,21 @@ export function PublicBooking() {
   const selectSlot = (center: Center, slot: string) => {
     setSelectedCenterName(center.name);
     setSelectedSlot(slot);
+    if (slot) {
+      setVisitDate(resolveSlotDate(slot));
+      setVisitTime((slot.split(" ")[1] || "").slice(0, 5));
+    }
     setBookingStatus("Creneau selectionne");
+  };
+
+  const chooseService = (center: Center, serviceName: string) => {
+    setSelectedServiceName(serviceName);
+    setSelectedCenterName(center.name);
+    setBookingStatus(`${serviceName} sélectionné`);
+    document.getElementById("reservation")?.scrollIntoView({
+      behavior: "smooth",
+      block: "start",
+    });
   };
 
   const reserveAppointment = async () => {
@@ -871,8 +998,15 @@ export function PublicBooking() {
       return;
     }
 
-    const start = selectedSlot.split(" ")[1] ?? selectedCenter.nextSlot;
-    const date = resolveSlotDate(selectedSlot);
+    const bookedService =
+      selectedCenter.services?.find((service) => service.name === selectedServiceName) ??
+      null;
+    const start = (visitTime || selectedSlot.split(" ")[1] || "").slice(0, 5);
+    const date = visitDate || resolveSlotDate(selectedSlot);
+    if (!/^\d{2}:\d{2}$/.test(start)) {
+      setBookingStatus("Choisissez une date et une heure pour réserver.");
+      return;
+    }
     const booking = {
       id: createPublicBookingId(),
       centerName: selectedCenter.name,
@@ -880,19 +1014,21 @@ export function PublicBooking() {
       lastName,
       phone,
       email,
-      treatment: selectedCenter.service,
+      treatment: bookedService?.name || selectedCenter.service,
       date,
       start,
-      duration: parseDuration(selectedCenter.duration),
-      price: selectedCenter.price,
-      deposit: selectedCenter.deposit,
+      duration: bookedService
+        ? parseDuration(bookedService.duration)
+        : parseDuration(selectedCenter.duration),
+      price: bookedService?.price ?? selectedCenter.price,
+      deposit: bookedService?.deposit ?? selectedCenter.deposit,
       createdAt: new Date().toISOString(),
     };
 
     setAppointments((current) => [
       {
         center: selectedCenter.name,
-        service: selectedCenter.service,
+        service: bookedService?.name || selectedCenter.service,
         date: formatPublicDate(date),
         time: start,
         status: "Réservé",
@@ -907,7 +1043,7 @@ export function PublicBooking() {
       selectedCenter.name.trim().toLowerCase() ===
         String(storedSettings?.center?.name || "").trim().toLowerCase();
     if (isPublishedCenter) {
-      await fetch("/api/public/booking", {
+      const response = await fetch("/api/public/booking", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -922,44 +1058,24 @@ export function PublicBooking() {
           start: booking.start,
           duration: booking.duration,
         }),
-      }).catch(() => null);
-    }
-    if (booking.deposit > 0 && storedSettings?.stripeConnected && slug) {
-      setBookingStatus("Redirection vers le paiement de l'acompte…");
-      try {
-        const origin = window.location.origin;
-        const response = await fetch("/api/center/stripe-checkout", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            slug,
-            amount: booking.deposit,
-            serviceName: booking.treatment,
-            customerEmail: booking.email,
-            customerName: `${firstName} ${lastName}`.trim(),
-            bookingId: booking.id,
-            successUrl: `${origin}/centres/${slug}?paid=1`,
-            cancelUrl: `${origin}/centres/${slug}?paid=0`,
-          }),
-        });
-        const json = (await response.json().catch(() => ({}))) as {
-          url?: string;
-        };
-        if (json.url) {
-          window.location.assign(json.url);
-          return;
-        }
-      } catch {
-        // Keep the reservation even if Checkout cannot start.
+      });
+      const json = (await response.json().catch(() => ({}))) as {
+        checkoutUrl?: string;
+        message?: string;
+      };
+      if (json.checkoutUrl) {
+        setBookingStatus("Redirection vers le paiement de l’acompte…");
+        window.location.assign(json.checkoutUrl);
+        return;
       }
-      setBookingStatus(
-        "Reservation confirmee. Le paiement Stripe n'a pas pu démarrer : le centre peut renvoyer un lien d'acompte.",
-      );
-    } else {
-      setBookingStatus(
-        "Reservation confirmee : SMS et mail de confirmation envoyes, CRM et planning du centre mis a jour",
-      );
+      if (!response.ok) {
+        setBookingStatus(json.message || "La réservation n’a pas pu être enregistrée.");
+        return;
+      }
     }
+    setBookingStatus(
+      "Reservation confirmee : SMS et mail de confirmation envoyes, CRM et planning du centre mis a jour",
+    );
     window.setTimeout(() => {
       document.getElementById("reservation-confirmee")?.scrollIntoView({
         behavior: "smooth",
@@ -1026,15 +1142,24 @@ export function PublicBooking() {
               </button>
             ))}
             <a href="/client/compte" className="hover:text-blue-600">
-              Mon compte Bookea
+              {clientName ? clientName : "Mon compte Bookea"}
+              {offerNotices.length > 0 ? ` · ${offerNotices.length}` : ""}
             </a>
           </nav>
           <div className="flex shrink-0 items-center gap-2">
             <Link
-              href="/client/login"
-              className="rounded-full border border-slate-200 bg-white px-3 py-2.5 text-sm font-bold text-slate-950 shadow-sm transition hover:bg-slate-50 sm:px-4"
+              href={
+                clientName
+                  ? "/client/compte"
+                  : `/client/login?next=${encodeURIComponent("/")}`
+              }
+              className="rounded-full border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold text-stone-950 shadow-sm transition hover:bg-stone-50 sm:px-4"
             >
-              Connexion client
+              {clientName
+                ? offerNotices.length > 0
+                  ? `${clientName} · ${offerNotices.length}`
+                  : clientName
+                : "Connexion client"}
             </Link>
             <Link
               href="/login"
@@ -1078,17 +1203,17 @@ export function PublicBooking() {
       <section id="centres" className="mx-auto w-full max-w-6xl px-3 pb-8 sm:px-6 lg:px-8">
         <div className="mb-4 flex items-end justify-between gap-4">
           <div className="min-w-0">
-            <p className="text-xs font-black uppercase text-blue-600">
-              Disponibilites
+            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-stone-400">
+              Disponibilités
             </p>
-            <h2 className="text-2xl font-black text-slate-950 sm:text-3xl">
-              Centres recommandes
+            <h2 className="mt-1 font-serif text-2xl text-stone-950 sm:text-[1.7rem]">
+              Centres recommandés
             </h2>
           </div>
           <button
             type="button"
             onClick={() => setFiltersExpanded((current) => !current)}
-            className={`inline-flex items-center gap-2 rounded-2xl border px-4 py-3 font-black shadow-sm transition ${
+            className={`inline-flex items-center gap-2 rounded-2xl border px-4 py-3 text-sm font-semibold shadow-sm transition ${
               filtersExpanded
                 ? "border-blue-200 bg-blue-50 text-blue-700"
                 : "border-slate-200 bg-white text-slate-700"
@@ -1103,7 +1228,7 @@ export function PublicBooking() {
           <div className="mb-4 rounded-[24px] border border-slate-200 bg-white p-4 shadow-sm">
             <div className="grid gap-4 md:grid-cols-2">
               <div>
-                <p className="text-xs font-black uppercase text-slate-500">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-stone-400">
                   Catégorie
                 </p>
                 <div className="mt-3 flex flex-wrap gap-2">
@@ -1112,7 +1237,7 @@ export function PublicBooking() {
                       key={category}
                       type="button"
                       onClick={() => setActiveCategory(category)}
-                      className={`rounded-full px-4 py-2 text-sm font-black transition ${
+                      className={`rounded-full px-4 py-2 text-sm font-semibold transition ${
                         activeCategory === category
                           ? "bg-blue-600 text-white"
                           : "bg-slate-100 text-slate-700 hover:bg-slate-200"
@@ -1125,7 +1250,7 @@ export function PublicBooking() {
               </div>
 
               <div>
-                <p className="text-xs font-black uppercase text-slate-500">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-stone-400">
                   Ville
                 </p>
                 <div className="mt-3 flex flex-wrap gap-2">
@@ -1134,7 +1259,7 @@ export function PublicBooking() {
                       key={city}
                       type="button"
                       onClick={() => setLocationQuery(city)}
-                      className={`rounded-full px-4 py-2 text-sm font-black transition ${
+                      className={`rounded-full px-4 py-2 text-sm font-semibold transition ${
                         locationQuery.toLowerCase().includes(city.toLowerCase())
                           ? "bg-emerald-600 text-white"
                           : "bg-slate-100 text-slate-700 hover:bg-slate-200"
@@ -1150,7 +1275,7 @@ export function PublicBooking() {
                     value={locationQuery === "Autour de moi" ? "" : locationQuery}
                     onChange={(event) => setLocationQuery(event.target.value)}
                     placeholder="Entrer une ville"
-                    className="min-w-0 flex-1 bg-transparent text-sm font-bold text-slate-900 outline-none placeholder:text-slate-400"
+                    className="min-w-0 flex-1 bg-transparent text-sm text-stone-900 outline-none placeholder:text-stone-400"
                   />
                 </label>
               </div>
@@ -1191,38 +1316,56 @@ export function PublicBooking() {
               <div className="p-4 sm:p-5">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
-                    <h3 className="truncate text-2xl font-black text-slate-950">
+                    <h3 className="truncate font-serif text-2xl text-stone-950">
                       {center.name}
                     </h3>
-                    <p className="mt-1 flex min-w-0 items-center gap-2 font-semibold text-slate-500">
+                    <p className="mt-1 flex min-w-0 items-center gap-2 text-sm text-stone-500">
                       <MapPin className="h-4 w-4 shrink-0" />
                       {center.city} · {center.distance}
                     </p>
                   </div>
                   <button
-                    className="grid h-10 w-10 shrink-0 place-items-center rounded-full border border-slate-200"
-                    aria-label={`Ajouter ${center.name} aux favoris`}
+                    type="button"
+                    disabled={favoriteBusy === clientFavoriteId(center)}
+                    onClick={() => void toggleFavorite(center)}
+                    className="grid h-10 w-10 shrink-0 place-items-center rounded-full border border-stone-200"
+                    aria-label={
+                      clientFavorites.some((item) => item.id === clientFavoriteId(center))
+                        ? `Retirer ${center.name} des favoris`
+                        : `Ajouter ${center.name} aux favoris`
+                    }
+                    aria-pressed={clientFavorites.some(
+                      (item) => item.id === clientFavoriteId(center),
+                    )}
                   >
-                    <Heart className="h-5 w-5 text-slate-500" />
+                    <Heart
+                      className={`h-5 w-5 ${
+                        clientFavorites.some((item) => item.id === clientFavoriteId(center))
+                          ? "fill-rose-700 text-rose-700"
+                          : "text-stone-500"
+                      }`}
+                    />
                   </button>
                 </div>
 
+                {center.reviews > 0 ? (
                 <div className="mt-4 flex items-center gap-2">
                   <Star className="h-5 w-5 fill-amber-400 text-amber-400" />
-                  <span className="font-black">{center.rating}</span>
-                  <span className="font-semibold text-slate-500">
+                  <span className="font-semibold text-stone-950">{center.rating}</span>
+                  <span className="text-sm text-stone-500">
                     ({center.reviews} avis)
                   </span>
                 </div>
+                ) : null}
 
                 <div className="mt-4 rounded-2xl border border-emerald-100 bg-emerald-50 px-3 py-3 sm:rounded-3xl sm:px-4">
                   <div className="flex items-center gap-3">
                     <span className="h-3 w-3 rounded-full bg-emerald-500 shadow-[0_0_0_6px_rgba(16,185,129,0.14)]" />
                     <div className="min-w-0">
-                      <p className="text-[11px] font-black uppercase tracking-[0.12em] text-emerald-700">
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-emerald-700">
                         Prochaine disponibilité
                       </p>
-                      <p className="font-black text-slate-950">{center.nextSlot}</p>
+                      <p className="text-lg font-semibold text-stone-950">{center.nextSlot}</p>
                     </div>
                   </div>
                 </div>
@@ -1242,7 +1385,7 @@ export function PublicBooking() {
                           backgroundSize: "cover",
                         }}
                       >
-                        <div className="absolute inset-x-2 bottom-2 flex items-center gap-1 rounded-full bg-white/85 px-2 py-1 text-[10px] font-black text-slate-700 backdrop-blur">
+                        <div className="absolute inset-x-2 bottom-2 flex items-center gap-1 rounded-full bg-white/85 px-2 py-1 text-[10px] font-semibold text-stone-700 backdrop-blur">
                           <ImageIcon className="h-3 w-3 shrink-0" />
                           <span className="truncate">{photo.label}</span>
                         </div>
@@ -1255,28 +1398,30 @@ export function PublicBooking() {
                   <div className="mt-4 min-w-0 rounded-[22px] border border-slate-100 bg-white p-3 shadow-sm sm:rounded-[28px] sm:p-4">
                     <div className="flex flex-wrap items-end justify-between gap-3">
                       <div className="min-w-0">
-                        <p className="text-xs font-black uppercase text-blue-600">
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-stone-400">
                           Prestations
                         </p>
-                        <h4 className="text-xl font-black text-slate-950">
+                        <h4 className="font-serif text-xl text-stone-950">
                           Les soins ({center.services.length})
                         </h4>
                       </div>
-                      <span className="shrink-0 rounded-full bg-blue-50 px-3 py-1 text-xs font-black text-blue-700">
-                        Top centre
-                      </span>
                     </div>
 
                     <div className="mt-3 flex gap-2 overflow-x-auto pb-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-                      {["Tous", ...center.categories.slice(0, 3)].map((category, index) => (
+                      {["Tous", ...new Set(center.services.map((service) => service.category || "Soin"))].map((category) => (
                         <button
                           key={category}
                           type="button"
-                          onClick={() => setServiceQuery(index === 0 ? "" : category)}
-                          className={`shrink-0 rounded-full px-4 py-2 text-sm font-black transition ${
-                            index === 0
-                              ? "bg-blue-600 text-white shadow-sm"
-                              : "bg-slate-100 text-slate-600 hover:bg-blue-50 hover:text-blue-700"
+                          onClick={() =>
+                            setCatalogCategory((current) => ({
+                              ...current,
+                              [center.name]: category,
+                            }))
+                          }
+                          className={`shrink-0 rounded-full px-4 py-2 text-sm font-semibold transition ${
+                            (catalogCategory[center.name] || "Tous") === category
+                              ? "bg-stone-950 text-white shadow-sm"
+                              : "bg-stone-100 text-stone-600 hover:bg-stone-200"
                           }`}
                         >
                           {category}
@@ -1285,14 +1430,20 @@ export function PublicBooking() {
                     </div>
 
                     <div className="mt-4 space-y-3">
-                      {center.services.slice(0, 4).map((service, index) => (
+                      {(catalogView[center.name] === "soins" || catalogView[center.name] === "tarifs"
+                        ? center.services
+                        : center.services.slice(0, 4)
+                      )
+                        .filter(
+                          (service) =>
+                            (catalogCategory[center.name] || "Tous") === "Tous" ||
+                            (service.category || "Soin") === catalogCategory[center.name],
+                        )
+                        .map((service, index) => (
                         <button
                           key={service.name}
                           type="button"
-                          onClick={() => {
-                            setServiceQuery(service.name);
-                            selectSlot(center, center.slots[0]);
-                          }}
+                          onClick={() => chooseService(center, service.name)}
                           className="group flex w-full items-center gap-3 rounded-2xl px-2 py-2 text-left transition hover:bg-slate-50"
                         >
                           <span
@@ -1317,10 +1468,10 @@ export function PublicBooking() {
                             )}
                           </span>
                           <span className="min-w-0 flex-1">
-                            <span className="block truncate text-base font-black text-slate-950">
+                            <span className="block truncate text-sm font-semibold text-stone-950">
                               {service.name}
                             </span>
-                            <span className="mt-0.5 block text-sm font-bold text-slate-500">
+                            <span className="mt-0.5 block text-sm text-stone-500">
                               {service.duration} - {formatCenterServicePrice(service)}
                             </span>
                           </span>
@@ -1329,24 +1480,62 @@ export function PublicBooking() {
                       ))}
                     </div>
 
+                    {catalogView[center.name] === "tarifs" ? (
+                      <div className="mt-4 divide-y divide-stone-100 rounded-2xl border border-stone-100">
+                        {center.services
+                          .filter(
+                            (service) =>
+                              (catalogCategory[center.name] || "Tous") === "Tous" ||
+                              (service.category || "Soin") === catalogCategory[center.name],
+                          )
+                          .map((service) => (
+                            <button
+                              key={`price-${service.name}`}
+                              type="button"
+                              onClick={() => chooseService(center, service.name)}
+                              className="flex w-full items-center justify-between gap-3 px-3 py-3 text-left"
+                            >
+                              <span>
+                                <span className="block text-sm font-semibold text-stone-950">
+                                  {service.name}
+                                </span>
+                                <span className="text-xs text-stone-500">
+                                  {service.duration}
+                                  {service.deposit > 0 ? ` · acompte ${service.deposit} €` : ""}
+                                </span>
+                              </span>
+                              <span className="text-sm font-semibold text-stone-950">
+                                {formatCenterServicePrice(service)}
+                              </span>
+                            </button>
+                          ))}
+                      </div>
+                    ) : null}
+
                     <div className="mt-4 grid gap-2 sm:grid-cols-2">
                       <button
                         type="button"
-                        onClick={() => {
-                          setSelectedCenterName(center.name);
-                          setBookingStatus("Liste des soins ouverte");
-                        }}
-                        className="rounded-2xl bg-slate-100 px-4 py-3 text-sm font-black text-slate-700 transition hover:bg-slate-200"
+                        onClick={() =>
+                          setCatalogView((current) => ({
+                            ...current,
+                            [center.name]: current[center.name] === "soins" ? "" : "soins",
+                          }))
+                        }
+                        className="rounded-2xl bg-stone-100 px-4 py-3 text-sm font-semibold text-stone-700 transition hover:bg-stone-200"
                       >
-                        Voir tous les soins
+                        {catalogView[center.name] === "soins"
+                          ? "Réduire la liste"
+                          : "Voir tous les soins"}
                       </button>
                       <button
                         type="button"
-                        onClick={() => {
-                          setSelectedCenterName(center.name);
-                          setBookingStatus("Grille tarifaire selectionnee");
-                        }}
-                        className="rounded-2xl bg-blue-50 px-4 py-3 text-sm font-black text-blue-700 transition hover:bg-blue-100"
+                        onClick={() =>
+                          setCatalogView((current) => ({
+                            ...current,
+                            [center.name]: current[center.name] === "tarifs" ? "" : "tarifs",
+                          }))
+                        }
+                        className="rounded-2xl bg-stone-950 px-4 py-3 text-sm font-semibold text-white transition hover:bg-stone-800"
                       >
                         Grille tarifaire
                       </button>
@@ -1355,18 +1544,23 @@ export function PublicBooking() {
                 ) : null}
 
                 <div className="mt-4">
-                  <p className="text-xs font-black uppercase text-slate-400">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-stone-400">
                     Prochains créneaux
                   </p>
                   <div className="mt-3 flex snap-x gap-2 overflow-x-auto pb-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                    {center.slots.length === 0 ? (
+                      <p className="text-sm text-stone-500">
+                        Les créneaux suivent les horaires enregistrés du centre.
+                      </p>
+                    ) : null}
                     {center.slots.map((slot) => (
                       <button
                         key={slot}
                         onClick={() => selectSlot(center, slot)}
-                        className={`shrink-0 rounded-full px-4 py-2 text-sm font-black transition ${
+                        className={`shrink-0 rounded-full px-4 py-2 text-sm font-semibold transition ${
                           selectedCenter.name === center.name && selectedSlot === slot
-                            ? "bg-blue-600 text-white"
-                            : "bg-blue-50 text-blue-700 hover:bg-blue-100"
+                            ? "bg-stone-950 text-white"
+                            : "bg-stone-100 text-stone-700 hover:bg-stone-200"
                         }`}
                       >
                         {slot}
@@ -1381,18 +1575,18 @@ export function PublicBooking() {
                       <Quote className="mt-1 h-5 w-5 shrink-0 text-amber-500" />
                       <div className="min-w-0">
                         <div className="flex flex-wrap items-center gap-2">
-                          <span className="font-black text-slate-950">
+                          <span className="font-semibold text-stone-950">
                             {center.reviewHighlights[0].author}
                           </span>
-                          <span className="flex items-center gap-1 text-xs font-black text-amber-600">
+                          <span className="flex items-center gap-1 text-xs font-semibold text-amber-600">
                             <Star className="h-3 w-3 fill-amber-400 text-amber-400" />
                             {center.reviewHighlights[0].rating}/5
                           </span>
-                          <span className="text-xs font-bold text-slate-500">
+                          <span className="text-xs text-stone-500">
                             {center.reviewHighlights[0].source}
                           </span>
                         </div>
-                        <p className="mt-1 overflow-hidden text-sm font-semibold text-slate-700 [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2]">
+                        <p className="mt-1 overflow-hidden text-sm text-stone-600 [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2]">
                           {center.reviewHighlights[0].comment}
                         </p>
                       </div>
@@ -1400,54 +1594,14 @@ export function PublicBooking() {
                   </div>
                 ) : null}
 
-                {center.address || center.phone || center.email ? (
-                  <div className="mt-4 rounded-2xl border border-slate-100 bg-white px-3 py-3 shadow-sm sm:rounded-3xl sm:px-4">
-                    <div className="flex items-start gap-3">
-                      <div className="grid h-9 w-9 shrink-0 place-items-center rounded-2xl bg-blue-50 text-blue-600">
-                        <Navigation className="h-4 w-4" />
-                      </div>
-                      <div className="min-w-0">
-                        <p className="text-xs font-black uppercase text-slate-400">
-                          Coordonnées du centre
-                        </p>
-                        <div className="mt-2 grid gap-2 text-xs font-bold text-slate-600 sm:grid-cols-3">
-                          <p className="flex min-w-0 items-start gap-2">
-                            <MapPin className="mt-0.5 h-4 w-4 shrink-0 text-blue-600" />
-                            <span className="min-w-0">
-                              <span className="block truncate font-black text-slate-950">
-                                {center.address ?? center.city}
-                              </span>
-                              <span className="block text-slate-500">
-                                {center.city} · {center.distance}
-                              </span>
-                            </span>
-                          </p>
-                          <p className="flex min-w-0 items-center gap-2">
-                            <Phone className="h-4 w-4 shrink-0 text-emerald-600" />
-                            <span className="truncate">
-                              {center.phone ?? "Téléphone à renseigner"}
-                            </span>
-                          </p>
-                          <p className="flex min-w-0 items-center gap-2">
-                            <Mail className="h-4 w-4 shrink-0 text-purple-600" />
-                            <span className="truncate">
-                              {center.email ?? "Email à renseigner"}
-                            </span>
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                ) : null}
-
-                <div className="mt-3 flex flex-wrap gap-2">
+                <div className="mt-4 flex flex-wrap gap-2">
                   <button
                     type="button"
                     onClick={(event) => {
                       event.stopPropagation();
                       openBookeaChat(center);
                     }}
-                    className="inline-flex items-center gap-2 rounded-full border border-blue-100 bg-blue-50 px-3 py-2 text-xs font-black text-blue-700 shadow-sm"
+                    className="inline-flex items-center gap-2 rounded-full border border-stone-200 bg-white px-3 py-2 text-xs font-semibold text-stone-700 shadow-sm"
                     aria-label={`Contacter ${center.name}`}
                   >
                     <MessageCircle className="h-4 w-4" />
@@ -1459,7 +1613,7 @@ export function PublicBooking() {
                       target="_blank"
                       rel="noreferrer"
                       onClick={(event) => event.stopPropagation()}
-                      className="inline-flex items-center gap-2 rounded-full bg-gradient-to-r from-pink-500 via-fuchsia-500 to-orange-400 px-3 py-2 text-xs font-black text-white shadow-sm"
+                      className="inline-flex items-center gap-2 rounded-full bg-gradient-to-r from-pink-500 via-fuchsia-500 to-orange-400 px-3 py-2 text-xs font-semibold text-white shadow-sm"
                     >
                       <InstagramGlyph className="h-4 w-4" />
                       Instagram
@@ -1471,7 +1625,7 @@ export function PublicBooking() {
                       target="_blank"
                       rel="noreferrer"
                       onClick={(event) => event.stopPropagation()}
-                      className="inline-flex items-center gap-2 rounded-full bg-slate-950 px-3 py-2 text-xs font-black text-white shadow-sm"
+                      className="inline-flex items-center gap-2 rounded-full bg-stone-950 px-3 py-2 text-xs font-semibold text-white shadow-sm"
                     >
                       <Music2 className="h-4 w-4" />
                       TikTok
@@ -1483,7 +1637,7 @@ export function PublicBooking() {
                       target="_blank"
                       rel="noreferrer"
                       onClick={(event) => event.stopPropagation()}
-                      className="inline-flex items-center gap-2 rounded-full bg-blue-600 px-3 py-2 text-xs font-black text-white shadow-sm"
+                      className="inline-flex items-center gap-2 rounded-full bg-stone-950 px-3 py-2 text-xs font-semibold text-white shadow-sm"
                     >
                       <FacebookGlyph className="h-4 w-4" />
                       Facebook
@@ -1491,28 +1645,9 @@ export function PublicBooking() {
                   )}
                 </div>
 
-                <div className="mt-4 flex flex-wrap gap-2">
-                  {center.categories.slice(0, 3).map((category) => (
-                    <span
-                      key={category}
-                      className="rounded-full bg-blue-50 px-3 py-1 text-xs font-black text-blue-700"
-                    >
-                      {category}
-                    </span>
-                  ))}
-                  {center.tags.map((tag) => (
-                    <span
-                      key={tag}
-                      className="rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-600"
-                    >
-                      {tag}
-                    </span>
-                  ))}
-                </div>
-
                 <button
                   onClick={() => selectSlot(center, center.slots[0])}
-                  className="mt-5 flex w-full items-center justify-center gap-2 rounded-2xl bg-slate-950 px-5 py-4 font-black text-white transition hover:bg-slate-800"
+                  className="mt-5 flex w-full items-center justify-center gap-2 rounded-2xl bg-stone-950 px-5 py-4 text-sm font-semibold text-white transition hover:bg-stone-800"
                 >
                   Choisir ce centre
                   <ChevronRight className="h-5 w-5" />
@@ -1530,11 +1665,11 @@ export function PublicBooking() {
               <CalendarCheck className="h-6 w-6" />
             </div>
             <div className="min-w-0">
-              <p className="text-xs font-black uppercase text-emerald-600">
-                Reservation
+              <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-emerald-700">
+                Réservation
               </p>
-              <h2 className="text-2xl font-black text-slate-950">
-                Reservation rapide
+              <h2 className="mt-1 font-serif text-2xl text-stone-950">
+                Réservation rapide
               </h2>
             </div>
           </div>
@@ -1542,26 +1677,56 @@ export function PublicBooking() {
           <div className="mt-5 rounded-2xl bg-slate-50 p-4 sm:rounded-3xl sm:p-5">
             {[
               ["Centre", selectedCenter.name],
-              ["Soin", selectedCenter.service],
-              ["Creneau", selectedSlot],
+              ["Soin", selectedServiceName || selectedCenter.service],
+              ["Prix", `${bookedPrice.price} €`],
+              ["Acompte", bookedPrice.deposit > 0 ? `${bookedPrice.deposit} €` : "Aucun"],
+              ["Reste au salon", `${bookedPrice.remaining} €`],
+              ["Créneau", visitDate && visitTime ? `${visitDate} ${visitTime}` : selectedSlot],
             ].map(([label, value]) => (
               <div
                 key={label}
                 className="flex min-w-0 items-center justify-between gap-4 border-b border-slate-200 py-3 first:pt-0"
               >
-                <span className="font-bold text-slate-500">{label}</span>
-                <span className="min-w-0 text-right font-black">{value}</span>
+                <span className="text-sm text-stone-500">{label}</span>
+                <span className="min-w-0 text-right text-sm font-semibold text-stone-950">{value}</span>
               </div>
             ))}
           </div>
 
+          {configuredCenter && selectedCenter.name === configuredCenter.name ? (
+            <div className="mt-4 grid gap-3 sm:grid-cols-2">
+              <label className="space-y-1.5">
+                <span className="text-[11px] font-semibold uppercase tracking-[0.16em] text-stone-400">
+                  Date
+                </span>
+                <input
+                  type="date"
+                  value={visitDate}
+                  onChange={(event) => setVisitDate(event.target.value)}
+                  className="h-12 w-full rounded-2xl border border-stone-200 px-4 text-sm text-stone-950 outline-none focus:border-stone-400"
+                />
+              </label>
+              <label className="space-y-1.5">
+                <span className="text-[11px] font-semibold uppercase tracking-[0.16em] text-stone-400">
+                  Heure
+                </span>
+                <input
+                  type="time"
+                  value={visitTime}
+                  onChange={(event) => setVisitTime(event.target.value)}
+                  className="h-12 w-full rounded-2xl border border-stone-200 px-4 text-sm text-stone-950 outline-none focus:border-stone-400"
+                />
+              </label>
+            </div>
+          ) : null}
+
           <div className="mt-4 grid gap-3 sm:grid-cols-2">
             <label className="space-y-1.5">
-              <span className="text-xs font-black uppercase text-slate-500">
+              <span className="text-[11px] font-semibold uppercase tracking-[0.16em] text-stone-400">
                 Prénom
               </span>
               <input
-                className="h-12 w-full rounded-2xl border border-slate-200 px-4 font-bold outline-none focus:border-blue-500"
+                className="h-12 w-full rounded-2xl border border-stone-200 px-4 text-sm text-stone-950 outline-none focus:border-stone-400"
                 value={customerForm.firstName}
                 onChange={(event) =>
                   setCustomerForm((form) => ({
@@ -1572,11 +1737,11 @@ export function PublicBooking() {
               />
             </label>
             <label className="space-y-1.5">
-              <span className="text-xs font-black uppercase text-slate-500">
+              <span className="text-[11px] font-semibold uppercase tracking-[0.16em] text-stone-400">
                 Nom
               </span>
               <input
-                className="h-12 w-full rounded-2xl border border-slate-200 px-4 font-bold outline-none focus:border-blue-500"
+                className="h-12 w-full rounded-2xl border border-stone-200 px-4 text-sm text-stone-950 outline-none focus:border-stone-400"
                 value={customerForm.lastName}
                 onChange={(event) =>
                   setCustomerForm((form) => ({
@@ -1587,11 +1752,11 @@ export function PublicBooking() {
               />
             </label>
             <label className="space-y-1.5">
-              <span className="text-xs font-black uppercase text-slate-500">
+              <span className="text-[11px] font-semibold uppercase tracking-[0.16em] text-stone-400">
                 Téléphone
               </span>
               <input
-                className="h-12 w-full rounded-2xl border border-slate-200 px-4 font-bold outline-none focus:border-blue-500"
+                className="h-12 w-full rounded-2xl border border-stone-200 px-4 text-sm text-stone-950 outline-none focus:border-stone-400"
                 value={customerForm.phone}
                 onChange={(event) =>
                   setCustomerForm((form) => ({
@@ -1602,12 +1767,12 @@ export function PublicBooking() {
               />
             </label>
             <label className="space-y-1.5">
-              <span className="text-xs font-black uppercase text-slate-500">
+              <span className="text-[11px] font-semibold uppercase tracking-[0.16em] text-stone-400">
                 Email
               </span>
               <input
                 type="email"
-                className="h-12 w-full rounded-2xl border border-slate-200 px-4 font-bold outline-none focus:border-blue-500"
+                className="h-12 w-full rounded-2xl border border-stone-200 px-4 text-sm text-stone-950 outline-none focus:border-stone-400"
                 value={customerForm.email}
                 onChange={(event) =>
                   setCustomerForm((form) => ({
@@ -1620,7 +1785,7 @@ export function PublicBooking() {
           </div>
 
           <p
-            className={`mt-4 rounded-2xl px-4 py-3 text-sm font-black ${
+            className={`mt-4 rounded-2xl px-4 py-3 text-sm font-semibold ${
               bookingStatus.startsWith("Completez")
                 ? "bg-rose-50 text-rose-700"
                 : bookingStatus.startsWith("Reservation confirmee")
@@ -1631,10 +1796,19 @@ export function PublicBooking() {
             {bookingStatus}
           </p>
 
+          {storedSettings?.loyalty?.enabled &&
+          storedSettings.loyalty.noShowEnabled &&
+          storedSettings.loyalty.noShowPenalty > 0 ? (
+            <p className="mt-4 text-sm text-stone-600">
+              Un rendez-vous non honoré retire {storedSettings.loyalty.noShowPenalty}{" "}
+              points de fidélité. Le solde ne descend pas sous zéro.
+            </p>
+          ) : null}
+
           <button
             type="button"
             onClick={reserveAppointment}
-            className="mt-5 flex w-full items-center justify-center gap-2 rounded-2xl bg-emerald-600 px-5 py-4 font-black text-white shadow-lg shadow-emerald-200 transition hover:bg-emerald-700"
+            className="mt-5 flex w-full items-center justify-center gap-2 rounded-2xl bg-emerald-600 px-5 py-4 text-sm font-semibold text-white shadow-lg shadow-emerald-200 transition hover:bg-emerald-700"
           >
             <CheckCircle2 className="h-5 w-5" />
             Valider la reservation
@@ -1650,13 +1824,13 @@ export function PublicBooking() {
                   <CheckCircle2 className="h-6 w-6" />
                 </div>
                 <div>
-                  <p className="text-xs font-black uppercase text-emerald-700">
-                    Reservation confirmee
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-emerald-700">
+                    Réservation confirmée
                   </p>
-                  <h3 className="mt-1 text-2xl font-black text-slate-950">
-                    Votre rendez-vous est bien reserve.
+                  <h3 className="mt-1 font-serif text-2xl text-stone-950">
+                    Votre rendez-vous est bien réservé.
                   </h3>
-                  <p className="mt-1 text-sm font-bold text-emerald-800">
+                  <p className="mt-1 text-sm text-emerald-800">
                     Le planning du centre et le CRM sont mis a jour.
                   </p>
                 </div>
@@ -1664,26 +1838,26 @@ export function PublicBooking() {
 
               <div className="mt-4 grid gap-3 sm:grid-cols-3">
                 <div className="rounded-2xl bg-white p-3">
-                  <p className="text-xs font-black uppercase text-slate-400">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-stone-400">
                     Centre
                   </p>
-                  <p className="mt-1 font-black text-slate-950">
+                  <p className="mt-1 font-semibold text-stone-950">
                     {selectedCenter.name}
                   </p>
                 </div>
                 <div className="rounded-2xl bg-white p-3">
-                  <p className="text-xs font-black uppercase text-slate-400">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-stone-400">
                     Soin
                   </p>
-                  <p className="mt-1 font-black text-slate-950">
+                  <p className="mt-1 font-semibold text-stone-950">
                     {selectedCenter.service}
                   </p>
                 </div>
                 <div className="rounded-2xl bg-white p-3">
-                  <p className="text-xs font-black uppercase text-slate-400">
-                    Creneau
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-stone-400">
+                    Créneau
                   </p>
-                  <p className="mt-1 font-black text-slate-950">
+                  <p className="mt-1 font-semibold text-stone-950">
                     {selectedSlot}
                   </p>
                 </div>
@@ -1693,19 +1867,19 @@ export function PublicBooking() {
                 <div className="rounded-2xl border border-emerald-100 bg-white p-3">
                   <div className="flex items-center gap-2 text-emerald-700">
                     <MessageCircle className="h-5 w-5" />
-                    <p className="font-black">SMS de confirmation</p>
+                    <p className="font-semibold">SMS de confirmation</p>
                   </div>
-                  <p className="mt-1 text-sm font-bold text-slate-500">
-                    Envoye au {customerForm.phone || "numero renseigne"}
+                  <p className="mt-1 text-sm text-stone-500">
+                    Envoyé au {customerForm.phone || "numéro renseigné"}
                   </p>
                 </div>
                 <div className="rounded-2xl border border-emerald-100 bg-white p-3">
                   <div className="flex items-center gap-2 text-emerald-700">
                     <Mail className="h-5 w-5" />
-                    <p className="font-black">Mail de confirmation</p>
+                    <p className="font-semibold">Mail de confirmation</p>
                   </div>
-                  <p className="mt-1 text-sm font-bold text-slate-500">
-                    Envoye a {customerForm.email || "l'email renseigne"}
+                  <p className="mt-1 text-sm text-stone-500">
+                    Envoyé à {customerForm.email || "l'email renseigné"}
                   </p>
                 </div>
               </div>
@@ -1714,24 +1888,45 @@ export function PublicBooking() {
         </div>
 
         <div id="client" className="min-w-0 rounded-[22px] border border-slate-200 bg-white p-4 shadow-sm sm:rounded-[28px] sm:p-6">
+          {configuredCenter ? (
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-stone-400">
+                Espace cliente
+              </p>
+              <h2 className="mt-1 font-serif text-2xl text-stone-950">Mon compte Bookea</h2>
+              <p className="mt-2 text-sm text-stone-600">
+                {clientName
+                  ? `${clientName}, vos rendez-vous, messages et cartes de fidélité sont dans votre compte.`
+                  : "Connectez-vous pour retrouver vos rendez-vous, vos messages et vos cartes de fidélité."}
+              </p>
+              <a
+                href={clientName ? "/client/compte" : "/client/login?next=%2Fclient%2Fcompte"}
+                className="mt-4 inline-flex rounded-2xl bg-stone-950 px-4 py-3 text-sm font-semibold text-white"
+              >
+                {clientName ? "Ouvrir mon compte" : "Connexion cliente"}
+              </a>
+            </div>
+          ) : null}
+          {configuredCenter ? null : (
+          <>
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div className="flex min-w-0 items-center gap-3">
               <div className="grid h-12 w-12 place-items-center rounded-2xl bg-blue-50 text-blue-600">
                 <UserRound className="h-6 w-6" />
               </div>
               <div className="min-w-0">
-                <p className="text-xs font-black uppercase text-blue-600">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-stone-400">
                   Espace cliente connecté
                 </p>
-                <h2 className="text-2xl font-black text-slate-950 sm:text-3xl">
+                <h2 className="mt-1 font-serif text-2xl text-stone-950 sm:text-[1.7rem]">
                   Mon compte Bookea
                 </h2>
-                <p className="mt-1 truncate text-sm font-bold text-slate-500">
+                <p className="mt-1 truncate text-sm text-stone-500">
                   {customerForm.firstName} {customerForm.lastName} · {customerForm.email}
                 </p>
               </div>
             </div>
-            <span className="rounded-full bg-emerald-50 px-4 py-2 text-sm font-black text-emerald-700">
+            <span className="rounded-full bg-emerald-50 px-4 py-2 text-sm font-semibold text-emerald-700">
               Compte actif
             </span>
           </div>
@@ -1740,10 +1935,10 @@ export function PublicBooking() {
             <section className="min-w-0 rounded-[22px] border border-slate-200 bg-slate-50 p-4 sm:rounded-[26px]">
               <div className="flex items-center justify-between gap-3">
                 <div>
-                  <p className="text-xs font-black uppercase text-slate-400">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-stone-400">
                     Mes RDV
                   </p>
-                  <h3 className="text-xl font-black text-slate-950">
+                  <h3 className="font-serif text-xl text-stone-950">
                     Rendez-vous à venir
                   </h3>
                 </div>
@@ -1758,15 +1953,15 @@ export function PublicBooking() {
                   >
                     <div className="flex items-start justify-between gap-3">
                       <div>
-                        <h4 className="text-lg font-black text-slate-950">
+                        <h4 className="font-serif text-lg text-stone-950">
                           {appointment.service}
                         </h4>
-                        <p className="mt-1 font-semibold text-slate-500">
+                        <p className="mt-1 text-sm text-stone-500">
                           {appointment.center}
                         </p>
                       </div>
                       <span
-                        className={`rounded-full px-3 py-1 text-xs font-black ${
+                        className={`rounded-full px-3 py-1 text-xs font-semibold ${
                           appointment.status === "Réservé"
                             ? "bg-emerald-50 text-emerald-700"
                             : "bg-amber-50 text-amber-700"
@@ -1775,11 +1970,11 @@ export function PublicBooking() {
                         {appointment.status}
                       </span>
                     </div>
-                    <p className="mt-4 text-base font-black text-slate-800">
+                    <p className="mt-4 text-sm font-semibold text-stone-800">
                       {appointment.date} · {appointment.time}
                     </p>
                     <div className="mt-4 flex gap-2">
-                      <button className="flex-1 rounded-2xl border border-slate-200 px-4 py-3 font-black text-slate-700 transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700">
+                      <button className="flex-1 rounded-2xl border border-stone-200 px-4 py-3 text-sm font-semibold text-stone-700 transition hover:bg-stone-50">
                         Modifier
                       </button>
                       <button
@@ -1789,7 +1984,7 @@ export function PublicBooking() {
                             `Bonjour, j'ai une question sur mon rendez-vous ${appointment.service} du ${appointment.date} à ${appointment.time}.`
                           )
                         }
-                        className="flex-1 rounded-2xl bg-blue-50 px-4 py-3 font-black text-blue-700 transition hover:bg-blue-100"
+                        className="flex-1 rounded-2xl bg-stone-950 px-4 py-3 text-sm font-semibold text-white transition hover:bg-stone-800"
                       >
                         Message
                       </button>
@@ -1805,10 +2000,10 @@ export function PublicBooking() {
             >
               <div className="flex items-center justify-between gap-3">
                 <div>
-                  <p className="text-xs font-black uppercase text-slate-400">
-                    Messagerie in-app
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-stone-400">
+                    Messagerie
                   </p>
-                  <h3 className="text-xl font-black text-slate-950">
+                  <h3 className="font-serif text-xl text-stone-950">
                     Messages avec le centre
                   </h3>
                 </div>
@@ -1825,12 +2020,12 @@ export function PublicBooking() {
                         : "bg-white text-slate-800 shadow-sm"
                     }`}
                   >
-                    <p className={`text-xs font-black uppercase ${
+                    <p className={`text-[11px] font-semibold uppercase tracking-[0.12em] ${
                       message.side === "client" ? "text-blue-100" : "text-slate-400"
                     }`}>
                       {message.author} · {message.time}
                     </p>
-                    <p className="mt-1 text-sm font-bold leading-6">
+                    <p className="mt-1 text-sm leading-6">
                       {message.text}
                     </p>
                   </div>
@@ -1842,103 +2037,107 @@ export function PublicBooking() {
                   value={clientMessageDraft}
                   onChange={(event) => setClientMessageDraft(event.target.value)}
                   placeholder="Écrire au centre..."
-                  className="min-h-12 min-w-0 flex-1 rounded-2xl border border-slate-200 px-4 font-bold outline-none focus:border-blue-500"
+                  className="min-h-12 min-w-0 flex-1 rounded-2xl border border-stone-200 px-4 text-sm text-stone-950 outline-none focus:border-stone-400"
                 />
                 <button
                   type="button"
                   onClick={sendClientMessage}
-                  className="rounded-2xl bg-slate-950 px-5 py-3 font-black text-white transition hover:bg-slate-800 sm:py-0"
+                  className="rounded-2xl bg-stone-950 px-5 py-3 text-sm font-semibold text-white transition hover:bg-stone-800 sm:py-0"
                 >
                   Envoyer
                 </button>
               </div>
-              <p className="mt-3 rounded-2xl bg-amber-50 px-4 py-3 text-xs font-bold leading-5 text-amber-700">
+              <p className="mt-3 rounded-2xl bg-amber-50 px-4 py-3 text-xs leading-5 text-amber-700">
                 En version connectée, le centre reçoit aussi une notification email à chaque nouveau message.
               </p>
             </section>
           </div>
 
-          <div className="mt-5 overflow-hidden rounded-[28px] border border-white/40 bg-slate-950 p-1 shadow-xl shadow-blue-950/10">
-            <div className="relative overflow-hidden rounded-[24px] bg-gradient-to-br from-[#7c3cff] via-[#2563eb] to-[#06b6d4] p-5 text-white sm:p-6">
-              <div className="absolute -right-16 -top-16 h-44 w-44 rounded-full bg-white/20 blur-2xl" />
-              <div className="absolute -bottom-20 left-10 h-40 w-40 rounded-full bg-cyan-200/20 blur-2xl" />
+          <div className="mt-5 overflow-hidden rounded-[28px] border border-amber-100/80 bg-[#fbf8f4] p-2 shadow-sm">
+            <div className="relative overflow-hidden rounded-[22px] bg-[#1c1917] px-5 py-6 text-[#fbf8f4] sm:px-7 sm:py-7">
+              <div className="pointer-events-none absolute -right-16 -top-20 h-52 w-52 rounded-full bg-amber-200/15 blur-3xl" />
+              <div className="pointer-events-none absolute inset-x-8 top-0 h-px bg-gradient-to-r from-transparent via-amber-200/80 to-transparent" />
 
-              <div className="relative grid gap-5 lg:grid-cols-[0.9fr_1.1fr] lg:items-center">
+              <div className="relative flex items-start justify-between gap-4">
                 <div>
-                  <p className="text-xs font-black uppercase tracking-[0.18em] text-white/70">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-amber-100/70">
                     Bookea Club
                   </p>
-                  <h3 className="mt-2 text-3xl font-black leading-tight">
+                  <h3 className="mt-2 font-serif text-3xl leading-none sm:text-4xl">
                     Carte fidélité
                   </h3>
-                  <p className="mt-2 text-sm font-bold text-white/75">
+                  <p className="mt-3 text-sm text-stone-300">
                     {customerForm.firstName || "Cliente"}{" "}
-                    {customerForm.lastName || "Bookea"} · 420 points
+                    {customerForm.lastName || "Bookea"}
                   </p>
+                </div>
+                <p className="shrink-0 rounded-full border border-amber-200/40 px-3 py-1 text-[11px] font-semibold tracking-[0.16em] text-amber-100">
+                  #BK-0420
+                </p>
+              </div>
 
-                  <div className="mt-5 rounded-3xl border border-white/15 bg-white/12 p-4 backdrop-blur">
-                    <div className="flex items-center justify-between gap-3">
+              <div className="relative mt-7 grid gap-6 lg:grid-cols-[0.9fr_1.1fr] lg:items-end">
+                <div>
+                  <p className="font-serif text-5xl leading-none tracking-tight">
+                    420
+                    <span className="ml-2 font-serif text-2xl text-amber-100/80">pts</span>
+                  </p>
+                  <div className="mt-5">
+                    <div className="flex items-end justify-between gap-3">
                       <div>
-                        <p className="text-xs font-black uppercase text-white/60">
-                          Niveau actuel
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-stone-400">
+                          Niveau Glow
                         </p>
-                        <p className="mt-1 text-xl font-black">Glow</p>
+                        <p className="mt-1 text-sm text-stone-300">80 pts avant Gold</p>
                       </div>
-                      <span className="rounded-full bg-white px-3 py-1 text-xs font-black text-blue-700">
-                        80 pts avant Gold
-                      </span>
                     </div>
-
-                    <div className="mt-4 h-3 overflow-hidden rounded-full bg-white/20">
-                      <div className="h-full w-[84%] rounded-full bg-white shadow-sm" />
+                    <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-white/10">
+                      <div className="h-full w-[84%] rounded-full bg-gradient-to-r from-amber-200 to-amber-400" />
                     </div>
                   </div>
                 </div>
 
                 <div>
-                  <div className="grid grid-cols-5 gap-2">
+                  <div className="flex items-center gap-2">
                     {[1, 2, 3, 4, 5].map((stamp) => (
                       <div
                         key={stamp}
-                        className={`grid aspect-square place-items-center rounded-2xl border text-sm font-black ${
+                        className={`grid h-11 w-11 place-items-center rounded-full border ${
                           stamp <= 4
-                            ? "border-white/30 bg-white text-blue-700"
-                            : "border-dashed border-white/35 bg-white/10 text-white/55"
+                            ? "border-amber-200/50 bg-amber-100 text-stone-950"
+                            : "border-dashed border-white/25 text-white/40"
                         }`}
                       >
-                        {stamp <= 4 ? <Star className="h-4 w-4 fill-current" /> : stamp}
+                        {stamp <= 4 ? (
+                          <Star className="h-4 w-4 fill-current" />
+                        ) : (
+                          <span className="text-xs">{stamp}</span>
+                        )}
                       </div>
                     ))}
                   </div>
 
-                  <div className="mt-4 grid gap-2 sm:grid-cols-3">
+                  <div className="mt-5 grid grid-cols-3 gap-3 border-t border-white/10 pt-4">
                     {[
-                      ["RDV honoré", "+40 pts"],
-                      ["Avis publié", "+20 pts"],
-                      ["Parrainage", "+100 pts"],
+                      ["RDV honoré", "+40"],
+                      ["Avis", "+20"],
+                      ["Parrainage", "+100"],
                     ].map(([label, value]) => (
-                      <div key={label} className="rounded-2xl bg-white/12 p-3">
-                        <p className="text-xs font-black uppercase text-white/60">
+                      <div key={label}>
+                        <p className="text-[11px] uppercase tracking-[0.12em] text-stone-400">
                           {label}
                         </p>
-                        <p className="mt-1 text-lg font-black">{value}</p>
+                        <p className="mt-1 font-serif text-xl text-amber-100">{value}</p>
                       </div>
                     ))}
                   </div>
 
-                  <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-3xl bg-white p-4 text-slate-950">
-                    <div>
-                      <p className="text-xs font-black uppercase text-slate-400">
-                        Prochaine récompense
-                      </p>
-                      <p className="mt-1 font-black">
-                        10 € offerts ou bonus soin
-                      </p>
-                    </div>
-                    <span className="rounded-full bg-slate-950 px-4 py-2 text-sm font-black text-white">
-                      #BK-0420
+                  <p className="mt-4 text-sm text-stone-300">
+                    Prochaine récompense ·{" "}
+                    <span className="font-semibold text-[#fbf8f4]">
+                      10 € offerts ou bonus soin
                     </span>
-                  </div>
+                  </p>
                 </div>
               </div>
             </div>
@@ -1947,14 +2146,14 @@ export function PublicBooking() {
           <div className="mt-5 rounded-[28px] border border-blue-100 bg-blue-50/70 p-5 shadow-sm sm:p-6">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
-                <p className="text-xs font-black uppercase tracking-[0.16em] text-blue-600">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-stone-400">
                   Notes partagées
                 </p>
-                <h3 className="mt-1 text-2xl font-black text-slate-950">
+                <h3 className="mt-1 font-serif text-2xl text-stone-950">
                   Conseils visibles dans votre compte
                 </h3>
               </div>
-              <span className="rounded-full bg-white px-4 py-2 text-xs font-black text-blue-700 shadow-sm">
+              <span className="rounded-full bg-white px-4 py-2 text-xs font-semibold text-stone-600 shadow-sm">
                 {sharedClientNotes.length} notes
               </span>
             </div>
@@ -1966,53 +2165,20 @@ export function PublicBooking() {
                   className="rounded-3xl border border-white/70 bg-white p-4 shadow-sm"
                 >
                   <div className="flex flex-wrap items-center justify-between gap-2">
-                    <p className="font-black text-slate-950">{note.center}</p>
-                    <span className="text-xs font-black text-slate-400">
+                    <p className="font-semibold text-stone-950">{note.center}</p>
+                    <span className="text-xs text-stone-400">
                       {note.date}
                     </span>
                   </div>
-                  <p className="mt-2 text-sm font-bold leading-6 text-slate-600">
+                  <p className="mt-2 text-sm leading-6 text-stone-600">
                     {note.text}
                   </p>
                 </article>
               ))}
             </div>
           </div>
-        </div>
-      </section>
-
-      <section className="mx-auto max-w-6xl px-4 pb-14 sm:px-6 lg:px-8">
-        <div className="rounded-[28px] bg-slate-950 p-5 text-white shadow-sm sm:p-7 lg:p-9">
-          <div className="grid gap-7 lg:grid-cols-[0.8fr_1.2fr] lg:items-center">
-            <div>
-              <p className="text-xs font-black uppercase text-cyan-300">
-                Plateforme multi-centres
-              </p>
-              <h2 className="mt-3 text-2xl font-black tracking-tight sm:text-3xl lg:text-4xl">
-                Une seule plateforme pour la cliente et pour le centre.
-              </h2>
-              <p className="mt-4 font-medium leading-7 text-slate-300">
-                La cliente reserve depuis l&apos;interface publique. Le centre recoit
-                le rendez-vous dans son agenda Pro, avec les donnees separees de
-                chaque etablissement.
-              </p>
-            </div>
-            <div className="grid gap-3 md:grid-cols-3">
-              {[
-                ["Client", "Recherche, reservation, suivi"],
-                ["Centre", "CRM, agenda, KPI, relances"],
-                ["Admin", "Support, abonnements, supervision"],
-              ].map(([title, body]) => (
-                <div key={title} className="rounded-3xl bg-white/10 p-5">
-                  <CheckCircle2 className="h-6 w-6 text-cyan-300" />
-                  <p className="mt-4 text-xl font-black">{title}</p>
-                  <p className="mt-2 text-sm font-semibold leading-6 text-slate-300">
-                    {body}
-                  </p>
-                </div>
-              ))}
-            </div>
-          </div>
+          </>
+          )}
         </div>
       </section>
 
@@ -2101,8 +2267,38 @@ function FacebookGlyph({ className }: { className?: string }) {
   );
 }
 
+function publicDepositEuros(service: {
+  price?: number;
+  depositEnabled?: boolean;
+  depositAmount?: number;
+  depositMode?: string;
+  depositPercent?: number;
+}) {
+  if (service.depositEnabled === false) {
+    return 0;
+  }
+  if (service.depositMode === "percent") {
+    return (
+      Math.round((Number(service.price) || 0) * (Number(service.depositPercent) || 0)) / 100
+    );
+  }
+  return Number(service.depositAmount) || 0;
+}
+
+function isPublicCare(service: { visible?: boolean }) {
+  return service.visible !== false;
+}
+
 function resolveSlotDate(slot: string) {
   const [dayLabel] = slot.split(" ");
+  const date = new Date();
+  if (dayLabel === "Auj") {
+    return date.toISOString().slice(0, 10);
+  }
+  if (dayLabel === "Dem") {
+    date.setDate(date.getDate() + 1);
+    return date.toISOString().slice(0, 10);
+  }
   const targetDay = {
     Dim: 0,
     Lun: 1,
@@ -2112,7 +2308,6 @@ function resolveSlotDate(slot: string) {
     Ven: 5,
     Sam: 6,
   }[dayLabel];
-  const date = new Date();
 
   if (targetDay === undefined) {
     return date.toISOString().slice(0, 10);

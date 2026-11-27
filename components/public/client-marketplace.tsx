@@ -61,6 +61,23 @@ function money(value: number) {
   return `${value} €`;
 }
 
+function discountPercent(price: number, oldPrice: number) {
+  if (!oldPrice || oldPrice <= price) {
+    return 0;
+  }
+  return Math.round((1 - price / oldPrice) * 100);
+}
+
+function spotsLabel(spots: number) {
+  if (spots === 1) {
+    return "Plus qu’une place";
+  }
+  if (spots > 1) {
+    return `Plus que ${spots} places`;
+  }
+  return "";
+}
+
 function OfferTimer({ deadline }: { deadline: number }) {
   const [now, setNow] = useState<number | null>(null);
 
@@ -82,21 +99,28 @@ function OfferTimer({ deadline }: { deadline: number }) {
     [parts.seconds, "Sec"],
   ] as const;
 
+  const short = parts.days < 3;
+
   return (
     <div className="flex gap-1.5" aria-label="Temps restant">
-      {cells.map(([value, label]) => (
-        <div
-          key={label}
-          className="min-w-[3.1rem] rounded-xl bg-[#1c1917] px-2 py-1.5 text-center text-white"
-        >
-          <p className="text-base font-semibold leading-none tabular-nums">
-            {String(value).padStart(2, "0")}
-          </p>
-          <p className="mt-1 text-[9px] font-medium uppercase tracking-wide text-white/60">
-            {label}
-          </p>
-        </div>
-      ))}
+      {cells.map(([value, label]) => {
+        const urgent = label === "Sec" || (short && label !== "Jours");
+        return (
+          <div
+            key={label}
+            className={`min-w-[3.1rem] rounded-xl px-2 py-1.5 text-center text-white ${
+              urgent ? "bg-rose-900" : "bg-[#1c1917]"
+            }`}
+          >
+            <p className="text-base font-semibold leading-none tabular-nums">
+              {String(value).padStart(2, "0")}
+            </p>
+            <p className="mt-1 text-[9px] font-medium uppercase tracking-wide text-white/70">
+              {label}
+            </p>
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -105,15 +129,21 @@ function SectionHeading({
   kicker,
   title,
   action,
+  urgent = false,
 }: {
   kicker: string;
   title: string;
   action?: string;
+  urgent?: boolean;
 }) {
   return (
     <div className="flex items-end justify-between gap-3">
       <div>
-        <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-stone-400">
+        <p
+          className={`text-[11px] font-semibold uppercase tracking-[0.16em] ${
+            urgent ? "text-rose-800" : "text-stone-400"
+          }`}
+        >
           {kicker}
         </p>
         <h2 className="mt-1 font-serif text-2xl text-stone-950 sm:text-[1.7rem]">{title}</h2>
@@ -269,7 +299,7 @@ export function ClientMarketplace({
 
       <section className="grid gap-4 lg:grid-cols-[1.15fr_0.85fr]">
         <div className="rounded-[28px] border border-stone-200 bg-white p-4 shadow-sm sm:p-5">
-          <SectionHeading kicker="À saisir" title="Offre limitée" />
+          <SectionHeading kicker="À saisir" title="Offre limitée" urgent />
           <div className="mt-4 flex gap-3 overflow-x-auto pb-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             {limited.length === 0 ? (
               <p className="text-sm text-stone-500">
@@ -281,27 +311,36 @@ export function ClientMarketplace({
                   key={offer.id}
                   type="button"
                   onClick={() => onOffer(offer)}
-                  className="w-[240px] shrink-0 rounded-3xl border border-stone-200 bg-stone-50 p-3 text-left transition hover:-translate-y-0.5 hover:border-violet-200"
+                  className="w-[240px] shrink-0 rounded-3xl border border-rose-100 bg-white p-3 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-rose-200"
                 >
-                  <div className="flex h-28 items-end overflow-hidden rounded-2xl bg-gradient-to-br from-stone-200 to-violet-100 p-3">
+                  <div className="relative flex h-28 items-end overflow-hidden rounded-2xl bg-gradient-to-br from-stone-200 to-rose-100 p-3">
                     {offer.photo ? (
-                      <img src={offer.photo} alt="" className="h-full w-full rounded-xl object-cover" />
-                    ) : (
-                      <span className="rounded-full bg-white/90 px-2 py-1 text-[11px] font-semibold text-violet-800">
-                        {publicOfferShelfLabel(offer.shelf)}
-                      </span>
-                    )}
+                      <img src={offer.photo} alt="" className="absolute inset-0 h-full w-full object-cover" />
+                    ) : null}
+                    <span className="relative rounded-full bg-rose-900 px-2.5 py-1 text-[11px] font-semibold text-white">
+                      {publicOfferShelfLabel(offer.shelf)}
+                    </span>
                   </div>
                   <p className="mt-3 text-sm font-semibold text-stone-950">{offer.title}</p>
                   <p className="mt-1 text-xs text-stone-500">
                     {offer.center}
                     {offer.city ? ` · ${offer.city}` : ""}
                   </p>
+                  {spotsLabel(offer.spots) ? (
+                    <p className="mt-2 text-xs font-semibold text-rose-800">{spotsLabel(offer.spots)}</p>
+                  ) : null}
                   <div className="mt-3 flex items-end justify-between gap-2">
-                    <p className="text-lg font-semibold text-stone-950">{money(offer.price)}</p>
-                    {offer.oldPrice > offer.price ? (
-                      <p className="text-xs text-stone-400 line-through">{money(offer.oldPrice)}</p>
-                    ) : null}
+                    <p className="text-lg font-semibold text-rose-900">{money(offer.price)}</p>
+                    <div className="flex items-center gap-2">
+                      {discountPercent(offer.price, offer.oldPrice) > 0 ? (
+                        <span className="rounded-full bg-rose-50 px-2 py-0.5 text-[11px] font-semibold text-rose-800">
+                          −{discountPercent(offer.price, offer.oldPrice)} %
+                        </span>
+                      ) : null}
+                      {offer.oldPrice > offer.price ? (
+                        <p className="text-xs text-stone-400 line-through">{money(offer.oldPrice)}</p>
+                      ) : null}
+                    </div>
                   </div>
                   {offer.deadline ? (
                     <div className="mt-3">
@@ -318,36 +357,45 @@ export function ClientMarketplace({
           <button
             type="button"
             onClick={() => onOffer(featured)}
-            className="rounded-[28px] border border-violet-100 bg-gradient-to-br from-white to-violet-50 p-5 text-left shadow-sm transition hover:-translate-y-0.5"
+            className="rounded-[28px] border border-rose-200 bg-gradient-to-br from-white to-rose-50/80 p-5 text-left shadow-sm transition hover:-translate-y-0.5"
           >
             <div className="flex items-center justify-between gap-3">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-violet-700">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-rose-800">
                 Bon plan du moment
               </p>
-              <Timer className="h-5 w-5 text-violet-700" />
+              <Timer className="h-5 w-5 text-rose-800" />
             </div>
             <h2 className="mt-4 font-serif text-3xl text-stone-950">{featured.title}</h2>
             <p className="mt-2 text-sm text-stone-500">
               {featured.center}
-              {featured.spots > 0 ? ` · ${featured.spots} places` : ""}
+              {spotsLabel(featured.spots)
+                ? ` · ${spotsLabel(featured.spots).toLowerCase()}`
+                : featured.spots > 0
+                  ? ` · ${featured.spots} places`
+                  : ""}
             </p>
             <div className="mt-5 flex items-end gap-3">
-              <p className="text-4xl font-semibold text-stone-950">{money(featured.price)}</p>
+              <p className="text-4xl font-semibold text-rose-900">{money(featured.price)}</p>
               {featured.oldPrice > featured.price ? (
                 <p className="mb-1 text-lg text-stone-400 line-through">
                   {money(featured.oldPrice)}
                 </p>
               ) : null}
+              {discountPercent(featured.price, featured.oldPrice) > 0 ? (
+                <span className="mb-1 rounded-full bg-rose-900 px-2.5 py-1 text-xs font-semibold text-white">
+                  −{discountPercent(featured.price, featured.oldPrice)} %
+                </span>
+              ) : null}
             </div>
             {featured.deadline ? (
               <div className="mt-5">
-                <p className="mb-2 text-xs font-medium text-stone-500">Cette offre expire dans</p>
+                <p className="mb-2 text-xs font-semibold text-rose-800">Cette offre expire dans</p>
                 <OfferTimer deadline={featured.deadline} />
               </div>
             ) : (
               <p className="mt-5 text-sm text-stone-500">Offre en cours dans ce centre.</p>
             )}
-            <span className="mt-6 inline-flex items-center gap-2 text-sm font-semibold text-violet-800">
+            <span className="mt-6 inline-flex items-center gap-2 text-sm font-semibold text-rose-900">
               Voir l&apos;offre
               <ArrowRight className="h-4 w-4" />
             </span>
@@ -363,6 +411,7 @@ export function ClientMarketplace({
         <SectionHeading
           kicker="Avant qu'il ne soit trop tard"
           title="Derniers créneaux disponibles"
+          urgent
         />
         <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
           {slots.map((offer) => (
@@ -370,15 +419,15 @@ export function ClientMarketplace({
               key={offer.id}
               type="button"
               onClick={() => onOffer(offer)}
-              className="rounded-3xl border border-stone-200 bg-stone-50 p-4 text-left transition hover:border-violet-200"
+              className="rounded-3xl border border-rose-100 bg-white p-4 text-left transition hover:border-rose-200"
             >
-              <p className="text-[11px] font-semibold uppercase tracking-wide text-violet-700">
-                {offer.spots > 0 ? `${offer.spots} places` : "Places limitées"}
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-rose-800">
+                {spotsLabel(offer.spots) || "Places limitées"}
               </p>
               <p className="mt-2 font-semibold text-stone-950">{offer.title}</p>
               <p className="mt-1 text-sm text-stone-500">{offer.center}</p>
               <div className="mt-4 flex items-center justify-between">
-                <p className="text-lg font-semibold">{money(offer.price)}</p>
+                <p className="text-lg font-semibold text-rose-900">{money(offer.price)}</p>
                 <span className="rounded-full bg-stone-950 px-3 py-1.5 text-xs font-semibold text-white">
                   Réserver
                 </span>

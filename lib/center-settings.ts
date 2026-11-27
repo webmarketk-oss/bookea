@@ -15,6 +15,7 @@ import {
   mergeProductCategories,
   mergeServiceCategories,
 } from "@/lib/center-categories";
+import { explicitCenterHours, type CenterDayHours } from "@/lib/center-hours";
 import { createClient } from "@/lib/supabase";
 
 export {
@@ -102,6 +103,8 @@ export type CenterServiceSetting = {
   duration: number;
   depositEnabled: boolean;
   depositAmount: number;
+  depositMode?: "fixed" | "percent";
+  depositPercent?: number;
   visible: boolean;
   topListed: boolean;
   cabins: string;
@@ -164,6 +167,12 @@ export type CenterPublicOffer = {
   visible: boolean;
 };
 
+export type CenterLoyaltyPublic = {
+  enabled: boolean;
+  noShowEnabled: boolean;
+  noShowPenalty: number;
+};
+
 export type CenterReviewAutomation = {
   enabled: boolean;
   emailSubject: string;
@@ -173,6 +182,7 @@ export type CenterReviewAutomation = {
 
 export type StoredCenterSettings = {
   center?: {
+    id?: string;
     name: string;
     legalName?: string;
     slug: string;
@@ -205,6 +215,8 @@ export type StoredCenterSettings = {
   photoPreviews?: string[];
   externalReviews?: CenterExternalReview[];
   offers?: CenterPublicOffer[];
+  loyalty?: CenterLoyaltyPublic;
+  hours?: CenterDayHours[];
   reviewAutomation?: CenterReviewAutomation;
 };
 
@@ -518,6 +530,36 @@ export async function loadPublicCenterProfile() {
   }
 }
 
+async function readPublicCenterAsVisitor(column: "slug" | "public_slug", value: string) {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  if (!url || !key) {
+    return null;
+  }
+  const query = new URLSearchParams({
+    select: CENTER_PROFILE_COLUMNS,
+    [column]: `eq.${value}`,
+    public_profile_enabled: "eq.true",
+    limit: "1",
+  });
+  try {
+    const response = await fetch(`${url}/rest/v1/centers?${query.toString()}`, {
+      headers: {
+        apikey: key,
+        Authorization: `Bearer ${key}`,
+        Accept: "application/json",
+      },
+    });
+    if (!response.ok) {
+      return null;
+    }
+    const rows = (await response.json()) as CenterProfileRow[];
+    return Array.isArray(rows) ? rows[0] ?? null : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function loadPublishedCenterProfile(slug: string) {
   const normalized = slug.trim().toLowerCase();
 
@@ -546,6 +588,13 @@ export async function loadPublishedCenterProfile(slug: string) {
     if (!byPublicSlug.error) {
       row = (byPublicSlug.data ?? null) as CenterProfileRow | null;
     }
+  }
+
+  if (!row) {
+    row = await readPublicCenterAsVisitor("slug", normalized);
+  }
+  if (!row) {
+    row = await readPublicCenterAsVisitor("public_slug", normalized);
   }
 
   if (!row) {
@@ -693,9 +742,10 @@ export async function savePublicCenterProfile(
 }
 
 const CENTER_PROFILE_COLUMNS =
-  "name,slug,city,email,phone,description,address_line1,postal_code,theme_color,public_profile_enabled,instagram_url,facebook_url,tiktok_url,settings";
+  "id,name,slug,city,email,phone,description,address_line1,postal_code,theme_color,public_profile_enabled,instagram_url,facebook_url,tiktok_url,settings";
 
 type CenterProfileRow = {
+  id?: string | null;
   address_line1?: string | null;
   city?: string | null;
   description?: string | null;
@@ -753,6 +803,7 @@ function storedSettingsFromCenterRow(row: CenterProfileRow): StoredCenterSetting
 
   return {
     center: {
+      id: asString(row.id),
       name: asString(row.name, asString(fromJsonCenter.name)),
       legalName: asString(
         asRecord(asRecord(row.settings).legal).legalName,
@@ -794,6 +845,8 @@ function storedSettingsFromCenterRow(row: CenterProfileRow): StoredCenterSetting
     photoPreviews: asStringArray(publicSettings.photoPreviews),
     externalReviews: asArray(publicSettings.externalReviews),
     offers: asArray(publicSettings.offers),
+    loyalty: parseLoyaltyPublic(asRecord(asRecord(row.settings).loyalty)),
+    hours: explicitCenterHours(row.settings) ?? undefined,
     reviewAutomation: Object.keys(asRecord(publicSettings.reviewAutomation))
       .length
       ? (asRecord(publicSettings.reviewAutomation) as CenterReviewAutomation)
@@ -908,6 +961,15 @@ function isUnknownColumnError(message: string) {
 
 function isSlugConflict(message: string) {
   return /duplicate|unique|slug/i.test(message);
+}
+
+function parseLoyaltyPublic(value: Record<string, unknown>): CenterLoyaltyPublic {
+  const penalty = Number(value.noShowPenalty);
+  return {
+    enabled: value.enabled === true,
+    noShowEnabled: value.noShowEnabled === true,
+    noShowPenalty: Number.isFinite(penalty) ? penalty : 0,
+  };
 }
 
 function asRecord(value: unknown): Record<string, unknown> {

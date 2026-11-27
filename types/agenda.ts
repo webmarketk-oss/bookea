@@ -36,7 +36,15 @@ export interface Cabin {
 
 export interface Appointment {
   id: string;
+  centerId?: string;
   clientId?: string;
+  loyaltyReward?: {
+    requestId: string;
+    status: "requested" | "used";
+    discountEur: number;
+    points: number;
+    centerId?: string;
+  };
   /** Fiche CRM liée, déjà lue avec le rendez-vous. Sert au lien WhatsApp. */
   leadId?: string;
   personName: string;

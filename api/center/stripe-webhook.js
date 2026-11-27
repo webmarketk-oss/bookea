@@ -60,7 +60,7 @@ module.exports = async function handler(req, res) {
   const payload = await readRawBody(req);
   const signature = req.headers["stripe-signature"];
 
-  if (secret && !verifyStripeSignature(payload, signature, secret)) {
+  if (!secret || !verifyStripeSignature(payload, signature, secret)) {
     return res.status(400).json({ ok: false, error: "invalid_signature" });
   }
 
@@ -69,6 +69,33 @@ module.exports = async function handler(req, res) {
     event = JSON.parse(payload);
   } catch {
     return res.status(400).json({ ok: false, error: "invalid_json" });
+  }
+
+  if (
+    event.type === "checkout.session.completed" ||
+    event.type === "checkout.session.async_payment_succeeded"
+  ) {
+    const { handlePaidSession } = require("./online-deposit");
+    const supabase = createServiceClient();
+    const result = await handlePaidSession(supabase, event);
+    if (!result.ok) {
+      return res.status(400).json(result);
+    }
+    return res.status(200).json(result);
+  }
+
+  if (event.type === "checkout.session.expired") {
+    const { handleExpiredSession } = require("./online-deposit");
+    const supabase = createServiceClient();
+    const result = await handleExpiredSession(supabase, event);
+    return res.status(200).json(result);
+  }
+
+  if (event.type === "charge.refunded") {
+    const { recordDepositRefund } = require("./loyalty-store");
+    const supabase = createServiceClient();
+    await recordDepositRefund(supabase, event.data?.object);
+    return res.status(200).json({ ok: true });
   }
 
   if (event.type !== "account.updated") {

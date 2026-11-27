@@ -141,6 +141,23 @@ function appointmentEventCopy({
     };
   }
 
+  if (kind === "deposit_conflict") {
+    return {
+      title: "Acompte reçu, créneau indisponible",
+      subject: `Acompte à traiter — ${name}`,
+      body: `${name} a payé ${care}, mais le créneau ${slot} n’est plus libre.`,
+      text: [
+        `Un acompte a été encaissé pour ${centre}, mais le créneau n’est plus disponible.`,
+        "",
+        `Cliente : ${name}`,
+        `Soin : ${care}`,
+        `Créneau demandé : ${slot}`,
+        "",
+        "Proposez un autre créneau ou remboursez depuis Stripe. Bookea ne rembourse pas automatiquement.",
+      ].join("\n"),
+    };
+  }
+
   return {
     title: "RDV annulé",
     subject: `RDV annulé — ${name}`,

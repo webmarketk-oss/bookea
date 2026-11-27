@@ -286,6 +286,11 @@ async function applyAction(supabase, row, action, source = "client_link") {
       console.error("[appointments/confirm] center notify", error);
     });
 
+    const { closeRequestedReward } = require("../center/loyalty-store");
+    await closeRequestedReward(supabase, row.id).catch((error) => {
+      console.error("[appointments/confirm] loyalty", error);
+    });
+
     return "cancelled";
   }
 

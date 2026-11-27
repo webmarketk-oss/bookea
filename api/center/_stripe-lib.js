@@ -94,7 +94,7 @@ function isStripeConfigured() {
   return Boolean(stripeSecret());
 }
 
-async function stripeRequest(method, path, params) {
+async function stripeRequest(method, path, params, options = {}) {
   const secret = stripeSecret();
   if (!secret) {
     const error = new Error("Stripe n’est pas encore configuré côté Bookea.");
@@ -108,6 +108,9 @@ async function stripeRequest(method, path, params) {
     Authorization: `Bearer ${secret}`,
     "Stripe-Version": "2024-11-20.acacia",
   };
+  if (options.account) {
+    headers["Stripe-Account"] = String(options.account);
+  }
   const init = { method, headers };
   if (method !== "GET" && params) {
     headers["Content-Type"] = "application/x-www-form-urlencoded";
@@ -134,8 +137,27 @@ function stripeStatusFromAccount(account) {
     detailsSubmitted: account?.details_submitted === true,
     email: String(account?.email || ""),
     livemode: account?.livemode === true,
+    state: connectState(account),
     updatedAt: new Date().toISOString(),
   };
+}
+
+function connectState(account) {
+  if (account?.charges_enabled === true) {
+    return "active";
+  }
+  const due = account?.requirements?.currently_due || [];
+  const past = account?.requirements?.past_due || [];
+  if (
+    account?.details_submitted === true &&
+    (due.length || past.length || account?.requirements?.disabled_reason)
+  ) {
+    return "action";
+  }
+  if (account?.details_submitted === true) {
+    return "pending";
+  }
+  return "setup";
 }
 
 function accountLabel(accountId) {
@@ -165,6 +187,13 @@ function parseStoredStripe(settings) {
     detailsSubmitted: stripe.detailsSubmitted === true,
     email: String(stripe.email || ""),
     livemode: stripe.livemode === true,
+    state: ["setup", "pending", "active", "action"].includes(stripe.state)
+      ? stripe.state
+      : stripe.chargesEnabled
+        ? "active"
+        : stripe.detailsSubmitted
+          ? "pending"
+          : "setup",
   };
 }
 
@@ -272,6 +301,7 @@ function clientStatus(stripe, configured = isStripeConfigured()) {
     accountLabel: accountLabel(stripe.accountId),
     email: stripe.email || "",
     livemode: stripe.livemode === true,
+    state: stripe.state || (stripe.chargesEnabled ? "active" : stripe.detailsSubmitted ? "pending" : "setup"),
   };
 }
 

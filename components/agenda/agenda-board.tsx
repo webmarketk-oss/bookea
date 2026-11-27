@@ -40,6 +40,8 @@ import {
   persistCrmAppointment,
   saveCenterCabins,
 } from "@/lib/agenda-supabase";
+import { LoyaltyRewardMark } from "@/components/agenda/loyalty-reward-mark";
+import { syncAppointmentLoyalty } from "@/lib/loyalty-client";
 import { issueAppointmentConfirmationUrl } from "@/lib/appointment-confirmation";
 import {
   applyPositionedAppointmentStatus,
@@ -1713,6 +1715,24 @@ export default function AgendaBoard() {
     try {
       const savedAppointment = await persistCrmAppointment(nextAppointment);
       replaceAppointment(localId, savedAppointment);
+      const previous = previousAppointments.find(
+        (appointment) => appointment.id === localId,
+      );
+      if (
+        previous &&
+        savedAppointment.centerId &&
+        isPersistedAppointmentId(savedAppointment.id)
+      ) {
+        const loyalty = await syncAppointmentLoyalty({
+          centerId: savedAppointment.centerId,
+          appointmentId: savedAppointment.id,
+          previousStatus: previous.status,
+          status: savedAppointment.status,
+        }).catch(() => null);
+        if (loyalty?.manualReview) {
+          setAgendaNotice(loyalty.manualReview);
+        }
+      }
       unlinkPublicBooking(nextAppointment);
       if (savedAppointment.status === "Annulation") {
         void cancelAppointmentSmsJobs(savedAppointment.id);
@@ -3958,6 +3978,7 @@ function WeekSchedule({
                               {appointment.duration} min ·{" "}
                               {cabin?.name ?? appointment.cabinId}
                             </p>
+                            <LoyaltyRewardMark reward={appointment.loyaltyReward} />
                           </div>
                           <button
                             type="button"
@@ -5435,6 +5456,7 @@ function AppointmentCard({
           <p className="text-xs font-semibold opacity-75">
             {appointment.start} · {appointment.duration} min
           </p>
+          <LoyaltyRewardMark reward={appointment.loyaltyReward} />
         </div>
         <div className="flex shrink-0 items-start gap-1">
           <div className="flex flex-col items-end gap-1">

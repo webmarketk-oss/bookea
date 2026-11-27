@@ -27,6 +27,25 @@ export type ClientThread = {
   messages: ClientThreadMessage[];
 };
 
+export type ClientFavorite = {
+  id: string;
+  name: string;
+  city: string;
+};
+
+export type ClientOfferNotice = {
+  id: string;
+  centerId: string;
+  centerName: string;
+  title: string;
+  price: number;
+};
+
+export type ClientFavoritesSnapshot = {
+  favorites: ClientFavorite[];
+  notices: ClientOfferNotice[];
+};
+
 export type ClientAccount = {
   firstName: string;
   lastName: string;
@@ -80,6 +99,65 @@ async function authHeaders() {
     return null;
   }
   return { Authorization: `Bearer ${token}` };
+}
+
+export function clientFavoriteId(center: { id?: string; centerId?: string; name: string }) {
+  const id = String(center.centerId || center.id || "").trim();
+  if (id) {
+    return id.slice(0, 80);
+  }
+  const name = center.name.trim().toLowerCase();
+  return name ? `name:${name}`.slice(0, 80) : "";
+}
+
+export async function loadClientFavorites(): Promise<ClientFavoritesSnapshot | null> {
+  const headers = await authHeaders();
+  if (!headers) {
+    return null;
+  }
+  const response = await fetch("/api/client/favorites", { headers });
+  if (response.status === 401) {
+    return null;
+  }
+  if (!response.ok) {
+    throw new Error("favorites_failed");
+  }
+  return (await response.json()) as ClientFavoritesSnapshot;
+}
+
+export async function saveClientFavorite(
+  action: "add" | "remove",
+  favorite: ClientFavorite,
+) {
+  const headers = await authHeaders();
+  if (!headers) {
+    throw new Error("unauthorized");
+  }
+  const response = await fetch("/api/client/favorites", {
+    method: "POST",
+    headers: { ...headers, "Content-Type": "application/json" },
+    body: JSON.stringify({ action, favorite }),
+  });
+  if (!response.ok) {
+    throw new Error("favorites_failed");
+  }
+  return (await response.json()) as ClientFavoritesSnapshot;
+}
+
+export async function markClientOfferNoticesRead() {
+  const headers = await authHeaders();
+  if (!headers) {
+    throw new Error("unauthorized");
+  }
+  const response = await fetch("/api/client/favorites", {
+    method: "POST",
+    headers: { ...headers, "Content-Type": "application/json" },
+    body: JSON.stringify({ action: "read" }),
+  });
+  if (!response.ok) {
+    throw new Error("favorites_failed");
+  }
+  return (await response.json()) as ClientFavoritesSnapshot;
 }
 
 export async function loadClientAccount(): Promise<ClientAccount | null> {

@@ -192,6 +192,24 @@ module.exports = async function handler(req, res) {
       return res.status(404).json({ ok: false, error: "unknown_center" });
     }
 
+    const { releaseHold, startOnlineDeposit } = require("../center/online-deposit");
+    if (String(payload.action || "") === "release") {
+      const released = await releaseHold(supabase, center, bookingId);
+      return res.status(released.status).json(released.body);
+    }
+    const { serviceHiddenFromPublic } = require("../../lib/online-deposit");
+    if (serviceHiddenFromPublic(center.settings, treatment)) {
+      return res.status(403).json({
+        ok: false,
+        error: "service_hidden",
+        message: "Cette prestation n’est pas visible sur la fiche du centre.",
+      });
+    }
+    const online = await startOnlineDeposit(supabase, center, { ...payload, bookingId, treatment, date, start, duration, firstName, lastName, phone, email }, req);
+    if (online) {
+      return res.status(online.status).json(online.body);
+    }
+
     if (bookingId) {
       const { data: existing } = await supabase
         .from("appointments")

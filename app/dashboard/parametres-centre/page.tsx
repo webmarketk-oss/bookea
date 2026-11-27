@@ -49,6 +49,7 @@ import {
   type CenterPublicOffer,
   type CenterReviewAutomation,
 } from "@/lib/center-settings";
+import { createClient } from "@/lib/supabase";
 import { cabins as agendaCabins, practitioners as agendaPractitioners } from "@/lib/agenda-data";
 import {
   PUBLIC_OFFER_SHELVES,
@@ -78,6 +79,7 @@ import {
   type LeadOfferRoute,
 } from "@/lib/lead-offer-routes";
 import { loadLeadNotifySettings, saveLeadNotifySettings } from "@/lib/lead-notify-settings";
+import { LoyaltySettings } from "@/components/dashboard/loyalty-settings";
 
 type StripeConnectStatus = {
   ok?: boolean;
@@ -85,6 +87,7 @@ type StripeConnectStatus = {
   connected?: boolean;
   detailsSubmitted?: boolean;
   accountLabel?: string;
+  state?: "setup" | "pending" | "active" | "action";
   url?: string;
   error?: string;
   message?: string;
@@ -94,20 +97,37 @@ async function requestStripeConnect(
   centerId: string,
   action: "status" | "start" | "refresh" | "dashboard" | "disconnect" = "status",
 ) {
+  const supabase = createClient();
+  const { data } = await supabase.auth.getSession();
+  const token = data.session?.access_token || "";
   const response = await fetch(
     action === "status"
       ? `/api/center/stripe?centerId=${encodeURIComponent(centerId)}`
       : "/api/center/stripe",
-    action === "status"
-      ? undefined
-      : {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ centerId, action }),
-        },
+    {
+      method: action === "status" ? "GET" : "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        ...(action === "status" ? {} : { "Content-Type": "application/json" }),
+      },
+      body: action === "status" ? undefined : JSON.stringify({ centerId, action }),
+    },
   );
   const json = (await response.json().catch(() => ({}))) as StripeConnectStatus;
   return { ok: response.ok, json };
+}
+
+function stripeStateFrom(json: StripeConnectStatus) {
+  if (json.state === "active" || json.state === "pending" || json.state === "action") {
+    return json.state;
+  }
+  if (json.connected) {
+    return "active" as const;
+  }
+  if (json.detailsSubmitted) {
+    return "pending" as const;
+  }
+  return "setup" as const;
 }
 
 type Service = {
@@ -121,6 +141,8 @@ type Service = {
   duration: number;
   depositEnabled: boolean;
   depositAmount: number;
+  depositMode?: "fixed" | "percent";
+  depositPercent?: number;
   visible: boolean;
   topListed: boolean;
   cabins: string;
@@ -352,6 +374,7 @@ export default function CenterSettingsPage() {
   );
   const [stripeDetailsSubmitted, setStripeDetailsSubmitted] = useState(false);
   const [stripeAccountLabel, setStripeAccountLabel] = useState("");
+  const [stripeState, setStripeState] = useState<"setup" | "pending" | "active" | "action">("setup");
   const [stripeBusy, setStripeBusy] = useState(false);
   const [savedMessage, setSavedMessage] = useState("");
   const [saveError, setSaveError] = useState(false);
@@ -374,6 +397,8 @@ export default function CenterSettingsPage() {
   const [externalReviews, setExternalReviews] =
     useState<CenterExternalReview[]>(defaultExternalReviews);
   const [offers, setOffers] = useState<CenterPublicOffer[]>(defaultCenterOffers);
+  const offersRef = useRef(offers);
+  offersRef.current = offers;
   const [reviewAutomation, setReviewAutomation] = useState<CenterReviewAutomation>(
     defaultReviewAutomation,
   );
@@ -436,9 +461,13 @@ export default function CenterSettingsPage() {
             cabinNamesRef.current,
           ),
           depositAmount: Number(service.depositAmount) || 0,
+          depositMode: service.depositMode === "percent" ? "percent" : "fixed",
+          depositPercent: Number(service.depositPercent) || 0,
           depositEnabled:
             service.depositEnabled === true ||
-            Number(service.depositAmount) > 0,
+            Number(service.depositAmount) > 0 ||
+            Number(service.depositPercent) > 0,
+          visible: service.visible !== false,
         })),
       );
     }
@@ -535,6 +564,7 @@ export default function CenterSettingsPage() {
         setStripeConnected(json.connected === true);
         setStripeDetailsSubmitted(json.detailsSubmitted === true);
         setStripeAccountLabel(json.accountLabel || "");
+        setStripeState(stripeStateFrom(json));
         const params = new URLSearchParams(window.location.search);
         const returned = params.get("stripe") === "return";
         const refresh = params.get("stripe") === "refresh";
@@ -603,6 +633,7 @@ export default function CenterSettingsPage() {
     setStripeConnected(json.connected === true);
     setStripeDetailsSubmitted(json.detailsSubmitted === true);
     setStripeAccountLabel(json.accountLabel || "");
+    setStripeState(stripeStateFrom(json));
   };
 
   const startStripeConnect = async (
@@ -701,6 +732,8 @@ export default function CenterSettingsPage() {
         duration: 60,
         depositEnabled: false,
         depositAmount: 0,
+        depositMode: "fixed",
+        depositPercent: 0,
         visible: true,
         topListed: true,
         cabins: "Toutes",
@@ -1319,21 +1352,39 @@ export default function CenterSettingsPage() {
     );
   };
 
+  const saveOffers = async (next = offersRef.current) => {
+    offersRef.current = next;
+    setOffers(next);
+    if (saving) {
+      return;
+    }
+    setSaving(true);
+    try {
+      await persistProfile({ offers: next }, "Offres enregistrées.");
+    } catch (error) {
+      showNotice(publicSaveErrorMessage(error), true);
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const updateOffer = <K extends keyof CenterPublicOffer>(
     id: number,
     key: K,
     value: CenterPublicOffer[K],
   ) => {
-    setOffers((current) =>
-      current.map((offer) =>
+    setOffers((current) => {
+      const next = current.map((offer) =>
         offer.id === id ? { ...offer, [key]: value } : offer,
-      ),
-    );
+      );
+      offersRef.current = next;
+      return next;
+    });
   };
 
   const addOffer = () => {
     const firstService = services.find((service) => service.visible) ?? services[0];
-    setOffers((current) => [
+    const next = [
       {
         id: Date.now(),
         title: firstService ? `${firstService.name} offre spéciale` : "Offre spéciale",
@@ -1341,40 +1392,38 @@ export default function CenterSettingsPage() {
         oldPrice: firstService?.price ?? 0,
         price: firstService ? Math.max(0, firstService.price - 10) : 0,
         tag: "Bon plan du moment",
-        shelf: "bon-plan",
+        shelf: "bon-plan" as const,
         endsAt: new Date().toISOString().slice(0, 10),
         endsAtTime: "23:59",
         timerEnabled: false,
         limitedSpots: 5,
         visible: true,
       },
-      ...current,
-    ]);
-    setSavedMessage("Offre ajoutée. Cliquez sur Enregistrer pour publier.");
-    window.setTimeout(() => setSavedMessage(""), 2400);
+      ...offersRef.current,
+    ];
+    void saveOffers(next);
   };
 
   const removeOffer = async (id: number) => {
-    const offer = offers.find((item) => item.id === id);
+    const offer = offersRef.current.find((item) => item.id === id);
     const confirmed = await askConfirm(
       `Êtes-vous sûr de vouloir supprimer l'offre ${offer?.title ?? ""} ?`,
     );
     if (!confirmed) return;
-    setOffers((current) => current.filter((offerItem) => offerItem.id !== id));
+    void saveOffers(offersRef.current.filter((offerItem) => offerItem.id !== id));
   };
 
   const moveOffer = (id: number, direction: -1 | 1) => {
-    setOffers((current) => {
-      const index = current.findIndex((offer) => offer.id === id);
-      const nextIndex = index + direction;
-      if (index < 0 || nextIndex < 0 || nextIndex >= current.length) {
-        return current;
-      }
-      const copy = [...current];
-      const [item] = copy.splice(index, 1);
-      copy.splice(nextIndex, 0, item);
-      return copy;
-    });
+    const current = offersRef.current;
+    const index = current.findIndex((offer) => offer.id === id);
+    const nextIndex = index + direction;
+    if (index < 0 || nextIndex < 0 || nextIndex >= current.length) {
+      return;
+    }
+    const copy = [...current];
+    const [item] = copy.splice(index, 1);
+    copy.splice(nextIndex, 0, item);
+    void saveOffers(copy);
   };
 
   const updateReviewAutomation = <K extends keyof CenterReviewAutomation>(
@@ -1499,8 +1548,9 @@ export default function CenterSettingsPage() {
           ["sources", "Sources"],
           ["produits", "Produits"],
           ["acomptes", "Liens acompte"],
-          ["paiements", "Paiements"],
+          ["paiements", "Paiement en ligne"],
           ["reservation", "Réservation en ligne"],
+          ["fidelite", "Fidélité"],
         ].map(([id, label]) => (
           <button
             key={id}
@@ -1517,7 +1567,10 @@ export default function CenterSettingsPage() {
         ))}
       </nav>
 
+      {activeTab === "fidelite" && <LoyaltySettings centerId={loadedCenterId} />}
+
       {activeTab === "profil" && (
+        <div className="space-y-6">
         <div className="grid gap-6 xl:grid-cols-[1.05fr_0.95fr]">
           <section className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-sm">
             <SectionTitle
@@ -2011,193 +2064,6 @@ export default function CenterSettingsPage() {
                 </div>
               </div>
 
-              <div className="space-y-4 rounded-3xl border border-violet-100 bg-violet-50/70 p-4 md:col-span-2">
-                <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-                  <div>
-                    <p className="text-xs font-medium text-violet-700">
-                      Offres publiques
-                    </p>
-                    <h3 className="mt-1 text-base font-semibold text-slate-950">
-                      Offre limitée, créneaux, près de chez vous, bon plan
-                    </h3>
-                    <p className="mt-1 text-sm font-normal text-slate-500">
-                      Chaque offre est publiée dans une catégorie de la vitrine client. Le minuteur la retire toute seule à l&apos;heure choisie.
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={addOffer}
-                    className="inline-flex items-center justify-center gap-2 rounded-xl bg-violet-600 px-4 py-2 text-sm font-medium text-white shadow-sm"
-                  >
-                    <Plus className="h-5 w-5" />
-                    Ajouter une offre
-                  </button>
-                </div>
-
-                <div className="space-y-3">
-                  {offers.map((offer, index) => {
-                    const offerPhoto = servicePhotoByName(services, offer.serviceName);
-                    return (
-                    <article
-                      key={offer.id}
-                      className="rounded-[24px] border border-violet-100 bg-white p-4 shadow-sm"
-                    >
-                      <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
-                        <ServiceThumb
-                          src={offerPhoto}
-                          name={offer.serviceName}
-                          className="h-20 w-20 shrink-0"
-                        />
-                        <div className="min-w-0 flex-1 space-y-3">
-                          <div className="grid gap-3 sm:grid-cols-2">
-                            <Field
-                              label="Titre"
-                              value={offer.title}
-                              onChange={(value) => updateOffer(offer.id, "title", value)}
-                            />
-                            <label className="space-y-2">
-                              <span className="text-xs font-medium text-slate-500">
-                                Prestation
-                              </span>
-                              <select
-                                className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-medium text-slate-800 outline-none focus:border-blue-500"
-                                value={offer.serviceName}
-                                onChange={(event) =>
-                                  updateOffer(offer.id, "serviceName", event.target.value)
-                                }
-                              >
-                                {services.map((service) => (
-                                  <option key={service.id}>{service.name}</option>
-                                ))}
-                              </select>
-                            </label>
-                          </div>
-                          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                            <NumberField
-                              label="Prix avant"
-                              value={offer.oldPrice}
-                              suffix="€"
-                              onChange={(value) => updateOffer(offer.id, "oldPrice", value)}
-                            />
-                            <NumberField
-                              label="Prix offre"
-                              value={offer.price}
-                              suffix="€"
-                              onChange={(value) => updateOffer(offer.id, "price", value)}
-                            />
-                            <label className="space-y-2">
-                              <span className="text-xs font-medium text-slate-500">
-                                Catégorie vitrine
-                              </span>
-                              <select
-                                className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-medium text-slate-800 outline-none focus:border-blue-500"
-                                value={offerShelf(offer)}
-                                onChange={(event) => {
-                                  const shelf = event.target.value as PublicOfferShelf;
-                                  setOffers((current) =>
-                                    current.map((item) =>
-                                      item.id === offer.id
-                                        ? {
-                                            ...item,
-                                            shelf,
-                                            tag: publicOfferShelfLabel(shelf),
-                                          }
-                                        : item,
-                                    ),
-                                  );
-                                }}
-                              >
-                                {PUBLIC_OFFER_SHELVES.map((shelf) => (
-                                  <option key={shelf.id} value={shelf.id}>
-                                    {shelf.label}
-                                  </option>
-                                ))}
-                              </select>
-                            </label>
-                            <NumberField
-                              label="Places"
-                              value={offer.limitedSpots}
-                              suffix="rest."
-                              onChange={(value) =>
-                                updateOffer(offer.id, "limitedSpots", value)
-                              }
-                            />
-                          </div>
-                          <div className="flex flex-wrap items-center gap-3">
-                            <div className="flex flex-wrap items-end gap-3">
-                              <Toggle
-                                checked={Boolean(offer.timerEnabled)}
-                                label={offer.timerEnabled ? "Minuteur actif" : "Sans minuteur"}
-                                onClick={() =>
-                                  updateOffer(offer.id, "timerEnabled", !offer.timerEnabled)
-                                }
-                              />
-                              {offer.timerEnabled ? (
-                                <>
-                                  <label className="space-y-2">
-                                    <span className="text-xs font-medium text-slate-500">
-                                      Fin de l&apos;offre
-                                    </span>
-                                    <input
-                                      type="date"
-                                      value={offer.endsAt}
-                                      onChange={(event) =>
-                                        updateOffer(offer.id, "endsAt", event.target.value)
-                                      }
-                                      className="h-11 rounded-xl border border-slate-200 px-3 font-semibold outline-none focus:border-blue-500"
-                                    />
-                                  </label>
-                                  <label className="space-y-2">
-                                    <span className="text-xs font-medium text-slate-500">
-                                      Heure
-                                    </span>
-                                    <input
-                                      type="time"
-                                      value={offer.endsAtTime || "23:59"}
-                                      onChange={(event) =>
-                                        updateOffer(offer.id, "endsAtTime", event.target.value)
-                                      }
-                                      className="h-11 rounded-xl border border-slate-200 px-3 font-semibold outline-none focus:border-blue-500"
-                                    />
-                                  </label>
-                                </>
-                              ) : null}
-                            </div>
-                            <div className="flex flex-wrap items-center gap-2 pt-5">
-                              <Toggle
-                                checked={offer.visible}
-                                label={offer.visible ? "Visible public" : "Masquée public"}
-                                onClick={() => updateOffer(offer.id, "visible", !offer.visible)}
-                              />
-                              <IconButton
-                                label="Monter l'offre"
-                                disabled={index === 0}
-                                onClick={() => moveOffer(offer.id, -1)}
-                              >
-                                <ArrowUp className="h-5 w-5" />
-                              </IconButton>
-                              <IconButton
-                                label="Descendre l'offre"
-                                disabled={index === offers.length - 1}
-                                onClick={() => moveOffer(offer.id, 1)}
-                              >
-                                <ArrowDown className="h-5 w-5" />
-                              </IconButton>
-                              <IconButton
-                                label="Supprimer l'offre"
-                                onClick={() => void removeOffer(offer.id)}
-                              >
-                                <Trash2 className="h-5 w-5" />
-                              </IconButton>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    </article>
-                    );
-                  })}
-                </div>
-              </div>
 
               <div className="grid gap-4 rounded-3xl border border-emerald-100 bg-emerald-50/70 p-4 md:col-span-2 lg:grid-cols-[1fr_1fr]">
                 <div>
@@ -2283,6 +2149,224 @@ export default function CenterSettingsPage() {
             reviewAutomation={reviewAutomation}
           />
         </div>
+        <section className="space-y-4 rounded-[28px] border border-violet-100 bg-violet-50/70 p-6 shadow-sm">
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                  <div>
+                    <p className="text-xs font-medium text-violet-700">
+                      Offres publiques
+                    </p>
+                    <h3 className="mt-1 text-base font-semibold text-slate-950">
+                      Offre limitée, créneaux, près de chez vous, bon plan
+                    </h3>
+                    <p className="mt-1 text-sm font-normal text-slate-500">
+                      Chaque offre est publiée dans une catégorie de la vitrine client. Le minuteur la retire toute seule à l&apos;heure choisie.
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={addOffer}
+                      className="inline-flex items-center justify-center gap-2 rounded-xl bg-violet-600 px-4 py-2 text-sm font-medium text-white shadow-sm"
+                    >
+                      <Plus className="h-5 w-5" />
+                      Ajouter une offre
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void saveOffers()}
+                      disabled={saving}
+                      className="inline-flex items-center justify-center gap-2 rounded-xl bg-slate-950 px-4 py-2 text-sm font-medium text-white shadow-sm disabled:opacity-60"
+                    >
+                      <Save className="h-5 w-5" />
+                      {saving ? "Enregistrement…" : "Enregistrer les offres"}
+                    </button>
+                  </div>
+                </div>
+                {savedMessage ? (
+                  <p className={`text-sm font-medium ${saveError ? "text-rose-700" : "text-emerald-700"}`}>
+                    {savedMessage}
+                  </p>
+                ) : (
+                  <p className="text-sm text-slate-500">
+                    Enregistrez pour écrire les offres dans la fiche du centre. Elles restent affichées après rechargement.
+                  </p>
+                )}
+
+                <div className="space-y-3">
+                  {offers.map((offer, index) => {
+                    const offerPhoto = servicePhotoByName(services, offer.serviceName);
+                    return (
+                    <article
+                      key={offer.id}
+                      className="rounded-[24px] border border-violet-100 bg-white p-4 shadow-sm"
+                      onBlur={(event) => {
+                        const nextFocus = event.relatedTarget;
+                        if (nextFocus instanceof Node && event.currentTarget.contains(nextFocus)) {
+                          return;
+                        }
+                        void saveOffers();
+                      }}
+                    >
+                      <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
+                        <ServiceThumb
+                          src={offerPhoto}
+                          name={offer.serviceName}
+                          className="h-20 w-20 shrink-0"
+                        />
+                        <div className="min-w-0 flex-1 space-y-3">
+                          <div className="grid gap-3 sm:grid-cols-2">
+                            <Field
+                              label="Titre"
+                              value={offer.title}
+                              onChange={(value) => updateOffer(offer.id, "title", value)}
+                            />
+                            <label className="space-y-2">
+                              <span className="text-xs font-medium text-slate-500">
+                                Prestation
+                              </span>
+                              <select
+                                className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-medium text-slate-800 outline-none focus:border-blue-500"
+                                value={offer.serviceName}
+                                onChange={(event) =>
+                                  updateOffer(offer.id, "serviceName", event.target.value)
+                                }
+                              >
+                                {services.map((service) => (
+                                  <option key={service.id}>{service.name}</option>
+                                ))}
+                              </select>
+                            </label>
+                          </div>
+                          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                            <NumberField
+                              label="Prix avant"
+                              value={offer.oldPrice}
+                              suffix="€"
+                              onChange={(value) => updateOffer(offer.id, "oldPrice", value)}
+                            />
+                            <NumberField
+                              label="Prix offre"
+                              value={offer.price}
+                              suffix="€"
+                              onChange={(value) => updateOffer(offer.id, "price", value)}
+                            />
+                            <label className="space-y-2">
+                              <span className="text-xs font-medium text-slate-500">
+                                Catégorie vitrine
+                              </span>
+                              <select
+                                className="h-11 w-full min-w-0 rounded-xl border border-slate-200 bg-white px-3 text-sm font-medium text-slate-800 outline-none focus:border-blue-500"
+                                value={offerShelf(offer)}
+                                onChange={(event) => {
+                                  const shelf = event.target.value as PublicOfferShelf;
+                                  setOffers((current) =>
+                                    current.map((item) =>
+                                      item.id === offer.id
+                                        ? {
+                                            ...item,
+                                            shelf,
+                                            tag: publicOfferShelfLabel(shelf),
+                                          }
+                                        : item,
+                                    ),
+                                  );
+                                }}
+                              >
+                                {PUBLIC_OFFER_SHELVES.map((shelf) => (
+                                  <option key={shelf.id} value={shelf.id}>
+                                    {shelf.label}
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+                            <NumberField
+                              label="Places restantes"
+                              value={
+                                Number.isFinite(Number(offer.limitedSpots))
+                                  ? Number(offer.limitedSpots)
+                                  : 0
+                              }
+                              onChange={(value) =>
+                                updateOffer(offer.id, "limitedSpots", value)
+                              }
+                            />
+                          </div>
+                          <div className="flex flex-wrap items-center gap-3">
+                            <div className="flex flex-wrap items-end gap-3">
+                              <Toggle
+                                checked={Boolean(offer.timerEnabled)}
+                                label={offer.timerEnabled ? "Minuteur actif" : "Sans minuteur"}
+                                onClick={() =>
+                                  updateOffer(offer.id, "timerEnabled", !offer.timerEnabled)
+                                }
+                              />
+                              {offer.timerEnabled ? (
+                                <>
+                                  <label className="space-y-2">
+                                    <span className="text-xs font-medium text-slate-500">
+                                      Fin de l&apos;offre
+                                    </span>
+                                    <input
+                                      type="date"
+                                      value={offer.endsAt}
+                                      onChange={(event) =>
+                                        updateOffer(offer.id, "endsAt", event.target.value)
+                                      }
+                                      className="h-11 rounded-xl border border-slate-200 px-3 font-semibold outline-none focus:border-blue-500"
+                                    />
+                                  </label>
+                                  <label className="space-y-2">
+                                    <span className="text-xs font-medium text-slate-500">
+                                      Heure
+                                    </span>
+                                    <input
+                                      type="time"
+                                      value={offer.endsAtTime || "23:59"}
+                                      onChange={(event) =>
+                                        updateOffer(offer.id, "endsAtTime", event.target.value)
+                                      }
+                                      className="h-11 rounded-xl border border-slate-200 px-3 font-semibold outline-none focus:border-blue-500"
+                                    />
+                                  </label>
+                                </>
+                              ) : null}
+                            </div>
+                            <div className="flex flex-wrap items-center gap-2 pt-5">
+                              <Toggle
+                                checked={offer.visible}
+                                label={offer.visible ? "Visible public" : "Masquée public"}
+                                onClick={() => updateOffer(offer.id, "visible", !offer.visible)}
+                              />
+                              <IconButton
+                                label="Monter l'offre"
+                                disabled={index === 0}
+                                onClick={() => moveOffer(offer.id, -1)}
+                              >
+                                <ArrowUp className="h-5 w-5" />
+                              </IconButton>
+                              <IconButton
+                                label="Descendre l'offre"
+                                disabled={index === offers.length - 1}
+                                onClick={() => moveOffer(offer.id, 1)}
+                              >
+                                <ArrowDown className="h-5 w-5" />
+                              </IconButton>
+                              <IconButton
+                                label="Supprimer l'offre"
+                                onClick={() => void removeOffer(offer.id)}
+                              >
+                                <Trash2 className="h-5 w-5" />
+                              </IconButton>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </article>
+                    );
+                  })}
+                </div>
+              </section>
+        </div>
       )}
 
       {activeTab === "prestations" && (
@@ -2291,7 +2375,7 @@ export default function CenterSettingsPage() {
             <SectionTitle
               icon={<Settings2 className="h-4 w-4" />}
               title="Prestations proposées"
-              subtitle="Tarif, durée, acompte, ordre d'affichage et compatibilité cabine/praticienne."
+              subtitle="Visible par le public : la prestation apparaît sur la fiche du centre. Invisible : la cliente ne la voit pas. Enregistrez pour publier."
             />
             <button
               type="button"
@@ -2443,21 +2527,48 @@ export default function CenterSettingsPage() {
                       updateService(service.id, "duration", value)
                     }
                   />
+                  <label className="space-y-1">
+                    <span className="text-[11px] font-medium text-slate-500">Acompte</span>
+                    <select
+                      value={service.depositMode === "percent" ? "percent" : "fixed"}
+                      onChange={(event) =>
+                        updateService(
+                          service.id,
+                          "depositMode",
+                          event.target.value === "percent" ? "percent" : "fixed",
+                        )
+                      }
+                      className="h-8 w-full rounded-lg border border-slate-200 bg-white px-2 text-xs font-medium text-slate-800"
+                    >
+                      <option value="fixed">Euros</option>
+                      <option value="percent">Pourcentage</option>
+                    </select>
+                  </label>
                   <NumberField
                     compact
-                    label="Acompte"
-                    value={service.depositAmount}
-                    suffix="€"
+                    label={service.depositMode === "percent" ? "Pourcentage" : "Montant"}
+                    value={
+                      service.depositMode === "percent"
+                        ? service.depositPercent || 0
+                        : service.depositAmount
+                    }
+                    suffix={service.depositMode === "percent" ? "%" : "€"}
                     onChange={(value) => {
                       const amount = Number.isFinite(value) ? Math.max(0, value) : 0;
                       setServices((current) =>
                         current.map((item) =>
                           item.id === service.id
-                            ? {
-                                ...item,
-                                depositAmount: amount,
-                                depositEnabled: amount > 0,
-                              }
+                            ? service.depositMode === "percent"
+                              ? {
+                                  ...item,
+                                  depositPercent: Math.min(100, amount),
+                                  depositEnabled: amount > 0,
+                                }
+                              : {
+                                  ...item,
+                                  depositAmount: amount,
+                                  depositEnabled: amount > 0,
+                                }
                             : item,
                         ),
                       );
@@ -2537,10 +2648,15 @@ export default function CenterSettingsPage() {
                   </label>
                   <Toggle
                     compact
-                    checked={service.visible}
-                    label={service.visible ? "Visible public" : "Masqué public"}
+                    tone="danger"
+                    checked={service.visible !== false}
+                    label={
+                      service.visible !== false
+                        ? "Visible par le public"
+                        : "Invisible"
+                    }
                     onClick={() =>
-                      updateService(service.id, "visible", !service.visible)
+                      updateService(service.id, "visible", service.visible === false)
                     }
                   />
                   <Toggle
@@ -2867,8 +2983,8 @@ export default function CenterSettingsPage() {
           <div className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-sm">
             <SectionTitle
               icon={<CreditCard className="h-4 w-4" />}
-              title="Stripe Connect"
-              subtitle="Chaque centre doit pouvoir recevoir ses acomptes directement sur son compte."
+              title="Paiement en ligne"
+              subtitle="L’acompte est encaissé sur le compte Stripe du salon, puis versé sur son compte bancaire. L’abonnement Bookea reste séparé."
             />
             <div
               className={`mt-6 rounded-3xl border p-5 ${
@@ -2885,11 +3001,13 @@ export default function CenterSettingsPage() {
                 />
                 <div>
                   <p className="text-base font-semibold">
-                    {stripeConnected
-                      ? "Compte Stripe connecté"
-                      : stripeDetailsSubmitted
-                        ? "Compte Stripe en vérification"
-                        : "Compte Stripe non connecté"}
+                    {stripeState === "active"
+                      ? "Actif"
+                      : stripeState === "pending"
+                        ? "Vérification en cours"
+                        : stripeState === "action"
+                          ? "Action requise"
+                          : "À configurer"}
                   </p>
                   <p className="mt-1 font-semibold text-slate-600">
                     {stripeConnected
@@ -2923,7 +3041,7 @@ export default function CenterSettingsPage() {
                       ) : (
                         <ExternalLink className="h-4 w-4" />
                       )}
-                      Ouvrir Stripe
+                      Gérer mon compte Stripe
                     </button>
                     <button
                       type="button"
@@ -2950,9 +3068,11 @@ export default function CenterSettingsPage() {
                     ) : (
                       <CreditCard className="h-4 w-4" />
                     )}
-                    {stripeDetailsSubmitted
-                      ? "Continuer l’inscription Stripe"
-                      : "Connecter Stripe"}
+                    {stripeState === "action"
+                      ? "Compléter sur Stripe"
+                      : stripeDetailsSubmitted
+                        ? "Continuer l’inscription Stripe"
+                        : "Activer les acomptes en ligne"}
                   </button>
                 )}
               </div>
@@ -3815,7 +3935,7 @@ function NumberField({
   compact?: boolean;
   label: string;
   value: number;
-  suffix: string;
+  suffix?: string;
   disabled?: boolean;
   onChange: (value: number) => void;
 }) {
@@ -3837,11 +3957,16 @@ function NumberField({
           type="number"
           min={0}
           disabled={disabled}
-          className="w-full bg-transparent text-sm font-medium text-slate-800 outline-none disabled:text-slate-300"
-          value={value}
-          onChange={(event) => onChange(Number(event.target.value))}
+          className="w-0 min-w-[2.75rem] flex-1 bg-transparent text-sm font-medium text-slate-800 outline-none disabled:text-slate-300"
+          value={Number.isFinite(value) ? value : 0}
+          onChange={(event) => {
+            const next = Number(event.target.value);
+            onChange(Number.isFinite(next) && next >= 0 ? next : 0);
+          }}
         />
-        <span className="text-sm font-medium text-slate-400">{suffix}</span>
+        {suffix ? (
+          <span className="shrink-0 pl-1 text-sm font-medium text-slate-400">{suffix}</span>
+        ) : null}
       </div>
     </label>
   );
@@ -3851,24 +3976,27 @@ function Toggle({
   checked,
   compact = false,
   label,
+  tone = "neutral",
   onClick,
 }: {
   checked: boolean;
   compact?: boolean;
   label: string;
+  tone?: "neutral" | "danger";
   onClick: () => void;
 }) {
+  const off =
+    tone === "danger"
+      ? "bg-rose-50 text-rose-700 ring-1 ring-rose-200"
+      : "bg-slate-200 text-slate-600";
   return (
     <button
       type="button"
+      aria-pressed={checked}
       onClick={onClick}
       className={`rounded-full font-medium ${
         compact ? "px-2.5 py-1 text-xs" : "px-3 py-1.5 text-sm"
-      } ${
-        checked
-          ? "bg-emerald-100 text-emerald-700"
-          : "bg-slate-200 text-slate-600"
-      }`}
+      } ${checked ? "bg-emerald-100 text-emerald-800" : off}`}
     >
       {label}
     </button>
@@ -3989,7 +4117,7 @@ function PublicPreview({
   reviewAutomation: CenterReviewAutomation;
 }) {
   const sortedServices = sortServicesByCategory(
-    services.filter((service) => service.visible),
+    services.filter((service) => service.visible !== false),
     mergeServiceCategories(serviceCategories, services),
   );
   const averageRating =
@@ -4462,6 +4590,10 @@ function CoverFrame({
 
 function publicSaveErrorMessage(error: unknown) {
   const message = error instanceof Error ? error.message : "";
+
+  if (/auth session missing|session expir|jwt/i.test(message)) {
+    return "Session expirée. Reconnecte-toi, puis enregistre à nouveau les offres.";
+  }
 
   if (/row-level security|not authorized|permission|42501/i.test(message)) {
     return "Enregistrement refusé. Seul un gérant du centre peut modifier la fiche publique.";
