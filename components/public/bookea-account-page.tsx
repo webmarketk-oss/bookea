@@ -107,6 +107,125 @@ function messageTime(iso?: string) {
   }).format(new Date(stamp));
 }
 
+const birthMonths = [
+  ["01", "Janvier"],
+  ["02", "Février"],
+  ["03", "Mars"],
+  ["04", "Avril"],
+  ["05", "Mai"],
+  ["06", "Juin"],
+  ["07", "Juillet"],
+  ["08", "Août"],
+  ["09", "Septembre"],
+  ["10", "Octobre"],
+  ["11", "Novembre"],
+  ["12", "Décembre"],
+] as const;
+
+function birthParts(value: string) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  return {
+    year: match?.[1] ?? "",
+    month: match?.[2] ?? "",
+    day: match?.[3] ?? "",
+  };
+}
+
+function BirthDateField({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  const parsed = birthParts(value);
+  const [year, setYear] = useState(parsed.year);
+  const [month, setMonth] = useState(parsed.month);
+  const [day, setDay] = useState(parsed.day);
+
+  useEffect(() => {
+    setYear(parsed.year);
+    setMonth(parsed.month);
+    setDay(parsed.day);
+  }, [parsed.year, parsed.month, parsed.day]);
+
+  const currentYear = new Date().getFullYear();
+  const years = Array.from({ length: currentYear - 1919 }, (_, index) =>
+    String(currentYear - index),
+  );
+  const dayCount =
+    year && month ? new Date(Number(year), Number(month), 0).getDate() : 31;
+
+  function commit(next: { year: string; month: string; day: string }) {
+    setYear(next.year);
+    setMonth(next.month);
+    setDay(next.day);
+    if (!next.year && !next.month && !next.day) {
+      onChange("");
+      return;
+    }
+    if (!next.year || !next.month || !next.day) {
+      return;
+    }
+    const max = new Date(Number(next.year), Number(next.month), 0).getDate();
+    const safeDay = String(Math.min(Number(next.day), max)).padStart(2, "0");
+    if (safeDay !== next.day) {
+      setDay(safeDay);
+    }
+    onChange(`${next.year}-${next.month}-${safeDay}`);
+  }
+
+  const selectClass =
+    "h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-medium text-slate-950 outline-none focus:border-violet-500";
+
+  return (
+    <div className="grid grid-cols-3 gap-2">
+      <select
+        aria-label="Jour de naissance"
+        value={day}
+        onChange={(event) => commit({ year, month, day: event.target.value })}
+        className={selectClass}
+      >
+        <option value="">Jour</option>
+        {Array.from({ length: dayCount }, (_, index) => {
+          const option = String(index + 1).padStart(2, "0");
+          return (
+            <option key={option} value={option}>
+              {index + 1}
+            </option>
+          );
+        })}
+      </select>
+      <select
+        aria-label="Mois de naissance"
+        value={month}
+        onChange={(event) => commit({ year, month: event.target.value, day })}
+        className={selectClass}
+      >
+        <option value="">Mois</option>
+        {birthMonths.map(([option, label]) => (
+          <option key={option} value={option}>
+            {label}
+          </option>
+        ))}
+      </select>
+      <select
+        aria-label="Année de naissance"
+        value={year}
+        onChange={(event) => commit({ year: event.target.value, month, day })}
+        className={selectClass}
+      >
+        <option value="">Année</option>
+        {years.map((option) => (
+          <option key={option} value={option}>
+            {option}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
 export function BookeaAccountPage() {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState<AccountTab>("upcoming");
@@ -893,22 +1012,20 @@ export function BookeaAccountPage() {
                     className="h-11 w-full rounded-xl border border-slate-200 px-3 text-sm font-medium outline-none focus:border-violet-500"
                   />
                 </label>
-                <label className="block space-y-1.5">
+                <div className="space-y-1.5 sm:col-span-2">
                   <span className="text-xs font-medium text-slate-500">
                     Date de naissance
                   </span>
-                  <input
-                    type="date"
+                  <BirthDateField
                     value={profileForm.birthDate}
-                    onChange={(event) =>
+                    onChange={(birthDate) =>
                       setProfileForm((current) => ({
                         ...current,
-                        birthDate: event.target.value,
+                        birthDate,
                       }))
                     }
-                    className="h-11 w-full rounded-xl border border-slate-200 px-3 text-sm font-medium outline-none focus:border-violet-500"
                   />
-                </label>
+                </div>
                 <div className="sm:col-span-2">
                   <PlaceSuggestField
                     kind="address"
