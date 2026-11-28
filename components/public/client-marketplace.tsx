@@ -1,12 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { ArrowRight, Clock3, Flame, MapPin, Search, Sparkles, Timer } from "lucide-react";
-import {
-  countdownParts,
-  publicOfferShelfLabel,
-  type PublicOfferShelf,
-} from "@/lib/public-offers";
+import { Activity, ArrowRight, Clock3, Hand, MapPin, Scissors, Sparkles, Zap } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
+import type { PublicOfferShelf } from "@/lib/public-offers";
 
 export type MarketplaceOffer = {
   id: string;
@@ -49,492 +45,262 @@ type ClientMarketplaceProps = {
   onSlot: (slot: string, service: string, centerName: string) => void;
 };
 
-const popularSearches = [
-  "Hydrafacial",
-  "Épilation laser",
-  "Bilan minceur",
-  "Soin du visage",
-  "Massage",
+const shortcuts: Array<{
+  label: string;
+  category?: string;
+  query?: string;
+  icon: LucideIcon;
+}> = [
+  { label: "Visage", category: "Soin du visage", icon: Sparkles },
+  { label: "Coiffure", category: "Coiffeur", icon: Scissors },
+  { label: "Laser", query: "Laser", icon: Zap },
+  { label: "Minceur", category: "Minceur", icon: Activity },
+  { label: "Massage", query: "Massage", category: "Bien-être", icon: Hand },
 ];
 
 function money(value: number) {
   return `${value} €`;
 }
 
-function discountPercent(price: number, oldPrice: number) {
-  if (!oldPrice || oldPrice <= price) {
-    return 0;
+const fallbackPool = [
+  "/marketplace/offer-nails.jpg",
+  "/marketplace/offer-hair.jpg",
+  "/marketplace/offer-spa.jpg",
+  "/marketplace/offer-care.jpg",
+];
+
+function fallbackPhoto(offer: MarketplaceOffer, used: Set<string>) {
+  const text = `${offer.title} ${offer.service} ${offer.searchCategory}`.toLowerCase();
+  const start = /(ongle|manucure|semi)/.test(text)
+    ? 0
+    : /(coiff|brush|balay|cheveu)/.test(text)
+      ? 1
+      : /(visage|éclat|eclat|hydra|soin)/.test(text)
+        ? 3
+        : 2;
+  let photo = fallbackPool[start];
+  for (let step = 0; step < fallbackPool.length && used.has(photo); step += 1) {
+    photo = fallbackPool[(start + step + 1) % fallbackPool.length];
   }
-  return Math.round((1 - price / oldPrice) * 100);
+  used.add(photo);
+  return photo;
 }
 
-function spotsLabel(spots: number) {
-  if (spots === 1) {
+function endingPhrase(deadline: number | null) {
+  if (!deadline) {
+    return "";
+  }
+  const date = new Date(deadline);
+  const left = deadline - Date.now();
+  if (left <= 24 * 60 * 60 * 1000) {
+    return "Dernier jour";
+  }
+  if (left <= 7 * 24 * 60 * 60 * 1000) {
+    const weekday = date.toLocaleDateString("fr-FR", { weekday: "long" });
+    return `Se termine ${weekday}`;
+  }
+  return `Jusqu'au ${date.toLocaleDateString("fr-FR", { day: "numeric", month: "short" })}`;
+}
+
+function offerBadge(offer: MarketplaceOffer) {
+  if (offer.spots === 1) {
     return "Plus qu’une place";
   }
-  if (spots > 1) {
-    return `Plus que ${spots} places`;
+  if (offer.spots > 1 && offer.spots <= 5) {
+    return `Plus que ${offer.spots} places`;
   }
-  return "";
-}
-
-function endDateLabel(deadline: number) {
-  const date = new Date(deadline);
-  const day = new Intl.DateTimeFormat("fr-FR", {
-    day: "numeric",
-    month: "short",
-  }).format(date);
-  const time = new Intl.DateTimeFormat("fr-FR", {
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(date);
-  return `${day} · ${time}`;
-}
-
-function OfferTimer({ deadline }: { deadline: number }) {
-  const [now, setNow] = useState<number | null>(null);
-
-  useEffect(() => {
-    setNow(Date.now());
-    const timer = window.setInterval(() => setNow(Date.now()), 1000);
-    return () => window.clearInterval(timer);
-  }, []);
-
-  if (now == null) {
-    return <div className="h-12 rounded-xl bg-[#1c1917]" aria-hidden="true" />;
-  }
-
-  const parts = countdownParts(deadline, now);
-  const cells = [
-    [parts.days, "j"],
-    [parts.hours, "h"],
-    [parts.minutes, "min"],
-    [parts.seconds, "s"],
-  ] as const;
-
-  return (
-    <div
-      className="rounded-xl bg-[#1c1917] px-2.5 py-1.5 text-white"
-      aria-label="Temps restant"
-    >
-      <p className="flex items-baseline justify-between gap-2 font-heading text-sm font-medium tabular-nums tracking-tight">
-        {cells.map(([value, label]) => (
-          <span key={label}>
-            {String(value).padStart(2, "0")}
-            <span className="ml-0.5 text-[10px] font-medium uppercase tracking-wide text-white/55">{label}</span>
-          </span>
-        ))}
-      </p>
-      <p className="mt-0.5 font-heading text-[11px] font-medium tracking-wide text-white/70">
-        Fin le {endDateLabel(deadline)}
-      </p>
-    </div>
-  );
-}
-
-function SectionHeading({
-  kicker,
-  title,
-  action,
-  urgent = false,
-}: {
-  kicker: string;
-  title: string;
-  action?: string;
-  urgent?: boolean;
-}) {
-  return (
-    <div className="flex items-end justify-between gap-3">
-      <div>
-        <p
-          className={`font-heading text-[11px] font-medium uppercase tracking-[0.18em] ${
-            urgent ? "text-violet-700" : "text-stone-400"
-          }`}
-        >
-          {kicker}
-        </p>
-        <h2 className="mt-1 flex items-center gap-2 font-heading text-2xl font-medium tracking-tight text-stone-950 sm:text-[1.7rem]">
-          {title}
-          {urgent ? (
-            <Flame className="h-4 w-4 shrink-0 text-violet-700" aria-hidden />
-          ) : null}
-        </h2>
-      </div>
-      {action ? (
-        <span className="hidden text-sm font-medium text-stone-500 sm:inline">{action}</span>
-      ) : null}
-    </div>
-  );
+  return endingPhrase(offer.deadline);
 }
 
 export function ClientMarketplace({
-  serviceQuery,
-  locationQuery,
-  categories,
   activeCategory,
   offers,
   centers,
   onServiceQuery,
-  onLocationQuery,
   onSearch,
   onCategory,
   onOffer,
-  onCenter,
   onSlot,
 }: ClientMarketplaceProps) {
   const featured =
-    offers.find((offer) => offer.shelf === "bon-plan") ??
-    offers.find((offer) => offer.shelf === "offre-limitee");
-  const limited = offers.filter((offer) => offer.shelf === "offre-limitee");
-  const slots = offers.filter((offer) => offer.shelf === "derniers-creneaux");
-  const nearbyOffers = offers.filter((offer) => offer.shelf === "pres-de-chez-vous");
+    offers.find((offer) => offer.shelf === "bon-plan") ?? offers[0] ?? null;
+  const momentOffers = offers.filter((offer) => offer.id !== featured?.id);
+  const rowOffers = momentOffers.length > 0 ? momentOffers : offers;
+  const usedPhotos = new Set<string>();
+  const rowPhotos = rowOffers.map((offer) => offer.photo || fallbackPhoto(offer, usedPhotos));
   const liveSlots = centers
     .flatMap((center) =>
-      center.slots.slice(0, 1).map((slot) => ({
+      center.slots.slice(0, 2).map((slot) => ({
         slot,
         service: center.service,
         center,
       })),
     )
-    .slice(0, 4);
+    .slice(0, 8);
 
   return (
-    <div className="mx-auto w-full max-w-6xl space-y-5 px-3 py-5 sm:px-6 lg:px-8 lg:py-8">
-      <section className="overflow-hidden rounded-[28px] border border-stone-200 bg-[#fbf8f4] shadow-sm">
-        <div className="grid gap-6 p-5 sm:p-8 lg:grid-cols-[1.15fr_0.85fr] lg:items-center">
-          <div>
-            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-stone-400">
-              Votre beauté, nos meilleures adresses
-            </p>
-            <h1 className="mt-3 max-w-xl font-serif text-4xl leading-[1.05] text-stone-950 sm:text-5xl">
-              Trouvez le soin{" "}
-              <span className="text-violet-700">qui vous ressemble</span>
+    <div className="mx-auto w-full max-w-6xl space-y-8 px-4 py-6 sm:px-6 lg:px-8">
+      {featured ? (
+        <section className="grid overflow-hidden rounded-[28px] bg-[#f4f0ff] lg:grid-cols-[1.02fr_0.98fr]">
+          <div className="flex flex-col justify-center px-6 py-7 sm:px-9 sm:py-10">
+            {endingPhrase(featured.deadline) ? (
+              <p className="inline-flex w-fit items-center gap-2 rounded-full bg-white px-3 py-1 text-xs font-semibold text-[#5b46f0] shadow-sm">
+                <Clock3 className="h-3.5 w-3.5" />
+                {endingPhrase(featured.deadline)}
+              </p>
+            ) : null}
+            <h1 className="mt-4 max-w-md font-heading text-[2.15rem] font-extrabold leading-[1.05] tracking-tight text-[#17133a] sm:text-[2.7rem]">
+              Les offres beauté
+              <br />
+              <span className="underline decoration-[#17133a] decoration-[3px] underline-offset-[7px]">
+                près de chez vous
+              </span>
             </h1>
-            <p className="mt-4 max-w-lg text-sm leading-6 text-stone-600 sm:text-base">
-              Réservez en quelques clics. Les offres limitées, les derniers
-              créneaux et les adresses près de chez vous sont publiés par les
-              centres.
-            </p>
-            <form
-              className="mt-6 flex flex-col gap-2 rounded-2xl border border-stone-200 bg-white p-2 shadow-sm sm:flex-row"
-              onSubmit={(event) => {
-                event.preventDefault();
+            <p className="mt-5 text-lg font-semibold text-[#241a55]">{featured.title}</p>
+            <div className="mt-2 flex flex-wrap items-center gap-3">
+              <p className="font-heading text-[2.7rem] font-extrabold leading-none tracking-tight text-[#17133a]">
+                {money(featured.price)}
+              </p>
+              {featured.oldPrice > featured.price ? (
+                <p className="text-lg text-slate-400 line-through">{money(featured.oldPrice)}</p>
+              ) : null}
+              {featured.spots > 0 ? (
+                <p className="border-l border-violet-200 pl-3 text-sm font-medium text-[#3b2d78]">
+                  Encore {featured.spots} créneau{featured.spots > 1 ? "x" : ""} à ce tarif
+                </p>
+              ) : null}
+            </div>
+            <button
+              type="button"
+              onClick={() => onOffer(featured)}
+              className="mt-6 inline-flex w-fit items-center gap-2 rounded-full bg-[#5b46f0] px-5 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-[#4936e4]"
+            >
+              Voir les créneaux
+              <ArrowRight className="h-4 w-4" />
+            </button>
+          </div>
+          <div className="relative min-h-64">
+            <img
+              src={featured.photo || "/marketplace/hero-portrait.jpg"}
+              alt=""
+              className="absolute inset-0 h-full w-full object-cover object-[center_20%] lg:rounded-l-[72px]"
+            />
+          </div>
+        </section>
+      ) : null}
+
+      <div className="flex justify-center gap-3 overflow-x-auto pb-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        {shortcuts.map((item) => {
+          const Icon = item.icon;
+          const selected = item.category && activeCategory === item.category;
+          return (
+            <button
+              key={item.label}
+              type="button"
+              onClick={() => {
+                if (item.query) {
+                  onServiceQuery(item.query);
+                }
+                if (item.category) {
+                  onCategory(item.category);
+                }
                 onSearch();
               }}
-            >
-              <label className="flex min-w-0 flex-1 items-center gap-2 px-3 py-2">
-                <Search className="h-4 w-4 shrink-0 text-stone-400" />
-                <input
-                  value={serviceQuery}
-                  onChange={(event) => onServiceQuery(event.target.value)}
-                  aria-label="Quel soin recherchez-vous"
-                  placeholder="Quel soin recherchez-vous ?"
-                  className="w-full bg-transparent text-sm font-medium outline-none placeholder:text-stone-400"
-                />
-              </label>
-              <label className="flex min-w-0 flex-1 items-center gap-2 border-t border-stone-100 px-3 py-2 sm:border-t-0 sm:border-l">
-                <MapPin className="h-4 w-4 shrink-0 text-stone-400" />
-                <input
-                  value={locationQuery}
-                  onChange={(event) => onLocationQuery(event.target.value)}
-                  aria-label="Votre ville"
-                  placeholder="Votre ville"
-                  className="w-full bg-transparent text-sm font-medium outline-none placeholder:text-stone-400"
-                />
-              </label>
-              <button
-                type="submit"
-                className="inline-flex items-center justify-center gap-2 rounded-xl bg-violet-700 px-5 py-3 text-sm font-semibold text-white transition hover:bg-violet-800"
-              >
-                Rechercher
-                <ArrowRight className="h-4 w-4" />
-              </button>
-            </form>
-            <div className="mt-4 flex gap-2 overflow-x-auto pb-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-              {popularSearches.map((item) => (
-                <button
-                  key={item}
-                  type="button"
-                  onClick={() => {
-                    onServiceQuery(item);
-                    onSearch();
-                  }}
-                  className="shrink-0 rounded-full border border-stone-200 bg-white px-3 py-1.5 text-xs font-medium text-stone-600"
-                >
-                  {item}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <aside className="rounded-[24px] border border-white/80 bg-white p-4 shadow-sm">
-            <div className="flex items-center gap-3">
-              <div className="grid h-10 w-10 place-items-center rounded-2xl bg-violet-700 text-white">
-                <Sparkles className="h-5 w-5" />
-              </div>
-              <div>
-                <p className="text-sm font-semibold text-stone-950">Seya</p>
-                <p className="text-xs text-stone-500">
-                  Je vous aide à trouver le bon créneau.
-                </p>
-              </div>
-            </div>
-            <p className="mt-4 rounded-2xl bg-stone-50 px-3 py-3 text-sm leading-6 text-stone-700">
-              « Je cherche un soin près de chez moi, ce week-end. »
-            </p>
-            <button
-              type="button"
-              onClick={onSearch}
-              className="mt-4 w-full rounded-xl bg-stone-950 px-4 py-3 text-sm font-semibold text-white"
-            >
-              Discuter avec Seya
-            </button>
-          </aside>
-        </div>
-        <div className="flex gap-2 overflow-x-auto border-t border-stone-200/80 px-5 py-3 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-          {["Tous", ...categories].map((category) => (
-            <button
-              key={category}
-              type="button"
-              onClick={() => onCategory(category)}
-              className={`shrink-0 rounded-full px-3 py-1.5 text-xs font-semibold ${
-                activeCategory === category
-                  ? "bg-stone-950 text-white"
-                  : "bg-white text-stone-600"
+              className={`inline-flex shrink-0 items-center gap-2 rounded-full border px-4 py-2 text-sm font-medium shadow-sm ${
+                selected
+                  ? "border-violet-300 bg-violet-50 text-violet-800"
+                  : "border-violet-100 bg-white text-slate-700"
               }`}
             >
-              {category}
+              <Icon className="h-4 w-4 text-violet-600" />
+              {item.label}
             </button>
-          ))}
-        </div>
-      </section>
+          );
+        })}
+      </div>
 
-      <section className="grid gap-4 lg:grid-cols-[1.15fr_0.85fr]">
-        <div className="rounded-[28px] border border-stone-200 bg-white p-4 shadow-sm sm:p-5">
-          <SectionHeading kicker="À saisir" title="Offre limitée" urgent />
-          <div className="mt-4 flex gap-3 overflow-x-auto pb-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-            {limited.length === 0 ? (
-              <p className="text-sm text-stone-500">
-                Les offres limitées publiées par les centres apparaîtront ici.
-              </p>
-            ) : (
-              limited.map((offer) => (
-                <button
-                  key={offer.id}
-                  type="button"
-                  onClick={() => onOffer(offer)}
-                  className="w-[260px] shrink-0 rounded-3xl border border-stone-200 bg-stone-50 p-3 text-left transition hover:-translate-y-0.5 hover:border-violet-200"
-                >
-                  <div className="relative flex h-28 items-end overflow-hidden rounded-2xl bg-gradient-to-br from-stone-200 to-violet-100 p-3">
-                    {offer.photo ? (
-                      <img src={offer.photo} alt="" className="absolute inset-0 h-full w-full object-cover" />
-                    ) : null}
-                    <span className="relative rounded-full bg-white/90 px-2.5 py-1 font-heading text-[11px] font-medium text-violet-800">
-                      {publicOfferShelfLabel(offer.shelf)}
+      <section id="offres">
+        <h2 className="flex items-center gap-2 font-heading text-2xl font-extrabold tracking-tight text-[#1a1440]">
+          Les offres du moment
+          <span aria-hidden>🔥</span>
+        </h2>
+        <div className="mt-4 flex gap-4 overflow-x-auto pb-2 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          {rowOffers.map((offer, index) => {
+            const badge = offerBadge(offer);
+            return (
+              <button
+                key={offer.id}
+                type="button"
+                onClick={() => onOffer(offer)}
+                className="w-[250px] shrink-0 overflow-hidden rounded-[22px] border border-slate-100 bg-white text-left shadow-sm transition hover:-translate-y-0.5"
+              >
+                <div className="relative h-40">
+                  <img
+                    src={rowPhotos[index]}
+                    alt=""
+                    className="h-full w-full object-cover"
+                  />
+                  {badge ? (
+                    <span className="absolute left-3 top-3 rounded-full bg-[#5b46f0] px-2.5 py-1 text-[11px] font-semibold text-white">
+                      {badge}
                     </span>
-                  </div>
-                  <p className="mt-3 font-heading text-sm font-medium tracking-tight text-stone-950">{offer.title}</p>
-                  <p className="mt-1 text-xs text-stone-500">
-                    {offer.center}
-                    {offer.city ? ` · ${offer.city}` : ""}
-                  </p>
-                  {spotsLabel(offer.spots) ? (
-                    <p className="mt-2 font-heading text-xs font-medium tracking-wide text-violet-700">{spotsLabel(offer.spots)}</p>
                   ) : null}
-                  <div className="mt-3 flex flex-wrap items-baseline gap-2">
-                    <p className="font-heading text-xl font-medium tracking-tight text-stone-950">{money(offer.price)}</p>
+                </div>
+                <div className="px-3.5 pb-3.5 pt-3">
+                  <p className="font-heading text-[15px] font-bold leading-5 text-[#17133a]">
+                    {offer.title}
+                  </p>
+                  <p className="mt-1 flex items-baseline gap-2">
+                    <span className="font-heading text-[1.65rem] font-extrabold leading-none text-[#4d3fe0]">
+                      {money(offer.price)}
+                    </span>
                     {offer.oldPrice > offer.price ? (
-                      <p className="font-heading text-base font-medium text-stone-400 line-through">
+                      <span className="text-sm text-slate-400 line-through">
                         {money(offer.oldPrice)}
-                      </p>
-                    ) : null}
-                    {discountPercent(offer.price, offer.oldPrice) > 0 ? (
-                      <span className="rounded-full bg-violet-50 px-2 py-0.5 font-heading text-[11px] font-medium text-violet-800">
-                        −{discountPercent(offer.price, offer.oldPrice)} %
                       </span>
                     ) : null}
+                  </p>
+                  <div className="mt-3 flex items-center justify-between gap-2">
+                    <span className="inline-flex min-w-0 items-center gap-1 text-xs text-slate-500">
+                      <MapPin className="h-3.5 w-3.5 shrink-0" />
+                      <span className="truncate">{offer.city || offer.center}</span>
+                    </span>
+                    <span className="shrink-0 rounded-full bg-[#efeaff] px-2.5 py-1 text-[11px] font-semibold text-[#5b46f0]">
+                      Voir les créneaux →
+                    </span>
                   </div>
-                  {offer.deadline ? (
-                    <div className="mt-3">
-                      <OfferTimer deadline={offer.deadline} />
-                    </div>
-                  ) : null}
-                </button>
-              ))
-            )}
-          </div>
+                </div>
+              </button>
+            );
+          })}
         </div>
-
-        {featured ? (
-          <button
-            type="button"
-            onClick={() => onOffer(featured)}
-            className="rounded-[28px] border border-violet-100 bg-gradient-to-br from-white to-violet-50 p-5 text-left shadow-sm transition hover:-translate-y-0.5"
-          >
-            <div className="flex items-center justify-between gap-3">
-              <p className="font-heading text-[11px] font-medium uppercase tracking-[0.18em] text-violet-700">
-                Bon plan du moment
-              </p>
-              <Timer className="h-5 w-5 text-violet-700" />
-            </div>
-            <h2 className="mt-4 font-heading text-3xl font-medium tracking-tight text-stone-950">{featured.title}</h2>
-            <p className="mt-2 text-sm text-stone-500">
-              {featured.center}
-              {spotsLabel(featured.spots)
-                ? ` · ${spotsLabel(featured.spots).toLowerCase()}`
-                : featured.spots > 0
-                  ? ` · ${featured.spots} places`
-                  : ""}
-            </p>
-            <div className="mt-5 flex flex-wrap items-baseline gap-3">
-              <p className="font-heading text-4xl font-medium tracking-tight text-stone-950">{money(featured.price)}</p>
-              {featured.oldPrice > featured.price ? (
-                <p className="font-heading text-2xl font-medium text-stone-400 line-through">
-                  {money(featured.oldPrice)}
-                </p>
-              ) : null}
-              {discountPercent(featured.price, featured.oldPrice) > 0 ? (
-                <span className="rounded-full bg-white px-2.5 py-1 font-heading text-xs font-medium text-violet-800">
-                  −{discountPercent(featured.price, featured.oldPrice)} %
-                </span>
-              ) : null}
-            </div>
-            {featured.deadline ? (
-              <div className="mt-4">
-                <OfferTimer deadline={featured.deadline} />
-              </div>
-            ) : (
-              <p className="mt-5 text-sm text-stone-500">Offre en cours dans ce centre.</p>
-            )}
-            <span className="mt-6 inline-flex items-center gap-2 font-heading text-sm font-medium text-violet-800">
-              Voir l&apos;offre
-              <ArrowRight className="h-4 w-4" />
-            </span>
-          </button>
-        ) : (
-          <div className="rounded-[28px] border border-dashed border-stone-200 bg-white p-5 text-sm text-stone-500">
-            Le bon plan du moment se règle dans les paramètres du centre.
-          </div>
-        )}
       </section>
 
-      <section className="rounded-[28px] border border-stone-200 bg-white p-4 shadow-sm sm:p-5">
-        <SectionHeading
-          kicker="Avant qu'il ne soit trop tard"
-          title="Derniers créneaux disponibles"
-          urgent
-        />
-        <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          {slots.map((offer) => (
-            <button
-              key={offer.id}
-              type="button"
-              onClick={() => onOffer(offer)}
-              className="rounded-3xl border border-stone-200 bg-stone-50 p-4 text-left transition hover:border-violet-200"
-            >
-              <p className="font-heading text-[11px] font-medium uppercase tracking-[0.14em] text-violet-700">
-                {spotsLabel(offer.spots) || "Places limitées"}
-              </p>
-              <p className="mt-2 font-heading text-base font-medium tracking-tight text-stone-950">{offer.title}</p>
-              <p className="mt-1 text-sm text-stone-500">{offer.center}</p>
-              <div className="mt-4 flex items-center justify-between gap-2">
-                <p className="flex items-baseline gap-2">
-                  <span className="font-heading text-lg font-medium tracking-tight text-stone-950">{money(offer.price)}</span>
-                  {offer.oldPrice > offer.price ? (
-                    <span className="font-heading text-base font-medium text-stone-400 line-through">
-                      {money(offer.oldPrice)}
-                    </span>
-                  ) : null}
-                </p>
-                <span className="rounded-full bg-stone-950 px-3 py-1.5 text-xs font-semibold text-white">
-                  Réserver
-                </span>
-              </div>
-              {offer.deadline ? (
-                <div className="mt-3">
-                  <OfferTimer deadline={offer.deadline} />
-                </div>
-              ) : null}
-            </button>
-          ))}
+      <section>
+        <h2 className="flex items-center gap-2 font-heading text-2xl font-extrabold tracking-tight text-[#1a1440]">
+          Des créneaux dès demain
+          <Clock3 className="h-5 w-5 text-slate-700" />
+        </h2>
+        <div className="mt-4 flex gap-3 overflow-x-auto pb-2 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           {liveSlots.map((item) => (
             <button
               key={`${item.center.name}-${item.slot}`}
               type="button"
               onClick={() => onSlot(item.slot, item.service, item.center.name)}
-              className="rounded-3xl border border-stone-200 p-4 text-left transition hover:border-stone-400"
+              className="flex w-[220px] shrink-0 items-center gap-3 rounded-2xl border border-slate-100 bg-white px-4 py-3 text-left shadow-sm"
             >
-              <div className="inline-flex items-center gap-2 font-heading text-xs font-medium tracking-wide text-stone-500">
-                <Clock3 className="h-3.5 w-3.5" />
-                {item.slot}
-              </div>
-              <p className="mt-3 font-heading text-base font-medium tracking-tight text-stone-950">{item.service}</p>
-              <p className="mt-1 text-sm text-stone-500">
-                {item.center.name} · {item.center.city}
-              </p>
-              <span className="mt-4 inline-flex rounded-full bg-white px-3 py-1.5 font-heading text-xs font-medium text-stone-950 ring-1 ring-stone-200">
-                Réserver
+              <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-violet-50 text-violet-700">
+                <Clock3 className="h-4 w-4" />
+              </span>
+              <span className="min-w-0">
+                <span className="block truncate text-sm font-bold text-[#1a1440]">{item.slot}</span>
+                <span className="block truncate text-xs text-slate-500">
+                  {item.service} · {item.center.city}
+                </span>
               </span>
             </button>
           ))}
         </div>
-      </section>
-
-      <section className="rounded-[28px] border border-stone-200 bg-white p-4 shadow-sm sm:p-5">
-        <SectionHeading kicker="Autour de vous" title="Près de chez vous" />
-        <div className="mt-4 grid gap-3 lg:grid-cols-3">
-          {centers.slice(0, 3).map((center) => {
-            const deal = nearbyOffers.find((offer) => offer.center === center.name);
-            return (
-              <button
-                key={center.name}
-                type="button"
-                onClick={() => (deal ? onOffer(deal) : onCenter(center))}
-                className="rounded-3xl border border-stone-200 bg-[#fbf8f4] p-4 text-left transition hover:-translate-y-0.5 hover:border-violet-200"
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <p className="font-semibold text-stone-950">{center.name}</p>
-                    <p className="mt-1 text-sm text-stone-500">
-                      {center.city}
-                      {center.distance ? ` · ${center.distance}` : ""}
-                    </p>
-                  </div>
-                  <p className="text-sm font-semibold text-amber-600">★ {center.rating}</p>
-                </div>
-                <p className="mt-3 text-sm text-stone-600">{center.service}</p>
-                {deal ? (
-                  <p className="mt-3 text-sm font-semibold text-violet-800">
-                    {deal.title} · {money(deal.price)}
-                  </p>
-                ) : null}
-                <span className="mt-4 inline-flex text-sm font-semibold text-stone-950">
-                  Voir les créneaux
-                </span>
-              </button>
-            );
-          })}
-        </div>
-        {nearbyOffers.length > 0 ? (
-          <div className="mt-4 grid gap-2 sm:grid-cols-2">
-            {nearbyOffers
-              .filter((offer) => !centers.slice(0, 3).some((center) => center.name === offer.center))
-              .map((offer) => (
-                <button
-                  key={offer.id}
-                  type="button"
-                  onClick={() => onOffer(offer)}
-                  className="flex items-center justify-between rounded-2xl border border-stone-200 px-4 py-3 text-left"
-                >
-                  <span>
-                    <span className="block text-sm font-semibold text-stone-950">{offer.title}</span>
-                    <span className="block text-xs text-stone-500">{offer.center}</span>
-                  </span>
-                  <span className="text-sm font-semibold">{money(offer.price)}</span>
-                </button>
-              ))}
-          </div>
-        ) : null}
       </section>
     </div>
   );

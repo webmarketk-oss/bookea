@@ -17,6 +17,7 @@ import {
   MessageCircle,
   Music2,
   Quote,
+  ChevronDown,
   Search,
   SlidersHorizontal,
   Sparkles,
@@ -539,8 +540,8 @@ const latestReviews = [
 
 export function PublicBooking() {
   const searchInputRef = useRef<HTMLInputElement | null>(null);
-  const [serviceQuery, setServiceQuery] = useState("Hydrafacial samedi apres-midi");
-  const [locationQuery, setLocationQuery] = useState("Aubiere");
+  const [serviceQuery, setServiceQuery] = useState("");
+  const [locationQuery, setLocationQuery] = useState("Clermont-Ferrand");
   const [selectedCenterName, setSelectedCenterName] = useState(centers[0].name);
   const [selectedSlot, setSelectedSlot] = useState(centers[0].slots[0]);
   const [appointments, setAppointments] = useState(initialClientAppointments);
@@ -899,13 +900,6 @@ export function PublicBooking() {
     window.setTimeout(() => searchInputRef.current?.focus(), 250);
   };
 
-  const scrollToSeyaAssistant = () => {
-    document.getElementById("seya-assistant")?.scrollIntoView({
-      behavior: "smooth",
-      block: "center",
-    });
-  };
-
   const scrollToCenters = () => {
     document.getElementById("centres")?.scrollIntoView({ behavior: "smooth" });
   };
@@ -956,7 +950,7 @@ export function PublicBooking() {
       allCenters[0];
 
     setSelectedCenterName(matchingCenter.name);
-    setSelectedSlot(`Auj ${time}`);
+    setSelectedSlot(time.includes(" ") ? time : `Auj ${time}`);
     setBookingStatus(`Creneau ${time} selectionne pour ${service}`);
     scrollToBooking();
   };
@@ -1122,53 +1116,109 @@ export function PublicBooking() {
   };
 
   return (
-    <main className="min-h-screen overflow-x-hidden bg-[#f4f7fb] pb-28 text-slate-950 lg:pb-0">
-      <header className="sticky top-0 z-30 border-b border-slate-200/80 bg-white/95 backdrop-blur">
-        <div className="mx-auto flex w-full max-w-6xl items-center justify-between gap-3 px-4 py-3 sm:px-6 lg:px-8">
+    <main className="min-h-screen overflow-x-hidden bg-white pb-28 text-slate-950 lg:pb-0">
+      <header className="sticky top-0 z-30 border-b border-slate-100 bg-white">
+        <div className="mx-auto flex w-full max-w-6xl items-center gap-4 px-4 py-3 sm:px-6 lg:px-8">
           <BookeaLogo href="/" size="sm" showSlogan={false} />
-          <nav className="hidden max-w-[680px] items-center gap-2 overflow-x-auto text-sm font-semibold text-slate-600 md:flex">
-            {publicCenterCategories.map((category) => (
-              <button
-                key={category}
-                type="button"
-                onClick={() => selectCategory(category)}
-                className={`shrink-0 rounded-full px-3 py-2 transition ${
-                  activeCategory === category
-                    ? "bg-blue-600 text-white"
-                    : "hover:bg-blue-50 hover:text-blue-600"
-                }`}
-              >
-                {category}
-              </button>
-            ))}
-            <a href="/client/compte" className="hover:text-blue-600">
-              {clientName ? clientName : "Mon compte Bookea"}
-              {offerNotices.length > 0 ? ` · ${offerNotices.length}` : ""}
-            </a>
+          <nav className="hidden items-center gap-5 text-sm font-medium text-slate-700 lg:flex">
+            <button type="button" onClick={() => document.getElementById("offres")?.scrollIntoView({ behavior: "smooth" })}>
+              Offres
+            </button>
+            <button type="button" onClick={() => selectCategory("Coiffeur")}>
+              Coiffure
+            </button>
+            <button type="button" onClick={() => selectCategory("Soin du visage")}>
+              Visage
+            </button>
+            <button type="button" onClick={() => selectCategory("Bien-être")}>
+              Bien-être
+            </button>
           </nav>
-          <div className="flex shrink-0 items-center gap-2">
+          <form
+            id="recherche"
+            className="hidden min-w-0 flex-1 items-center justify-end gap-2 lg:flex"
+            onSubmit={(event) => {
+              event.preventDefault();
+              launchPublicSearch();
+            }}
+          >
+            <div className="flex min-w-0 max-w-[420px] flex-1 items-center rounded-full border border-slate-200 bg-white">
+              <label className="flex min-w-0 flex-1 items-center gap-2 px-3 py-2">
+                <Search className="h-4 w-4 shrink-0 text-slate-400" />
+                <input
+                  ref={searchInputRef}
+                  value={serviceQuery}
+                  onChange={(event) => setServiceQuery(event.target.value)}
+                  aria-label="Quel soin ?"
+                  placeholder="Quel soin ?"
+                  className="w-full bg-transparent text-sm outline-none placeholder:text-slate-400"
+                />
+              </label>
+              <span className="h-5 w-px bg-slate-200" />
+              <label className="flex w-44 items-center gap-1.5 px-3 py-2">
+                <MapPin className="h-4 w-4 shrink-0 text-slate-400" />
+                <select
+                  value={locationQuery}
+                  onChange={(event) => setLocationQuery(event.target.value)}
+                  aria-label="Ville"
+                  className="w-full appearance-none bg-transparent text-sm outline-none"
+                >
+                  {[locationQuery, ...allCenters.map((center) => center.city)]
+                    .filter((city, index, list) => city && list.indexOf(city) === index)
+                    .map((city) => (
+                      <option key={city} value={city}>
+                        {city}
+                      </option>
+                    ))}
+                </select>
+                <ChevronDown className="h-4 w-4 shrink-0 text-slate-400" />
+              </label>
+            </div>
+            <button
+              type="submit"
+              className="rounded-full bg-[#5b46f0] px-4 py-2 text-sm font-semibold text-white"
+            >
+              Rechercher
+            </button>
+          </form>
+          <div className="ml-auto flex shrink-0 items-center gap-3">
             <Link
               href={
                 clientName
                   ? "/client/compte"
                   : `/client/login?next=${encodeURIComponent("/")}`
               }
-              className="rounded-full border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold text-stone-950 shadow-sm transition hover:bg-stone-50 sm:px-4"
+              className="inline-flex items-center gap-2 text-sm font-medium text-slate-800"
             >
-              {clientName
-                ? offerNotices.length > 0
-                  ? `${clientName} · ${offerNotices.length}`
-                  : clientName
-                : "Connexion client"}
+              <UserRound className="h-5 w-5" />
+              {clientName || "Mon compte"}
             </Link>
-            <Link
-              href="/login"
-              className="rounded-full bg-slate-950 px-3 py-2.5 text-sm font-bold text-white shadow-sm transition hover:bg-slate-800 sm:px-4"
-            >
-              Connexion Pro
+            <Link href="/login" className="text-xs font-semibold text-slate-400">
+              Pro
             </Link>
           </div>
         </div>
+        <form
+          className="mx-auto flex w-full max-w-6xl items-center gap-2 px-4 pb-3 lg:hidden"
+          onSubmit={(event) => {
+            event.preventDefault();
+            launchPublicSearch();
+          }}
+        >
+          <label className="flex min-w-0 flex-1 items-center gap-2 rounded-full border border-slate-200 px-3 py-2">
+            <Search className="h-4 w-4 shrink-0 text-slate-400" />
+            <input
+              value={serviceQuery}
+              onChange={(event) => setServiceQuery(event.target.value)}
+              aria-label="Quel soin ?"
+              placeholder="Quel soin ?"
+              className="w-full bg-transparent text-sm outline-none placeholder:text-slate-400"
+            />
+          </label>
+          <button type="submit" className="rounded-full bg-[#6d4aff] px-3 py-2 text-sm font-semibold text-white">
+            OK
+          </button>
+        </form>
       </header>
 
       <ClientMarketplace
@@ -2205,22 +2255,17 @@ export function PublicBooking() {
 
       <button
         type="button"
-        onClick={scrollToSeyaAssistant}
-        className="fixed bottom-5 right-5 z-30 hidden max-w-sm rounded-3xl border border-blue-100 bg-white p-4 text-left shadow-xl transition hover:-translate-y-0.5 hover:shadow-2xl md:block"
-        aria-label="Ouvrir le bloc Seya"
+        onClick={focusSeyaSearch}
+        className="fixed bottom-5 right-5 z-30 inline-flex items-center gap-2"
+        aria-label="Demandez à Seya"
       >
-        <div className="flex items-start gap-3">
-          <div className="grid h-10 w-10 place-items-center rounded-2xl bg-blue-600 text-white">
-            <MessageCircle className="h-5 w-5" />
-          </div>
-          <div>
-            <p className="font-black text-slate-950">Seya</p>
-            <p className="mt-1 text-sm font-semibold leading-5 text-slate-500">
-              Dites-moi le soin, la ville et le moment souhaite. Je cherche le
-              meilleur creneau.
-            </p>
-          </div>
-        </div>
+        <span className="grid h-12 w-12 place-items-center rounded-full bg-white shadow-lg ring-1 ring-violet-100">
+          <Bot className="h-6 w-6 text-[#5b46f0]" />
+        </span>
+        <span className="inline-flex items-center gap-2 rounded-full bg-[#5b46f0] px-4 py-3 text-sm font-semibold text-white shadow-lg">
+          <Sparkles className="h-4 w-4" />
+          Demandez à Seya
+        </span>
       </button>
     </main>
   );
