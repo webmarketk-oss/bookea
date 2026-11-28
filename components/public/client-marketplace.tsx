@@ -237,7 +237,7 @@ export function ClientMarketplace({
             <button
               type="button"
               onClick={() => onOffer(featured)}
-              className="mt-2.5 inline-flex w-fit items-center gap-1.5 rounded-full bg-[#5410d6] px-3 py-2 text-xs font-semibold text-white shadow-sm transition hover:bg-[#4510b4] sm:mt-3 sm:gap-2 sm:px-4 sm:py-2 sm:text-sm"
+              className="mt-2.5 inline-flex h-9 w-fit items-center gap-1.5 rounded-full bg-gradient-to-r from-[#5410d6] to-[#2b5fed] px-4 text-xs font-semibold text-white shadow-sm transition hover:from-[#4510b4] hover:to-[#1e4ed8] sm:mt-3 sm:h-10 sm:gap-2 sm:px-5 sm:text-sm"
             >
               Voir les créneaux
               <ArrowRight className="h-3.5 w-3.5 sm:h-4 sm:w-4" />

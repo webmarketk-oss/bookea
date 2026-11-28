@@ -4,7 +4,6 @@ import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowRight,
-  Bot,
   CalendarCheck,
   CheckCircle2,
   ChevronRight,
@@ -540,6 +539,16 @@ const latestReviews = [
 
 export function PublicBooking() {
   const searchInputRef = useRef<HTMLInputElement | null>(null);
+  const seyaThreadRef = useRef<Record<string, unknown> | null>(null);
+  const [seyaChatOpen, setSeyaChatOpen] = useState(false);
+  const [seyaDraft, setSeyaDraft] = useState("");
+  const [seyaBusy, setSeyaBusy] = useState(false);
+  const [seyaMessages, setSeyaMessages] = useState<Array<{ author: "seya" | "lead"; text: string }>>([
+    {
+      author: "seya",
+      text: "Bonjour. Dites-moi le soin que vous cherchez, je vous aide à le trouver.",
+    },
+  ]);
   const [serviceQuery, setServiceQuery] = useState("");
   const [locationQuery, setLocationQuery] = useState("Clermont-Ferrand");
   const [selectedCenterName, setSelectedCenterName] = useState(centers[0].name);
@@ -895,9 +904,84 @@ export function PublicBooking() {
       }));
   }, [configuredCenter, storedSettings]);
 
-  const focusSeyaSearch = () => {
-    document.getElementById("recherche")?.scrollIntoView({ behavior: "smooth" });
-    window.setTimeout(() => searchInputRef.current?.focus(), 250);
+  const openSeyaChat = () => {
+    setSeyaChatOpen(true);
+  };
+
+  const sendSeyaMessage = async () => {
+    const text = seyaDraft.trim();
+    if (!text || seyaBusy) {
+      return;
+    }
+    setSeyaDraft("");
+    setSeyaMessages((current) => [...current, { author: "lead", text }]);
+    const centerId = configuredCenter?.centerId;
+    if (!centerId) {
+      setServiceQuery(text);
+      setBookingStatus("Seya cherche un soin pour votre demande");
+      scrollToCenters();
+      setSeyaMessages((current) => [
+        ...current,
+        {
+          author: "seya",
+          text: `Je cherche « ${text} » pour vous. Les centres sont juste en dessous.`,
+        },
+      ]);
+      return;
+    }
+    setSeyaBusy(true);
+    try {
+      const conversation = seyaThreadRef.current ?? {
+        id: `web-${centerId}`,
+        leadId: "",
+        firstName: "",
+        lastName: "",
+        phone: "",
+        treatment: "",
+        status: "En cours",
+        qualification: { need: "", zone: "", delay: "", availability: "" },
+        proposedSlots: [],
+        messages: [],
+        updatedAt: new Date().toISOString(),
+        centerId,
+      };
+      const response = await fetch("/api/seya/reply", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          conversation,
+          text,
+          centerId,
+          centerName: configuredCenter.name,
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok || !data?.conversation) {
+        throw new Error("reply");
+      }
+      seyaThreadRef.current = data.conversation;
+      const reply = [...(data.conversation.messages || [])]
+        .reverse()
+        .find((item: { author?: string; text?: string }) => item.author === "seya");
+      setSeyaMessages((current) => [
+        ...current,
+        {
+          author: "seya",
+          text: String(reply?.text || "Je peux reformuler si vous me donnez un peu plus de détail."),
+        },
+      ]);
+    } catch {
+      setServiceQuery(text);
+      setSeyaMessages((current) => [
+        ...current,
+        {
+          author: "seya",
+          text: "Je note votre demande. Regardez les soins proposés juste en dessous.",
+        },
+      ]);
+    } finally {
+      setSeyaBusy(false);
+    }
   };
 
   const scrollToCenters = () => {
@@ -1176,7 +1260,7 @@ export function PublicBooking() {
             </div>
             <button
               type="submit"
-              className="rounded-full bg-[#5e41ee] px-4 py-2 text-sm font-semibold text-white"
+              className="rounded-full bg-gradient-to-r from-[#5410d6] to-[#2b5fed] px-4 py-2 text-sm font-semibold text-white"
             >
               Rechercher
             </button>
@@ -1215,7 +1299,7 @@ export function PublicBooking() {
               className="w-full bg-transparent text-sm outline-none placeholder:text-slate-400"
             />
           </label>
-          <button type="submit" className="rounded-full bg-[#5e41ee] px-3 py-2 text-sm font-semibold text-white">
+          <button type="submit" className="rounded-full bg-gradient-to-r from-[#5410d6] to-[#2b5fed] px-3 py-2 text-sm font-semibold text-white">
             OK
           </button>
         </form>
@@ -1251,6 +1335,25 @@ export function PublicBooking() {
       />
 
       <section id="centres" className="mx-auto w-full max-w-6xl px-3 pb-8 sm:px-6 lg:px-8">
+        <button
+          type="button"
+          onClick={openSeyaChat}
+          className="mb-5 flex w-full items-center gap-2 overflow-hidden rounded-[24px] bg-gradient-to-r from-[#5410d6] to-[#2b5fed] px-3 py-2.5 text-left text-white shadow-sm transition hover:brightness-105 sm:gap-4 sm:px-5 sm:py-3"
+        >
+          <img
+            src="/marketplace/seya-robot.png"
+            alt=""
+            className="h-16 w-16 shrink-0 object-contain sm:h-20 sm:w-20"
+          />
+          <span className="min-w-0">
+            <span className="block font-heading text-base font-bold leading-tight sm:text-lg">
+              Seya vous aide
+            </span>
+            <span className="mt-1 block text-sm leading-snug text-white/90">
+              Exprimez votre demande naturellement et Seya vous aidera à trouver le soin qu’il vous faut.
+            </span>
+          </span>
+        </button>
         <div className="mb-4 flex items-end justify-between gap-4">
           <div className="min-w-0">
             <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-stone-400">
@@ -2253,20 +2356,83 @@ export function PublicBooking() {
         </div>
       </div>
 
+      {seyaChatOpen ? (
+        <section className="fixed inset-x-3 bottom-24 z-[60] flex max-h-[min(70vh,520px)] flex-col overflow-hidden rounded-[24px] bg-white shadow-2xl ring-1 ring-violet-100 sm:inset-x-auto sm:right-5 sm:w-[380px] lg:bottom-5">
+          <div className="flex items-center gap-3 bg-gradient-to-r from-[#5410d6] to-[#2b5fed] px-3 py-2.5 text-white">
+            <img src="/marketplace/seya-robot.png" alt="" className="h-12 w-12 shrink-0 object-contain" />
+            <div className="min-w-0 flex-1">
+              <p className="font-heading text-sm font-bold">Seya</p>
+              <p className="truncate text-xs text-white/80">
+                {configuredCenter?.name || "Trouvez le soin qu’il vous faut"}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setSeyaChatOpen(false)}
+              aria-label="Fermer la conversation"
+              className="grid h-8 w-8 place-items-center rounded-full text-lg leading-none text-white/90 hover:bg-white/15"
+            >
+              ×
+            </button>
+          </div>
+          <div className="flex-1 space-y-2 overflow-y-auto px-3 py-3">
+            {seyaMessages.map((message, index) => (
+              <p
+                key={`${message.author}-${index}`}
+                className={`max-w-[85%] rounded-2xl px-3 py-2 text-sm leading-snug ${
+                  message.author === "seya"
+                    ? "bg-[#f4f1ff] text-[#241a55]"
+                    : "ml-auto bg-gradient-to-r from-[#5410d6] to-[#2b5fed] text-white"
+                }`}
+              >
+                {message.text}
+              </p>
+            ))}
+            {seyaBusy ? <p className="text-xs text-slate-400">Seya écrit…</p> : null}
+          </div>
+          <form
+            className="flex items-center gap-2 border-t border-slate-100 p-3"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void sendSeyaMessage();
+            }}
+          >
+            <input
+              value={seyaDraft}
+              onChange={(event) => setSeyaDraft(event.target.value)}
+              aria-label="Message pour Seya"
+              placeholder="Votre demande"
+              className="min-w-0 flex-1 rounded-full border border-slate-200 px-3 py-2 text-sm outline-none focus:border-[#5410d6]"
+            />
+            <button
+              type="submit"
+              disabled={seyaBusy || !seyaDraft.trim()}
+              className="rounded-full bg-gradient-to-r from-[#5410d6] to-[#2b5fed] px-3 py-2 text-sm font-semibold text-white disabled:opacity-50"
+            >
+              Envoyer
+            </button>
+          </form>
+        </section>
+      ) : null}
+
+      {seyaChatOpen ? null : (
       <button
         type="button"
-        onClick={focusSeyaSearch}
-        className="fixed bottom-5 right-5 z-30 inline-flex items-center gap-2"
+        onClick={openSeyaChat}
+        className="fixed bottom-24 right-3 z-50 inline-flex items-end lg:bottom-5 lg:right-5"
         aria-label="Demandez à Seya"
       >
-        <span className="grid h-12 w-12 place-items-center rounded-full bg-white shadow-lg ring-1 ring-violet-100">
-          <Bot className="h-6 w-6 text-[#5410d6]" />
-        </span>
-        <span className="inline-flex items-center gap-2 rounded-full bg-[#5410d6] px-4 py-3 text-sm font-semibold text-white shadow-lg">
+        <img
+          src="/marketplace/seya-robot.png"
+          alt=""
+          className="relative z-10 -mr-2 h-16 w-16 object-contain drop-shadow-md"
+        />
+        <span className="inline-flex items-center gap-2 rounded-full bg-gradient-to-r from-[#5410d6] to-[#2b5fed] py-3 pl-4 pr-4 text-sm font-semibold text-white shadow-lg">
           <Sparkles className="h-4 w-4" />
           Demandez à Seya
         </span>
       </button>
+      )}
     </main>
   );
 }
