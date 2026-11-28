@@ -1176,7 +1176,7 @@ export function PublicBooking() {
             </div>
             <button
               type="submit"
-              className="rounded-full bg-[#5b46f0] px-4 py-2 text-sm font-semibold text-white"
+              className="rounded-full bg-[#5e41ee] px-4 py-2 text-sm font-semibold text-white"
             >
               Rechercher
             </button>
@@ -1215,7 +1215,7 @@ export function PublicBooking() {
               className="w-full bg-transparent text-sm outline-none placeholder:text-slate-400"
             />
           </label>
-          <button type="submit" className="rounded-full bg-[#6d4aff] px-3 py-2 text-sm font-semibold text-white">
+          <button type="submit" className="rounded-full bg-[#5e41ee] px-3 py-2 text-sm font-semibold text-white">
             OK
           </button>
         </form>
@@ -2260,9 +2260,9 @@ export function PublicBooking() {
         aria-label="Demandez à Seya"
       >
         <span className="grid h-12 w-12 place-items-center rounded-full bg-white shadow-lg ring-1 ring-violet-100">
-          <Bot className="h-6 w-6 text-[#5b46f0]" />
+          <Bot className="h-6 w-6 text-[#5410d6]" />
         </span>
-        <span className="inline-flex items-center gap-2 rounded-full bg-[#5b46f0] px-4 py-3 text-sm font-semibold text-white shadow-lg">
+        <span className="inline-flex items-center gap-2 rounded-full bg-[#5410d6] px-4 py-3 text-sm font-semibold text-white shadow-lg">
           <Sparkles className="h-4 w-4" />
           Demandez à Seya
         </span>
