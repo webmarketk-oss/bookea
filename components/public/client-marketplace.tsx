@@ -1,6 +1,6 @@
 "use client";
 
-import { Activity, ArrowRight, Clock3, Hand, MapPin, Scissors, Sparkles, Zap } from "lucide-react";
+import { Activity, ArrowRight, Clock3, Hand, Hourglass, MapPin, Scissors, Sparkles, Zap } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import type { PublicOfferShelf } from "@/lib/public-offers";
 
@@ -112,6 +112,57 @@ function offerBadge(offer: MarketplaceOffer) {
   return endingPhrase(offer.deadline);
 }
 
+function OfferCard({
+  offer,
+  photo,
+  onOffer,
+}: {
+  offer: MarketplaceOffer;
+  photo: string;
+  onOffer: (offer: MarketplaceOffer) => void;
+}) {
+  const badge = offerBadge(offer);
+  return (
+    <button
+      type="button"
+      onClick={() => onOffer(offer)}
+      className="w-[250px] shrink-0 overflow-hidden rounded-[22px] border border-slate-100 bg-white text-left shadow-sm transition hover:-translate-y-0.5"
+    >
+      <div className="relative h-40">
+        <img src={photo} alt="" className="h-full w-full object-cover" />
+        {badge ? (
+          <span className="absolute left-3 top-3 inline-flex items-center gap-1 rounded-full bg-[#5b46f0] px-2.5 py-1 text-[11px] font-semibold text-white">
+            {/jusqu|termine|dernier jour/i.test(badge) ? (
+              <Hourglass className="h-3 w-3" />
+            ) : null}
+            {badge}
+          </span>
+        ) : null}
+      </div>
+      <div className="px-3.5 pb-3.5 pt-3">
+        <p className="font-heading text-[15px] font-bold leading-5 text-[#17133a]">{offer.title}</p>
+        <p className="mt-1 flex items-baseline gap-2">
+          <span className="font-heading text-[1.65rem] font-extrabold leading-none text-[#4d3fe0]">
+            {money(offer.price)}
+          </span>
+          {offer.oldPrice > offer.price ? (
+            <span className="text-sm text-slate-400 line-through">{money(offer.oldPrice)}</span>
+          ) : null}
+        </p>
+        <div className="mt-3 flex items-center justify-between gap-2">
+          <span className="inline-flex min-w-0 items-center gap-1 text-xs text-slate-500">
+            <MapPin className="h-3.5 w-3.5 shrink-0" />
+            <span className="truncate">{offer.city || offer.center}</span>
+          </span>
+          <span className="shrink-0 rounded-full bg-[#efeaff] px-2.5 py-1 text-[11px] font-semibold text-[#5b46f0]">
+            Voir les créneaux →
+          </span>
+        </div>
+      </div>
+    </button>
+  );
+}
+
 export function ClientMarketplace({
   activeCategory,
   offers,
@@ -126,8 +177,18 @@ export function ClientMarketplace({
     offers.find((offer) => offer.shelf === "bon-plan") ?? offers[0] ?? null;
   const momentOffers = offers.filter((offer) => offer.id !== featured?.id);
   const rowOffers = momentOffers.length > 0 ? momentOffers : offers;
+  const soonLimit = Date.now() + 14 * 24 * 60 * 60 * 1000;
+  const endingSoon = offers
+    .filter((offer) => offer.deadline != null && offer.deadline <= soonLimit)
+    .sort((a, b) => (a.deadline ?? 0) - (b.deadline ?? 0));
+  const brokenPrices = offers.filter((offer) => offer.oldPrice > offer.price);
+  const lastSlotOffers = offers.filter(
+    (offer) => offer.shelf === "derniers-creneaux" || (offer.spots > 0 && offer.spots <= 3),
+  );
   const usedPhotos = new Set<string>();
-  const rowPhotos = rowOffers.map((offer) => offer.photo || fallbackPhoto(offer, usedPhotos));
+  const photoById = new Map(
+    offers.map((offer) => [offer.id, offer.photo || fallbackPhoto(offer, usedPhotos)]),
+  );
   const liveSlots = centers
     .flatMap((center) =>
       center.slots.slice(0, 2).map((slot) => ({
@@ -141,11 +202,11 @@ export function ClientMarketplace({
   return (
     <div className="mx-auto w-full max-w-6xl space-y-8 px-4 py-6 sm:px-6 lg:px-8">
       {featured ? (
-        <section className="grid overflow-hidden rounded-[28px] bg-[#f4f0ff] lg:grid-cols-[1.02fr_0.98fr]">
+        <section className="mx-auto grid w-full max-w-4xl overflow-hidden rounded-[28px] bg-[#f4f0ff] lg:grid-cols-[1.02fr_0.98fr]">
           <div className="flex flex-col justify-center px-6 py-7 sm:px-9 sm:py-10">
             {endingPhrase(featured.deadline) ? (
               <p className="inline-flex w-fit items-center gap-2 rounded-full bg-white px-3 py-1 text-xs font-semibold text-[#5b46f0] shadow-sm">
-                <Clock3 className="h-3.5 w-3.5" />
+                <Hourglass className="h-3.5 w-3.5" />
                 {endingPhrase(featured.deadline)}
               </p>
             ) : null}
@@ -225,62 +286,71 @@ export function ClientMarketplace({
           <span aria-hidden>🔥</span>
         </h2>
         <div className="mt-4 flex gap-4 overflow-x-auto pb-2 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-          {rowOffers.map((offer, index) => {
-            const badge = offerBadge(offer);
-            return (
-              <button
-                key={offer.id}
-                type="button"
-                onClick={() => onOffer(offer)}
-                className="w-[250px] shrink-0 overflow-hidden rounded-[22px] border border-slate-100 bg-white text-left shadow-sm transition hover:-translate-y-0.5"
-              >
-                <div className="relative h-40">
-                  <img
-                    src={rowPhotos[index]}
-                    alt=""
-                    className="h-full w-full object-cover"
-                  />
-                  {badge ? (
-                    <span className="absolute left-3 top-3 rounded-full bg-[#5b46f0] px-2.5 py-1 text-[11px] font-semibold text-white">
-                      {badge}
-                    </span>
-                  ) : null}
-                </div>
-                <div className="px-3.5 pb-3.5 pt-3">
-                  <p className="font-heading text-[15px] font-bold leading-5 text-[#17133a]">
-                    {offer.title}
-                  </p>
-                  <p className="mt-1 flex items-baseline gap-2">
-                    <span className="font-heading text-[1.65rem] font-extrabold leading-none text-[#4d3fe0]">
-                      {money(offer.price)}
-                    </span>
-                    {offer.oldPrice > offer.price ? (
-                      <span className="text-sm text-slate-400 line-through">
-                        {money(offer.oldPrice)}
-                      </span>
-                    ) : null}
-                  </p>
-                  <div className="mt-3 flex items-center justify-between gap-2">
-                    <span className="inline-flex min-w-0 items-center gap-1 text-xs text-slate-500">
-                      <MapPin className="h-3.5 w-3.5 shrink-0" />
-                      <span className="truncate">{offer.city || offer.center}</span>
-                    </span>
-                    <span className="shrink-0 rounded-full bg-[#efeaff] px-2.5 py-1 text-[11px] font-semibold text-[#5b46f0]">
-                      Voir les créneaux →
-                    </span>
-                  </div>
-                </div>
-              </button>
-            );
-          })}
+          {rowOffers.map((offer) => (
+            <OfferCard
+              key={offer.id}
+              offer={offer}
+              photo={photoById.get(offer.id) || ""}
+              onOffer={onOffer}
+            />
+          ))}
         </div>
       </section>
 
+      {endingSoon.length > 0 ? (
+        <section>
+          <h2 className="flex items-center gap-2 font-heading text-2xl font-extrabold tracking-tight text-[#1a1440]">
+            Bientôt terminé
+            <Clock3 className="h-5 w-5 text-[#5b46f0]" />
+          </h2>
+          <div className="mt-4 flex gap-4 overflow-x-auto pb-2 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            {endingSoon.map((offer) => (
+              <OfferCard
+                key={offer.id}
+                offer={offer}
+                photo={photoById.get(offer.id) || ""}
+                onOffer={onOffer}
+              />
+            ))}
+          </div>
+        </section>
+      ) : null}
+
+      {brokenPrices.length > 0 ? (
+        <section>
+          <h2 className="font-heading text-2xl font-extrabold tracking-tight text-[#1a1440]">
+            Offres à prix cassé
+          </h2>
+          <div className="mt-4 flex gap-4 overflow-x-auto pb-2 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            {brokenPrices.map((offer) => (
+              <OfferCard
+                key={offer.id}
+                offer={offer}
+                photo={photoById.get(offer.id) || ""}
+                onOffer={onOffer}
+              />
+            ))}
+          </div>
+        </section>
+      ) : null}
+
       <section>
         <h2 className="flex items-center gap-2 font-heading text-2xl font-extrabold tracking-tight text-[#1a1440]">
-          Des créneaux dès demain
+          Dernier créneau dispo
           <Clock3 className="h-5 w-5 text-slate-700" />
         </h2>
+        {lastSlotOffers.length > 0 ? (
+          <div className="mt-4 flex gap-4 overflow-x-auto pb-2 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            {lastSlotOffers.map((offer) => (
+              <OfferCard
+                key={offer.id}
+                offer={offer}
+                photo={photoById.get(offer.id) || ""}
+                onOffer={onOffer}
+              />
+            ))}
+          </div>
+        ) : null}
         <div className="mt-4 flex gap-3 overflow-x-auto pb-2 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           {liveSlots.map((item) => (
             <button
